@@ -6,7 +6,7 @@
 
 <p align="center">
   A native-macOS, agentic creative-coding &amp; realtime-VFX harness.<br>
-  Describe visual ideas as prompt nodes - agents turn them into live, hot-reloading Metal nodes.
+  Describe visual ideas as prompt nodes - agents turn them into live native code.
 </p>
 
 <p align="center">
@@ -17,9 +17,7 @@
   <a href="https://sxp.studio/apps/subjectivezero"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&amp;logoColor=white" alt="Discord"></a>
 </p>
 
-<!-- TODO: drop a screenshot/GIF at docs/assets/screenshot.png and uncomment:
-<p align="center"><img src="docs/assets/screenshot.png" alt="SubjectiveZero screenshot" width="800"></p>
--->
+https://github.com/user-attachments/assets/bbcd7fae-9686-4333-9023-b8c8d8d950a4
 
 ## What it is
 
