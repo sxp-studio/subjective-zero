@@ -1,0 +1,27 @@
+{
+  "project": {
+    "name": "Grayscale (single prompt)",
+    "author": "SXP Studio",
+    "viewport": {
+      "zoom": 1,
+      "translation": { "x": 0, "y": 0 },
+      "fps": 60,
+      "resolution": { "width": 1280, "height": 720 },
+      "pixelFormat": "bgra8Unorm"
+    },
+    "graph": {
+      "nodes": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "kind": "prompt",
+          "title": "New Node",
+          "sfSymbol": "sparkles",
+          "prompt": "make the MacBook camera grayscale",
+          "position": { "x": 300, "y": 240 }
+        }
+      ],
+      "connections": [],
+      "renderEndpoint": null
+    }
+  }
+}

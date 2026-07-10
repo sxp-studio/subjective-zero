@@ -1,0 +1,11 @@
+{
+  "title": "Make Grayscale",
+  "sfSymbol": "circle.lefthalf.filled",
+  "summary": "Converts the input texture to luminance grayscale (Rec. 601).",
+  "inputs": [
+    { "name": "input", "type": "texture" }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

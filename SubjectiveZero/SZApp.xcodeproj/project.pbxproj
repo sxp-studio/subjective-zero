@@ -1,0 +1,319 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		21C0FFEE21C0FFEE21C0FFE1 /* grayscale-camera.subz in Resources */ = {isa = PBXBuildFile; fileRef = 21C0FFEE21C0FFEE21C0FFEE /* grayscale-camera.subz */; };
+		21C0FFEE21C0FFEE21C0FFEB /* NodeLibrary in Resources */ = {isa = PBXBuildFile; fileRef = 21C0FFEE21C0FFEE21C0FFEA /* NodeLibrary */; };
+		78E6E222C2B14C5B9E93F557 /* SZUI in Frameworks */ = {isa = PBXBuildFile; productRef = BA96ACD61F3548C0B4947CFE /* SZUI */; };
+		11A22B33C44D55E66F778899 /* SZRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 99887766F55E44D33C22B11A /* SZRuntime */; };
+		5200C0DE5200C0DE5200C0DE /* SZCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5200C0DE5200C0DE5200C0DF /* SZCore */; };
+		5200A15200A15200A15200A1 /* SZAI in Frameworks */ = {isa = PBXBuildFile; productRef = 5200A15200A15200A15200A2 /* SZAI */; };
+		5BA271E05BA271E05BA271E1 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 5BA271E05BA271E05BA271E2 /* Sparkle */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		21C0FFEE21C0FFEE21C0FFEE /* grayscale-camera.subz */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "grayscale-camera.subz"; path = "Samples/grayscale-camera.subz"; sourceTree = "<group>"; };
+		21C0FFEE21C0FFEE21C0FFEA /* NodeLibrary */ = {isa = PBXFileReference; lastKnownFileType = folder; path = NodeLibrary; sourceTree = "<group>"; };
+		C384F2845895498AA9275FF0 /* SubjectiveZero.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SubjectiveZero.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		2D36AF151DF34CED840AABF5 /* SZApp */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SZApp;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		04F22695685F428A8931C850 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				78E6E222C2B14C5B9E93F557 /* SZUI in Frameworks */,
+				11A22B33C44D55E66F778899 /* SZRuntime in Frameworks */,
+				5200C0DE5200C0DE5200C0DE /* SZCore in Frameworks */,
+				5200A15200A15200A15200A1 /* SZAI in Frameworks */,
+				5BA271E05BA271E05BA271E1 /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		EB2F0BD4A5C14E6FA218E999 = {
+			isa = PBXGroup;
+			children = (
+				2D36AF151DF34CED840AABF5 /* SZApp */,
+				21C0FFEE21C0FFEE21C0FFEE /* grayscale-camera.subz */,
+				21C0FFEE21C0FFEE21C0FFEA /* NodeLibrary */,
+				53932F471DA94D9AA055C205 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		53932F471DA94D9AA055C205 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C384F2845895498AA9275FF0 /* SubjectiveZero.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B0DC1D73CC2647D9AF5A7682 /* SubjectiveZero */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FD30A93552844543AF58116D /* Build configuration list for PBXNativeTarget "SubjectiveZero" */;
+			buildPhases = (
+				5A6F0C5E145A4702A9D1A5F2 /* Sources */,
+				04F22695685F428A8931C850 /* Frameworks */,
+				03EC194841DB49AB9FEAD68E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2D36AF151DF34CED840AABF5 /* SZApp */,
+			);
+			name = SubjectiveZero;
+			packageProductDependencies = (
+				BA96ACD61F3548C0B4947CFE /* SZUI */,
+				99887766F55E44D33C22B11A /* SZRuntime */,
+				5200C0DE5200C0DE5200C0DF /* SZCore */,
+				5200A15200A15200A15200A2 /* SZAI */,
+				5BA271E05BA271E05BA271E2 /* Sparkle */,
+			);
+			productName = SubjectiveZero;
+			productReference = C384F2845895498AA9275FF0 /* SubjectiveZero.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1AE15DBF91D444E4B709CB38 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					B0DC1D73CC2647D9AF5A7682 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+				};
+			};
+			buildConfigurationList = A5F5240AF5074F70A819475D /* Build configuration list for PBXProject "SZApp" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = EB2F0BD4A5C14E6FA218E999;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				2D9D0A3B692148D6B4A6B3C0 /* XCLocalSwiftPackageReference "Modules" */,
+				5BA271E05BA271E05BA271E3 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 53932F471DA94D9AA055C205 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B0DC1D73CC2647D9AF5A7682 /* SubjectiveZero */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		03EC194841DB49AB9FEAD68E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				21C0FFEE21C0FFEE21C0FFE1 /* grayscale-camera.subz in Resources */,
+				21C0FFEE21C0FFEE21C0FFEB /* NodeLibrary in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5A6F0C5E145A4702A9D1A5F2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		FB63E91851954873832229E4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = "DEBUG=1 $(inherited)";
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		6CB27BE2596446AA9C936C12 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		7C5592A792E3426EA3BA1E6C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SubjectiveZero.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 397;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "SubjectiveZero uses the camera as a live texture source for camera nodes.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SubjectiveZero uses the microphone as a live audio source for audio-reactive nodes.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				MARKETING_VERSION = 0.2.1;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.sxp.subjectivezero;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		9F1A19892F0C4980ACF5417E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SubjectiveZero.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 397;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "SubjectiveZero uses the camera as a live texture source for camera nodes.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SubjectiveZero uses the microphone as a live audio source for audio-reactive nodes.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				MARKETING_VERSION = 0.2.1;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.sxp.subjectivezero;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A5F5240AF5074F70A819475D /* Build configuration list for PBXProject "SZApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FB63E91851954873832229E4 /* Debug */,
+				6CB27BE2596446AA9C936C12 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FD30A93552844543AF58116D /* Build configuration list for PBXNativeTarget "SubjectiveZero" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7C5592A792E3426EA3BA1E6C /* Debug */,
+				9F1A19892F0C4980ACF5417E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		2D9D0A3B692148D6B4A6B3C0 /* XCLocalSwiftPackageReference "Modules" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Modules;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5BA271E05BA271E05BA271E3 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BA96ACD61F3548C0B4947CFE /* SZUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SZUI;
+		};
+		99887766F55E44D33C22B11A /* SZRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SZRuntime;
+		};
+		5200C0DE5200C0DE5200C0DF /* SZCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SZCore;
+		};
+		5200A15200A15200A15200A2 /* SZAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SZAI;
+		};
+		5BA271E05BA271E05BA271E2 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5BA271E05BA271E05BA271E3 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1AE15DBF91D444E4B709CB38 /* Project object */;
+}

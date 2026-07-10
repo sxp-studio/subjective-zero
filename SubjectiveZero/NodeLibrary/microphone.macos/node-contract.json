@@ -1,0 +1,15 @@
+{
+  "title": "Microphone",
+  "sfSymbol": "mic",
+  "summary": "Live microphone capture as a 2048-sample mono PCM window (floatArray), with a synthetic-audio fallback when no mic is authorized.",
+  "inputs": [
+    { "name": "gain", "type": "float", "ui": { "kind": "slider", "min": 0, "max": 4, "step": 0.05 },
+      "default": { "type": "float", "value": 1 } },
+    { "name": "device", "type": "enum", "ui": { "kind": "dropdown" },
+      "default": { "type": "enum", "value": "default" } }
+  ],
+  "outputs": [
+    { "name": "samples", "type": "floatArray" }
+  ],
+  "permissions": ["microphone"]
+}

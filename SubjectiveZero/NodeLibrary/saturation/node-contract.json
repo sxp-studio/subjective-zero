@@ -1,0 +1,17 @@
+{
+  "title": "Saturation",
+  "sfSymbol": "drop.fill",
+  "summary": "Blends RGB toward luma. amount 0 = grayscale, 1 = unchanged, >1 boosts color intensity.",
+  "inputs": [
+    { "name": "input", "type": "texture" },
+    {
+      "name": "amount",
+      "type": "float",
+      "default": { "type": "float", "value": 1.0 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 2.0, "step": 0.01 }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

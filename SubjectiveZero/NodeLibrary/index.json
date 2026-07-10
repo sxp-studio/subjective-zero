@@ -1,0 +1,329 @@
+{
+  "nodes": [
+    {
+      "id": "audio-bands",
+      "tags": [
+        "audio",
+        "bands",
+        "buckets",
+        "spectrum",
+        "analysis"
+      ],
+      "purpose": "Reduces an FFT power spectrum into 10 normalized 0..1 frequency buckets (hz32…hz16k) with attack/decay smoothing.",
+      "platform": "any",
+      "useWhen": "You need '10 frequency buckets as 0.0–1.0' (or similar named band levels) from a spectrum. Feed the hz… outputs into your visualizer or any reactive node.",
+      "avoidWhen": "You need the full dense spectrum rather than a handful of bands (use audio-fft's magnitudes directly).",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "audio-fft",
+      "tags": [
+        "audio",
+        "fft",
+        "spectrum",
+        "dsp",
+        "analysis"
+      ],
+      "purpose": "FFT of a PCM sample window into a power spectrum (floatArray of 1024 magnitude bins). Pure DSP — no audio device.",
+      "platform": "any",
+      "useWhen": "You have a PCM sample window (e.g. from microphone.macos) and need its frequency spectrum. Feed `magnitudes` into audio-bands.",
+      "avoidWhen": "You only need a few named band levels — pair this with audio-bands rather than computing the FFT inline.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "blend",
+      "tags": [
+        "compositor",
+        "blend",
+        "two-input",
+        "compute",
+        "mix",
+        "layer",
+        "vfx"
+      ],
+      "purpose": "Blends two textures with a selectable Photoshop-style mode (add/multiply/screen/overlay/soft light/hard light/difference), mixed by opacity.",
+      "platform": "any",
+      "useWhen": "You need to composite/mix two texture layers. Takes TWO texture inputs — base and blend — plus a mode enum and an opacity slider. The go-to node for combining a generator (gradient/noise/checkerboard) over a camera or other source.",
+      "avoidWhen": "You only have one texture to process (use a single-input tone/color node like brightness), or you need alpha-aware over compositing with premultiplied coverage — this mixes RGB by a scalar opacity and preserves base alpha.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "brightness",
+      "tags": [
+        "color",
+        "tone",
+        "exposure",
+        "compute",
+        "vfx"
+      ],
+      "purpose": "Scale RGB by a gain (exposure) — the simplest tone adjustment.",
+      "platform": "any",
+      "useWhen": "You need to brighten or darken an image by a linear gain, or a minimal reference for a single-pixel color op.",
+      "avoidWhen": "You need nonlinear midtone control (use gamma) or contrast around a pivot (use contrast).",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "camera.macos",
+      "tags": [
+        "source",
+        "camera",
+        "video",
+        "macos"
+      ],
+      "purpose": "Provides the built-in/selected Mac camera feed as an MTLTexture.",
+      "platform": "macos",
+      "useWhen": "You need live camera input as a texture source.",
+      "avoidWhen": "You need a still image or a non-camera video source.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "checkerboard",
+      "tags": [
+        "generator",
+        "pattern",
+        "source",
+        "render",
+        "test-pattern",
+        "procedural"
+      ],
+      "purpose": "Generates a two-color checkerboard pattern as a texture source (no input).",
+      "platform": "any",
+      "useWhen": "You need a tiled checkerboard — UV/alignment test pattern, transparency backdrop, or a starting point for any parity-tiled procedural generator. Tune cell density with scale and the two colors.",
+      "avoidWhen": "You need an organic or irregular pattern (use noise), a smooth ramp (use gradient), or want to modify an existing texture (this ignores input).",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "chromatic-aberration",
+      "tags": [
+        "chromatic-aberration",
+        "lens",
+        "fringing",
+        "rgb-split",
+        "render",
+        "vfx"
+      ],
+      "purpose": "Radially splits the red and blue channels from a center point to fake lens color fringing.",
+      "platform": "any",
+      "useWhen": "You want lens-distortion fringing, a glitchy RGB split, or edge color separation.",
+      "avoidWhen": "You need physically accurate per-wavelength dispersion or barrel distortion.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "contrast",
+      "tags": [
+        "color",
+        "tone",
+        "compute",
+        "vfx"
+      ],
+      "purpose": "Expand or compress RGB contrast around an adjustable pivot.",
+      "platform": "any",
+      "useWhen": "You need to boost or flatten contrast after brightness, with control over the fixed midpoint.",
+      "avoidWhen": "You want a nonlinear midtone curve (use gamma) or a per-channel color grade.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "edge-detect",
+      "tags": [
+        "edge-detect",
+        "sobel",
+        "outline",
+        "toon",
+        "convolution",
+        "render",
+        "vfx"
+      ],
+      "purpose": "3x3 Sobel on luminance; edges take edgeColor, flat regions take bgColor.",
+      "platform": "any",
+      "useWhen": "You want outlines, a toon/blueprint look, or an edge mask from any image.",
+      "avoidWhen": "You need sub-pixel edges, Canny-quality thinning, or true variable line width.",
+      "reuse": "reference-only"
+    },
+    {
+      "id": "gamma",
+      "tags": [
+        "color",
+        "tone",
+        "compute",
+        "vfx"
+      ],
+      "purpose": "Apply a 1/gamma power curve to lift or crush midtones.",
+      "platform": "any",
+      "useWhen": "You need nonlinear midtone brightening/darkening without clipping highlights or shadows.",
+      "avoidWhen": "You need a linear gain (use brightness) or true sRGB/linear color-space conversion.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "gaussian-blur",
+      "tags": [
+        "blur",
+        "filter",
+        "vfx",
+        "render",
+        "separable",
+        "softening"
+      ],
+      "purpose": "Separable 9-tap Gaussian blur (two 1D render passes with a lazy intermediate texture).",
+      "platform": "any",
+      "useWhen": "You want to soften an image, prep a bloom/glow, or reduce high-frequency detail; radius 0–20.",
+      "avoidWhen": "You need a very heavy blur (chain instances instead) or an exact box/median filter.",
+      "reuse": "reference-only"
+    },
+    {
+      "id": "gradient",
+      "tags": [
+        "generator",
+        "gradient",
+        "source",
+        "render",
+        "ramp",
+        "procedural"
+      ],
+      "purpose": "Generate a two-color gradient (linear, radial, or angular) as a texture source.",
+      "platform": "any",
+      "useWhen": "You need a smooth color ramp — background, mask, or the base layer of a composite. Pick type and two colors; no input.",
+      "avoidWhen": "You need a hard-edged pattern (use checkerboard) or organic noise (use noise), or want to modify an existing texture.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "grain",
+      "tags": [
+        "grain",
+        "noise",
+        "film",
+        "animated",
+        "compute",
+        "vfx"
+      ],
+      "purpose": "Adds animated per-pixel hash noise to fake film/sensor grain; churns over time via speed.",
+      "platform": "any",
+      "useWhen": "You want moving film grain or sensor noise over a live image (reads ctx.time).",
+      "avoidWhen": "You need a static dither or deterministic frame-locked noise (this drifts with time).",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "image-file",
+      "tags": [
+        "source",
+        "image",
+        "file",
+        "texture",
+        "render"
+      ],
+      "purpose": "Load a still image file as a texture source, scaled to the viewport.",
+      "platform": "any",
+      "useWhen": "You need a fixed image as input to an effect chain — a permission-free, camera-free source. Set the path and a fit mode.",
+      "avoidWhen": "You need a moving image (use video-file) or a live camera feed (use camera.macos).",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "microphone.macos",
+      "tags": [
+        "source",
+        "audio",
+        "microphone",
+        "macos"
+      ],
+      "purpose": "Live microphone capture as a 2048-sample mono PCM window (floatArray), with a synthetic-audio fallback when no mic is authorized.",
+      "platform": "macos",
+      "useWhen": "You need live audio as a stream of PCM samples to analyze (the source of an audio-reactive pipeline). Feed `samples` into audio-fft.",
+      "avoidWhen": "You need a texture/visual source, or an audio file rather than the live mic.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "noise",
+      "tags": [
+        "generator",
+        "noise",
+        "procedural",
+        "source",
+        "render",
+        "animated",
+        "fbm",
+        "voronoi",
+        "mask"
+      ],
+      "purpose": "Generates animated procedural noise (white, value, fractal fBm, or voronoi) as a grayscale texture source.",
+      "platform": "any",
+      "useWhen": "You need procedural grayscale noise for masks, displacement, dissolves, or organic motion. Pick a type (white/value/fractal/voronoi), set scale for detail, and drive animation with speed (reads ctx.time); octaves controls fractal richness.",
+      "avoidWhen": "You need color output, a deterministic still pattern (use checkerboard), or precise SDF/geometry — this is stochastic grayscale only.",
+      "reuse": "reference-only"
+    },
+    {
+      "id": "pixelate",
+      "tags": [
+        "pixelate",
+        "mosaic",
+        "retro",
+        "downsample",
+        "compute",
+        "vfx"
+      ],
+      "purpose": "Quantizes the image into square blocks by snapping each pixel to its block's top-left texel.",
+      "platform": "any",
+      "useWhen": "You want a blocky mosaic / censor / retro-downsample look; block size 1–64 px.",
+      "avoidWhen": "You want smooth downscaling or antialiased blocks — this snaps to hard texels by design.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "saturation",
+      "tags": [
+        "color",
+        "tone",
+        "grayscale",
+        "compute",
+        "vfx"
+      ],
+      "purpose": "Blend RGB toward luma to desaturate, restore, or oversaturate.",
+      "platform": "any",
+      "useWhen": "You need a saturation control, or a grayscale/desaturate pass (set amount 0).",
+      "avoidWhen": "You need hue rotation or selective per-color saturation.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "threshold",
+      "tags": [
+        "mask",
+        "matte",
+        "key",
+        "compute",
+        "vfx"
+      ],
+      "purpose": "Binarize the image by luma into a soft-edged black/white mask.",
+      "platform": "any",
+      "useWhen": "You need a luma matte or key source with a feathered cutoff.",
+      "avoidWhen": "You want to preserve original color, or need chroma/alpha keying.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "video-file",
+      "tags": [
+        "source",
+        "video",
+        "file",
+        "playback",
+        "render"
+      ],
+      "purpose": "Play a local video file as a live texture source, scaled to the viewport.",
+      "platform": "any",
+      "useWhen": "You need a video clip as input to an effect chain — a permission-free alternative to the camera. Set path, loop, rate, and fit.",
+      "avoidWhen": "You need a still image (use image-file) or a live camera feed (use camera.macos).",
+      "reuse": "reference-only"
+    },
+    {
+      "id": "vignette",
+      "tags": [
+        "color",
+        "edge",
+        "stylize",
+        "compute",
+        "vfx"
+      ],
+      "purpose": "Fade the frame edges toward a color with a soft radial falloff.",
+      "platform": "any",
+      "useWhen": "You want classic edge darkening or a colored edge tint framing the subject.",
+      "avoidWhen": "You need a centered spotlight/mask output rather than an edge blend, or a non-radial shape.",
+      "reuse": "copy-as-is"
+    }
+  ]
+}

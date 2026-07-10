@@ -1,0 +1,46 @@
+{
+  "inputs" : [
+    {
+      "name" : "input",
+      "type" : "texture"
+    },
+    {
+      "default" : {
+        "type" : "float",
+        "value" : 1.5
+      },
+      "name" : "amount",
+      "type" : "float",
+      "ui" : {
+        "kind" : "slider",
+        "max" : 2,
+        "min" : 0,
+        "step" : 0.01
+      }
+    },
+    {
+      "default" : {
+        "type" : "float",
+        "value" : 0.5
+      },
+      "name" : "pivot",
+      "type" : "float",
+      "ui" : {
+        "kind" : "slider",
+        "max" : 1,
+        "min" : 0,
+        "step" : 0.01
+      }
+    }
+  ],
+  "outputs" : [
+    {
+      "display" : true,
+      "name" : "output",
+      "type" : "texture"
+    }
+  ],
+  "sfSymbol" : "circle.lefthalf.filled",
+  "summary" : "Expands or compresses RGB around a pivot. amount 1 = unchanged, <1 flattens, >1 boosts contrast.",
+  "title" : "Contrast"
+}

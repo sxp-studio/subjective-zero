@@ -1,0 +1,33 @@
+{
+  "title": "Blend",
+  "sfSymbol": "square.stack.3d.down.right",
+  "summary": "Blends two textures (base + blend) using a selectable Photoshop-style mode, mixed by opacity.",
+  "inputs": [
+    { "name": "base", "type": "texture" },
+    { "name": "blend", "type": "texture" },
+    {
+      "name": "mode",
+      "type": "enum",
+      "default": { "type": "enum", "value": "add" },
+      "ui": { "kind": "dropdown" },
+      "options": [
+        ["Add", "add"],
+        ["Multiply", "multiply"],
+        ["Screen", "screen"],
+        ["Overlay", "overlay"],
+        ["Soft Light", "softlight"],
+        ["Hard Light", "hardlight"],
+        ["Difference", "difference"]
+      ]
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": { "type": "float", "value": 1.0 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01 }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

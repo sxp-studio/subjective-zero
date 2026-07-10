@@ -1,0 +1,155 @@
+{
+  "inputs" : [
+    {
+      "default" : {
+        "type" : "float",
+        "value" : 0.35
+      },
+      "name" : "scale",
+      "type" : "float",
+      "ui" : {
+        "kind" : "field"
+      }
+    },
+    {
+      "default" : {
+        "type" : "float2",
+        "value" : [
+          0.15,
+          -0.1
+        ]
+      },
+      "name" : "offset",
+      "type" : "float2",
+      "ui" : {
+        "kind" : "field"
+      }
+    },
+    {
+      "default" : {
+        "type" : "float3",
+        "value" : [
+          0.05,
+          0.07,
+          0.12
+        ]
+      },
+      "name" : "background",
+      "type" : "float3",
+      "ui" : {
+        "kind" : "field"
+      }
+    },
+    {
+      "default" : {
+        "type" : "float4",
+        "value" : [
+          1,
+          0.6,
+          0.8,
+          0.4
+        ]
+      },
+      "name" : "corners",
+      "type" : "float4",
+      "ui" : {
+        "kind" : "field"
+      }
+    },
+    {
+      "default" : {
+        "type" : "colorRGB",
+        "value" : [
+          0.2,
+          0.9,
+          0.6
+        ]
+      },
+      "name" : "fill",
+      "type" : "colorRGB",
+      "ui" : {
+        "kind" : "colorWell"
+      }
+    },
+    {
+      "default" : {
+        "type" : "colorRGBA",
+        "value" : [
+          1,
+          0.3,
+          0.2,
+          0.85
+        ]
+      },
+      "name" : "ring",
+      "type" : "colorRGBA",
+      "ui" : {
+        "kind" : "colorWell"
+      }
+    },
+    {
+      "default" : {
+        "type" : "float3x3",
+        "value" : [
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "name" : "colorMatrix",
+      "type" : "float3x3"
+    },
+    {
+      "default" : {
+        "type" : "float4x4",
+        "value" : [
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "name" : "gain",
+      "type" : "float4x4"
+    },
+    {
+      "default" : {
+        "type" : "string",
+        "value" : ""
+      },
+      "name" : "path",
+      "type" : "string",
+      "ui" : {
+        "kind" : "filePicker"
+      }
+    }
+  ],
+  "outputs" : [
+    {
+      "display" : true,
+      "name" : "texture",
+      "type" : "texture"
+    }
+  ],
+  "sfSymbol" : "slider.horizontal.3",
+  "summary" : "The value-widget zoo, completing the Pattern Source playground: a plain numeric field (scale), float2/float3/float4 component fields (offset/background/corners), and read-only colorRGB/colorRGBA/float3x3/float4x4 chips — every value crossing the v3 scalar channel into a disc-and-corners render, plus a filePicker path on the v4 string channel that rotates the palette hue.",
+  "title" : "Control Zoo"
+}

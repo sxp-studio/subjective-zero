@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sparkle keys ONLY. Everything else (bundle identity, versions, usage strings) stays
+	     owned by Info.plist generation + INFOPLIST_KEY_* build settings: with both
+	     GENERATE_INFOPLIST_FILE = YES and INFOPLIST_FILE set, Xcode merges this file into the
+	     generated plist. Versions deliberately absent — release.sh stamps the pbxproj's
+	     MARKETING_VERSION / CURRENT_PROJECT_VERSION and generation carries them through.
+	     The EdDSA PRIVATE key never ships or lands in the repo: it lives in the login Keychain
+	     (account studio.sxp.subjectivezero); this is only its public half. -->
+	<!-- Document type: `.subz` is a bundle (directory) that Finder shows as one double-clickable
+	     file — it conforms to com.apple.package, so it also AirDrops / emails as a single unit.
+	     Editor role + Owner rank = this app owns the format. Pairs with SZAppDelegate's
+	     application(_:open:) handler and the save/open panels' allowedContentTypes. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>SubjectiveZero Project</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>studio.sxp.subz</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>studio.sxp.subz</string>
+			<key>UTTypeDescription</key>
+			<string>SubjectiveZero Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.package</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>subz</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://sxp.studio/apps/subjectivezero/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>ZMDip9D96ja+zfJM+QRiLh7O3jDIWgMXCLWVvruxM4U=</string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+</dict>
+</plist>

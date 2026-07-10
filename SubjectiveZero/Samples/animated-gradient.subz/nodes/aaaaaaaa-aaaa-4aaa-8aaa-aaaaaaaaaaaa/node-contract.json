@@ -1,0 +1,16 @@
+{
+  "title": "Animated Gradient",
+  "sfSymbol": "circle.hexagongrid.fill",
+  "summary": "A time-animated screen-space rainbow gradient; `speed` scales the animation rate.",
+  "inputs": [
+    {
+      "name": "speed",
+      "type": "float",
+      "default": { "type": "float", "value": 1.0 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 5.0, "step": 0.1 }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

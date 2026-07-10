@@ -1,0 +1,29 @@
+{
+  "title": "Grain",
+  "sfSymbol": "circle.grid.3x3.fill",
+  "summary": "Adds animated hash noise to fake film/sensor grain. Churns over time via `speed`.",
+  "inputs": [
+    { "name": "input", "type": "texture" },
+    {
+      "name": "amount",
+      "type": "float",
+      "default": { "type": "float", "value": 0.08 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 0.5, "step": 0.01 }
+    },
+    {
+      "name": "size",
+      "type": "float",
+      "default": { "type": "float", "value": 1.0 },
+      "ui": { "kind": "slider", "min": 0.5, "max": 4.0, "step": 0.1 }
+    },
+    {
+      "name": "speed",
+      "type": "float",
+      "default": { "type": "float", "value": 1.0 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 5.0, "step": 0.1 }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

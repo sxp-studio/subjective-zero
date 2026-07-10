@@ -1,0 +1,376 @@
+{
+  "project" : {
+    "author" : "SXP Studio",
+    "graph" : {
+      "connections" : [
+        {
+          "from" : {
+            "node" : "00000003-1111-4111-8111-000000000003",
+            "port" : "output"
+          },
+          "id" : "000003EA-1111-4111-8111-0000000003EA",
+          "kind" : "data",
+          "to" : {
+            "node" : "00000008-1111-4111-8111-000000000008",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000003-1111-4111-8111-000000000003",
+            "port" : "output"
+          },
+          "id" : "000003EC-1111-4111-8111-0000000003EC",
+          "kind" : "data",
+          "to" : {
+            "node" : "0000000A-1111-4111-8111-00000000000A",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000003-1111-4111-8111-000000000003",
+            "port" : "output"
+          },
+          "id" : "000003ED-1111-4111-8111-0000000003ED",
+          "kind" : "data",
+          "to" : {
+            "node" : "0000000B-1111-4111-8111-00000000000B",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000003-1111-4111-8111-000000000003",
+            "port" : "output"
+          },
+          "id" : "000003EE-1111-4111-8111-0000000003EE",
+          "kind" : "data",
+          "to" : {
+            "node" : "0000000C-1111-4111-8111-00000000000C",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000003-1111-4111-8111-000000000003",
+            "port" : "output"
+          },
+          "id" : "000003EF-1111-4111-8111-0000000003EF",
+          "kind" : "data",
+          "to" : {
+            "node" : "0000000D-1111-4111-8111-00000000000D",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000003-1111-4111-8111-000000000003",
+            "port" : "output"
+          },
+          "id" : "000003F4-1111-4111-8111-0000000003F4",
+          "kind" : "data",
+          "to" : {
+            "node" : "00000012-1111-4111-8111-000000000012",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000004-1111-4111-8111-000000000004",
+            "port" : "output"
+          },
+          "id" : "C08A2C53-55D3-46C0-B46C-5E060E17F10F",
+          "kind" : "data",
+          "to" : {
+            "node" : "00000003-1111-4111-8111-000000000003",
+            "port" : "base"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000005-1111-4111-8111-000000000005",
+            "port" : "texture"
+          },
+          "id" : "1A203947-988D-48B8-A4D8-D24D21E144C1",
+          "kind" : "data",
+          "to" : {
+            "node" : "00000003-1111-4111-8111-000000000003",
+            "port" : "blend"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000008-1111-4111-8111-000000000008",
+            "port" : "output"
+          },
+          "id" : "8B1724DC-A3A8-4F61-9E5B-21E200CBE4FB",
+          "kind" : "data",
+          "to" : {
+            "node" : "0000000E-1111-4111-8111-00000000000E",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "0000000E-1111-4111-8111-00000000000E",
+            "port" : "output"
+          },
+          "id" : "50A8A9B4-89A7-4652-BAD2-253794CD0FD7",
+          "kind" : "data",
+          "to" : {
+            "node" : "0000000F-1111-4111-8111-00000000000F",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "0000000F-1111-4111-8111-00000000000F",
+            "port" : "output"
+          },
+          "id" : "4CBB83E7-6C5A-490E-8CE0-84A06EE04848",
+          "kind" : "data",
+          "to" : {
+            "node" : "00000010-1111-4111-8111-000000000010",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000010-1111-4111-8111-000000000010",
+            "port" : "output"
+          },
+          "id" : "09826267-46FD-4A62-AF6F-ADBC3722A792",
+          "kind" : "data",
+          "to" : {
+            "node" : "00000011-1111-4111-8111-000000000011",
+            "port" : "input"
+          }
+        },
+        {
+          "from" : {
+            "node" : "00000011-1111-4111-8111-000000000011",
+            "port" : "output"
+          },
+          "id" : "B6AF820B-C242-4407-89B1-03ACBE0069F3",
+          "kind" : "data",
+          "to" : {
+            "node" : "00000009-1111-4111-8111-000000000009",
+            "port" : "input"
+          }
+        }
+      ],
+      "nodes" : [
+        {
+          "id" : "00000001-1111-4111-8111-000000000001",
+          "kind" : "generated",
+          "position" : {
+            "x" : -180,
+            "y" : 60
+          },
+          "sfSymbol" : "square.righthalf.filled",
+          "title" : "Gradient"
+        },
+        {
+          "id" : "00000002-1111-4111-8111-000000000002",
+          "kind" : "generated",
+          "position" : {
+            "x" : -180,
+            "y" : 252
+          },
+          "sfSymbol" : "aqi.medium",
+          "title" : "Noise"
+        },
+        {
+          "id" : "00000003-1111-4111-8111-000000000003",
+          "kind" : "generated",
+          "position" : {
+            "x" : 400,
+            "y" : 120
+          },
+          "sfSymbol" : "square.stack.3d.down.right",
+          "title" : "Test Pattern"
+        },
+        {
+          "id" : "00000004-1111-4111-8111-000000000004",
+          "kind" : "generated",
+          "position" : {
+            "x" : 80,
+            "y" : 360
+          },
+          "sfSymbol" : "checkerboard.rectangle",
+          "title" : "Checkerboard"
+        },
+        {
+          "id" : "00000005-1111-4111-8111-000000000005",
+          "kind" : "generated",
+          "position" : {
+            "x" : 80,
+            "y" : 510
+          },
+          "sfSymbol" : "camera",
+          "title" : "MacBook Camera"
+        },
+        {
+          "id" : "00000006-1111-4111-8111-000000000006",
+          "kind" : "generated",
+          "position" : {
+            "x" : 80,
+            "y" : 660
+          },
+          "sfSymbol" : "photo",
+          "title" : "Image File"
+        },
+        {
+          "id" : "00000007-1111-4111-8111-000000000007",
+          "kind" : "generated",
+          "position" : {
+            "x" : 80,
+            "y" : 810
+          },
+          "sfSymbol" : "film",
+          "title" : "Video File"
+        },
+        {
+          "id" : "00000008-1111-4111-8111-000000000008",
+          "kind" : "generated",
+          "position" : {
+            "x" : 720,
+            "y" : 40
+          },
+          "sfSymbol" : "sun.max",
+          "title" : "Brightness"
+        },
+        {
+          "id" : "00000009-1111-4111-8111-000000000009",
+          "kind" : "generated",
+          "position" : {
+            "x" : 1572,
+            "y" : 360
+          },
+          "sfSymbol" : "circle.lefthalf.filled",
+          "title" : "Contrast"
+        },
+        {
+          "id" : "0000000A-1111-4111-8111-00000000000A",
+          "kind" : "generated",
+          "position" : {
+            "x" : 720,
+            "y" : 280
+          },
+          "sfSymbol" : "drop.fill",
+          "title" : "Saturation"
+        },
+        {
+          "id" : "0000000B-1111-4111-8111-00000000000B",
+          "kind" : "generated",
+          "position" : {
+            "x" : 720,
+            "y" : 400
+          },
+          "sfSymbol" : "chart.line.uptrend.xyaxis",
+          "title" : "Gamma"
+        },
+        {
+          "id" : "0000000C-1111-4111-8111-00000000000C",
+          "kind" : "generated",
+          "position" : {
+            "x" : 720,
+            "y" : 520
+          },
+          "sfSymbol" : "circle.righthalf.filled",
+          "title" : "Threshold"
+        },
+        {
+          "id" : "0000000D-1111-4111-8111-00000000000D",
+          "kind" : "generated",
+          "position" : {
+            "x" : 720,
+            "y" : 640
+          },
+          "sfSymbol" : "camera.filters",
+          "title" : "Vignette"
+        },
+        {
+          "id" : "0000000E-1111-4111-8111-00000000000E",
+          "kind" : "generated",
+          "position" : {
+            "x" : 996,
+            "y" : 36
+          },
+          "sfSymbol" : "drop.fill",
+          "title" : "Gaussian Blur"
+        },
+        {
+          "id" : "0000000F-1111-4111-8111-00000000000F",
+          "kind" : "generated",
+          "position" : {
+            "x" : 1260,
+            "y" : 36
+          },
+          "sfSymbol" : "squareshape.split.3x3",
+          "title" : "Pixelate"
+        },
+        {
+          "id" : "00000010-1111-4111-8111-000000000010",
+          "kind" : "generated",
+          "position" : {
+            "x" : 1572,
+            "y" : 48
+          },
+          "sfSymbol" : "camera.filters",
+          "title" : "Chromatic Aberration"
+        },
+        {
+          "id" : "00000011-1111-4111-8111-000000000011",
+          "kind" : "generated",
+          "position" : {
+            "x" : 1884,
+            "y" : 96
+          },
+          "sfSymbol" : "square.on.square.dashed",
+          "title" : "Edge Detect"
+        },
+        {
+          "id" : "00000012-1111-4111-8111-000000000012",
+          "kind" : "generated",
+          "position" : {
+            "x" : 1040,
+            "y" : 520
+          },
+          "sfSymbol" : "circle.grid.3x3.fill",
+          "title" : "Grain"
+        },
+        {
+          "id" : "7F02A3C7-169A-4130-9984-AC637F32DA95",
+          "kind" : "prompt",
+          "position" : {
+            "x" : 420,
+            "y" : 624
+          },
+          "prompt" : "",
+          "sfSymbol" : "sparkles",
+          "title" : "New Node"
+        }
+      ],
+      "renderEndpoint" : {
+        "node" : "00000011-1111-4111-8111-000000000011",
+        "port" : "output"
+      }
+    },
+    "name" : "Effects Lab",
+    "viewport" : {
+      "fps" : 60,
+      "pixelFormat" : "bgra8Unorm",
+      "resolution" : {
+        "height" : 720,
+        "width" : 1280
+      },
+      "translation" : {
+        "x" : 0,
+        "y" : 0
+      },
+      "zoom" : 0.7
+    }
+  }
+}

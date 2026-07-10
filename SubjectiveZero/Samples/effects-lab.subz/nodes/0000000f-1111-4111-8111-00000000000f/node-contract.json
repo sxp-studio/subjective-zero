@@ -1,0 +1,32 @@
+{
+  "inputs" : [
+    {
+      "name" : "input",
+      "type" : "texture"
+    },
+    {
+      "default" : {
+        "type" : "float",
+        "value" : 30
+      },
+      "name" : "size",
+      "type" : "float",
+      "ui" : {
+        "kind" : "slider",
+        "max" : 64,
+        "min" : 1,
+        "step" : 1
+      }
+    }
+  ],
+  "outputs" : [
+    {
+      "display" : true,
+      "name" : "output",
+      "type" : "texture"
+    }
+  ],
+  "sfSymbol" : "squareshape.split.3x3",
+  "summary" : "Quantizes the image into square blocks (mosaic). `size` is the block edge in pixels.",
+  "title" : "Pixelate"
+}

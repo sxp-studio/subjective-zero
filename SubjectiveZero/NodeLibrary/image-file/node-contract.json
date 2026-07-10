@@ -1,0 +1,23 @@
+{
+  "title": "Image File",
+  "sfSymbol": "photo",
+  "summary": "Loads a still image file (png/jpg/heic/…) as a texture source, scaled to the viewport.",
+  "inputs": [
+    {
+      "name": "path",
+      "type": "string",
+      "default": { "type": "string", "value": "" },
+      "ui": { "kind": "filePicker" }
+    },
+    {
+      "name": "fit",
+      "type": "enum",
+      "default": { "type": "enum", "value": "fit" },
+      "ui": { "kind": "dropdown" },
+      "options": [ ["Fit (letterbox)", "fit"], ["Fill (crop)", "fill"], ["Stretch", "stretch"] ]
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

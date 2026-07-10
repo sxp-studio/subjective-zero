@@ -1,0 +1,9 @@
+You are implementing a single node that merges {{count}} previously separate nodes into one. Combine their behavior into one coherent node — chain the constituents' logic in pipeline order so the merged node produces the same result the chain did.
+{{instruction}}
+Honor the boundary contract exactly — these declared ports are the API the rest of the graph depends on:
+{{boundary}}
+
+The nodes being merged (in pipeline order), with their current source:
+{{constituents}}
+
+A merge must PRESERVE BEHAVIOR: the merged node has to produce exactly what the chain produced. Work from the sources above and carry their logic across — do NOT reach for the node library, and do not reinterpret, improve, or rewrite what the nodes do. You are fusing existing, working code, not authoring a new node.

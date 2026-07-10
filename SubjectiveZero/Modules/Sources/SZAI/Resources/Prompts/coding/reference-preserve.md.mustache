@@ -1,0 +1,17 @@
+## Do NOT look for a reference — you already have one
+
+This node came from splitting or merging existing, working code, and that code is quoted above. It IS your
+reference. Your job is to PRESERVE ITS BEHAVIOR: the pieces, wired back together, must render exactly what
+the original rendered — same maths, same constants, same output for the same inputs.
+
+- **Do not call `agent_library_index`, `agent_library_card`, or `agent_library_source`.** The built-in
+  library describes *other* nodes. Nothing in it does this node's job, because this node's job is defined
+  by the source above and nothing else.
+- **Do not reinterpret, improve, modernize, or "clean up" the logic.** A prettier gradient is a broken
+  split. If the source multiplies time by a speed input and takes a cosine, so does your stage.
+- **Carry the code across, don't re-derive it.** Copy the shader strings, the constants, the buffer indices.
+  Change only what the split/merge itself forces: which part of the pipeline you own, and reading your
+  input texture / writing your output texture at the boundary declared below.
+
+If the original's behavior is unclear from its source, say so with `agent_report_status` (`needsInput`)
+rather than guessing — a guess silently changes what the user's graph draws.

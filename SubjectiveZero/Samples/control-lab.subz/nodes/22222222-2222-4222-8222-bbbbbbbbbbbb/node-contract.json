@@ -1,0 +1,14 @@
+{
+  "title": "Tint",
+  "sfSymbol": "paintpalette.fill",
+  "summary": "Tints an input texture by a chosen warm/cool color, blended by `amount`. A second generated node so `ui_toggle_display` has two display targets to switch between.",
+  "inputs": [
+    { "name": "input", "type": "texture" },
+    { "name": "tint", "type": "enum", "ui": { "kind": "dropdown" }, "default": { "type": "enum", "value": "warm" },
+      "options": [["None", "none"], ["Warm", "warm"], ["Cool", "cool"]] },
+    { "name": "amount", "type": "float", "ui": { "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01 }, "default": { "type": "float", "value": 0.6 } }
+  ],
+  "outputs": [
+    { "name": "texture", "type": "texture", "display": true }
+  ]
+}

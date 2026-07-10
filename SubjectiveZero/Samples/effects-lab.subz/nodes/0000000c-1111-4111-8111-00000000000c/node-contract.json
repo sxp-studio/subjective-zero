@@ -1,0 +1,46 @@
+{
+  "inputs" : [
+    {
+      "name" : "input",
+      "type" : "texture"
+    },
+    {
+      "default" : {
+        "type" : "float",
+        "value" : 0.5
+      },
+      "name" : "threshold",
+      "type" : "float",
+      "ui" : {
+        "kind" : "slider",
+        "max" : 1,
+        "min" : 0,
+        "step" : 0.01
+      }
+    },
+    {
+      "default" : {
+        "type" : "float",
+        "value" : 0.1
+      },
+      "name" : "softness",
+      "type" : "float",
+      "ui" : {
+        "kind" : "slider",
+        "max" : 0.5,
+        "min" : 0,
+        "step" : 0.01
+      }
+    }
+  ],
+  "outputs" : [
+    {
+      "display" : true,
+      "name" : "output",
+      "type" : "texture"
+    }
+  ],
+  "sfSymbol" : "circle.righthalf.filled",
+  "summary" : "Converts RGB to a black/white mask by luma, with a soft edge band around the cutoff.",
+  "title" : "Threshold"
+}

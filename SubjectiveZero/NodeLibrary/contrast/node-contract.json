@@ -1,0 +1,23 @@
+{
+  "title": "Contrast",
+  "sfSymbol": "circle.lefthalf.filled",
+  "summary": "Expands or compresses RGB around a pivot. amount 1 = unchanged, <1 flattens, >1 boosts contrast.",
+  "inputs": [
+    { "name": "input", "type": "texture" },
+    {
+      "name": "amount",
+      "type": "float",
+      "default": { "type": "float", "value": 1.0 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 2.0, "step": 0.01 }
+    },
+    {
+      "name": "pivot",
+      "type": "float",
+      "default": { "type": "float", "value": 0.5 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01 }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

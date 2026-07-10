@@ -1,0 +1,22 @@
+{
+  "title": "Chromatic Aberration",
+  "sfSymbol": "camera.filters",
+  "summary": "Radially splits the R/B channels from a center to fake lens color fringing.",
+  "inputs": [
+    { "name": "input", "type": "texture" },
+    {
+      "name": "amount",
+      "type": "float",
+      "default": { "type": "float", "value": 0.01 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 0.05, "step": 0.001 }
+    },
+    {
+      "name": "center",
+      "type": "float2",
+      "default": { "type": "float2", "value": [0.5, 0.5] }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

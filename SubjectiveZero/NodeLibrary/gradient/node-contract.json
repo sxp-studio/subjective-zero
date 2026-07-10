@@ -1,0 +1,46 @@
+{
+  "title": "Gradient",
+  "sfSymbol": "square.righthalf.filled",
+  "summary": "Generates a two-color gradient (linear, radial, or angular) as a texture source.",
+  "inputs": [
+    {
+      "name": "type",
+      "type": "enum",
+      "default": { "type": "enum", "value": "linear" },
+      "ui": { "kind": "dropdown" },
+      "options": [ ["Linear", "linear"], ["Radial", "radial"], ["Angular", "angular"] ]
+    },
+    {
+      "name": "colorA",
+      "type": "colorRGBA",
+      "default": { "type": "colorRGBA", "value": [0.0, 0.0, 0.0, 1.0] },
+      "ui": { "kind": "colorWell" }
+    },
+    {
+      "name": "colorB",
+      "type": "colorRGBA",
+      "default": { "type": "colorRGBA", "value": [1.0, 1.0, 1.0, 1.0] },
+      "ui": { "kind": "colorWell" }
+    },
+    {
+      "name": "angle",
+      "type": "float",
+      "default": { "type": "float", "value": 0.0 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 6.2831853, "step": 0.01 }
+    },
+    {
+      "name": "center",
+      "type": "float2",
+      "default": { "type": "float2", "value": [0.5, 0.5] }
+    },
+    {
+      "name": "scale",
+      "type": "float",
+      "default": { "type": "float", "value": 1.0 },
+      "ui": { "kind": "slider", "min": 0.1, "max": 4.0, "step": 0.01 }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

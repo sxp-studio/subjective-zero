@@ -1,0 +1,17 @@
+{
+  "title": "Brightness",
+  "sfSymbol": "sun.max",
+  "summary": "Scales the input texture's RGB by a gain (exposure). 1 = unchanged, <1 darker, >1 brighter.",
+  "inputs": [
+    { "name": "input", "type": "texture" },
+    {
+      "name": "amount",
+      "type": "float",
+      "default": { "type": "float", "value": 1.0 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 2.0, "step": 0.01 }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

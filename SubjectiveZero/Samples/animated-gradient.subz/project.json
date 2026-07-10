@@ -1,0 +1,26 @@
+{
+  "project": {
+    "name": "Animated Gradient",
+    "author": "SXP Studio",
+    "viewport": {
+      "zoom": 1,
+      "translation": { "x": 0, "y": 0 },
+      "fps": 60,
+      "resolution": { "width": 1280, "height": 720 },
+      "pixelFormat": "bgra8Unorm"
+    },
+    "graph": {
+      "nodes": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "kind": "generated",
+          "title": "Animated Gradient",
+          "sfSymbol": "circle.hexagongrid.fill",
+          "position": { "x": 260, "y": 200 }
+        }
+      ],
+      "connections": [],
+      "renderEndpoint": { "node": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "port": "output" }
+    }
+  }
+}

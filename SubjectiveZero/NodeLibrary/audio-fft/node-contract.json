@@ -1,0 +1,16 @@
+{
+  "title": "Audio FFT",
+  "sfSymbol": "waveform.path.ecg",
+  "summary": "FFT of a PCM sample window into a power spectrum (floatArray of 1024 magnitude bins). Pure DSP — no audio device.",
+  "inputs": [
+    { "name": "samples", "type": "floatArray" },
+    { "name": "window", "type": "enum", "ui": { "kind": "dropdown" },
+      "default": { "type": "enum", "value": "hann" },
+      "options": [ ["Hann", "hann"], ["Hamming", "hamming"], ["Blackman", "blackman"], ["Rectangular", "rect"] ] },
+    { "name": "smoothing", "type": "float", "ui": { "kind": "slider", "min": 0, "max": 0.95, "step": 0.01 },
+      "default": { "type": "float", "value": 0 } }
+  ],
+  "outputs": [
+    { "name": "magnitudes", "type": "floatArray" }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "inputs" : [
+    {
+      "default" : {
+        "type" : "string",
+        "value" : ""
+      },
+      "name" : "path",
+      "type" : "string",
+      "ui" : {
+        "kind" : "filePicker"
+      }
+    },
+    {
+      "default" : {
+        "type" : "bool",
+        "value" : true
+      },
+      "name" : "loop",
+      "type" : "bool",
+      "ui" : {
+        "kind" : "toggle"
+      }
+    },
+    {
+      "default" : {
+        "type" : "float",
+        "value" : 1
+      },
+      "name" : "rate",
+      "type" : "float",
+      "ui" : {
+        "kind" : "slider",
+        "max" : 4,
+        "min" : 0,
+        "step" : 0.1
+      }
+    },
+    {
+      "default" : {
+        "type" : "enum",
+        "value" : "fill"
+      },
+      "name" : "fit",
+      "options" : [
+        [
+          "Fit (letterbox)",
+          "fit"
+        ],
+        [
+          "Fill (crop)",
+          "fill"
+        ],
+        [
+          "Stretch",
+          "stretch"
+        ]
+      ],
+      "type" : "enum",
+      "ui" : {
+        "kind" : "dropdown"
+      }
+    }
+  ],
+  "outputs" : [
+    {
+      "display" : true,
+      "name" : "output",
+      "type" : "texture"
+    }
+  ],
+  "sfSymbol" : "film",
+  "summary" : "Plays a local video file (mp4/mov/…) as a live texture source, scaled to the viewport.",
+  "title" : "Video File"
+}

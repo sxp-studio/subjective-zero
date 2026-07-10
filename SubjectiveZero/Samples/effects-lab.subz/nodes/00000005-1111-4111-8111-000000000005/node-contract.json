@@ -1,0 +1,50 @@
+{
+  "inputs" : [
+    {
+      "default" : {
+        "type" : "bool",
+        "value" : true
+      },
+      "name" : "mirror",
+      "type" : "bool",
+      "ui" : {
+        "kind" : "toggle"
+      }
+    },
+    {
+      "default" : {
+        "type" : "bool",
+        "value" : true
+      },
+      "name" : "aspectFit",
+      "type" : "bool",
+      "ui" : {
+        "kind" : "toggle"
+      }
+    },
+    {
+      "default" : {
+        "type" : "enum",
+        "value" : "default"
+      },
+      "name" : "camera",
+      "type" : "enum",
+      "ui" : {
+        "kind" : "dropdown"
+      }
+    }
+  ],
+  "outputs" : [
+    {
+      "display" : true,
+      "name" : "texture",
+      "type" : "texture"
+    }
+  ],
+  "permissions" : [
+    "camera"
+  ],
+  "sfSymbol" : "camera",
+  "summary" : "Live Mac camera feed as a texture (built-in or selected camera).",
+  "title" : "MacBook Camera"
+}

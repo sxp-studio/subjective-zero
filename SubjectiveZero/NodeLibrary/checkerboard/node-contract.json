@@ -1,0 +1,28 @@
+{
+  "title": "Checkerboard",
+  "sfSymbol": "checkerboard.rectangle",
+  "summary": "Generates a two-color checkerboard pattern as a texture source. No input.",
+  "inputs": [
+    {
+      "name": "scale",
+      "type": "float",
+      "default": { "type": "float", "value": 8.0 },
+      "ui": { "kind": "slider", "min": 1.0, "max": 64.0, "step": 1.0 }
+    },
+    {
+      "name": "colorA",
+      "type": "colorRGBA",
+      "default": { "type": "colorRGBA", "value": [0.0, 0.0, 0.0, 1.0] },
+      "ui": { "kind": "colorWell" }
+    },
+    {
+      "name": "colorB",
+      "type": "colorRGBA",
+      "default": { "type": "colorRGBA", "value": [1.0, 1.0, 1.0, 1.0] },
+      "ui": { "kind": "colorWell" }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}

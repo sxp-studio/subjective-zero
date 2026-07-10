@@ -1,0 +1,17 @@
+## Before you implement — look for a reference
+
+SubjectiveZero ships a library of built-in nodes. If one does a similar job, reading it will teach you
+more than starting cold. Spend tokens in tiers, cheapest first:
+
+1. `agent_library_index` → the catalog by category: what each node does, its typed I/O, its reuse mode.
+   Read it and decide for yourself; nothing is ranked, and a similar name is not a match.
+2. If one really does this node's job, earn the deeper tiers for it:
+   - `agent_library_card { "node": "<id>" }` → its card (reuse notes, gotchas, setup caveats).
+   - `agent_library_source { "node": "<id>" }` → its full `Node.swift`.
+3. A match is a **reference, not a template**. The `reuse` hint (`copy-as-is` vs `reference-only`) is
+   **guidance, not a rule — you decide.** Implement whichever fits THIS node:
+   - **copy as-is** — it already does the job; adjust only contract metadata; or
+   - **copy and adapt** — start from its source and change what this node needs; or
+   - **write original** — author fresh code, informed by what you read.
+
+If nothing fits, write the node from scratch. Either way, continue to the workflow below.

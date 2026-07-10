@@ -1,0 +1,20 @@
+{
+  "title": "Pattern Source",
+  "sfSymbol": "square.grid.3x3.fill",
+  "summary": "A camera-free control playground: enum color/mode/cell-count dropdowns + brightness/gamma sliders + an invert toggle + a freeform note field, all driving a screen-space pattern. Exercises every input control type.",
+  "inputs": [
+    { "name": "color", "type": "enum", "ui": { "kind": "dropdown" }, "default": { "type": "enum", "value": "green" },
+      "options": [["Red", "red"], ["Green", "green"], ["Blue", "blue"], ["White", "white"], ["Black", "black"]] },
+    { "name": "mode", "type": "enum", "ui": { "kind": "dropdown" }, "default": { "type": "enum", "value": "gradient" },
+      "options": [["Solid", "solid"], ["Gradient", "gradient"], ["Checker", "checker"]] },
+    { "name": "cells", "type": "enum", "ui": { "kind": "dropdown" }, "default": { "type": "enum", "value": "8" },
+      "options": [["4", "4"], ["8", "8"], ["16", "16"], ["32", "32"]] },
+    { "name": "brightness", "type": "float", "ui": { "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01 }, "default": { "type": "float", "value": 0.8 } },
+    { "name": "gamma", "type": "float", "ui": { "kind": "slider", "min": 0.2, "max": 2.5, "step": 0.05 }, "default": { "type": "float", "value": 1.0 } },
+    { "name": "invert", "type": "bool", "ui": { "kind": "toggle" }, "default": { "type": "bool", "value": false } },
+    { "name": "note", "type": "string", "ui": { "kind": "field" }, "default": { "type": "string", "value": "stress me" } }
+  ],
+  "outputs": [
+    { "name": "texture", "type": "texture", "display": true }
+  ]
+}

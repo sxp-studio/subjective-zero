@@ -1,0 +1,78 @@
+{
+  "inputs" : [
+    {
+      "name" : "input",
+      "type" : "texture"
+    },
+    {
+      "default" : {
+        "type" : "float",
+        "value" : 0.2
+      },
+      "name" : "threshold",
+      "type" : "float",
+      "ui" : {
+        "kind" : "slider",
+        "max" : 1,
+        "min" : 0,
+        "step" : 0.01
+      }
+    },
+    {
+      "default" : {
+        "type" : "float",
+        "value" : 1
+      },
+      "name" : "thickness",
+      "type" : "float",
+      "ui" : {
+        "kind" : "slider",
+        "max" : 3,
+        "min" : 0.5,
+        "step" : 0.1
+      }
+    },
+    {
+      "default" : {
+        "type" : "colorRGBA",
+        "value" : [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "name" : "edgeColor",
+      "type" : "colorRGBA",
+      "ui" : {
+        "kind" : "colorWell"
+      }
+    },
+    {
+      "default" : {
+        "type" : "colorRGBA",
+        "value" : [
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "name" : "bgColor",
+      "type" : "colorRGBA",
+      "ui" : {
+        "kind" : "colorWell"
+      }
+    }
+  ],
+  "outputs" : [
+    {
+      "display" : true,
+      "name" : "output",
+      "type" : "texture"
+    }
+  ],
+  "sfSymbol" : "square.on.square.dashed",
+  "summary" : "3×3 Sobel on luminance. Edges take `edgeColor`, flat regions take `bgColor`.",
+  "title" : "Edge Detect"
+}

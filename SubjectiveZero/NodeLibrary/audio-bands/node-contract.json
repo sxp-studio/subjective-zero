@@ -1,0 +1,26 @@
+{
+  "title": "Frequency Bands",
+  "sfSymbol": "chart.bar.xaxis",
+  "summary": "Reduces an FFT power spectrum into 10 normalized 0..1 frequency buckets on octave centers 32 Hz … 16 kHz, with attack/decay smoothing.",
+  "inputs": [
+    { "name": "magnitudes", "type": "floatArray" },
+    { "name": "sensitivity", "type": "float", "ui": { "kind": "slider", "min": 0.1, "max": 4, "step": 0.05 },
+      "default": { "type": "float", "value": 1 } },
+    { "name": "attack", "type": "float", "ui": { "kind": "slider", "min": 0, "max": 1, "step": 0.01 },
+      "default": { "type": "float", "value": 0.15 } },
+    { "name": "release", "type": "float", "ui": { "kind": "slider", "min": 0, "max": 1, "step": 0.01 },
+      "default": { "type": "float", "value": 0.92 } }
+  ],
+  "outputs": [
+    { "name": "hz32",  "type": "float" },
+    { "name": "hz64",  "type": "float" },
+    { "name": "hz128", "type": "float" },
+    { "name": "hz256", "type": "float" },
+    { "name": "hz512", "type": "float" },
+    { "name": "hz1k",  "type": "float" },
+    { "name": "hz2k",  "type": "float" },
+    { "name": "hz4k",  "type": "float" },
+    { "name": "hz8k",  "type": "float" },
+    { "name": "hz16k", "type": "float" }
+  ]
+}

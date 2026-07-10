@@ -1,0 +1,35 @@
+{
+  "title": "Vignette",
+  "sfSymbol": "camera.filters",
+  "summary": "Fades the frame edges toward a color (black by default) with a soft radial falloff.",
+  "inputs": [
+    { "name": "input", "type": "texture" },
+    {
+      "name": "amount",
+      "type": "float",
+      "default": { "type": "float", "value": 1.0 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01 }
+    },
+    {
+      "name": "radius",
+      "type": "float",
+      "default": { "type": "float", "value": 0.75 },
+      "ui": { "kind": "slider", "min": 0.0, "max": 1.5, "step": 0.01 }
+    },
+    {
+      "name": "softness",
+      "type": "float",
+      "default": { "type": "float", "value": 0.45 },
+      "ui": { "kind": "slider", "min": 0.01, "max": 1.0, "step": 0.01 }
+    },
+    {
+      "name": "color",
+      "type": "colorRGBA",
+      "default": { "type": "colorRGBA", "value": [0.0, 0.0, 0.0, 1.0] },
+      "ui": { "kind": "colorWell" }
+    }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ]
+}
