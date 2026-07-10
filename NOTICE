@@ -1,0 +1,49 @@
+Subjective Zero
+Copyright (C) 2026 SXP Studio EURL. All rights reserved except as licensed below.
+
+Subjective Zero is licensed under the GNU Affero General Public License,
+version 3 only (AGPL-3.0-only). See the LICENSE file for the full text. The
+clarifications and reservations below accompany that license.
+
+
+1. NODE EXCEPTION (additional permission under GNU AGPL v3 section 7)
+--------------------------------------------------------------------
+
+Node definitions, node graphs, and other project documents authored with
+Subjective Zero -- whether serialized as JSON or as generated source -- together
+with node plugins that interface with the application through its public node
+API, are the work of their authors and are NOT covered by the AGPL. You may use,
+license, and distribute your own nodes, plugins, and projects under any terms you
+choose.
+
+This exception applies only to such author-created node and plugin works. The
+Subjective Zero application and engine themselves remain under the AGPL-3.0.
+
+
+2. TRADEMARKS
+-------------
+
+"Subjective Zero", "SubZ", "sxp.studio", and associated names and logos are
+trademarks of SXP Studio EURL. They are NOT licensed under the AGPL.
+
+You may use these marks only to accurately refer to this project. If you
+distribute a modified version, you must remove these names and logos from your
+distribution and choose a different name, and you may not use the marks in any
+way that suggests sponsorship or endorsement by SXP Studio EURL.
+
+
+3. COMMERCIAL LICENSE
+---------------------
+
+Subjective Zero is available under the AGPL-3.0. If its terms do not suit your
+needs -- for example, embedding it in a proprietary product, or offering it as a
+network service without the AGPL's copyleft obligation -- a separate commercial
+license is available from SXP Studio EURL. Contact subz@sxp.studio.
+
+
+4. THIRD-PARTY COMPONENTS
+-------------------------
+
+This software incorporates the Sparkle update framework, which is distributed
+under the MIT License. Sparkle's license text is included with its source in the
+dependency's own LICENSE file and applies to that component.

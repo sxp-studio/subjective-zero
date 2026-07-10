@@ -1,0 +1,40 @@
+# macOS
+.DS_Store
+
+# Swift / SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+DerivedData/
+
+# Release pipeline output
+build/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Build & generated node output (staged agent/build writes)
+*.dylib
+.staging/
+runtime-loads/
+
+# Chat transcript sidecars + attachment copies written into the TRACKED sample bundles at runtime —
+# user-session noise, not sample content. Deliberately Samples-scoped: in a real shared project these
+# dirs are meant to travel (they're the project's durable narrative).
+SubjectiveZero/Samples/*.subz/transcripts/
+SubjectiveZero/Samples/*.subz/attachments/
+
+# Telemetry API key — real config never in the repo (JellystatConfig.example.json is the template);
+# absent file = telemetry fully off.
+SubjectiveZero/SZApp/Telemetry/JellystatConfig.json
+
+# Internal working docs — build log, backlog, release runbook, roadmap, planning notes.
+# Kept on disk for maintainer/agent context, never published. Some may later be reworked
+# into public docs.
+internal/
+
+# Misc
+*.log
