@@ -10,6 +10,12 @@ SZAI only supplies provider sessions and the `Orchestrator`. Critically, the MCP
 closed-loop testing while the app (and the agents themselves) are built - because both the UI and
 MCP go through the one `HostBridge` path.
 
+Transport: TCP, newline-delimited JSON-RPC on 127.0.0.1 (ports 42100–42199). CLIs that speak
+stdio MCP reach it through an `nc` bridge (claude/codex via config, grok via a staged config
+file). pi ships no MCP support at all, so the pi provider stages a small extension
+(`<workdir>/.subz/mcp-bridge.mjs`, bundled in SZAI's resources) that dials the listener directly
+and registers each host tool via `pi.registerTool` — same wire protocol, no extra process.
+
 ## Structure
 
 One main server class (in SZApp); commands are defined in **extension files**, grouped by prefix, so

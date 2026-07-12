@@ -14,9 +14,9 @@ import Testing
 import SZCore
 @testable import SZAI
 
-/// Records the argv it was asked to run and returns canned output — no live CLI.
+/// Records the argv (and stdin payload) it was asked to run and returns canned output — no live CLI.
 private final class StubRunner: SZProcessRunning {
-    struct Call: Sendable { var launchPath: String; var arguments: [String] }
+    struct Call: Sendable { var launchPath: String; var arguments: [String]; var input: Data? }
     private let calls = Mutex<[Call]>([])   // Mutex.withLock is async-safe (NSLock.lock is not)
     let output: String
     let exitCode: Int32
@@ -31,9 +31,9 @@ private final class StubRunner: SZProcessRunning {
     func run(
         _ launchPath: String, _ arguments: [String],
         environment: [String: String], currentDirectoryURL: URL?,
-        timeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
+        input: Data?, timeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
     ) async throws -> SZProcessResult {
-        calls.withLock { $0.append(Call(launchPath: launchPath, arguments: arguments)) }
+        calls.withLock { $0.append(Call(launchPath: launchPath, arguments: arguments, input: input)) }
         return SZProcessResult(exitCode: exitCode, output: output)
     }
 }
@@ -63,11 +63,15 @@ private extension Array where Element == String {
 
 @Test func registryVendsAllProviders() {
     let reg = SZProviderRegistry.shared
-    #expect(reg.providers.map(\.id).sorted() == ["claude", "codex", "grok"])
+    #expect(reg.providers.map(\.id).sorted() == ["claude", "codex", "grok", "pi"])
     #expect(reg.defaultProvider.id == "claude")
     #expect(reg.provider(id: "claude")?.defaultModel == "claude-opus-4-8")
     #expect(reg.provider(id: "codex")?.defaultModel == "gpt-5.6-terra")
     #expect(reg.provider(id: "grok")?.defaultModel == "grok-composer-2.5-fast")
+    // pi's catalog is runtime-enumerated (BYOK — the user's pi decides): at rest it serves
+    // NOTHING, deliberately — no hardcoded pi model id exists anywhere in this codebase.
+    #expect(reg.provider(id: "pi")?.models.isEmpty == true)
+    #expect(reg.provider(id: "pi")?.defaultModel == "")
 }
 
 @Test func claudeLaunchBuildsArgvAndMintsSession() async throws {
@@ -587,6 +591,265 @@ private extension Array where Element == String {
     let e = SZGrokProvider().makeStreamConsumer()
     #expect(e.consume(#"{"type":"error","message":"Couldn't start session"}"#)
             == [.activity("⚠ Couldn't start session")])
+}
+
+// MARK: - pi (dynamic catalog + staged MCP bridge extension; fixtures recorded from pi 0.80.6)
+
+/// A successful pi turn, trimmed from a recorded `pi -p --mode json` run: header first, the final
+/// assistant message ends with stopReason "stop". `--mode json` exits 0 even on FAILED turns, so
+/// these stopReason fixtures are what parse() classifies by.
+private let piTurnOK = """
+{"type":"session","version":3,"id":"019f5800-e9d9-7890-8449-bcff50ac032b","timestamp":"2026-07-12T20:24:42.713Z","cwd":"/tmp/work"}
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"OK"}],"stopReason":"stop"}}
+{"type":"agent_end","messages":[],"willRetry":false}
+"""
+
+/// Recorded: a bogus model id — pi warns on stderr, sends it anyway, the backend rejects it, and
+/// the process still exits 0. The empty-content assistant message with stopReason "error" is the
+/// only failure signal.
+private let piTurnBackendError = """
+{"type":"session","version":3,"id":"019f580d-b26b-7b6d-9a64-b63453215fa5","timestamp":"2026-07-12T20:38:40.491Z","cwd":"/tmp/work"}
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Codex error: The 'bogus-model-xyz' model is not supported when using Codex with a ChatGPT account."}}
+{"type":"agent_end","messages":[],"willRetry":false}
+"""
+
+/// Recorded RPC catalog fetch (`--mode rpc` → get_state + get_available_models), trimmed to three
+/// models. gpt-5.5's map advertises xhigh but no max; luna reaches max; ids arrive bare and are
+/// qualified `provider/id` at mapping time. get_state carries the user's own configured default.
+private let piRPCCatalog = """
+{"id":"1","type":"response","command":"get_state","success":true,"data":{"model":{"id":"gpt-5.5","name":"GPT-5.5","api":"openai-codex-responses","provider":"openai-codex","reasoning":true,"thinkingLevelMap":{"xhigh":"xhigh","minimal":"low"},"input":["text","image"],"contextWindow":272000,"maxTokens":128000},"thinkingLevel":"medium","sessionId":"019f57b9-c419-7024-ad3b-2ff01ebc4dd2"}}
+{"id":"2","type":"response","command":"get_available_models","success":true,"data":{"models":[{"id":"gpt-5.4-mini","name":"GPT-5.4 mini","api":"openai-codex-responses","provider":"openai-codex","reasoning":true,"thinkingLevelMap":{"xhigh":"xhigh","minimal":"low"},"input":["text","image"],"contextWindow":272000,"maxTokens":128000},{"id":"gpt-5.5","name":"GPT-5.5","api":"openai-codex-responses","provider":"openai-codex","reasoning":true,"thinkingLevelMap":{"xhigh":"xhigh","minimal":"low"},"input":["text","image"],"contextWindow":272000,"maxTokens":128000},{"id":"gpt-5.6-luna","name":"GPT-5.6 Luna","api":"openai-codex-responses","provider":"openai-codex","reasoning":true,"thinkingLevelMap":{"xhigh":"xhigh","max":"max","minimal":"low"},"input":["text","image"],"contextWindow":372000,"maxTokens":128000}]}}
+"""
+
+/// Recorded logged-out RPC: get_state degrades to a sentinel "unknown" model (ignored) and the
+/// catalog is a clean empty array — the truthful zero-models state, not an error.
+private let piRPCCatalogLoggedOut = """
+{"id":"1","type":"response","command":"get_state","success":true,"data":{"model":{"id":"unknown","name":"unknown","api":"unknown","provider":"unknown","reasoning":false,"input":[],"contextWindow":0,"maxTokens":0},"thinkingLevel":"off"}}
+{"id":"2","type":"response","command":"get_available_models","success":true,"data":{"models":[]}}
+"""
+
+/// pi mints claude/grok-style (`--session-id`, host UUID), stages the MCP bridge EXTENSION into
+/// the working directory when the turn carries a port (pi has no built-in MCP — the bridge speaks
+/// the host's TCP protocol from inside pi), and removes the stale file on a portless turn.
+@Test func piLaunchBuildsArgvMintsSessionAndStagesBridge() async throws {
+    let pi = SZPiProvider()
+    let stub = StubRunner(output: piTurnOK)
+    let work = FileManager.default.temporaryDirectory.appending(path: "pi-mcp-\(UUID().uuidString)")
+    var req = request(port: 42123)
+    req.workingDirectory = work
+    defer { try? FileManager.default.removeItem(at: work) }
+
+    let result = try await pi.run(req, runner: stub)
+
+    let call = try #require(stub.lastCall)
+    #expect(call.launchPath == "/usr/bin/env")
+    #expect(call.arguments.prefix(5) == ["pi", "-p", "--mode", "json", "--offline"])
+    #expect(call.arguments.last == "make it grayscale")   // prompt is the trailing positional
+    // Empty catalog → NO --model (pi's own default serves); the pre-flights gate real turns.
+    #expect(!call.arguments.contains("--model"))
+    // The bridge rides an explicit --extension path and the staged file carries the turn's port.
+    let bridge = work.appending(path: ".subz/mcp-bridge.mjs")
+    #expect(call.arguments.value(after: "--extension") == bridge.path)
+    let source = try String(contentsOf: bridge, encoding: .utf8)
+    #expect(source.contains("const PORT = 42123"))
+    #expect(source.contains("net.connect"))
+    #expect(!source.contains("__SUBZ_MCP_PORT__"))   // template token fully substituted
+    // pi takes a host-minted UUID, echoed back as the session id (claude-style).
+    let sessionID = try #require(result.outcome.sessionID)
+    #expect(call.arguments.value(after: "--session-id") == sessionID)
+    #expect(UUID(uuidString: sessionID) != nil)
+    #expect(result.outcome.failed == false)
+
+    // A later run in the same staging dir WITHOUT a port removes the stale bridge.
+    req.mcpServerPort = nil
+    _ = try await pi.run(req, runner: stub)
+    #expect(!FileManager.default.fileExists(atPath: bridge.path))
+}
+
+/// pi has ONE session flag: `--session-id` creates AND resumes ("creating it if missing"), so a
+/// resume turn reuses it — there is no `--resume` grammar to diverge into. The resumed run's
+/// header echoes the passed id (verified live), which is what keeps the host's session map stable.
+@Test func piResumeReusesSessionIdFlag() async throws {
+    let pi = SZPiProvider()
+    var req = request(port: nil)
+    req.resumeSessionID = "S-existing"
+
+    let argv = pi.launch(req, preallocatedSessionID: nil).arguments
+    #expect(argv.value(after: "--session-id") == "S-existing")
+    #expect(!argv.contains("--resume"))
+
+    let resumedTurn = piTurnOK.replacingOccurrences(
+        of: "019f5800-e9d9-7890-8449-bcff50ac032b", with: "S-existing")   // the header echo
+    let result = try await pi.run(req, runner: StubRunner(output: resumedTurn))
+    #expect(result.outcome.sessionID == "S-existing")
+
+    // Even a stream with NO header (killed early) keeps the id: run() falls back to the resume id.
+    let headerless = try await pi.run(req, runner: StubRunner(output: "", exitCode: 1))
+    #expect(headerless.outcome.sessionID == "S-existing")
+}
+
+/// The failure signal lives in the stream, not the exit code: `--mode json` exits 0 on a failed
+/// turn (recorded — print-mode maps errors to exit 1 only in text mode). stopReason "error", a
+/// missing assistant message, and a nonzero exit each fail; the header id is the parse fallback
+/// when no id was minted (a resume turn).
+@Test func piParseReadsStopReasonNotExitCode() {
+    let pi = SZPiProvider()
+    #expect(pi.parse(output: piTurnBackendError, exitCode: 0, preallocatedSessionID: nil).failed)
+    #expect(pi.parse(output: "", exitCode: 0, preallocatedSessionID: nil).failed)       // died pre-reply
+    #expect(pi.parse(output: piTurnOK, exitCode: 1, preallocatedSessionID: nil).failed) // exit still counts
+    let ok = pi.parse(output: piTurnOK, exitCode: 0, preallocatedSessionID: nil)
+    #expect(!ok.failed)
+    #expect(ok.sessionID == "019f5800-e9d9-7890-8449-bcff50ac032b")   // header id (belt-and-braces)
+    // A minted id outranks the header echo.
+    #expect(pi.parse(output: piTurnOK, exitCode: 0, preallocatedSessionID: "minted").sessionID == "minted")
+}
+
+/// Effort → `--thinking`; model + effort overrides ride through argv. An empty effort (a CLI with
+/// no concept never sends one, and pi's own default covers a nil) omits the flag.
+@Test func piEffortAndModelReachArgv() {
+    let pi = SZPiProvider()
+    let argv = pi.launch(
+        request(port: nil, model: "openai-codex/gpt-5.5", reasoningEffort: "xhigh"),
+        preallocatedSessionID: "x").arguments
+    #expect(argv.value(after: "--model") == "openai-codex/gpt-5.5")
+    #expect(argv.value(after: "--thinking") == "xhigh")
+
+    let defaulted = pi.launch(request(port: nil), preallocatedSessionID: "x").arguments
+    #expect(!defaulted.contains("--thinking"))   // nil effort → pi's own default, no flag
+}
+
+/// The user's pi config is deliberately NOT silenced (pi users self-select for a customized
+/// harness — their extensions/skills ARE their agent): no isolation flags ever reach argv. The
+/// subz bridge composes additively via the explicit `--extension` path.
+@Test func piNeverEmitsIsolationFlags() {
+    let argv = SZPiProvider().launch(request(port: 42100), preallocatedSessionID: "x").arguments
+    for flag in ["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-tools"] {
+        #expect(!argv.contains(flag), "pi argv must not carry \(flag)")
+    }
+}
+
+/// The catalog mapper: bare ids qualify as `provider/id`, thinking menus derive from the
+/// documented thinkingLevelMap tristate, and the default is the CLI's own (get_state — the
+/// user's configured default, not our guess).
+@Test func piCatalogSnapshotMapsRecordedRPCOutput() throws {
+    let snapshot = try #require(SZPiProvider.catalogSnapshot(fromRPCOutput: piRPCCatalog))
+    #expect(snapshot.models.map(\.id)
+            == ["openai-codex/gpt-5.4-mini", "openai-codex/gpt-5.5", "openai-codex/gpt-5.6-luna"])
+    #expect(snapshot.models.map(\.displayName) == ["GPT-5.4 mini", "GPT-5.5", "GPT-5.6 Luna"])
+    #expect(snapshot.defaultModelID == "openai-codex/gpt-5.5")
+    // gpt-5.5: standard levels + xhigh, no max (its map has no "max" entry).
+    #expect(snapshot.models[1].supportedReasoningEfforts == ["minimal", "low", "medium", "high", "xhigh"])
+    // luna's map adds max as a string → supported.
+    #expect(snapshot.models[2].supportedReasoningEfforts == ["minimal", "low", "medium", "high", "xhigh", "max"])
+    #expect(snapshot.models.allSatisfy { $0.defaultReasoningEffort == "medium" })
+}
+
+/// The documented tristate, corner by corner: omitted = standard-through-high supported; null =
+/// hole (pi's docs use a model exposing only high and max); string = supported; reasoning:false =
+/// no menu at all. `off` never appears — subz doesn't model a "no thinking" token.
+@Test func piThinkingLevelDerivationFollowsTheDocumentedTristate() {
+    #expect(SZPiProvider.thinkingLevels(reasoning: true, map: [:])
+            == ["minimal", "low", "medium", "high"])
+    #expect(SZPiProvider.thinkingLevels(
+        reasoning: true,
+        map: ["minimal": NSNull(), "low": NSNull(), "medium": NSNull(), "high": "high", "max": "max"])
+            == ["high", "max"])
+    #expect(SZPiProvider.thinkingLevels(reasoning: true, map: ["xhigh": "xhigh", "minimal": "low"])
+            == ["minimal", "low", "medium", "high", "xhigh"])
+    #expect(SZPiProvider.thinkingLevels(reasoning: false, map: ["max": "max"]).isEmpty)
+    #expect(!SZPiProvider.thinkingLevels(reasoning: true, map: [:]).contains("off"))
+}
+
+/// refreshModelCatalog is one token-free RPC spawn: the two commands ride stdin, the parsed
+/// snapshot becomes what `models`/`defaultModel` serve, and the resolver clamps against it —
+/// xhigh survives on gpt-5.5, max clamps away (its map never advertised it).
+@Test func piRefreshModelCatalogFetchesAndServes() async throws {
+    let pi = SZPiProvider()
+    let stub = StubRunner(output: piRPCCatalog)
+    let snapshot = try #require(try await pi.refreshModelCatalog(runner: stub))
+
+    let call = try #require(stub.lastCall)
+    #expect(call.arguments == ["pi", "--mode", "rpc", "--no-session", "--offline"])
+    let stdin = String(decoding: try #require(call.input), as: UTF8.self)
+    #expect(stdin.contains(#""type":"get_state""#))
+    #expect(stdin.contains(#""type":"get_available_models""#))
+
+    #expect(pi.models.map(\.id) == snapshot.models.map(\.id))
+    #expect(pi.defaultModel == "openai-codex/gpt-5.5")
+
+    let kept = pi.resolvedGenerationSettings(
+        from: SZProviderGenerationSettings(model: "openai-codex/gpt-5.5", reasoningEffort: "xhigh", fastMode: false))
+    #expect(kept.reasoningEffort == "xhigh")
+    let clamped = pi.resolvedGenerationSettings(
+        from: SZProviderGenerationSettings(model: "openai-codex/gpt-5.5", reasoningEffort: "max", fastMode: true))
+    #expect(clamped == SZProviderGenerationSettings(model: "openai-codex/gpt-5.5", reasoningEffort: "medium", fastMode: false))
+}
+
+/// Logged out, the fetch parses cleanly to ZERO models (recorded) — an empty catalog next to an
+/// authNeeded status is the truthful state, and seeding a persisted snapshot restores service
+/// without a fetch (the offline relaunch story).
+@Test func piEmptyAndSeededCatalogs() async throws {
+    let pi = SZPiProvider()
+    let empty = try #require(try await pi.refreshModelCatalog(runner: StubRunner(output: piRPCCatalogLoggedOut)))
+    #expect(empty.models.isEmpty)
+    #expect(empty.defaultModelID == nil)   // the sentinel "unknown" default is ignored
+    #expect(pi.models.isEmpty)
+
+    let seeded = SZPiProvider()
+    seeded.seedModelCatalog(SZProviderModelCatalog(
+        models: [SZProviderModel(id: "openai-codex/gpt-5.5", displayName: "GPT-5.5",
+                                 supportedReasoningEfforts: ["low", "medium"], defaultReasoningEffort: "medium")],
+        defaultModelID: "openai-codex/gpt-5.5"))
+    #expect(seeded.defaultModel == "openai-codex/gpt-5.5")
+    #expect(seeded.resolvedGenerationSettings(from: nil)
+            == SZProviderGenerationSettings(model: "openai-codex/gpt-5.5", reasoningEffort: "medium", fastMode: false))
+}
+
+/// pi streams complete messages (`message_end`) — the consumer classifies those, never the
+/// token-level deltas. Assistant text is held as the reply candidate, thinking → activity, tool
+/// starts carry the real tool name, and a superseded text demotes to narration — the same
+/// reply/trace split as claude/codex/grok. Fixture lines follow the recorded event shapes.
+@Test func piStreamConsumerClassifiesReplyAndTrace() {
+    let c = SZPiProvider().makeStreamConsumer()
+    // header, lifecycle, user echo, and deltas are all silent
+    #expect(c.consume(#"{"type":"session","version":3,"id":"abc"}"#).isEmpty)
+    #expect(c.consume(#"{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#).isEmpty)
+    #expect(c.consume(#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"O"}}"#).isEmpty)
+    // an intermediate assistant message: thinking → activity; its toolCall block is silent
+    // (tool_execution_start carries the name)
+    #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"toolUse","content":[{"type":"thinking","thinking":"need the graph"},{"type":"toolCall","id":"call_1","name":"agent_read_graph","arguments":{}}]}}"#)
+            == [.activity("need the graph")])
+    #expect(c.consume(#"{"type":"tool_execution_start","toolCallId":"call_1","toolName":"agent_read_graph","args":{}}"#)
+            == [.activity("→ agent_read_graph")])
+    #expect(c.consume(#"{"type":"message_end","message":{"role":"toolResult","content":[{"type":"text","text":"GRAPH"}]}}"#).isEmpty)
+    // the final assistant text is held, and finish() flushes it exactly once
+    #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"done: 3 nodes"}]}}"#).isEmpty)
+    #expect(c.finish() == [.reply("done: 3 nodes")])
+    #expect(c.finish().isEmpty)
+}
+
+@Test func piStreamConsumerDemotesSupersededTextAndSurfacesErrors() {
+    let c = SZPiProvider().makeStreamConsumer()
+    #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"toolUse","content":[{"type":"text","text":"I'll check the file"}]}}"#).isEmpty)
+    // a later assistant message supersedes the held text → narration
+    #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"42"}]}}"#)
+            == [.activity("I'll check the file")])
+    #expect(c.finish() == [.reply("42")])
+
+    // A failed turn's error surfaces in the trace; the run's failure rides parse(), not this.
+    let e = SZPiProvider().makeStreamConsumer()
+    #expect(e.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"Codex error: model not supported","content":[]}}"#)
+            == [.activity("⚠ Codex error: model not supported")])
+    #expect(e.finish().isEmpty)
+
+    // auto_retry_start (transient backend error, pi retries itself) is trace-worthy.
+    let r = SZPiProvider().makeStreamConsumer()
+    #expect(r.consume(#"{"type":"auto_retry_start","attempt":1,"errorMessage":"overloaded"}"#)
+            == [.activity("⚠ retrying: overloaded")])
+    // stderr warnings interleave in the merged stream (e.g. the "creating a new session" notice) —
+    // non-JSON lines must skip, never throw or leak into the trace.
+    #expect(r.consume("Warning: No project session found with id 'x'; creating a new session with that id.").isEmpty)
 }
 
 /// The coding prompt drives the 3-tier library browse, and keeps the agent's agency.

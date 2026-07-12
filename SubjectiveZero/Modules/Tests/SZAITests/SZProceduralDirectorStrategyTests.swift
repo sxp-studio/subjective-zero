@@ -17,7 +17,7 @@ private final class RecordingRunner: SZProcessRunning {
     func run(
         _ launchPath: String, _ arguments: [String],
         environment: [String: String], currentDirectoryURL: URL?,
-        timeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
+        input: Data?, timeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
     ) async throws -> SZProcessResult {
         calls.withLock { $0.append(arguments) }
         return SZProcessResult(exitCode: 0, output: "")

@@ -19,9 +19,20 @@ extension SZHost {
     /// a no-op and `switchProject` retries it on the way out — but the refresh above still runs, so
     /// the sheet opens onto warm health either way.
     func checkProviderSetupOnLaunch() {
+        seedProviderModelCatalogs()
         Task { @MainActor in
             await refreshProviderHealthOnce()
             autoPresentProviderSetupIfNeeded()
+        }
+    }
+
+    /// Hand each dynamic-catalog provider its persisted snapshot (no-op for static providers), so
+    /// the model picker serves last-known truth before — and without — any live fetch.
+    func seedProviderModelCatalogs() {
+        for provider in SZProviderRegistry.shared.providers {
+            if let catalog = providerModelCatalogs[provider.id] {
+                provider.seedModelCatalog(catalog)
+            }
         }
     }
 
@@ -103,10 +114,36 @@ extension SZHost {
             // (install landed, login landed/expired), so the deeper truth must be re-earned.
             // This is also what re-arms the first-run auto-probe, bounding token spend by
             // user-visible state changes, never by the poll timer.
-            if providerHealth[report.providerID]?.status != report.status {
+            let transitioned = providerHealth[report.providerID]?.status != report.status
+            if transitioned {
                 providerProbes[report.providerID] = nil
             }
             providerHealth[report.providerID] = report
+            if report.status == .ready {
+                refreshProviderModelCatalogIfNeeded(report.providerID, transitioned: transitioned)
+            }
+        }
+    }
+
+    /// Re-fetch a dynamic provider's model catalog when its cheap status just transitioned to
+    /// ready (login/install landing is exactly when the served catalog changes), when it's ready
+    /// but serving nothing (first launch, or a fetch that failed), or when the snapshot is a day
+    /// old. Static-manifest providers no-op (their `refreshModelCatalog` returns nil, no spawn).
+    /// A failed fetch keeps the last-known catalog — never clobber cache with a failure; the poll
+    /// loop retries while the sheet is open, the next launch/transition retries after that.
+    func refreshProviderModelCatalogIfNeeded(_ id: String, transitioned: Bool) {
+        guard let provider = SZProviderRegistry.shared.provider(id: id),
+              !catalogRefreshesInFlight.contains(id) else { return }
+        let staleAfter: TimeInterval = 24 * 3600
+        let stale = providerModelCatalogs[id].map { Date().timeIntervalSince($0.fetchedAt) > staleAfter } ?? false
+        guard transitioned || stale || provider.models.isEmpty else { return }
+        catalogRefreshesInFlight.insert(id)
+        Task { @MainActor in
+            defer { catalogRefreshesInFlight.remove(id) }
+            guard let snapshot = try? await provider.refreshModelCatalog(runner: SZSystemProcessRunner())
+            else { return }   // static provider (nil) or failed fetch — keep last-known
+            providerModelCatalogs[id] = snapshot
+            try? SZProviderCatalogIO.save(providerModelCatalogs)
         }
     }
 

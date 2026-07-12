@@ -34,7 +34,24 @@ public struct SZProcessResult: Sendable {
 }
 
 /// Injectable so the orchestrator and providers can run against a stub in tests.
+/// `input` is written to the child's stdin, which is then closed; nil wires stdin to /dev/null.
+/// Either way the child sees EOF — never the app's inherited stdin, which may stay open forever
+/// (a CLI that reads piped stdin to EOF, like `pi -p`, would block with zero output; verified
+/// pi 0.80.6, 2026-07-12).
 public protocol SZProcessRunning: Sendable {
+    func run(
+        _ launchPath: String,
+        _ arguments: [String],
+        environment: [String: String],
+        currentDirectoryURL: URL?,
+        input: Data?,
+        timeout: TimeInterval?,
+        onOutput: (@Sendable (String) -> Void)?
+    ) async throws -> SZProcessResult
+}
+
+public extension SZProcessRunning {
+    /// Source-compatible overload for the common no-stdin spawn.
     func run(
         _ launchPath: String,
         _ arguments: [String],
@@ -42,7 +59,11 @@ public protocol SZProcessRunning: Sendable {
         currentDirectoryURL: URL?,
         timeout: TimeInterval?,
         onOutput: (@Sendable (String) -> Void)?
-    ) async throws -> SZProcessResult
+    ) async throws -> SZProcessResult {
+        try await run(launchPath, arguments, environment: environment,
+                      currentDirectoryURL: currentDirectoryURL, input: nil,
+                      timeout: timeout, onOutput: onOutput)
+    }
 }
 
 /// The production runner: launches a real `Process`, merges stdout+stderr, enforces `timeout`.
@@ -54,6 +75,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         _ arguments: [String],
         environment: [String: String] = [:],
         currentDirectoryURL: URL? = nil,
+        input: Data? = nil,
         timeout: TimeInterval? = nil,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> SZProcessResult {
@@ -68,6 +90,14 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        // The child must always see stdin EOF (see SZProcessRunning). Payload → pipe written and
+        // closed below; none → /dev/null. Never inherit.
+        let stdinPipe: Pipe? = input.map { _ in Pipe() }
+        if let stdinPipe {
+            process.standardInput = stdinPipe
+        } else {
+            process.standardInput = FileHandle.nullDevice
+        }
 
         // Bridge process termination to an AsyncStream signal *before* run() so we can't miss it.
         let (terminations, terminationFinish) = AsyncStream.makeStream(of: Void.self)
@@ -81,6 +111,12 @@ public struct SZSystemProcessRunner: SZProcessRunning {
             throw error
         }
         try? pipe.fileHandleForWriting.close()
+        if let stdinPipe {
+            // Write the payload then close, delivering EOF. Best-effort: a child that exits
+            // without reading (crash, bad argv) breaks the pipe — that's its exit code's story.
+            try? stdinPipe.fileHandleForWriting.write(contentsOf: input ?? Data())
+            try? stdinPipe.fileHandleForWriting.close()
+        }
         let pid = process.processIdentifier
 
         // Drain stdout+stderr in its own task — a *local* buffer, so no synchronization. An explicit

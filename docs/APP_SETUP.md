@@ -66,6 +66,24 @@ sheet shows the same remedies listed here.
 - Caution: a logged-out `grok -p …` does NOT fail - it prints a device-auth sign-in banner and
   polls (it may open a browser). Never use a real prompt to test auth; use `grok models`.
 
+### Pi (`pi`)
+
+- Install (pick one; ask first):
+  - `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`
+  - `curl -fsSL https://pi.dev/install.sh | sh`
+- Health: `pi --version`.
+- Auth status: `pi --list-models --offline` - **exit 0 in both states**; the output tells: a
+  model table when a provider is connected vs "No models available. Use /login …" when none is.
+  (Verified on pi 0.80.6.)
+- Log in: pi's login is **TUI-only** - run `pi` interactively, then type `/login` and pick a
+  provider (ChatGPT Plus/Pro, Claude Pro/Max, GitHub Copilot via OAuth, or an API key). Never
+  attempt it headless.
+- pi is a multi-provider harness: which models it serves depends on what the USER connected, so
+  the app enumerates them from the CLI at runtime instead of shipping a fixed list (the model
+  picker is empty until pi is logged in once).
+- Caution: a logged-out `pi -p …` without `--offline` can hang with NO output (it stalls on
+  provider auth). Never use a real prompt to test auth; use `pi --list-models --offline`.
+
 The app resolves CLIs on its own synthesized search path (inherited PATH + nvm/volta/bun/cargo/
 `~/.local/bin`/Homebrew/`Codex.app` + system dirs), so a CLI visible in the user's shell is
 normally visible to the app even when launched from Finder.

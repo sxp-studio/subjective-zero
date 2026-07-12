@@ -124,7 +124,7 @@ public final class SZNullStreamConsumer: SZAgentStreamConsumer {
 /// override is a fabricated fact. Each has an `SZProvider.…(for:)` reader that resolves the override
 /// against the provider's fallback. What any given model advertises, and the evidence for it, belongs
 /// next to that model in Providers/ — not here.
-public struct SZProviderModel: Sendable, Equatable, Identifiable {
+public struct SZProviderModel: Sendable, Equatable, Identifiable, Codable {
     public var id: String           // argv token, e.g. "claude-opus-4-8"
     public var displayName: String  // picker label, e.g. "Opus 4.8"
     public var supportedReasoningEfforts: [String]?
@@ -145,6 +145,23 @@ public struct SZProviderModel: Sendable, Equatable, Identifiable {
         self.supportedReasoningEfforts = supportedReasoningEfforts
         self.defaultReasoningEffort = defaultReasoningEffort
         self.supportsFastMode = supportsFastMode
+    }
+}
+
+/// A runtime-discovered model catalog snapshot — for a CLI whose served models depend on the
+/// user's own account/configuration and are enumerable from the CLI itself, so a static manifest
+/// cannot know them (a BYOK multi-provider harness). The snapshot is host-persisted (app-state)
+/// and re-seeded at launch, so the picker works offline from last-known truth. Static-manifest
+/// providers never produce one.
+public struct SZProviderModelCatalog: Codable, Sendable, Equatable {
+    public var models: [SZProviderModel]
+    public var defaultModelID: String?
+    public var fetchedAt: Date
+
+    public init(models: [SZProviderModel], defaultModelID: String?, fetchedAt: Date = Date()) {
+        self.models = models
+        self.defaultModelID = defaultModelID
+        self.fetchedAt = fetchedAt
     }
 }
 
@@ -200,6 +217,17 @@ public protocol SZProvider: Sendable {
     /// A fresh stream consumer for one chat turn — parses this provider's output into chat events
     /// (`.reply` / `.activity`). Provider-specific parsing, common API. Default: a no-op consumer.
     func makeStreamConsumer() -> any SZAgentStreamConsumer
+
+    /// Fetch the current model catalog from the CLI, for a provider whose served models are
+    /// user-account-dependent (see SZProviderModelCatalog). Token-free by contract — the host may
+    /// call it whenever the cheap health status transitions to ready. Returns nil (the default)
+    /// for a static-manifest provider; throws when the CLI could not be asked. A fetch that
+    /// succeeds also updates what `models`/`defaultModel` serve.
+    func refreshModelCatalog(runner: any SZProcessRunning) async throws -> SZProviderModelCatalog?
+
+    /// Seed `models`/`defaultModel` from a persisted snapshot (launch, before any fetch), so the
+    /// picker serves last-known truth offline. No-op (the default) for static-manifest providers.
+    func seedModelCatalog(_ catalog: SZProviderModelCatalog)
 }
 
 public extension SZProvider {
@@ -211,6 +239,8 @@ public extension SZProvider {
     var supportsFastMode: Bool { false }
     func prepare(_ request: SZAgentRunRequest) throws {}
     func makeStreamConsumer() -> any SZAgentStreamConsumer { SZNullStreamConsumer() }
+    func refreshModelCatalog(runner: any SZProcessRunning) async throws -> SZProviderModelCatalog? { nil }
+    func seedModelCatalog(_ catalog: SZProviderModelCatalog) {}
 
     func model(id modelID: String) -> SZProviderModel? {
         models.first { $0.id == modelID }

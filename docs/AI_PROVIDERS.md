@@ -33,11 +33,16 @@ protocol SZProvider {
 - **claude code** - CLI only.
 - **codex** - CLI, and CLI driven through Codex.app.
 - **grok** - CLI only (x.ai; added 2026-07, verified against grok 0.2.93).
+- **pi** - CLI only (pi.dev, `@earendil-works/pi-coding-agent`; added 2026-07, verified against
+  pi 0.80.6). A BYOK multi-provider harness — the user connects their own accounts (ChatGPT
+  Plus/Pro, Claude Pro/Max, Copilot OAuth, or API keys) and pi routes to them; subz drives only
+  the harness. The first provider with a RUNTIME-enumerated model catalog (see Capability
+  discovery below).
 
 For each, we wrap and surface to the UI:
 
-- **models** available (e.g. Opus, Sonnet, …) - from the static manifest (neither CLI enumerates
-  models; see Capability discovery below),
+- **models** available (e.g. Opus, Sonnet, …) - from the static manifest (claude/codex can't
+  enumerate models; pi is the runtime-enumerated exception — see Capability discovery below),
 - **thinking** level - claude: `--effort {low, medium, high, xhigh, max}`; codex: a `-c`
   reasoning config key (not enumerable, manifest-declared).
 
@@ -94,21 +99,26 @@ These choices are set per agent role (Director Agent vs Coding Agent can differ)
 - Failure recovery: a crashed/stalled session is restarted by the host; in-flight tree state
   decides whether to resume or re-prompt.
 
-## CLI integration (verified 2026-06-13; grok column 2026-07-12)
+## CLI integration (verified 2026-06-13; grok column 2026-07-12; pi column 2026-07-12)
 
 Concrete facts the adapters rely on, from the installed CLIs (claude code 2.1.177, codex-cli
-0.137.0, grok 0.2.93):
+0.137.0, grok 0.2.93, pi 0.80.6):
 
-| Need | claude code | codex | grok |
-|---|---|---|---|
-| Non-interactive run | `claude -p/--print` | `codex exec` (alias `e`) | `grok -p/--single` |
-| Structured / streamed output | `--output-format json\|stream-json`, `--json-schema <s>` | `--json` (JSONL), `--output-schema <file>` | `--output-format json\|streaming-json` (token-level `thought`/`text` chunks; NO tool events) |
-| Model selection | `--model <alias\|full>` | `-m/--model` or `-c model="…"` (`--oss` for local) | `-m/--model` (enumerable via `grok models`) |
-| Thinking level | `--effort <low\|medium\|high\|xhigh\|max>` | `-c` reasoning config key | `--reasoning-effort` exists but is NOT honoured (measured) - never emitted |
-| Attach SubZ MCP server | `--mcp-config <json>` | `codex mcp` / config | `<cwd>/.grok/config.toml`, staged per run by `prepare()` (no per-invocation flag) |
-| Sessions | host-minted `--session-id`, `--resume <id>` | id parsed from `thread.started` | host-minted `--session-id`, `--resume <id>` |
-| Fallback | `--fallback-model <list>` | - | - |
-| Health | `claude --version`, `claude auth status` (JSON, exit 0/1 - verified 2.1.200) | `codex --version`, `codex login status` (exit 0/1 - verified 0.141.0) | `grok --version`, `grok models` (exit 0 in BOTH auth states - output markers decide) |
+| Need | claude code | codex | grok | pi |
+|---|---|---|---|---|
+| Non-interactive run | `claude -p/--print` | `codex exec` (alias `e`) | `grok -p/--single` | `pi -p --mode json` (prompt is a trailing positional; stdin MUST reach EOF or the CLI hangs with zero output — the runner wires /dev/null) |
+| Structured / streamed output | `--output-format json\|stream-json`, `--json-schema <s>` | `--json` (JSONL), `--output-schema <file>` | `--output-format json\|streaming-json` (token-level `thought`/`text` chunks; NO tool events) | `--mode json` (JSONL events: session header, message/turn lifecycle, `tool_execution_*`); CAUTION: a FAILED turn still exits 0 — `parse()` reads the last assistant `stopReason` |
+| Model selection | `--model <alias\|full>` | `-m/--model` or `-c model="…"` (`--oss` for local) | `-m/--model` (enumerable via `grok models`) | `--model <provider/id>` qualified (catalog enumerated at runtime via `--mode rpc` → `get_available_models`) |
+| Thinking level | `--effort <low\|medium\|high\|xhigh\|max>` | `-c` reasoning config key | `--reasoning-effort` exists but is NOT honoured (measured) - never emitted | `--thinking <minimal\|low\|medium\|high\|xhigh\|max>`, per-model menus derived from the catalog's `thinkingLevelMap`; out-of-menu values silently clamp |
+| Attach SubZ MCP server | `--mcp-config <json>` | `codex mcp` / config | `<cwd>/.grok/config.toml`, staged per run by `prepare()` (no per-invocation flag) | no built-in MCP: `prepare()` stages `<cwd>/.subz/mcp-bridge.mjs` (a pi extension speaking the host's TCP protocol), loaded via `--extension` |
+| Sessions | host-minted `--session-id`, `--resume <id>` | id parsed from `thread.started` | host-minted `--session-id`, `--resume <id>` | host-minted `--session-id` (one flag creates AND resumes; header echoes it) |
+| Fallback | `--fallback-model <list>` | - | - | - |
+| Health | `claude --version`, `claude auth status` (JSON, exit 0/1 - verified 2.1.200) | `codex --version`, `codex login status` (exit 0/1 - verified 0.141.0) | `grok --version`, `grok models` (exit 0 in BOTH auth states - output markers decide) | `pi --version`, `pi --list-models --offline` (exit 0 in BOTH auth states - output markers decide; login is TUI-only: `pi` then `/login`) |
+
+pi's user config (extensions, skills, AGENTS.md/CLAUDE.md) is deliberately NOT silenced — pi
+users self-select for a customized harness, and the subz bridge registers additively beside
+whatever they run. Known trade-off: a user extension that opens a `ctx.ui` dialog can stall a
+headless turn; if that bites in practice, a per-provider isolation toggle is the follow-up.
 
 Sessions are driven through the non-interactive run + structured output path so responses parse
 cleanly back into the orchestrator.
@@ -121,12 +131,14 @@ Provider health is **three tiers, cheapest first** (`SZProviderHealth.swift` /
 
 1. **install** - `/usr/bin/env <cli> --version`, 5s. env's exit 127 → `missingCLI`.
 2. **auth** - the CLI's own status command (`authStatusArgs`): `claude auth status` /
-   `codex login status` / `grok models`, 10s. Nonzero exit → `authNeeded` - except an
-   unknown-subcommand error (older CLI), which leaves auth unknown and defers to the probe. A
-   ZERO exit whose output contains one of the provider's `authFailureMarkers` is also
-   `authNeeded`: not every CLI encodes auth in its status command's exit code (grok 0.2.93's
-   `grok models` exits 0 logged out and says "You are not authenticated"). Token-free, so tiers
-   1–2 are safe for the launch pass and the setup sheet's 3s re-check loop.
+   `codex login status` / `grok models` / `pi --list-models --offline`, 10s. Nonzero exit →
+   `authNeeded` - except an unknown-subcommand error (older CLI), which leaves auth unknown and
+   defers to the probe. A ZERO exit whose output contains one of the provider's
+   `authFailureMarkers` is also `authNeeded`: not every CLI encodes auth in its status command's
+   exit code (grok 0.2.93's `grok models` exits 0 logged out and says "You are not
+   authenticated"; pi 0.80.6's `--list-models` exits 0 and says "No models available. Use
+   /login…"). Token-free, so tiers 1–2 are safe for the launch pass and the setup sheet's 3s
+   re-check loop. A ready transition here is also what triggers a dynamic-catalog re-fetch (pi).
 3. **probe** - `healthProbe()`: one real one-shot prompt through the provider's own
    `prepare()`/`launch()`/`parse()` path (default model, no MCP, temp cwd). The only token-costing
    tier; it runs once per provider during first-run setup, on the per-card Test button, and under
@@ -175,6 +187,20 @@ enumerable. So "ask the CLI for capabilities" is a dead end for the thing we car
 enumerate, which makes re-verifying its manifest one command - but the manifest stays static,
 and the CLI's own docs/flags still can't be trusted for capabilities: its effort flag parses
 everywhere and acts nowhere.)
+
+**pi carve-out (2026-07-12): the first runtime-enumerated catalog.** A static manifest cannot
+work for pi at all — it is a BYOK multi-provider harness, so the served models depend on which
+accounts each USER connected, not on the CLI version. And unlike the older CLIs, pi's own
+catalog IS trustworthy capability data: `pi --mode rpc` → `get_available_models` returns
+per-model metadata (`thinkingLevelMap`, modalities, context window) measured by the CLI itself,
+which satisfies the never-infer rule at runtime. So `SZPiProvider` fetches its catalog from the
+CLI (token-free), the host caches it in `provider-catalogs.json` (Application Support) and
+re-seeds it at launch — the picker serves last-known truth offline — and re-fetches when the
+cheap health status transitions to ready (login/install landing is exactly when the catalog
+changes) or the snapshot is a day old. Model ids are stored qualified (`openai-codex/gpt-5.5`),
+the exact `--model` argv token. Until a first successful fetch, pi serves an EMPTY catalog —
+the picker dims and pre-flights refuse, which is the truthful state for a logged-out harness.
+Static manifests remain the rule for CLIs that can't enumerate.
 
 **Decision:**
 

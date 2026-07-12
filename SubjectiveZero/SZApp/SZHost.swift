@@ -256,6 +256,13 @@ final class SZHost {
     internal(set) var providerProbes: [String: SZProviderHealthReport] = [:]
     /// Providers with a probe in flight — the per-card Test spinner.
     internal(set) var probingProviders: Set<String> = []
+    /// Last-known dynamic model catalogs, keyed by provider id — for providers whose served models
+    /// are enumerated from the CLI at runtime (pi; static-manifest providers never appear here).
+    /// Seeded into the providers at launch so the picker serves last-known truth offline, refreshed
+    /// on cheap-status ready transitions (SZHost+ProviderHealth), persisted to provider-catalogs.json.
+    internal(set) var providerModelCatalogs: [String: SZProviderModelCatalog] = SZProviderCatalogIO.load()
+    /// Providers with a catalog fetch in flight — collapses the sheet poll's 3s ticks.
+    internal(set) var catalogRefreshesInFlight: Set<String> = []
     /// The Agent Providers sheet. Auto-presents on a first-run launch; reopened any time via the
     /// app menu (⌘,) or the HUD health dot.
     var providerSetupPresented = false

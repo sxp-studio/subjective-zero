@@ -23,8 +23,9 @@ let package = Package(
             name: "SZAI",
             dependencies: ["SZCore"],
             resources: [
-                .copy("Resources/Prompts"),   // agent prompts as bundled .md.mustache files
+                .copy("Resources/Prompts"),    // agent prompts as bundled .md.mustache files
                 .copy("Resources/Docs"),       // agent-fetchable reference docs (agent_docs_*)
+                .copy("Resources/Extensions"), // staged CLI extensions (pi's MCP bridge)
             ]
         ),
         .target(name: "SZRuntime", dependencies: ["SZCore"]),
