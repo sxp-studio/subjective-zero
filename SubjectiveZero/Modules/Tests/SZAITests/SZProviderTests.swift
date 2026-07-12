@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The provider layer is per-provider Swift behind one protocol, and provider-agnostic.
-// These tests prove the seam is not claude-shaped by exercising BOTH backends through the same
+// These tests prove the seam is not claude-shaped by exercising EVERY backend through the same
 // protocol:
-//  - the registry vends both providers;
+//  - the registry vends all providers;
 //  - each provider's launch() builds the right argv for its distinct CLI grammar
-//    (--mcp-config JSON + --session-id for claude; -c mcp_servers + trailing prompt for codex);
-//  - the two session-id strategies resolve (claude host-minted UUID; codex jsonl thread.started);
-//  - both health checks pass on a machine with the CLIs installed (SZ_LIVE_PROVIDERS=1 only).
+//    (--mcp-config JSON + --session-id for claude; -c mcp_servers + trailing prompt for codex;
+//    streaming-json + a prepare()-staged config file for grok);
+//  - the session-id strategies resolve (claude/grok host-minted UUID; codex jsonl thread.started);
+//  - all health checks pass on a machine with the CLIs installed (SZ_LIVE_PROVIDERS=1 only).
 import Foundation
 import Synchronization
 import Testing
@@ -60,12 +61,13 @@ private extension Array where Element == String {
     }
 }
 
-@Test func registryVendsBothProviders() {
+@Test func registryVendsAllProviders() {
     let reg = SZProviderRegistry.shared
-    #expect(reg.providers.map(\.id).sorted() == ["claude", "codex"])
+    #expect(reg.providers.map(\.id).sorted() == ["claude", "codex", "grok"])
     #expect(reg.defaultProvider.id == "claude")
     #expect(reg.provider(id: "claude")?.defaultModel == "claude-opus-4-8")
     #expect(reg.provider(id: "codex")?.defaultModel == "gpt-5.6-terra")
+    #expect(reg.provider(id: "grok")?.defaultModel == "grok-composer-2.5-fast")
 }
 
 @Test func claudeLaunchBuildsArgvAndMintsSession() async throws {
@@ -144,6 +146,82 @@ private extension Array where Element == String {
 
     let result = try await codex.run(req, runner: StubRunner())   // empty output → no thread.started
     #expect(result.outcome.sessionID == "T-existing")
+}
+
+/// grok is claude-shaped on sessions (host-minted `--session-id`, echoed back) but attaches MCP
+/// through a config FILE staged by `prepare()` — run() calls it before launch(), so after a run
+/// with a port the file exists with the nc bridge, and a portless run removes the stale file
+/// (a leftover entry would spend the CLI's 30s MCP startup timeout on a dead bridge).
+@Test func grokLaunchBuildsArgvMintsSessionAndStagesMCPConfig() async throws {
+    let grok = SZGrokProvider()
+    let stub = StubRunner()
+    let work = FileManager.default.temporaryDirectory.appending(path: "grok-mcp-\(UUID().uuidString)")
+    var req = request(port: 42123)
+    req.workingDirectory = work
+    defer { try? FileManager.default.removeItem(at: work) }
+
+    let result = try await grok.run(req, runner: stub)
+
+    let call = try #require(stub.lastCall)
+    #expect(call.launchPath == "/usr/bin/env")
+    #expect(call.arguments.prefix(3) == ["grok", "-p", "make it grayscale"])
+    #expect(call.arguments.value(after: "-m") == "grok-composer-2.5-fast")
+    #expect(call.arguments.value(after: "--output-format") == "streaming-json")
+    #expect(call.arguments.contains("--always-approve"))
+    // MCP rides the staged config file, never argv.
+    #expect(!call.arguments.contains("--mcp-config"))
+    let config = work.appending(path: ".grok/config.toml")
+    let toml = try String(contentsOf: config, encoding: .utf8)
+    #expect(toml.contains("[mcp_servers.subz]"))
+    #expect(toml.contains(#"command = "/usr/bin/nc""#))
+    #expect(toml.contains(#"args = ["127.0.0.1", "42123"]"#))
+    // grok takes a host-minted UUID, echoed back as the session id (claude-style).
+    let sessionID = try #require(result.outcome.sessionID)
+    #expect(call.arguments.value(after: "--session-id") == sessionID)
+    #expect(UUID(uuidString: sessionID) != nil)
+
+    // A later run in the same staging dir WITHOUT a port removes the stale file.
+    req.mcpServerPort = nil
+    _ = try await grok.run(req, runner: stub)
+    #expect(!FileManager.default.fileExists(atPath: config.path))
+}
+
+/// A grok chat turn continues with `--resume <id>` (not a fresh `--session-id` mint), and run()
+/// keeps the id stable so the host's session map stays addressable.
+@Test func grokResumeContinuesSessionInsteadOfMinting() async throws {
+    let grok = SZGrokProvider()
+    var req = request(port: nil)
+    req.resumeSessionID = "S-existing"
+
+    let argv = grok.launch(req, preallocatedSessionID: nil).arguments
+    #expect(argv.value(after: "--resume") == "S-existing")
+    #expect(!argv.contains("--session-id"))   // resume, not a fresh mint
+    #expect(argv.value(after: "-p") == "make it grayscale")
+
+    let result = try await grok.run(req, runner: StubRunner())
+    #expect(result.outcome.sessionID == "S-existing")
+}
+
+/// grok 0.2.93 has no effort or fast-mode surface (measured — see the provider): the picker hides
+/// both dimensions, the resolver clamps stored values away, and argv NEVER carries the flag — the
+/// CLI would swallow it silently rather than reject it, so this is the only guard.
+@Test func grokHasNoEffortOrFastSurface() {
+    let grok = SZGrokProvider()
+    #expect(grok.supportedReasoningEfforts.isEmpty)
+    #expect(!grok.supportsFastMode)
+    for model in grok.models {
+        #expect(grok.supportedReasoningEfforts(for: model.id).isEmpty)
+        #expect(!grok.supportsFastMode(for: model.id))
+    }
+
+    let resolved = grok.resolvedGenerationSettings(
+        from: SZProviderGenerationSettings(model: "grok-build", reasoningEffort: "high", fastMode: true))
+    #expect(resolved == SZProviderGenerationSettings(model: "grok-build", reasoningEffort: nil, fastMode: false))
+
+    // Even a request that (wrongly) carries an effort never puts the flag on argv.
+    let argv = grok.launch(request(port: nil, reasoningEffort: "high"), preallocatedSessionID: "x").arguments
+    #expect(!argv.contains("--reasoning-effort"))
+    #expect(!argv.contains("--effort"))
 }
 
 /// Generation-settings overrides ride through each provider's argv; fast mode expands to each
@@ -471,6 +549,46 @@ private extension Array where Element == String {
     #expect(c.finish() == [.reply("done")])
 }
 
+/// grok streams token-level chunks (recorded from grok 0.2.93 streaming-json), so the consumer
+/// accumulates: thought chunks flush as ONE `.activity` when text starts (per-token events would
+/// spam the trace), text accumulates as the reply candidate, and a NEW thought block after text
+/// demotes that text to narration — same reply/trace split as claude/codex.
+@Test func grokStreamConsumerBatchesThoughtChunksAndAccumulatesReply() {
+    let c = SZGrokProvider().makeStreamConsumer()
+    #expect(c.consume(#"{"type":"thought","data":"The"}"#).isEmpty)
+    #expect(c.consume(#"{"type":"thought","data":" user wants OK"}"#).isEmpty)
+    // thought → text transition flushes the batched thought as one activity
+    #expect(c.consume(#"{"type":"text","data":"hello"}"#) == [.activity("The user wants OK")])
+    #expect(c.consume(#"{"type":"text","data":" from grok"}"#).isEmpty)
+    // the end event is metadata, not a flush point (finish() is)
+    #expect(c.consume(#"{"type":"end","stopReason":"EndTurn","sessionId":"abc"}"#).isEmpty)
+    #expect(c.finish() == [.reply("hello from grok")])
+    #expect(c.finish().isEmpty)   // flushed exactly once
+}
+
+@Test func grokStreamConsumerDemotesSupersededTextToNarration() {
+    let c = SZGrokProvider().makeStreamConsumer()
+    #expect(c.consume(#"{"type":"text","data":"I'll check the file"}"#).isEmpty)
+    // a new reasoning block after text → that text was narration, not the answer
+    #expect(c.consume(#"{"type":"thought","data":"Now the real answer"}"#) == [.activity("I'll check the file")])
+    #expect(c.consume(#"{"type":"text","data":"42"}"#) == [.activity("Now the real answer")])
+    #expect(c.finish() == [.reply("42")])
+}
+
+/// grok emits RAW control characters inside JSON string values (verified 0.2.93 — strict parsers
+/// throw). The consumer sanitizes per line, so the chunk survives instead of being dropped.
+@Test func grokStreamConsumerSurvivesRawControlCharacters() {
+    let c = SZGrokProvider().makeStreamConsumer()
+    let rawTab = "{\"type\":\"thought\",\"data\":\"col1\tcol2\"}"   // literal 0x09 inside the value
+    #expect(c.consume(rawTab).isEmpty)
+    #expect(c.finish() == [.activity("col1\tcol2")])
+
+    // An error event surfaces in the trace (the run's failure still rides the exit code).
+    let e = SZGrokProvider().makeStreamConsumer()
+    #expect(e.consume(#"{"type":"error","message":"Couldn't start session"}"#)
+            == [.activity("⚠ Couldn't start session")])
+}
+
 /// The coding prompt drives the 3-tier library browse, and keeps the agent's agency.
 /// The browse now lives behind `node-compile`'s `{{reference}}` token — a split/merge piece swaps it for the
 /// preserve-behavior section — so assert on the RENDERED ordinary prompt, not the bare template.
@@ -534,7 +652,7 @@ private extension Array where Element == String {
 /// here caused. Gated behind `SZ_LIVE_PROVIDERS=1` so the default suite stays honest — the classification
 /// logic it would otherwise cover is already pinned deterministically by SZProviderHealthTests' stubs.
 @Test(.enabled(if: ProcessInfo.processInfo.environment["SZ_LIVE_PROVIDERS"] != nil))
-func bothProvidersHealthReady() async {
+func allProvidersHealthReady() async {
     for provider in SZProviderRegistry.shared.providers {
         let report = await provider.healthReport()
         #expect(report.status == .ready, "\(provider.id) health: \(report.message)")

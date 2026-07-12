@@ -32,6 +32,7 @@ protocol SZProvider {
 
 - **claude code** - CLI only.
 - **codex** - CLI, and CLI driven through Codex.app.
+- **grok** - CLI only (x.ai; added 2026-07, verified against grok 0.2.93).
 
 For each, we wrap and surface to the UI:
 
@@ -58,12 +59,20 @@ For each, we wrap and surface to the UI:
 > a turn actually runs fast is an account entitlement the response reports per turn as `usage.speed`,
 > which reads `standard` while an org's fast-mode spend is disabled — not a model property, and not
 > modeled here. codex's five models are unmeasured on this axis, so none overrides and all inherit
-> `true`). Model ids and effort tokens
+> `true`. grok declares NO effort menu and `supportsFastMode: false`: grok 0.2.93's
+> `--reasoning-effort` silently accepts any value — even an invalid token, exit 0, no warning, so
+> acceptance proves nothing — and measured comparisons (`none` vs `high`, `minimal` vs `xhigh`,
+> both models, 2026-07-12) showed no change in thought volume, so the flag is treated as not
+> honoured and argv never carries it). Model ids and effort tokens
 > are live-verified against the CLI, never inferred: a slug the ChatGPT backend won't serve is
 > rejected with a 400 that no in-process test can see, so a model joins the list only once the
 > manifest carries it AND a live launch returns clean (GPT-5.6 Sol shipped announced-but-ungated for
-> a window, 400ing every turn). Picking a new model resets that provider's agent sessions (a thread
-> is bound to the model that opened it); changing effort or fast mode does not. Selection is
+> a window, 400ing every turn). grok's two ids (`grok-composer-2.5-fast` — the CLI's own default —
+> and `grok-build`) are the CLI's own enumeration: uniquely among our CLIs, `grok models` lists
+> them, so re-verification on a CLI update is one command; note `grok-build` is unversioned, and
+> there is no versioned alternative to pin. Picking a new model resets that provider's agent
+> sessions (a thread is bound to the model that opened it); changing effort or fast mode does not.
+> Selection is
 > **global** (not per agent role -
 > per-role overrides deferred to agent profiles), edited in the chat composer's
 > `SZProviderGenerationPickerView`, persisted per provider in app-state.json
@@ -85,20 +94,21 @@ These choices are set per agent role (Director Agent vs Coding Agent can differ)
 - Failure recovery: a crashed/stalled session is restarted by the host; in-flight tree state
   decides whether to resume or re-prompt.
 
-## CLI integration (verified 2026-06-13)
+## CLI integration (verified 2026-06-13; grok column 2026-07-12)
 
 Concrete facts the adapters rely on, from the installed CLIs (claude code 2.1.177, codex-cli
-0.137.0):
+0.137.0, grok 0.2.93):
 
-| Need | claude code | codex |
-|---|---|---|
-| Non-interactive run | `claude -p/--print` | `codex exec` (alias `e`) |
-| Structured / streamed output | `--output-format json\|stream-json`, `--json-schema <s>` | `--json` (JSONL), `--output-schema <file>` |
-| Model selection | `--model <alias\|full>` | `-m/--model` or `-c model="…"` (`--oss` for local) |
-| Thinking level | `--effort <low\|medium\|high\|xhigh\|max>` | `-c` reasoning config key |
-| Attach SubZ MCP server | `--mcp-config <json>` | `codex mcp` / config |
-| Fallback | `--fallback-model <list>` | - |
-| Health | `claude --version`, `claude auth status` (JSON, exit 0/1 - verified 2.1.200) | `codex --version`, `codex login status` (exit 0/1 - verified 0.141.0) |
+| Need | claude code | codex | grok |
+|---|---|---|---|
+| Non-interactive run | `claude -p/--print` | `codex exec` (alias `e`) | `grok -p/--single` |
+| Structured / streamed output | `--output-format json\|stream-json`, `--json-schema <s>` | `--json` (JSONL), `--output-schema <file>` | `--output-format json\|streaming-json` (token-level `thought`/`text` chunks; NO tool events) |
+| Model selection | `--model <alias\|full>` | `-m/--model` or `-c model="…"` (`--oss` for local) | `-m/--model` (enumerable via `grok models`) |
+| Thinking level | `--effort <low\|medium\|high\|xhigh\|max>` | `-c` reasoning config key | `--reasoning-effort` exists but is NOT honoured (measured) - never emitted |
+| Attach SubZ MCP server | `--mcp-config <json>` | `codex mcp` / config | `<cwd>/.grok/config.toml`, staged per run by `prepare()` (no per-invocation flag) |
+| Sessions | host-minted `--session-id`, `--resume <id>` | id parsed from `thread.started` | host-minted `--session-id`, `--resume <id>` |
+| Fallback | `--fallback-model <list>` | - | - |
+| Health | `claude --version`, `claude auth status` (JSON, exit 0/1 - verified 2.1.200) | `codex --version`, `codex login status` (exit 0/1 - verified 0.141.0) | `grok --version`, `grok models` (exit 0 in BOTH auth states - output markers decide) |
 
 Sessions are driven through the non-interactive run + structured output path so responses parse
 cleanly back into the orchestrator.
@@ -111,14 +121,20 @@ Provider health is **three tiers, cheapest first** (`SZProviderHealth.swift` /
 
 1. **install** - `/usr/bin/env <cli> --version`, 5s. env's exit 127 → `missingCLI`.
 2. **auth** - the CLI's own status command (`authStatusArgs`): `claude auth status` /
-   `codex login status`, 10s. Nonzero exit → `authNeeded` - except an unknown-subcommand error
-   (older CLI), which leaves auth unknown and defers to the probe. Token-free, so tiers 1–2 are
-   safe for the launch pass and the setup sheet's 3s re-check loop.
+   `codex login status` / `grok models`, 10s. Nonzero exit → `authNeeded` - except an
+   unknown-subcommand error (older CLI), which leaves auth unknown and defers to the probe. A
+   ZERO exit whose output contains one of the provider's `authFailureMarkers` is also
+   `authNeeded`: not every CLI encodes auth in its status command's exit code (grok 0.2.93's
+   `grok models` exits 0 logged out and says "You are not authenticated"). Token-free, so tiers
+   1–2 are safe for the launch pass and the setup sheet's 3s re-check loop.
 3. **probe** - `healthProbe()`: one real one-shot prompt through the provider's own
-   `launch()`/`parse()` path (default model, no MCP, temp cwd). The only token-costing tier;
-   it runs once per provider during first-run setup, on the per-card Test button, and under the
-   verifier's `--probe` flag - never on a timer. Logged-out run output is classified via each
-   provider's recorded `authFailureMarkers`.
+   `prepare()`/`launch()`/`parse()` path (default model, no MCP, temp cwd). The only token-costing
+   tier; it runs once per provider during first-run setup, on the per-card Test button, and under
+   the verifier's `--probe` flag - never on a timer. Logged-out run output is classified via each
+   provider's recorded `authFailureMarkers`, and the markers OUTRANK a timeout: a logged-out
+   `grok -p` never exits (it prints a device-auth banner and polls for a browser login until
+   killed), so the killed run's output showing the login wall reads `authNeeded`, not
+   `healthFailed`.
 
 Each provider also vends its remedies as data: `installCommand` (copy-paste) and `loginCommand`
 (what the setup sheet's Terminal launcher runs - auth is interactive by design; the app never
@@ -155,6 +171,10 @@ We investigated the real CLIs. **Neither claude code nor codex can enumerate mod
 `list-models` subcommand; you simply pass a model alias/name). claude's thinking levels *are*
 enumerable (`--effort` has a fixed set); codex's reasoning effort is a config key, not
 enumerable. So "ask the CLI for capabilities" is a dead end for the thing we cared about most.
+(grok, added later, is the exception that proves the manifest right: `grok models` DOES
+enumerate, which makes re-verifying its manifest one command - but the manifest stays static,
+and the CLI's own docs/flags still can't be trusted for capabilities: its effort flag parses
+everywhere and acts nowhere.)
 
 **Decision:**
 

@@ -31,7 +31,7 @@ Operate as **guided automation**, not autonomous installation:
 ## Provider CLI setup
 
 SubjectiveZero drives agent CLIs as subprocesses. At least one provider must be **ready**
-(installed + logged in). Both are optional individually; each card in the in-app Agent Providers
+(installed + logged in). Each is optional individually; each card in the in-app Agent Providers
 sheet shows the same remedies listed here.
 
 ### Claude Code (`claude`)
@@ -55,6 +55,16 @@ sheet shows the same remedies listed here.
 - Auth status: `codex login status` - exit 0 = "Logged in using ChatGPT", exit 1 = "Not logged
   in". (Verified on codex-cli 0.141.0.)
 - Log in: run `codex login` interactively (browser flow); ask before launching.
+
+### Grok (`grok`)
+
+- Install (ask first): `curl -fsSL https://x.ai/cli/install.sh | bash` (installs to `~/.local/bin`).
+- Health: `grok --version`.
+- Auth status: `grok models` - **exit 0 in both states**; the output tells: "You are logged in
+  with grok.com." vs "You are not authenticated." (Verified on grok 0.2.93.)
+- Log in: run `grok login` interactively (browser flow); ask before launching.
+- Caution: a logged-out `grok -p …` does NOT fail - it prints a device-auth sign-in banner and
+  polls (it may open a browser). Never use a real prompt to test auth; use `grok models`.
 
 The app resolves CLIs on its own synthesized search path (inherited PATH + nvm/volta/bun/cargo/
 `~/.local/bin`/Homebrew/`Codex.app` + system dirs), so a CLI visible in the user's shell is

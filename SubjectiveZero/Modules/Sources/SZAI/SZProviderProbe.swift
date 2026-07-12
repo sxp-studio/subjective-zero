@@ -24,9 +24,7 @@ public extension SZProvider {
                                         workingDirectory: work, cacheDirectory: cache,
                                         timeout: 90)
         let preallocated = usesPreallocatedSessionID ? UUID().uuidString : nil
-        let launch = launch(request, preallocatedSessionID: preallocated)
         let cliPath = SZAgentEnvironment.resolveExecutable(healthArgs.first ?? "")
-        let startedAt = Date()
 
         func report(_ status: SZProviderHealthStatus, _ message: String,
                     diagnostic: SZProviderHealthDiagnostic) -> SZProviderHealthReport {
@@ -34,6 +32,18 @@ public extension SZProvider {
                                    cliPath: cliPath, probeVerified: status == .ready,
                                    diagnostics: [diagnostic])
         }
+
+        // Same order as run(): stage the working directory, then build argv.
+        do {
+            try prepare(request)
+        } catch {
+            return report(.healthFailed, "Probe could not stage the working directory.",
+                          diagnostic: SZProviderHealthDiagnostic(
+                              tier: .probe, attemptedCommand: [], exitCode: nil, timedOut: false,
+                              outputExcerpt: SZProviderHealthDiagnostic.excerpt("\(error)")))
+        }
+        let launch = launch(request, preallocatedSessionID: preallocated)
+        let startedAt = Date()
 
         let result: SZProcessResult
         do {
@@ -60,12 +70,15 @@ public extension SZProvider {
             let seconds = Int(Date().timeIntervalSince(startedAt).rounded())
             return report(.ready, "Verified — replied in \(seconds)s.", diagnostic: diagnostic)
         }
-        if result.timedOut {
-            return report(.healthFailed, "Probe timed out after \(Int(request.timeout ?? 0))s.",
-                          diagnostic: diagnostic)
-        }
+        // Markers outrank the timeout: a CLI that answers a logged-out run by WAITING for an
+        // interactive login never exits, so the killed run's output showing the login wall is
+        // authNeeded — reporting it as a timeout would send the user to debugging instead of login.
         if authFailureMarkers.contains(where: result.output.contains) {
             return report(.authNeeded, "Probe hit a login wall — not logged in.",
+                          diagnostic: diagnostic)
+        }
+        if result.timedOut {
+            return report(.healthFailed, "Probe timed out after \(Int(request.timeout ?? 0))s.",
                           diagnostic: diagnostic)
         }
         return report(.healthFailed, "Probe failed (exit \(result.exitCode)).", diagnostic: diagnostic)

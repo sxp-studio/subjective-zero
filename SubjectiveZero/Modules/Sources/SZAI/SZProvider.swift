@@ -169,8 +169,9 @@ public protocol SZProvider: Sendable {
     /// The CLI's own cheap auth-status command (run via /usr/bin/env; exit 0 = logged in).
     /// `[]` = the CLI has no such command; the probe tier is then the only auth truth.
     var authStatusArgs: [String] { get }
-    /// Substrings identifying a logged-out failure in a real run's output — how the probe tier
-    /// tells `authNeeded` from `healthFailed` (recorded from the CLI, see the health tests).
+    /// Substrings identifying a logged-out state in the CLI's output — how the probe tier tells
+    /// `authNeeded` from `healthFailed`, and how the auth tier catches a status command that
+    /// reports logged-out without a nonzero exit (recorded from the CLI, see the health tests).
     var authFailureMarkers: [String] { get }
     /// Copy-paste shell command that installs the CLI — the setup sheet's `missingCLI` remedy.
     var installCommand: String { get }
@@ -181,6 +182,13 @@ public protocol SZProvider: Sendable {
     /// True if the host mints a session UUID up front and passes it on the CLI (claude); false if
     /// the id is parsed back out of the run's output (codex).
     var usesPreallocatedSessionID: Bool { get }
+
+    /// Stage per-run files for a CLI that reads run configuration from files it discovers in the
+    /// working directory rather than from argv. Runs before every `launch()` — in `run()` and in the
+    /// probe tier — so a stale file from a previous run is rewritten or removed each turn. Throwing
+    /// aborts the turn loudly: a run whose staged config failed to land would look alive while
+    /// silently missing its tools. Default: nothing.
+    func prepare(_ request: SZAgentRunRequest) throws
 
     /// Build the launch command for one turn. `preallocatedSessionID` is non-nil only when
     /// `usesPreallocatedSessionID` is true.
@@ -201,6 +209,7 @@ public extension SZProvider {
     var authFailureMarkers: [String] { [] }
     var supportedReasoningEfforts: [String] { [] }   // conservative for future providers; both shipped ones override
     var supportsFastMode: Bool { false }
+    func prepare(_ request: SZAgentRunRequest) throws {}
     func makeStreamConsumer() -> any SZAgentStreamConsumer { SZNullStreamConsumer() }
 
     func model(id modelID: String) -> SZProviderModel? {
@@ -265,6 +274,7 @@ public extension SZProvider {
     /// it), we fall back to the resume id so the host's session mapping stays stable.
     func run(_ request: SZAgentRunRequest, runner: any SZProcessRunning = SZSystemProcessRunner()) async throws -> SZAgentRunResult {
         let preallocated = (request.resumeSessionID == nil && usesPreallocatedSessionID) ? UUID().uuidString : nil
+        try prepare(request)
         let launch = launch(request, preallocatedSessionID: preallocated)
         let result = try await runner.run(
             launch.executable, launch.arguments,

@@ -148,13 +148,19 @@ public extension SZProvider {
                 outputExcerpt: SZProviderHealthDiagnostic.excerpt("\(error)")))
             return report(.healthFailed, "Could not launch the auth check.", version: version)
         }
-        let authFailed = auth.timedOut || auth.exitCode != 0
+        // Not every CLI encodes auth in its status command's exit code — some report logged-out
+        // state only in the output. The provider's recorded markers decide before the exit code does.
+        let loggedOutByMarker = authFailureMarkers.contains(where: auth.output.contains)
+        let authFailed = auth.timedOut || auth.exitCode != 0 || loggedOutByMarker
         diagnostics.append(SZProviderHealthDiagnostic(
             tier: .auth, attemptedCommand: authStatusArgs, exitCode: auth.exitCode,
             timedOut: auth.timedOut,
             outputExcerpt: authFailed ? SZProviderHealthDiagnostic.excerpt(auth.output) : nil))
         if auth.timedOut {
             return report(.healthFailed, "Auth check timed out.", version: version)
+        }
+        if loggedOutByMarker {
+            return report(.authNeeded, "Installed but not logged in.", version: version)
         }
         if auth.exitCode == 0 {
             return report(.ready, "Installed and \(Self.loggedInSummary(from: auth.output)).", version: version)
