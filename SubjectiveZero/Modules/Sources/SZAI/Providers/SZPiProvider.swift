@@ -34,6 +34,7 @@
 // pipes its two command lines and closes.
 import Foundation
 import Synchronization
+import SZCore
 
 public struct SZPiProvider: SZProvider {
     public init() {}
@@ -297,11 +298,18 @@ enum SZPiCatalogError: Error, CustomStringConvertible {
 /// supersedes it (the earlier text was narration — claude/codex/grok's reply/trace split), and
 /// `finish()` emits the survivor once. `thinking` blocks carry REAL reasoning text (pi talks to the
 /// model APIs directly — no CLI-side redaction) → `.thinking`; `tool_execution_start` → `.toolCall`.
-/// No usage events have been observed in pi's stream, so pi turns carry no `.usage`.
-/// Lines are strict JSON (pi JSON.stringify's its events — verified, zero raw control
+/// EVERY assistant `message_end` carries `usage` {input, output, cacheRead, cacheWrite, reasoning,
+/// cost.total} — and pi's `input` EXCLUDES the cache shares (pi-ai subtracts them from OpenAI's
+/// inclusive input_tokens; verified against pi 0.80.6 source + a live run). A tool-use turn has
+/// several assistant messages, so usage is SUMMED across the turn and emitted as one `.usage` in
+/// `finish()`. Lines are strict JSON (pi JSON.stringify's its events — verified, zero raw control
 /// characters), but stderr warnings interleave in the merged stream, so unparseable lines skip.
 final class SZPiStreamConsumer: SZAgentStreamConsumer {
     private var pendingReply: String?
+    // The turn's usage, summed across its assistant messages (one per tool-use round).
+    private var inputTokens = 0, outputTokens = 0, cachedTokens = 0, reasoningTokens = 0
+    private var costUSD = 0.0
+    private var sawUsage = false
 
     func consume(_ line: String) -> [SZAgentStreamEvent] {
         guard let data = line.data(using: .utf8),
@@ -311,6 +319,15 @@ final class SZPiStreamConsumer: SZAgentStreamConsumer {
         case "message_end":
             guard let message = obj["message"] as? [String: Any],
                   message["role"] as? String == "assistant" else { return [] }
+            if let u = message["usage"] as? [String: Any], let output = u["output"] as? Int {
+                sawUsage = true
+                let cached = (u["cacheRead"] as? Int ?? 0) + (u["cacheWrite"] as? Int ?? 0)
+                inputTokens += (u["input"] as? Int ?? 0) + cached
+                outputTokens += output
+                cachedTokens += cached
+                reasoningTokens += u["reasoning"] as? Int ?? 0
+                costUSD += ((u["cost"] as? [String: Any])?["total"] as? Double) ?? 0
+            }
             var events: [SZAgentStreamEvent] = []
             if let error = (message["errorMessage"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty {
@@ -345,8 +362,18 @@ final class SZPiStreamConsumer: SZAgentStreamConsumer {
     }
 
     func finish() -> [SZAgentStreamEvent] {
-        guard let reply = pendingReply, !reply.isEmpty else { return [] }
+        var events: [SZAgentStreamEvent] = []
+        if sawUsage {
+            events.append(.usage(SZTokenUsage(
+                inputTokens: inputTokens, outputTokens: outputTokens,
+                cachedInputTokens: cachedTokens > 0 ? cachedTokens : nil,
+                reasoningOutputTokens: reasoningTokens > 0 ? reasoningTokens : nil,
+                costUSD: costUSD > 0 ? costUSD : nil)))
+            sawUsage = false
+        }
+        guard let reply = pendingReply, !reply.isEmpty else { return events }
         pendingReply = nil
-        return [.reply(reply)]
+        events.append(.reply(reply))
+        return events
     }
 }

@@ -892,6 +892,26 @@ private let piRPCCatalogLoggedOut = """
     #expect(r.consume("Warning: No project session found with id 'x'; creating a new session with that id.").isEmpty)
 }
 
+/// Every assistant message_end carries usage (recorded verbatim from a live pi 0.80.6 run against
+/// openai-codex/gpt-5.5) — and pi's `input` EXCLUDES the cache shares (pi-ai subtracts them from
+/// OpenAI's inclusive input_tokens, per its source), so the total prompt side is input + cacheRead
+/// + cacheWrite. A tool-use turn has several assistant messages: usage SUMS across them and emits
+/// once in finish(), ahead of the reply.
+@Test func piStreamConsumerSumsUsageAcrossTheTurn() {
+    let c = SZPiProvider().makeStreamConsumer()
+    #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"toolUse","usage":{"input":1129,"output":5,"cacheRead":0,"cacheWrite":0,"reasoning":0,"totalTokens":1134,"cost":{"input":0.005645,"output":0.00015,"cacheRead":0,"cacheWrite":0,"total":0.005795}},"content":[{"type":"text","text":"checking"}]}}"#).isEmpty)
+    #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"stop","usage":{"input":100,"output":20,"cacheRead":1000,"cacheWrite":50,"reasoning":8,"totalTokens":1170,"cost":{"total":0.001}},"content":[{"type":"text","text":"42"}]}}"#)
+            == [.thinking("checking")])
+    #expect(c.finish() == [
+        // cost is a float SUM (0.005795 + 0.001) — spelled as the same addition, not a decimal
+        // literal, so the expectation lands on the identical binary double.
+        .usage(SZTokenUsage(inputTokens: 2279, outputTokens: 25, cachedInputTokens: 1050,
+                            reasoningOutputTokens: 8, costUSD: 0.005795 + 0.001)),
+        .reply("42"),
+    ])
+    #expect(c.finish().isEmpty)   // usage and reply both flush exactly once
+}
+
 /// The coding prompt drives the 3-tier library browse, and keeps the agent's agency.
 /// The browse now lives behind `node-compile`'s `{{reference}}` token — a split/merge piece swaps it for the
 /// preserve-behavior section — so assert on the RENDERED ordinary prompt, not the bare template.
