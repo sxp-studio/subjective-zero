@@ -120,7 +120,10 @@ public struct SZGrokProvider: SZProvider {
 
 /// Parses grok's streaming-json: token-level `{"type":"thought"|"text","data":…}` chunks and a final
 /// `end` event (no per-line messages, no tool events, no usage — verified 0.2.93, so grok turns carry
-/// no `.usage`). Chunks are accumulated — emitting per token would spam the trace — and flushed at
+/// no `.usage`). Usage was also hunted OUTSIDE the stream (0.2.93): the session dir
+/// (~/.grok/sessions/<url-encoded-cwd>/<session-id>/) records only a CUMULATIVE context gauge
+/// (`_meta.totalTokens` on updates.jsonl events, `contextTokensUsed` in signals.json) — no per-turn
+/// input/output split exists anywhere, so there is nothing honest to map into SZTokenUsage. Chunks are accumulated — emitting per token would spam the trace — and flushed at
 /// type transitions: a completed thought block becomes one `.thinking` when text starts, and text
 /// superseded by a NEW thought block was narration, not the answer (matching claude/codex's
 /// reply/trace split). The reply flushes in `finish()`, the one point that knows the stream is over.
