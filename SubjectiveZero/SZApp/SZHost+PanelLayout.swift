@@ -76,6 +76,12 @@ extension SZHost {
         persistAppState()
     }
 
+    /// View ▸ Show Token Counts — a live pref, persisted like every layout change.
+    func setShowTokenCounts(_ on: Bool) {
+        showTokenCounts = on
+        persistAppState()
+    }
+
     /// Write the live prefs (layout + snap + header auto-hide + grid cursor trail + confirmed default
     /// provider + project history) to app-state.json (~1 KB, synchronous). The remaining SZAppState fields
     /// (windowSize/theme) are still dormant — nothing reads or writes them yet, so saving defaults
@@ -93,7 +99,8 @@ extension SZHost {
                                              recentProjectPaths: recentProjectPaths.isEmpty ? nil : recentProjectPaths,
                                              providerGenerationSettings: providerGenerationSettings.isEmpty
                                                 ? nil : providerGenerationSettings,
-                                             showWelcomeAtStartup: showWelcomeAtStartup))
+                                             showWelcomeAtStartup: showWelcomeAtStartup,
+                                             showTokenCounts: showTokenCounts))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

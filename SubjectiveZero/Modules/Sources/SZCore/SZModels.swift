@@ -260,6 +260,10 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// Show the welcome/home window on cold launch (Help ▸ Welcome reopens it any time). Optional
     /// for the same decode-compatibility reason; nil means ON (show by default).
     public var showWelcomeAtStartup: Bool?
+    /// Show per-turn token counts next to the duration under chat replies (View ▸ Show Token
+    /// Counts). Optional for the same decode-compatibility reason; nil means OFF. Display-only:
+    /// usage is always captured into the transcript regardless.
+    public var showTokenCounts: Bool?
 
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
@@ -276,7 +280,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         defaultProviderID: String? = nil,
         recentProjectPaths: [String]? = nil,
         providerGenerationSettings: [String: SZProviderGenerationSettings]? = nil,
-        showWelcomeAtStartup: Bool? = nil
+        showWelcomeAtStartup: Bool? = nil,
+        showTokenCounts: Bool? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -290,6 +295,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.recentProjectPaths = recentProjectPaths
         self.providerGenerationSettings = providerGenerationSettings
         self.showWelcomeAtStartup = showWelcomeAtStartup
+        self.showTokenCounts = showTokenCounts
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

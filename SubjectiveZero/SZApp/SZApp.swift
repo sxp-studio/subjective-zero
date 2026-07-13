@@ -378,6 +378,9 @@ struct SZApp: App {
                 // Appearance, so it sits with the panel-chrome prefs. Squares just the viewport tile.
                 Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
                                                                  set: { host.setViewportRoundedCorners($0) }))
+                // Chat display, kept with the other view prefs — per-turn tokens under replies.
+                Toggle("Show Token Counts", isOn: Binding(get: { host.showTokenCounts },
+                                                          set: { host.setShowTokenCounts($0) }))
                 Divider()
             }
             // Graph — the node-graph view/arrange commands. Framing (Center View /
@@ -467,6 +470,8 @@ struct SZApp: App {
                                                             set: { host.setAutoHidePanelHeaders($0) }))
             Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
                                                              set: { host.setViewportRoundedCorners($0) }))
+            Toggle("Show Token Counts", isOn: Binding(get: { host.showTokenCounts },
+                                                      set: { host.setShowTokenCounts($0) }))
         }
         Menu("Graph") {
             Button("Center View") { host.centerView() }
@@ -601,7 +606,7 @@ struct SZApp: App {
             SZChatPanel(store: host.store, scope: host.activeChatScope, tabs: host.chatTabs,
                         project: host.store.project, provider: host.activeProviderID,
                         streaming: host.chatInFlight.contains(host.activeChatScope.key),
-                        isRunning: host.isRunning,
+                        isRunning: host.isRunning, showTokenCounts: host.showTokenCounts,
                         onStopRun: { host.cancelRun() },
                         workingScopes: host.chatInFlight,
                         unreadScopes: host.unreadScopes,

@@ -23,6 +23,7 @@ public struct SZChatPanel: View {
     private let provider: String
     private let streaming: Bool                    // the active scope has a turn in flight → show the dots
     private let isRunning: Bool                    // a whole run is in flight → Project-tab Stop slot, sends disabled
+    private let showTokenCounts: Bool              // View ▸ Show Token Counts — the usage caption under replies
     private let onStopRun: () -> Void              // the send slot's whole-run Stop (Project tab, while running)
     private let workingScopes: Set<String>         // scopes with a streaming turn → their tab dot pulses
     private let unreadScopes: Set<String>          // finished-unvisited scopes → static tab dot until visited
@@ -113,6 +114,7 @@ public struct SZChatPanel: View {
     public init(store: SZStore, scope: SZChatScope, tabs: [SZChatScope], project: SZProject?,
                 provider: String, streaming: Bool,
                 isRunning: Bool = false,
+                showTokenCounts: Bool = false,
                 onStopRun: @escaping () -> Void = {},
                 workingScopes: Set<String> = [],
                 unreadScopes: Set<String> = [],
@@ -141,6 +143,7 @@ public struct SZChatPanel: View {
         self.provider = provider
         self.streaming = streaming
         self.isRunning = isRunning
+        self.showTokenCounts = showTokenCounts
         self.onStopRun = onStopRun
         self.workingScopes = workingScopes
         self.unreadScopes = unreadScopes
@@ -557,10 +560,11 @@ public struct SZChatPanel: View {
                         // (send / stop-turn / stop-run); a second stop that wanders is worse.
                     }
                 } else if let duration = message.duration, message.role == .assistant {
-                    // Final time + tokens, kept below the reply. Not every CLI reports usage.
-                    let tokens = message.usage.map {
+                    // Final time + tokens, kept below the reply. Tokens are opt-in (View ▸ Show
+                    // Token Counts), and not every CLI reports usage.
+                    let tokens = showTokenCounts ? message.usage.map {
                         " · \(szFormatTokensCompact($0.inputTokens)) in / \(szFormatTokensCompact($0.outputTokens)) out"
-                    } ?? ""
+                    } ?? "" : ""
                     Text("Worked for \(szFormatDurationCompact(duration))\(tokens)")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tertiary)

@@ -166,6 +166,11 @@ final class SZHost {
     // `showWelcomeAtStartup` (default ON) gates the auto-present on cold launch.
     internal(set) var showWelcomeAtStartup: Bool = SZAppStateIO.load()?.showWelcomeAtStartup ?? true
 
+    // Per-turn token counts under chat replies — same app-state.json + restore story, mutated via
+    // setShowTokenCounts. Toggled from the View menu (SZApp). Defaults OFF; display-only — usage is
+    // always captured into the transcript, so turning it on later reveals past turns too.
+    internal(set) var showTokenCounts: Bool = SZAppStateIO.load()?.showTokenCounts ?? false
+
     // Node-editor camera commands (Graph ▸ Center View / Zoom to Fit). The camera (zoom/offset) is
     // panel-local @State, unreachable from here, so the host raises a one-shot command the panel
     // observes and applies. Transient (never persisted): the camera itself resets on panel appear.
