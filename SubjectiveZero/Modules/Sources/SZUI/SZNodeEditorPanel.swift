@@ -69,13 +69,11 @@ public struct SZNodeEditorPanel: View {
     // erased view — the panel just renders it inside a HUD-styled Menu. Empty by default (previews/tests).
     private let gearMenu: AnyView
 
-    @State private var zoom: CGFloat = 1
-    @State private var canvasOffset: CGSize = .zero
+    @State private var camera = SZCanvasCamera()   // zoom + pan offset + the screen↔world transforms
+    @State private var pinchAnchor: SZCanvasCamera?   // camera at pinch start — the zoom-about-pivot base
     @State private var chatToggleHover = false   // HUD chat-toggle hover highlight
     @State private var cursor: CGPoint?
     @State private var viewSize: CGSize = .zero
-    @State private var zoomStart: CGFloat?
-    @State private var zoomStartOffset: CGSize?
     @Binding private var selectedNodeID: SZNodeID?   // hoisted so the chat panel scopes to the selection
     @State private var multiSelection: Set<SZNodeID> = []   // marquee / shift-click set, for Merge
     @State private var marquee: (start: CGPoint, current: CGPoint)?   // rubber-band rect, panel space
@@ -117,7 +115,6 @@ public struct SZNodeEditorPanel: View {
         var moved = false       // passed the click guard — a plain click must not drop/disconnect
     }
 
-    private static let zoomRange: ClosedRange<CGFloat> = 0.35...2.4
     private static let space = "szcanvas"
 
     /// `project` is the live graph to render, passed (and observed) by the host so the panel re-renders
@@ -228,10 +225,10 @@ public struct SZNodeEditorPanel: View {
                     .gesture(SpatialTapGesture(count: 2, coordinateSpace: .named(Self.space))
                         .onEnded { addPromptNode(atScreen: $0.location) })
                     .gesture(marqueeGesture)
-                SZDotGridView(zoom: zoom, offset: canvasOffset)
+                SZDotGridView(zoom: camera.zoom, offset: camera.offset)
                     .allowsHitTesting(false)   // decorative — the Color above keeps tap/marquee gestures
                 if gridCursorTrail {
-                    SZGridCursorTrailView(cursor: cursor, zoom: zoom, offset: canvasOffset)
+                    SZGridCursorTrailView(cursor: cursor, zoom: camera.zoom, offset: camera.offset)
                         .allowsHitTesting(false)   // decorative overlay; idle-dormant (see the view's header)
                 }
                 if let graph {
@@ -244,8 +241,8 @@ public struct SZNodeEditorPanel: View {
                         dragOverlay
                         if let wire { wireTargetsOverlay(wire); wirePreview(wire) }
                     }
-                    .scaleEffect(zoom, anchor: .topLeading)
-                    .offset(canvasOffset)
+                    .scaleEffect(camera.zoom, anchor: .topLeading)
+                    .offset(camera.offset)
                 } else {
                     Text("No project loaded")
                         .font(.system(size: 12, design: .monospaced))
@@ -483,8 +480,8 @@ public struct SZNodeEditorPanel: View {
     /// mirroring `isOccluded`'s what-you-see-is-what-you-hit rule), or nil for empty canvas.
     private func nodeHit(at point: CGPoint) -> SZNode? {
         guard let graph = project?.graph else { return nil }
-        let world = SZNodeLayout.worldPoint(screen: point, zoom: zoom, offset: canvasOffset)
-        return SZGraphCanvasModel.topmostNode(at: world, in: contentGraph(graph), tiers: raisedTiers)
+        return SZGraphCanvasModel.topmostNode(at: camera.worldPoint(screen: point),
+                                              in: contentGraph(graph), tiers: raisedTiers)
     }
 
     /// Open the menu at a canvas point: hit-test, update the selection FIRST (an unselected node
@@ -511,8 +508,7 @@ public struct SZNodeEditorPanel: View {
     private func openNodeMenu(_ id: SZNodeID) {
         guard let node = project?.graph.node(id: id) else { return }
         let card = SZNodeLayout.cardRect(of: node)
-        let anchor = CGPoint(x: card.maxX * zoom + canvasOffset.width,
-                             y: card.minY * zoom + canvasOffset.height)
+        let anchor = camera.screenPoint(world: CGPoint(x: card.maxX, y: card.minY))
         selectNode(id, additive: false)
         presentContextMenu(target: .node(id), anchor: anchor)
     }
@@ -636,8 +632,8 @@ public struct SZNodeEditorPanel: View {
 
     private func updateMarqueeSelection() {
         guard let marquee, let nodes = project?.graph.nodes else { return }
-        let a = SZNodeLayout.worldPoint(screen: marquee.start, zoom: zoom, offset: canvasOffset)
-        let b = SZNodeLayout.worldPoint(screen: marquee.current, zoom: zoom, offset: canvasOffset)
+        let a = camera.worldPoint(screen: marquee.start)
+        let b = camera.worldPoint(screen: marquee.current)
         let world = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
         // Select a node if the marquee touches its CARD (SZNodeLayout.cardRect), not just its
         // center — standard "rubber-band intersects = select".
@@ -670,7 +666,7 @@ public struct SZNodeEditorPanel: View {
     private func canvasContent(_ graph: SZGraph) -> some View {
         SZNodeCanvasContentView(
             graph: graph,
-            strokeZoom: Self.quantizedStrokeZoom(zoom),
+            strokeZoom: Self.quantizedStrokeZoom(camera.zoom),
             space: Self.space,
             selectedNodeID: selectedNodeID,
             multiSelection: multiSelection,
@@ -732,7 +728,7 @@ public struct SZNodeEditorPanel: View {
                     if let points = SZGraphCanvasModel.endpoints(of: connection, in: ghost) {
                         SZConnectionStrokeView(from: points.from, to: points.to, kind: connection.kind,
                                                selected: connection.id == selectedConnectionID,
-                                               hidden: false, zoom: Self.quantizedStrokeZoom(zoom))
+                                               hidden: false, zoom: Self.quantizedStrokeZoom(camera.zoom))
                     }
                 }
                 ForEach(members) { node in
@@ -818,7 +814,7 @@ public struct SZNodeEditorPanel: View {
     }
 
     private func endpointGlow(_ p: CGPoint, _ color: Color) -> some View {
-        let r = max(3, 6 / max(zoom, 0.1))
+        let r = max(3, 6 / max(camera.zoom, 0.1))
         return Circle()
             .fill(color)
             .frame(width: SZNodeLayout.socketSize + 3, height: SZNodeLayout.socketSize + 3)
@@ -834,7 +830,7 @@ public struct SZNodeEditorPanel: View {
         let free = wire.target?.point ?? wire.current
         let (from, to) = wire.source.side == .input ? (free, wire.source.point) : (wire.source.point, free)
         let kind = wire.source.kind
-        let z = max(zoom, 0.1)
+        let z = max(camera.zoom, 0.1)
         // Dash = intent: a FLOW preview is violet + dashed; a data preview is a solid blue wire, its
         // in-flight cue being opacity + cursor-follow.
         let isFlow = kind == .flow
@@ -896,8 +892,8 @@ public struct SZNodeEditorPanel: View {
     /// (panning to reveal rightward makes panAccum negative, growing the delta) before dividing out
     /// the live zoom.
     private func rawDelta(_ drag: NodeDrag) -> CGSize {
-        CGSize(width: (drag.translation.width - drag.panAccum.width) / zoom,
-               height: (drag.translation.height - drag.panAccum.height) / zoom)
+        CGSize(width: (drag.translation.width - drag.panAccum.width) / camera.zoom,
+               height: (drag.translation.height - drag.panAccum.height) / camera.zoom)
     }
 
     // MARK: - Add node
@@ -911,8 +907,7 @@ public struct SZNodeEditorPanel: View {
     // we divide out the zoom + pan to land the card center under it. Used by the HUD button and by
     // double-click-on-empty-canvas.
     private func addPromptNode(atScreen screen: CGPoint) {
-        let center = snappedPromptCenter(
-            SZNodeLayout.worldPoint(screen: screen, zoom: zoom, offset: canvasOffset))
+        let center = snappedPromptCenter(camera.worldPoint(screen: screen))
         if let id = store.addPromptNode(prompt: "", position: SZPoint(x: center.x, y: center.y)) {
             selectedNodeID = id
             autoEditNodeID = id   // the new card opens into editing + grabs the field (see SZPromptNodeView)
@@ -932,8 +927,7 @@ public struct SZNodeEditorPanel: View {
     /// `SZMediaSource` — the same rules `ui_add_source_node` applies. Returns whether ANY media file was
     /// handled: false leaves the drag un-consumed (so a stray .txt just bounces back).
     private func handleFileDrop(_ urls: [URL], at screen: CGPoint) -> Bool {
-        let origin = snappedPromptCenter(
-            SZNodeLayout.worldPoint(screen: screen, zoom: zoom, offset: canvasOffset))
+        let origin = snappedPromptCenter(camera.worldPoint(screen: screen))
         let specs = SZMediaSource.specs(for: urls, origin: SZPoint(x: origin.x, y: origin.y))
         guard !specs.isEmpty else { return false }
         onCreateMediaNodes(specs)
@@ -986,7 +980,7 @@ public struct SZNodeEditorPanel: View {
         guard let raw = project?.graph else { return }
         let graph = displayGraph(raw)
         guard !isLocked(source.nodeID) else { return }   // can't wire a locked (in-progress) node
-        let world = SZNodeLayout.worldPoint(screen: location, zoom: zoom, offset: canvasOffset)
+        let world = camera.worldPoint(screen: location)
         if wire?.grabbed.id != source.id {
             // Grabbing a CONNECTED data input picks its wire up to re-route: the preview
             // re-anchors to the far output socket and the original edge hides until drop.
@@ -1018,7 +1012,7 @@ public struct SZNodeEditorPanel: View {
         guard let raw = project?.graph else { return }
         let graph = displayGraph(raw)
         guard !isLocked(connection.from.node), !isLocked(connection.to.node) else { return }
-        let world = SZNodeLayout.worldPoint(screen: screen, zoom: zoom, offset: canvasOffset)
+        let world = camera.worldPoint(screen: screen)
         if wire?.picked?.id != connection.id {
             guard let end = SZGraphCanvasModel.detachableEnd(of: connection, grabbedAt: world, in: graph),
                   let anchor = SZGraphCanvasModel.pickupAnchor(detaching: end, of: connection, in: graph)
@@ -1038,7 +1032,7 @@ public struct SZNodeEditorPanel: View {
     private func updateWireDrag(to world: CGPoint, in graph: SZGraph) {
         guard let source = wire?.source, let start = wire?.start else { return }
         wire?.current = world
-        if hypot(world.x - start.x, world.y - start.y) > 8 / max(zoom, 0.1) { wire?.moved = true }
+        if hypot(world.x - start.x, world.y - start.y) > 8 / max(camera.zoom, 0.1) { wire?.moved = true }
         wire?.target = validTarget(for: source, at: world, in: graph)
     }
 
@@ -1099,7 +1093,7 @@ public struct SZNodeEditorPanel: View {
 
     /// Nearest socket to `point` (within a zoom-aware radius) that can legally connect to `source`.
     private func validTarget(for source: SZSocket, at point: CGPoint, in graph: SZGraph) -> SZSocket? {
-        let radius = 28 / max(zoom, 0.1)
+        let radius = 28 / max(camera.zoom, 0.1)
         return SZGraphCanvasModel.sockets(in: graph)
             .filter { isValidTarget($0, for: source, in: graph) }
             .map { (socket: $0, d: hypot($0.point.x - point.x, $0.point.y - point.y)) }
@@ -1157,16 +1151,14 @@ public struct SZNodeEditorPanel: View {
             stopAutoPan()
             return
         }
-        canvasOffset.width += delta.width
-        canvasOffset.height += delta.height
+        camera.pan(by: delta)
         drag?.panAccum.width += delta.width
         drag?.panAccum.height += delta.height
         // The loose wire end tracks the (possibly stationary) cursor's NEW world point, and target
         // snapping re-runs against sockets scrolling under it. Same display graph the gestures see,
         // so hidden split/merge pieces can't become snap targets mid-pan.
         if let w = wire, let graph = project?.graph {
-            let world = SZNodeLayout.worldPoint(screen: w.lastScreen, zoom: zoom, offset: canvasOffset)
-            updateWireDrag(to: world, in: displayGraph(graph))
+            updateWireDrag(to: camera.worldPoint(screen: w.lastScreen), in: displayGraph(graph))
         }
     }
 
@@ -1174,61 +1166,35 @@ public struct SZNodeEditorPanel: View {
         MagnificationGesture()
             .onChanged { value in
                 dismissContextMenu()   // the menu is panel-space; it must not drift off its world anchor
-                if zoomStart == nil { zoomStart = zoom; zoomStartOffset = canvasOffset }
-                guard let start = zoomStart, let startOffset = zoomStartOffset else { return }
-                applyZoom(start * value, pivot: pivot(), fromZoom: start, fromOffset: startOffset)
+                if pinchAnchor == nil { pinchAnchor = camera }
+                guard let anchor = pinchAnchor else { return }
+                camera.applyZoom(anchor.zoom * value, pivot: pivot(), from: anchor)
             }
-            .onEnded { _ in zoomStart = nil; zoomStartOffset = nil }
+            .onEnded { _ in pinchAnchor = nil }
     }
 
     private func handleScroll(_ data: SZScrollWheelData) {
         dismissContextMenu()   // same rule as zoom: the camera moved, the anchor didn't
         guard cursor != nil, editingNodeID == nil else { return }   // only when hovering, not typing
         if data.commandHeld {
-            applyZoom(zoom * (1 - data.deltaY * 0.005), pivot: pivot(), fromZoom: zoom, fromOffset: canvasOffset)
+            camera.applyZoom(camera.zoom * (1 - data.deltaY * 0.005), pivot: pivot(), from: camera)
         } else {
-            canvasOffset.width += data.deltaX
-            canvasOffset.height += data.deltaY
+            camera.pan(by: CGSize(width: data.deltaX, height: data.deltaY))
         }
-    }
-
-    /// Set zoom to `target` (clamped) while keeping `pivot` fixed on the same world point.
-    private func applyZoom(_ target: CGFloat, pivot: CGPoint, fromZoom: CGFloat, fromOffset: CGSize) {
-        let newZoom = min(Self.zoomRange.upperBound, max(Self.zoomRange.lowerBound, target))
-        let worldAtPivot = CGPoint(
-            x: (pivot.x - fromOffset.width) / max(fromZoom, 0.1),
-            y: (pivot.y - fromOffset.height) / max(fromZoom, 0.1))
-        zoom = newZoom
-        canvasOffset = CGSize(
-            width: pivot.x - worldAtPivot.x * newZoom,
-            height: pivot.y - worldAtPivot.y * newZoom)
     }
 
     private func pivot() -> CGPoint {
         cursor ?? CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
     }
 
-    /// Apply a host-raised camera command. Center View keeps the current zoom and slides the graph's
-    /// bounding-box midpoint to the viewport center; Zoom to Fit also picks a clamped zoom that frames
-    /// the whole graph with a margin. Screen = world·zoom + offset (the `.scaleEffect(anchor:.topLeading)
-    /// .offset` transform), so an offset that maps the box midpoint to the view center recenters it.
-    /// No-op with no nodes or an unmeasured viewport. Animated with a snappy reframe.
+    /// Apply a host-raised camera command (the framing math lives on SZCanvasCamera). No-op with no
+    /// nodes or an unmeasured viewport. Animated with a snappy reframe.
     private func applyCameraCommand(_ command: SZCameraCommand) {
         guard let bounds = graphWorldBounds(), viewSize.width > 0, viewSize.height > 0 else { return }
         withAnimation(.snappy(duration: command.action == .fit ? 0.28 : 0.22)) {
             switch command.action {
-            case .center:
-                canvasOffset = CGSize(width: viewSize.width / 2 - bounds.midX * zoom,
-                                      height: viewSize.height / 2 - bounds.midY * zoom)
-            case .fit:
-                let framed = bounds.insetBy(dx: -max(80, bounds.width * 0.14),
-                                            dy: -max(80, bounds.height * 0.14))
-                let target = min(Self.zoomRange.upperBound,
-                                 max(Self.zoomRange.lowerBound,
-                                     min(viewSize.width / framed.width, viewSize.height / framed.height)))
-                zoom = target
-                canvasOffset = CGSize(width: viewSize.width / 2 - framed.midX * target,
-                                      height: viewSize.height / 2 - framed.midY * target)
+            case .center: camera = .centered(on: bounds, in: viewSize, zoom: camera.zoom)
+            case .fit: camera = .fitting(bounds, in: viewSize)
             }
         }
     }
