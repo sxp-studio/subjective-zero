@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The host's MCP server — a TCP, newline-delimited JSON-RPC line server (ARCHITECTURE.md: "the MCP
 // server lives in the host"). Coding agents reach it via `--mcp-config` running `nc 127.0.0.1 <port>`
-// (the stdio→TCP bridge); it's also hand-drivable for closed-loop testing: `nc localhost <port>`.
+// (the stdio→TCP bridge); it's also hand-drivable for closed-loop testing: `nc 127.0.0.1 <port>`
+// (the listener binds IPv4 loopback only — `localhost` may resolve to ::1 first, which is refused).
 //
 // Connection callbacks run off the main thread; every tool call hops to the MainActor
 // bridge. `@unchecked Sendable` is the standard shape for an NWListener wrapper (queue-confined).
@@ -45,7 +46,14 @@ final class SZMCPServer: @unchecked Sendable {
         self.port = port
         self.bridge = bridge
         self.surface = surface
-        self.listener = try NWListener(using: .tcp, on: nwPort)
+        // LOOPBACK ONLY. Plain `NWListener(using: .tcp, on:)` binds every interface (lsof shows
+        // `*:<port>`), so on a shared network any host could drive this bus — and its tools include
+        // `ui_run`, which spawns a coding agent that writes and executes code with no approval gate.
+        // `requiredLocalEndpoint` pins the bind to 127.0.0.1; every client dials IPv4 loopback (the
+        // `nc 127.0.0.1` bridge, the pi extension's `net.connect(port,"127.0.0.1")`, test clients).
+        let params = NWParameters.tcp
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: nwPort)
+        self.listener = try NWListener(using: params)
         let identity = surface == .full ? "subz" : "subz-agent"
         self.listener.newConnectionHandler = { [bridge] connection in
             connection.start(queue: DispatchQueue(label: "studio.sxp.subz.mcp.conn.\(port)"))
