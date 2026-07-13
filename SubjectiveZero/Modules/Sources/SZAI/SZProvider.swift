@@ -294,7 +294,11 @@ public extension SZProvider {
     func resolvedGenerationSettings(from stored: SZProviderGenerationSettings?) -> SZProviderGenerationSettings {
         let modelIDs = models.map(\.id)
         let model = stored?.model.flatMap { modelIDs.contains($0) ? $0 : nil } ?? defaultModel
-        let efforts = supportedReasoningEfforts(for: model)
+        // An EMPTY model list (a runtime catalog before its first fetch) resolves no effort either:
+        // the provider-level menu is a fallback for a stale id AMONG known models, not a claim
+        // about a CLI-default model we know nothing about — argv must not carry an effort flag
+        // for a model that was never enumerated.
+        let efforts = models.isEmpty ? [] : supportedReasoningEfforts(for: model)
         var effort: String?
         if !efforts.isEmpty {
             let fallback = defaultReasoningEffort(for: model)

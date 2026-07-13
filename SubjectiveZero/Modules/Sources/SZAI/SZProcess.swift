@@ -112,6 +112,12 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         }
         try? pipe.fileHandleForWriting.close()
         if let stdinPipe {
+            // The parent's copy of the READ end must close after spawn — only the child may hold
+            // it, or a child that exits without draining never breaks the pipe and a payload
+            // larger than the pipe buffer would block this write before the timeout race below is
+            // even armed. (Payloads today are tiny RPC lines; the close makes the seam safe for
+            // callers that aren't.)
+            try? stdinPipe.fileHandleForReading.close()
             // Write the payload then close, delivering EOF. Best-effort: a child that exits
             // without reading (crash, bad argv) breaks the pipe — that's its exit code's story.
             try? stdinPipe.fileHandleForWriting.write(contentsOf: input ?? Data())

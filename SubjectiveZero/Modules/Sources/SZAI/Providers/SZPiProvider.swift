@@ -220,7 +220,20 @@ public struct SZPiProvider: SZProvider {
         if request.mcpServerPort != nil {
             args += ["--extension", Self.bridgePath(in: request.workingDirectory).path]
         }
-        args.append(request.prompt)   // trailing positional — `-p` is a bare flag, unlike claude's
+        // PERMISSIONS: pi has no approval gate or sandbox — built-in and extension tools run
+        // unconditionally with process permissions (verified 0.80.6 docs/security.md + agent-loop),
+        // so this is functionally codex's full bypass, minus a flag to say so.
+        // TODO(SZ-pi-permissions): narrow with `--tools <allowlist>` / `--no-builtin-tools` once
+        // the coding flow's required built-ins are pinned, then live-verify a ui_run still passes.
+        //
+        // pi's arg parser flag-parses a leading `-`/`--` (swallowing the NEXT token as a value)
+        // and treats a leading `@` as a file attachment, with no `--` terminator (verified 0.80.6
+        // cli/args.js). A leading space defeats both checks and is invisible to the model — an
+        // established node chat sends the user's message raw, so "@State isn't updating" must not
+        // become a file arg.
+        let prompt = (request.prompt.hasPrefix("-") || request.prompt.hasPrefix("@"))
+            ? " " + request.prompt : request.prompt
+        args.append(prompt)   // trailing positional — `-p` is a bare flag, unlike claude's
         let env = SZAgentEnvironment.base(extra: [
             "SWIFT_MODULE_CACHE_PATH": request.cacheDirectory.appending(path: "swift-module-cache").path,
             "CLANG_MODULE_CACHE_PATH": request.cacheDirectory.appending(path: "clang-module-cache").path,

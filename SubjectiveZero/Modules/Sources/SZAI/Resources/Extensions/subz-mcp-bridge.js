@@ -14,6 +14,7 @@
 // running the turn — a run that silently lost its host tools would look alive while it wasn't.
 
 import net from "node:net";
+import { StringDecoder } from "node:string_decoder";
 
 const PORT = __SUBZ_MCP_PORT__;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -38,20 +39,16 @@ export default async function (pi) {
       // Raw JSON Schema — accepted by pi.registerTool (verified pi 0.80.6).
       parameters: tool.inputSchema ?? { type: "object", properties: {} },
       async execute(_toolCallId, params) {
-        try {
-          const result = await rpc.request("tools/call", { name: tool.name, arguments: params ?? {} });
-          return {
-            content: toPiContent(result?.content),
-            isError: result?.isError === true,
-            details: {},
-          };
-        } catch (error) {
-          return {
-            content: [{ type: "text", text: `subz-mcp-bridge: ${error?.message ?? error}` }],
-            isError: true,
-            details: {},
-          };
+        // THROWING is the only failure signal pi honors: a returned `isError` is ignored —
+        // agent-loop wraps any non-throwing execute as success (verified 0.80.6 source + its
+        // docs/extensions.md "Signaling errors"). A returned error object would reach the model
+        // as a successful tool result. So: rejections propagate, and an MCP-level isError throws.
+        const result = await rpc.request("tools/call", { name: tool.name, arguments: params ?? {} });
+        if (result?.isError === true) {
+          const text = toPiContent(result?.content).map((b) => b.text ?? "").join("\n").trim();
+          throw new Error(text || `subz-mcp-bridge: ${tool.name} failed`);
         }
+        return { content: toPiContent(result?.content), details: {} };
       },
     });
   }
@@ -75,6 +72,7 @@ function connect(port) {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, "127.0.0.1");
     const pending = new Map();
+    const decoder = new StringDecoder("utf8");   // per-chunk decode would corrupt split multibyte chars
     let nextId = 1;
     let buffer = "";
 
@@ -92,13 +90,17 @@ function connect(port) {
     // kills it (observed: exit 124 on an otherwise successful print-mode turn); never-referenced,
     // the loop could drain mid-tools/call and exit under a pending host tool.
     const updateRef = () => { if (pending.size > 0) socket.ref(); else socket.unref(); };
-    socket.once("error", (error) => {
+    // `on`, not `once`: a SECOND socket error (write on a connection the first error destroyed)
+    // must not become an uncaught exception — pi's print/json mode installs no uncaughtException
+    // handler (verified 0.80.6), so a consumed listener would crash the whole turn. The `reject`
+    // is a no-op once the connect promise has settled.
+    socket.on("error", (error) => {
       failAll(error);
       reject(new Error(`subz-mcp-bridge: cannot reach the SubjectiveZero MCP listener on 127.0.0.1:${port} (${error.message})`));
     });
     socket.on("close", () => failAll(new Error("subz-mcp-bridge: MCP connection closed")));
     socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
+      buffer += decoder.write(chunk);
       let newline;
       while ((newline = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, newline);
@@ -120,6 +122,9 @@ function connect(port) {
       resolve({
         request(method, params) {
           return new Promise((resolveCall, rejectCall) => {
+            if (socket.destroyed) {
+              return rejectCall(new Error("subz-mcp-bridge: MCP connection lost"));
+            }
             const id = nextId++;
             const handshake = method !== "tools/call";
             const timer = handshake
@@ -135,6 +140,7 @@ function connect(port) {
           });
         },
         notify(method, params) {
+          if (socket.destroyed) return;
           socket.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
         },
       });

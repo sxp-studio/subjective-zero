@@ -912,6 +912,32 @@ private let piRPCCatalogLoggedOut = """
     #expect(c.finish().isEmpty)   // usage and reply both flush exactly once
 }
 
+/// pi's arg parser flag-parses a leading `-`/`--` (swallowing the next token) and eats a leading
+/// `@` as a file attachment, with no `--` terminator (verified 0.80.6 cli/args.js) — and resumed
+/// node chats pass the user's message RAW. A leading space defeats both checks; ordinary prompts
+/// pass through untouched.
+@Test func piPromptPositionalSurvivesFlagLikeLeadingCharacters() {
+    let pi = SZPiProvider()
+    var req = request(port: nil)
+    req.prompt = "@State isn't updating — why?"
+    #expect(pi.launch(req, preallocatedSessionID: "s").arguments.last == " @State isn't updating — why?")
+    req.prompt = "--verbose please explain"
+    #expect(pi.launch(req, preallocatedSessionID: "s").arguments.last == " --verbose please explain")
+    req.prompt = "make it grayscale"
+    #expect(pi.launch(req, preallocatedSessionID: "s").arguments.last == "make it grayscale")
+}
+
+/// A runtime-catalog provider with an EMPTY catalog resolves NO effort (not the provider-level
+/// fallback): `--thinking` against a CLI-default model we never enumerated is an unrecorded
+/// combination, so argv must omit both --model and the effort flag.
+@Test func resolverEmitsNoEffortForAnEmptyModelCatalog() {
+    let pi = SZPiProvider()   // fresh instance: catalog unseeded, models == []
+    let resolved = pi.resolvedGenerationSettings(
+        from: SZProviderGenerationSettings(model: nil, reasoningEffort: "high", fastMode: false))
+    #expect(resolved.model == "")
+    #expect(resolved.reasoningEffort == nil)
+}
+
 /// The coding prompt drives the 3-tier library browse, and keeps the agent's agency.
 /// The browse now lives behind `node-compile`'s `{{reference}}` token — a split/merge piece swaps it for the
 /// preserve-behavior section — so assert on the RENDERED ordinary prompt, not the bare template.
