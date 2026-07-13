@@ -71,13 +71,29 @@ public enum SZGraphCanvasModel {
         for (i, node) in graph.nodes.enumerated() where node.id != socket.nodeID {
             let tier = tiers[node.id] ?? 0
             guard tier > ownerTier || (tier == ownerTier && i > ownerIndex) else { continue }
-            let size = SZNodeLayout.size(of: node)
-            let card = CGRect(x: CGFloat(node.position.x) - size.width / 2,
-                              y: CGFloat(node.position.y) - size.height / 2,
-                              width: size.width, height: size.height)
-            if card.contains(socket.point) { return true }
+            if SZNodeLayout.cardRect(of: node).contains(socket.point) { return true }
         }
         return false
+    }
+
+    /// The topmost node card under a world point (render z-order: `tiers`, ties broken by
+    /// `graph.nodes` order — the mirror of `isOccluded`'s what-you-see-is-what-you-hit rule), or nil
+    /// for empty canvas.
+    public static func topmostNode(at point: CGPoint, in graph: SZGraph,
+                                   tiers: [SZNodeID: Int] = [:]) -> SZNode? {
+        graph.nodes.enumerated()
+            .filter { SZNodeLayout.cardRect(of: $0.element).contains(point) }
+            .max { (tiers[$0.element.id] ?? 0, $0.offset) < (tiers[$1.element.id] ?? 0, $1.offset) }?
+            .element
+    }
+
+    /// World-space bounding box of every node card (each card via `SZNodeLayout.cardRect`). Nil when
+    /// the graph has no nodes.
+    public static func worldBounds(of graph: SZGraph) -> CGRect? {
+        guard !graph.nodes.isEmpty else { return nil }
+        var box = CGRect.null
+        for node in graph.nodes { box = box.union(SZNodeLayout.cardRect(of: node)) }
+        return box.isNull ? nil : box
     }
 
     /// The IDs of every socket wired by at least one connection, in one O(connections) pass — the

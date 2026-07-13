@@ -512,3 +512,40 @@ private func zooNode() -> SZNode {
     let draft = SZNode(kind: .prompt, title: "Draft", position: SZPoint(x: 0, y: 0))
     #expect(SZGraphCanvasModel.connectableSockets(of: draft).allSatisfy { $0.kind == .flow })
 }
+
+// MARK: - Card rects, hit-testing, world bounds (the ONE cardRect shared by all geometry consumers)
+
+@Test func cardRectIsCenteredOnNodePosition() {
+    let node = promptNode(at: SZPoint(x: 100, y: 200))
+    let rect = SZNodeLayout.cardRect(of: node)
+    #expect(rect.midX == 100)
+    #expect(rect.midY == 200)
+    #expect(rect.size == SZNodeLayout.size(of: node))
+}
+
+@Test func worldBoundsUnionsEveryCardAndIsNilWhenEmpty() {
+    let a = promptNode(at: SZPoint(x: 0, y: 0))
+    let b = cameraNode(at: SZPoint(x: 600, y: 300))
+    let bounds = SZGraphCanvasModel.worldBounds(of: SZGraph(nodes: [a, b], connections: []))
+    #expect(bounds == SZNodeLayout.cardRect(of: a).union(SZNodeLayout.cardRect(of: b)))
+    #expect(SZGraphCanvasModel.worldBounds(of: SZGraph(nodes: [], connections: [])) == nil)
+}
+
+@Test func topmostNodeBreaksTiesByDeclarationOrderAndRespectsTiers() {
+    // Two prompt cards overlapping at the probe point: same tier → the LATER declaration renders
+    // above and wins the hit; raising the first via `tiers` (selection) flips it — the mirror of
+    // isOccluded's what-you-see-is-what-you-hit rule.
+    let below = promptNode(at: SZPoint(x: 0, y: 0))
+    let above = promptNode(at: SZPoint(x: 10, y: 10))
+    let graph = SZGraph(nodes: [below, above], connections: [])
+    let point = CGPoint(x: 5, y: 5)   // inside both cards
+    #expect(SZGraphCanvasModel.topmostNode(at: point, in: graph)?.id == above.id)
+    #expect(SZGraphCanvasModel.topmostNode(at: point, in: graph, tiers: [below.id: 2])?.id == below.id)
+}
+
+@Test func topmostNodeMissesOffCardPointsAndEmptyCanvas() {
+    let node = promptNode(at: SZPoint(x: 0, y: 0))
+    let graph = SZGraph(nodes: [node], connections: [])
+    #expect(SZGraphCanvasModel.topmostNode(at: CGPoint(x: 10_000, y: 0), in: graph) == nil)
+    #expect(SZGraphCanvasModel.topmostNode(at: .zero, in: SZGraph(nodes: [], connections: [])) == nil)
+}

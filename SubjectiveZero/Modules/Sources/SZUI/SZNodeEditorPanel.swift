@@ -484,15 +484,7 @@ public struct SZNodeEditorPanel: View {
     private func nodeHit(at point: CGPoint) -> SZNode? {
         guard let graph = project?.graph else { return nil }
         let world = SZNodeLayout.worldPoint(screen: point, zoom: zoom, offset: canvasOffset)
-        let indexByID = Dictionary(uniqueKeysWithValues: graph.nodes.enumerated().map { ($1.id, $0) })
-        return graph.nodes
-            .filter { node in
-                guard !hiddenPieces.contains(node.id) else { return false }
-                let size = SZNodeLayout.size(of: node)
-                return CGRect(x: node.position.x - size.width / 2, y: node.position.y - size.height / 2,
-                              width: size.width, height: size.height).contains(world)
-            }
-            .max { (zTier($0.id), indexByID[$0.id] ?? 0) < (zTier($1.id), indexByID[$1.id] ?? 0) }
+        return SZGraphCanvasModel.topmostNode(at: world, in: contentGraph(graph), tiers: raisedTiers)
     }
 
     /// Open the menu at a canvas point: hit-test, update the selection FIRST (an unselected node
@@ -518,10 +510,9 @@ public struct SZNodeEditorPanel: View {
     /// screen), so the ⋯ is a discoverable entry to the same actions as right-click.
     private func openNodeMenu(_ id: SZNodeID) {
         guard let node = project?.graph.node(id: id) else { return }
-        let size = SZNodeLayout.size(of: node)
-        let worldTopRight = CGPoint(x: node.position.x + size.width / 2, y: node.position.y - size.height / 2)
-        let anchor = CGPoint(x: worldTopRight.x * zoom + canvasOffset.width,
-                             y: worldTopRight.y * zoom + canvasOffset.height)
+        let card = SZNodeLayout.cardRect(of: node)
+        let anchor = CGPoint(x: card.maxX * zoom + canvasOffset.width,
+                             y: card.minY * zoom + canvasOffset.height)
         selectNode(id, additive: false)
         presentContextMenu(target: .node(id), anchor: anchor)
     }
@@ -648,14 +639,11 @@ public struct SZNodeEditorPanel: View {
         let a = SZNodeLayout.worldPoint(screen: marquee.start, zoom: zoom, offset: canvasOffset)
         let b = SZNodeLayout.worldPoint(screen: marquee.current, zoom: zoom, offset: canvasOffset)
         let world = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
-        // Select a node if the marquee touches its CARD (center ± SZNodeLayout.size), not just its
-        // center — standard "rubber-band intersects = select". node.position is the card center.
+        // Select a node if the marquee touches its CARD (SZNodeLayout.cardRect), not just its
+        // center — standard "rubber-band intersects = select".
         multiSelection = Set(nodes.filter { node in
             guard !hiddenPieces.contains(node.id) else { return false }
-            let size = SZNodeLayout.size(of: node)
-            let card = CGRect(x: node.position.x - size.width / 2, y: node.position.y - size.height / 2,
-                              width: size.width, height: size.height)
-            return world.intersects(card)
+            return world.intersects(SZNodeLayout.cardRect(of: node))
         }.map(\.id))
         selectedNodeID = nil            // a multi-select supersedes the single chat/edit selection
         selectedConnectionID = nil
@@ -923,15 +911,18 @@ public struct SZNodeEditorPanel: View {
     // we divide out the zoom + pan to land the card center under it. Used by the HUD button and by
     // double-click-on-empty-canvas.
     private func addPromptNode(atScreen screen: CGPoint) {
-        var center = SZNodeLayout.worldPoint(screen: screen, zoom: zoom, offset: canvasOffset)
-        if snapToGrid {
-            center = SZNodeLayout.snappedCenter(
-                center, size: CGSize(width: SZNodeLayout.width, height: SZNodeLayout.promptHeight))
-        }
+        let center = snappedPromptCenter(
+            SZNodeLayout.worldPoint(screen: screen, zoom: zoom, offset: canvasOffset))
         if let id = store.addPromptNode(prompt: "", position: SZPoint(x: center.x, y: center.y)) {
             selectedNodeID = id
             autoEditNodeID = id   // the new card opens into editing + grabs the field (see SZPromptNodeView)
         }
+    }
+
+    /// A prompt-card center honoring the snap pref — the ONE placement rule shared by every creation
+    /// site (HUD/double-click add, file drop, flow-wire spawn).
+    private func snappedPromptCenter(_ center: CGPoint) -> CGPoint {
+        snapToGrid ? SZNodeLayout.snappedCenter(center, size: SZNodeLayout.promptCardSize) : center
     }
 
     // MARK: - File drop → media nodes
@@ -941,11 +932,8 @@ public struct SZNodeEditorPanel: View {
     /// `SZMediaSource` — the same rules `ui_add_source_node` applies. Returns whether ANY media file was
     /// handled: false leaves the drag un-consumed (so a stray .txt just bounces back).
     private func handleFileDrop(_ urls: [URL], at screen: CGPoint) -> Bool {
-        var origin = SZNodeLayout.worldPoint(screen: screen, zoom: zoom, offset: canvasOffset)
-        if snapToGrid {
-            origin = SZNodeLayout.snappedCenter(
-                origin, size: CGSize(width: SZNodeLayout.width, height: SZNodeLayout.promptHeight))
-        }
+        let origin = snappedPromptCenter(
+            SZNodeLayout.worldPoint(screen: screen, zoom: zoom, offset: canvasOffset))
         let specs = SZMediaSource.specs(for: urls, origin: SZPoint(x: origin.x, y: origin.y))
         guard !specs.isEmpty else { return false }
         onCreateMediaNodes(specs)
@@ -1095,10 +1083,7 @@ public struct SZNodeEditorPanel: View {
         // half the (fixed) prompt-node width toward the flow direction.
         var center = wire.current   // already world-space (set by updateWireDrag)
         center.x += wire.source.side == .output ? SZNodeLayout.width / 2 : -SZNodeLayout.width / 2
-        if snapToGrid {
-            center = SZNodeLayout.snappedCenter(
-                center, size: CGSize(width: SZNodeLayout.width, height: SZNodeLayout.promptHeight))
-        }
+        center = snappedPromptCenter(center)
         guard let newID = store.addPromptNode(prompt: "", position: SZPoint(x: center.x, y: center.y))
         else { return }
         let newRef = SZPortRef(node: newID, port: "flow")
@@ -1248,18 +1233,9 @@ public struct SZNodeEditorPanel: View {
         }
     }
 
-    /// World-space bounding box of every node card (`position` is the card CENTER, so each rect is the
-    /// center inset by half its `SZNodeLayout.size`). Nil with no graph / no nodes.
+    /// World-space bounding box of every node card. Nil with no graph / no nodes.
     private func graphWorldBounds() -> CGRect? {
-        guard let nodes = project?.graph.nodes, !nodes.isEmpty else { return nil }
-        var box = CGRect.null
-        for node in nodes {
-            let size = SZNodeLayout.size(of: node)
-            box = box.union(CGRect(x: CGFloat(node.position.x) - size.width / 2,
-                                   y: CGFloat(node.position.y) - size.height / 2,
-                                   width: size.width, height: size.height))
-        }
-        return box.isNull ? nil : box
+        project.flatMap { SZGraphCanvasModel.worldBounds(of: $0.graph) }
     }
 }
 
