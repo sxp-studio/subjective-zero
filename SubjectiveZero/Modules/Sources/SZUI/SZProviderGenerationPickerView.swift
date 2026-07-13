@@ -150,8 +150,11 @@ public struct SZProviderGenerationPickerView: View {
         .help("Agent provider, model, reasoning effort, and fast mode for new runs and chats")
     }
 
-    /// The Codex-shape pill: `[dot] [bolt] <model> · <effort> ⌄`. Falls back to raw tokens when a
-    /// lookup misses so a stale selection stays visible and re-pickable, never blank.
+    /// The Codex-shape pill: `[dot] [bolt] <provider> · <model> · <effort> ⌄`. The provider id leads
+    /// (the tab caption's lowercase convention) because a model label alone stopped identifying the
+    /// backend the moment a BYOK harness joined the registry — the same model label can be served
+    /// by two different providers. Falls back to raw tokens when a lookup misses so a stale
+    /// selection stays visible and re-pickable, never blank.
     private var pill: some View {
         HStack(spacing: 4) {
             if let active, !active.isEnabled {
@@ -175,9 +178,11 @@ public struct SZProviderGenerationPickerView: View {
     private var pillTitle: String {
         guard let active else { return "provider" }
         // Model label lookup with a raw-id fallback — a stale selection stays visible, never blank.
+        // Empty segments drop out: a runtime-catalog provider serves NO model before its first
+        // fetch (selectedModel ""), and the pill should read "pi · Medium", not "pi ·  · Medium".
         let model = active.models.first { $0.id == active.selectedModel }?.label ?? active.selectedModel
-        let effort = active.selectedReasoningEffort.map { " · \(Self.effortLabel($0))" } ?? ""
-        return model + effort
+        let effort = active.selectedReasoningEffort.map { Self.effortLabel($0) } ?? ""
+        return [active.id, model, effort].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     /// Opaque effort token → menu/pill display; unknown tokens pass through raw (still legible,
