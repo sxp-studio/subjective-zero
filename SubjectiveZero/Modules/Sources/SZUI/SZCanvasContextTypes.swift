@@ -3,6 +3,7 @@
 // computes rows: the host derives suggestions (drafted MESSAGES, per the run-UX paradigm — the
 // menu is "what can I say here"), the panel assembles the action rows from its own inputs, and
 // every activation routes back through closures.
+import CoreGraphics
 import Foundation
 import SZCore
 
@@ -26,6 +27,26 @@ public struct SZContextSuggestion: Identifiable, Equatable, Sendable {
         self.id = id
         self.label = label ?? draft.plainText
         self.draft = draft
+    }
+}
+
+/// One open right-click menu: the target under the click, the click point (panel space), and the
+/// suggestion rows SNAPSHOTTED at open (mid-run promotes don't reshuffle an open menu).
+struct SZContextMenuSession: Identifiable {
+    let id = UUID()
+    let target: SZCanvasContextTarget
+    let anchor: CGPoint
+    let suggestions: [SZContextSuggestion]
+
+    /// Shift-clamped placement: the menu opens at the click point and slides inward near the
+    /// right/bottom edges (8pt margin), NSMenu-like.
+    func origin(menuSize: CGSize, in viewSize: CGSize) -> CGPoint {
+        CGPoint(x: max(8, min(anchor.x, viewSize.width - menuSize.width - 8)),
+                y: max(8, min(anchor.y, viewSize.height - menuSize.height - 8)))
+    }
+
+    func frame(menuSize: CGSize, in viewSize: CGSize) -> CGRect {
+        CGRect(origin: origin(menuSize: menuSize, in: viewSize), size: menuSize)
     }
 }
 

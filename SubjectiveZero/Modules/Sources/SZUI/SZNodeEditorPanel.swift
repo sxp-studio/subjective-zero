@@ -85,18 +85,9 @@ public struct SZNodeEditorPanel: View {
     @State private var autoPan = SZEdgeAutoPanDriver()   // edge auto-pan while a node/wire drag is held
     @State private var panEdges = SZEdgeAutoPan.Intensities()   // drives the edge indicator bands
     @FocusState private var canvasFocused: Bool
-    @State private var contextMenu: ContextMenuSession?
+    @State private var contextMenu: SZContextMenuSession?
     @State private var contextMenuSize: CGSize = .zero   // measured; .zero = first frame, drawn invisible
     @State private var dropTargeted = false   // a file drag is hovering the canvas (drop-target highlight)
-
-    /// One open right-click menu: the target under the click, the click point (panel space), and
-    /// the suggestion rows SNAPSHOTTED at open (mid-run promotes don't reshuffle an open menu).
-    private struct ContextMenuSession: Identifiable {
-        let id = UUID()
-        let target: SZCanvasContextTarget
-        let anchor: CGPoint
-        let suggestions: [SZContextSuggestion]
-    }
 
     private struct NodeDrag {
         let primary: SZNodeID                              // the grabbed node (selection anchor)
@@ -456,7 +447,8 @@ public struct SZNodeEditorPanel: View {
     /// standard custom-popover behavior), then a fresh secondary click on the canvas opens a menu.
     private func handleCanvasMouseDown(_ point: CGPoint, isSecondary: Bool, inCanvas: Bool) -> Bool {
         if let session = contextMenu {
-            if menuFrame(session).contains(point), !isSecondary { return false }   // a row click passes through
+            if session.frame(menuSize: contextMenuSize, in: viewSize).contains(point),
+               !isSecondary { return false }   // a row click passes through
             dismissContextMenu()
             guard isSecondary else { return false }
         }
@@ -505,8 +497,8 @@ public struct SZNodeEditorPanel: View {
 
     private func presentContextMenu(target: SZCanvasContextTarget, anchor: CGPoint) {
         contextMenuSize = .zero   // re-measure; the menu stays invisible until it has a size
-        contextMenu = ContextMenuSession(target: target, anchor: anchor,
-                                         suggestions: contextSuggestionsFor(target))
+        contextMenu = SZContextMenuSession(target: target, anchor: anchor,
+                                           suggestions: contextSuggestionsFor(target))
     }
 
     private func dismissContextMenu() {
@@ -526,21 +518,10 @@ public struct SZNodeEditorPanel: View {
         if !valid { dismissContextMenu() }
     }
 
-    /// Shift-clamped placement: the menu opens at the click point and slides inward near the
-    /// right/bottom edges (8pt margin), NSMenu-like.
-    private func menuOrigin(_ session: ContextMenuSession) -> CGPoint {
-        CGPoint(x: max(8, min(session.anchor.x, viewSize.width - contextMenuSize.width - 8)),
-                y: max(8, min(session.anchor.y, viewSize.height - contextMenuSize.height - 8)))
-    }
-
-    private func menuFrame(_ session: ContextMenuSession) -> CGRect {
-        CGRect(origin: menuOrigin(session), size: contextMenuSize)
-    }
-
     @ViewBuilder
     private var contextMenuOverlay: some View {
         if let session = contextMenu {
-            let origin = menuOrigin(session)
+            let origin = session.origin(menuSize: contextMenuSize, in: viewSize)
             SZCanvasContextMenuView(
                 suggestions: session.suggestions,
                 actions: contextActions(for: session.target),
