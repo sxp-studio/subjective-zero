@@ -81,7 +81,7 @@ public struct SZNodeEditorPanel: View {
     @State private var editingNodeID: SZNodeID?
     @State private var autoEditNodeID: SZNodeID?   // a just-added prompt node → its card opens straight into editing
     @State private var drag: NodeDrag?
-    @State private var wire: WireDrag?
+    @State private var wire: SZWireDragSession?
     @State private var autoPan = SZEdgeAutoPanDriver()   // edge auto-pan while a node/wire drag is held
     @State private var panEdges = SZEdgeAutoPan.Intensities()   // drives the edge indicator bands
     @FocusState private var canvasFocused: Bool
@@ -102,17 +102,7 @@ public struct SZNodeEditorPanel: View {
         let primary: SZNodeID                              // the grabbed node (selection anchor)
         let members: [(id: SZNodeID, start: CGPoint)]      // all nodes moving + their start positions
         var translation: CGSize = .zero                    // gesture translation, screen (szcanvas) space
-        var panAccum: CGSize = .zero                       // Σ auto-pan canvasOffset deltas this drag
-    }
-    private struct WireDrag {
-        let grabbed: SZSocket   // the socket the gesture started on (gesture identity across ticks)
-        let source: SZSocket    // the preview wire's fixed anchor — the KEPT end's socket for a pickup
-        let start: CGPoint      // world point where the grab began (click/wobble guard)
-        var current: CGPoint
-        var lastScreen: CGPoint // last cursor position, screen (szcanvas) space — auto-pan re-derivation
-        var target: SZSocket?
-        var picked: (id: SZConnectionID, end: SZConnectionEnd, original: SZPortRef)?   // re-routing an edge
-        var moved = false       // passed the click guard — a plain click must not drop/disconnect
+        var panAccum: CGSize = .zero                       // Σ auto-pan camera-offset deltas this drag
     }
 
     private static let space = "szcanvas"
@@ -790,10 +780,12 @@ public struct SZNodeEditorPanel: View {
     /// and never touches the frozen socket layer, so it's as cheap as the preview. Gated on `wire.moved`
     /// so a bare click (sub-threshold wobble) doesn't flash rings.
     @ViewBuilder
-    private func wireTargetsOverlay(_ wire: WireDrag) -> some View {
+    private func wireTargetsOverlay(_ wire: SZWireDragSession) -> some View {
         if wire.moved, let graph = project?.graph {
             let display = displayGraph(graph)
-            ForEach(validTargets(for: wire.source, in: display)) { socket in
+            ForEach(SZGraphCanvasModel.validTargets(for: wire.source, in: display, tiers: raisedTiers,
+                                                    pickedConnectionID: wire.picked?.id,
+                                                    isLocked: isLocked)) { socket in
                 SZWireTargetHighlight(kind: socket.kind, isActiveTarget: socket.id == wire.target?.id)
                     .position(socket.point)
             }
@@ -824,7 +816,7 @@ public struct SZNodeEditorPanel: View {
             .allowsHitTesting(false)
     }
 
-    private func wirePreview(_ wire: WireDrag) -> some View {
+    private func wirePreview(_ wire: SZWireDragSession) -> some View {
         // The bezier's control points assume `from` exits an output (rightward) and `to` enters an
         // input (leftward) — so when the fixed anchor is an INPUT socket, the free end is the `from`.
         let free = wire.target?.point ?? wire.current
@@ -982,22 +974,8 @@ public struct SZNodeEditorPanel: View {
         guard !isLocked(source.nodeID) else { return }   // can't wire a locked (in-progress) node
         let world = camera.worldPoint(screen: location)
         if wire?.grabbed.id != source.id {
-            // Grabbing a CONNECTED data input picks its wire up to re-route: the preview
-            // re-anchors to the far output socket and the original edge hides until drop.
-            // Everything else (outputs, flow, unwired inputs) starts a new wire, as before —
-            // a flow-in holds N edges, so its wires are picked up along their paths instead.
-            if let conn = SZGraphCanvasModel.incomingDataConnection(to: source, in: graph),
-               let anchor = SZGraphCanvasModel.pickupAnchor(detaching: .to, of: conn, in: graph) {
-                // Same both-ends rule as the edge-path pickup: re-routing this wire would
-                // unwire its far node too, so a locked source end blocks the pickup.
-                guard !isLocked(conn.from.node) else { return }
-                wire = WireDrag(grabbed: source, source: anchor, start: world, current: world,
-                                lastScreen: location, target: nil,
-                                picked: (conn.id, .to, conn.to))
-            } else {
-                wire = WireDrag(grabbed: source, source: source, start: world, current: world,
-                                lastScreen: location, target: nil, picked: nil)
-            }
+            wire = SZWireDragSession.begin(from: source, atWorld: world, screen: location,
+                                           in: graph, isLocked: isLocked)
         } else {
             wire?.lastScreen = location
             updateWireDrag(to: world, in: graph)
@@ -1005,21 +983,15 @@ public struct SZNodeEditorPanel: View {
         feedAutoPan(cursor: location)
     }
 
-    /// Grab anywhere ALONG an edge (data or flow) to pick it up: the end nearer the grab detaches
-    /// (nearer the input → re-route the input end, nearer the output → re-route the source) and the
-    /// preview anchors at the kept end. Graph re-derived per event (see `socketDragChanged`).
+    /// Grab anywhere ALONG an edge (data or flow) to pick it up — the session picks the detachable
+    /// end. Graph re-derived per event (see `socketDragChanged`).
     private func edgeDragChanged(_ connection: SZConnection, at screen: CGPoint) {
         guard let raw = project?.graph else { return }
         let graph = displayGraph(raw)
         guard !isLocked(connection.from.node), !isLocked(connection.to.node) else { return }
         let world = camera.worldPoint(screen: screen)
         if wire?.picked?.id != connection.id {
-            guard let end = SZGraphCanvasModel.detachableEnd(of: connection, grabbedAt: world, in: graph),
-                  let anchor = SZGraphCanvasModel.pickupAnchor(detaching: end, of: connection, in: graph)
-            else { return }
-            wire = WireDrag(grabbed: anchor, source: anchor, start: world, current: world,
-                            lastScreen: screen, target: nil,
-                            picked: (connection.id, end, end == .to ? connection.to : connection.from))
+            wire = SZWireDragSession.begin(along: connection, atWorld: world, screen: screen, in: graph)
         } else {
             wire?.lastScreen = screen
             updateWireDrag(to: world, in: graph)
@@ -1027,103 +999,40 @@ public struct SZNodeEditorPanel: View {
         feedAutoPan(cursor: screen)
     }
 
-    /// Shared per-tick update for both wire gestures: track the cursor, arm the click guard once the
-    /// grab has really moved (world-space, zoom-aware), and snap to the nearest legal target.
     private func updateWireDrag(to world: CGPoint, in graph: SZGraph) {
-        guard let source = wire?.source, let start = wire?.start else { return }
-        wire?.current = world
-        if hypot(world.x - start.x, world.y - start.y) > 8 / max(camera.zoom, 0.1) { wire?.moved = true }
-        wire?.target = validTarget(for: source, at: world, in: graph)
+        wire?.update(toWorld: world, zoom: camera.zoom, in: graph, tiers: raisedTiers,
+                     isLocked: isLocked)
     }
 
-    /// Shared drop for both wire gestures: a picked-up edge re-routes (or disconnects on an empty
-    /// drop), a fresh wire connects.
+    /// Shared drop for both wire gestures: the session decides (`outcome`), the panel dispatches —
+    /// re-route / disconnect / connect through the host (persists + reloads; a connect swaps out an
+    /// occupied data input), spawn directly on the store (authoring-only — flow is not a runtime
+    /// construct, so no host round-trip / reload, like `addPromptNode(atScreen:)`).
     private func endWireDrag() {
         defer { wire = nil }
-        guard let wire else { return }
-        if let picked = wire.picked {
-            guard wire.moved else { return }                 // plain click / sub-threshold wobble: no-op
-            if let target = wire.target {
-                let ref = SZPortRef(node: target.nodeID, port: target.port)
-                // Dropping back on the original port restores the wire untouched. Flow compares nodes
-                // only: the socket port is "" but a flow ref's port may be "flow" (ensureFlow).
-                let unchanged = wire.source.kind == .flow
-                    ? ref.node == picked.original.node : ref == picked.original
-                if !unchanged { onReconnectConnection(picked.id, picked.end, ref) }
+        guard let outcome = wire?.outcome(snapToGrid: snapToGrid) else { return }
+        switch outcome {
+        case .none:
+            break
+        case let .reconnect(id, end, ref):
+            onReconnectConnection(id, end, ref)
+        case let .disconnect(id):
+            onDeleteConnection(id)
+        case let .connect(from, to, kind):
+            onConnect(from, to, kind)
+        case let .spawnPromptNode(center, source, downstream):
+            guard let newID = store.addPromptNode(prompt: "",
+                                                  position: SZPoint(x: center.x, y: center.y))
+            else { break }
+            let newRef = SZPortRef(node: newID, port: "flow")
+            if downstream {
+                store.connect(from: source, to: newRef, kind: .flow)   // source feeds new
             } else {
-                onDeleteConnection(picked.id)                // dropped on empty canvas: disconnect
+                store.connect(from: newRef, to: source, kind: .flow)   // new feeds source
             }
-        } else if let target = wire.target {
-            let out = wire.source.side == .output ? wire.source : target
-            let inp = wire.source.side == .input ? wire.source : target
-            // Through the host: persists + reloads (like delete), swaps out an occupied data input.
-            onConnect(SZPortRef(node: out.nodeID, port: out.port),
-                      SZPortRef(node: inp.nodeID, port: inp.port), out.kind)
-        } else if wire.moved, wire.source.kind == .flow {
-            spawnNodeFromWire(wire)          // fresh flow wire dropped on empty canvas → generate a node
+            selectedNodeID = newID
+            autoEditNodeID = newID   // the new card opens into editing (see SZPromptNodeView)
         }
-    }
-
-    /// A fresh FLOW (intent) wire dropped on empty canvas spawns a new prompt node there and joins it
-    /// with a flow edge — "drag into space" means "generate something here." Direction follows the
-    /// dragged socket: from a flow-OUT the new node is downstream (source → new); from a flow-IN it is
-    /// upstream (new → source). Authoring-only (direct store, like `addPromptNode(atScreen:)`) — flow is
-    /// not a runtime construct, so no host round-trip / reload.
-    private func spawnNodeFromWire(_ wire: WireDrag) {
-        // Anchor the new node by the EDGE the wire lands on, not its centroid: drop from a flow-OUT and
-        // the node grows rightward with its LEFT edge (input side) at the drop point; drop from a flow-IN
-        // and it grows leftward with its RIGHT edge at the drop. So the wire terminates cleanly at the
-        // node's socket instead of burying the drop point in the card's middle. Shift the centroid by
-        // half the (fixed) prompt-node width toward the flow direction.
-        var center = wire.current   // already world-space (set by updateWireDrag)
-        center.x += wire.source.side == .output ? SZNodeLayout.width / 2 : -SZNodeLayout.width / 2
-        center = snappedPromptCenter(center)
-        guard let newID = store.addPromptNode(prompt: "", position: SZPoint(x: center.x, y: center.y))
-        else { return }
-        let newRef = SZPortRef(node: newID, port: "flow")
-        let srcRef = SZPortRef(node: wire.source.nodeID, port: "flow")
-        if wire.source.side == .output {
-            store.connect(from: srcRef, to: newRef, kind: .flow)   // source feeds new (downstream)
-        } else {
-            store.connect(from: newRef, to: srcRef, kind: .flow)   // new feeds source (upstream)
-        }
-        selectedNodeID = newID
-        autoEditNodeID = newID   // the new card opens into editing (see SZPromptNodeView)
-    }
-
-    /// Nearest socket to `point` (within a zoom-aware radius) that can legally connect to `source`.
-    private func validTarget(for source: SZSocket, at point: CGPoint, in graph: SZGraph) -> SZSocket? {
-        let radius = 28 / max(camera.zoom, 0.1)
-        return SZGraphCanvasModel.sockets(in: graph)
-            .filter { isValidTarget($0, for: source, in: graph) }
-            .map { (socket: $0, d: hypot($0.point.x - point.x, $0.point.y - point.y)) }
-            .filter { $0.d <= radius }
-            .min { $0.d < $1.d }?.socket
-    }
-
-    /// Whether `socket` is a valid drop target for the in-flight wire anchored at `source` — the
-    /// per-socket test `validTarget` applies, minus the radius/nearest pick. Single source of truth
-    /// shared by the snap (validTarget) and the compatible-slot highlight (validTargets), so a
-    /// highlighted dot is always one a drop would really connect.
-    private func isValidTarget(_ socket: SZSocket, for source: SZSocket, in graph: SZGraph) -> Bool {
-        guard !isLocked(socket.nodeID),
-              SZGraphCanvasModel.canConnect(source, socket, in: graph),
-              // A dot buried under a higher card is invisible and un-grabbable — it must not
-              // silently catch a drop either.
-              !SZGraphCanvasModel.isOccluded(socket, in: graph, tiers: raisedTiers)
-        else { return false }
-        // Connecting to an occupied data input SWAPS its edge out — refuse when the displaced
-        // edge touches a locked node (same rule as deleting / picking that wire up directly).
-        // The currently picked-up edge doesn't count: dropping back restores it.
-        if let occupied = SZGraphCanvasModel.incomingDataConnection(to: socket, in: graph),
-           occupied.id != wire?.picked?.id, isLocked(occupied.from.node) { return false }
-        return true
-    }
-
-    /// Every socket a drop would validly connect to (no radius filter) — drives the compatible-slot
-    /// highlight drawn while a wire is being dragged.
-    private func validTargets(for source: SZSocket, in graph: SZGraph) -> [SZSocket] {
-        SZGraphCanvasModel.sockets(in: graph).filter { isValidTarget($0, for: source, in: graph) }
     }
 
     // MARK: - Pan / zoom
