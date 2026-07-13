@@ -3,6 +3,7 @@
 // codex in: --mcp-config JSON for the nc bridge, and a host-minted --session-id UUID. A chat turn
 // continues an existing session with `--resume <id>` (the same id we minted) instead of `--session-id`.
 import Foundation
+import SZCore
 
 public struct SZClaudeProvider: SZProvider {
     public init() {}
@@ -135,9 +136,15 @@ public struct SZClaudeProvider: SZProvider {
     }
 }
 
-/// Parses claude's stream-json. `assistant` events carry the agent's narration (`text` blocks) and the
-/// tools it calls (`tool_use`) → `.activity`. The final answer is held back (the last text block / the
-/// `result` event) and emitted once as `.reply` at the end, so it never echoes into the trace.
+/// Parses claude's stream-json. `assistant` events carry the agent's narration (`text` blocks →
+/// `.thinking` once superseded) and the tools it calls (`tool_use` → `.toolCall`). The final answer is
+/// held back (the last text block / the `result` event) and emitted once as `.reply` at the end, so it
+/// never echoes into the trace.
+///
+/// `thinking` content blocks arrive with EMPTY text in headless mode — verified 2.1.207 on Fable 5
+/// AND Opus 4.8, in the aggregate `assistant` event and equally in `--include-partial-messages`
+/// `thinking_delta` stream events (only the signature ships). So claude's `.thinking` is narration
+/// only; a non-empty `thinking` block would be surfaced below, but none has been observed.
 final class SZClaudeStreamConsumer: SZAgentStreamConsumer {
     private var pendingReply: String?   // latest assistant text — the reply candidate, flushed at the end
 
@@ -153,11 +160,16 @@ final class SZClaudeStreamConsumer: SZAgentStreamConsumer {
                 case "text":
                     let t = (block["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     if t.isEmpty { break }
-                    if let prior = pendingReply { events.append(.activity(prior)) }   // superseded → narration
+                    if let prior = pendingReply { events.append(.thinking(prior)) }   // superseded → narration
                     pendingReply = t
                 case "tool_use":
-                    if let prior = pendingReply { events.append(.activity(prior)); pendingReply = nil }
-                    events.append(.activity("→ " + Self.friendlyTool(block["name"] as? String ?? "tool")))
+                    if let prior = pendingReply { events.append(.thinking(prior)); pendingReply = nil }
+                    events.append(.toolCall(name: Self.friendlyTool(block["name"] as? String ?? "tool")))
+                case "thinking":
+                    // Empty in every recorded headless stream (see header) — surfaced anyway for the
+                    // day the CLI ships the text. Must not clobber the held reply candidate.
+                    let t = (block["thinking"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !t.isEmpty { events.append(.thinking(t)) }
                 default: break
                 }
             }
@@ -172,7 +184,21 @@ final class SZClaudeStreamConsumer: SZAgentStreamConsumer {
             // "standard" on EVERY turn, fast mode requested or not.
             if obj["fast_mode_state"] as? String == "on",
                let speed = (obj["usage"] as? [String: Any])?["speed"] as? String, speed != "fast" {
-                events.append(.activity("fast mode requested — served \(speed)"))
+                events.append(.thinking("fast mode requested — served \(speed)"))
+            }
+            // The turn's usage rides the result event (recorded from 2.1.207). Anthropic reports the
+            // cache traffic SEPARATELY from input_tokens, so the total prompt side is their sum and
+            // the cached share is read + creation (the pricing distinction between the two is
+            // already carried by total_cost_usd).
+            if let usage = obj["usage"] as? [String: Any],
+               let output = usage["output_tokens"] as? Int {
+                let cached = (usage["cache_read_input_tokens"] as? Int ?? 0)
+                    + (usage["cache_creation_input_tokens"] as? Int ?? 0)
+                events.append(.usage(SZTokenUsage(
+                    inputTokens: (usage["input_tokens"] as? Int ?? 0) + cached, outputTokens: output,
+                    cachedInputTokens: cached > 0 ? cached : nil,
+                    costUSD: obj["total_cost_usd"] as? Double
+                )))
             }
             let r = (obj["result"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let reply = r.isEmpty ? (pendingReply ?? "") : r

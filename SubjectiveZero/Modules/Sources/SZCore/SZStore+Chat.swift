@@ -32,6 +32,11 @@ extension SZStore {
         mutateMessage(messageID, in: scope) { $0.duration = duration }
     }
 
+    /// Record the token usage a turn's CLI reported — shown next to the duration.
+    public func setChatUsage(_ usage: SZTokenUsage, _ messageID: UUID, in scope: SZChatScope) {
+        mutateMessage(messageID, in: scope) { $0.usage = usage }
+    }
+
     /// Replace ALL transcripts at once — the project-open restore path (the host feeds it
     /// `SZChatTranscriptIO.loadAll` filtered to live scopes). One @Observable fire.
     public func restoreChat(_ transcripts: [String: [SZChatMessage]]) {

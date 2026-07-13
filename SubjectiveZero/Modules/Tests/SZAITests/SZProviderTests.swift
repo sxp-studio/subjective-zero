@@ -488,23 +488,45 @@ private extension Array where Element == String {
 }
 
 /// Stateful stream consumers (provider-specific parsing, common API). The final answer is held and
-/// emitted as `.reply` only at the end (never echoed into the trace); narration + tools → `.activity`.
+/// emitted as `.reply` only at the end (never echoed into the trace); narration → `.thinking`,
+/// tools → `.toolCall`, and the turn's reported tokens → `.usage`.
 @Test func claudeStreamConsumerClassifiesReplyAndTrace() {
     let c = SZClaudeProvider().makeStreamConsumer()
     // narration text is held (reply candidate) — no event yet
     #expect(c.consume(#"{"type":"assistant","message":{"content":[{"type":"text","text":"working on it"}]}}"#).isEmpty)
-    // a tool call flushes the prior narration → activity, then the tool → activity (real name)
+    // a tool call flushes the prior narration → thinking, then the tool itself (real name)
     #expect(c.consume(#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__subz__agent_compile_node"}]}}"#)
-            == [.activity("working on it"), .activity("→ agent_compile_node")])
+            == [.thinking("working on it"), .toolCall(name: "agent_compile_node")])
     // the result event is the final answer → reply (not echoed into the trace)
     #expect(c.consume(#"{"type":"result","result":"all done"}"#) == [.reply("all done")])
 }
 
-/// Fable 5 streams a `thinking` block ahead of its text — recorded verbatim from a live
-/// `claude -p --model claude-fable-5` run, `thinking` empty because the CLI omits the summary by
-/// default. It must stay invisible: no event, and no clobbering of the held reply candidate.
-/// Fable's thinking is always on, so it emits one where Opus 4.8 and Sonnet 5 at the same `--effort
-/// high` emit none (counted live: 1, 0, 0) — shipping Fable is what first put this shape on the wire.
+/// The result event's usage becomes one `.usage` — shape recorded verbatim from a live 2.1.207 run.
+/// Anthropic reports cache traffic SEPARATELY from `input_tokens` (2 fresh + 14925 read + 6580
+/// written here), so the total prompt side is the sum — reporting the bare `input_tokens` would
+/// claim a 21.5k-token turn cost 2 — and the cached share (read + creation) is preserved beside it.
+@Test func claudeStreamConsumerReportsUsage() {
+    let c = SZClaudeProvider().makeStreamConsumer()
+    #expect(c.consume(#"{"type":"result","result":"10","total_cost_usd":0.16683,"usage":{"input_tokens":2,"cache_creation_input_tokens":6580,"cache_read_input_tokens":14925,"output_tokens":393,"speed":"standard"}}"#)
+            == [.usage(SZTokenUsage(inputTokens: 21507, outputTokens: 393, cachedInputTokens: 21505, costUSD: 0.16683)), .reply("10")])
+}
+
+/// A NON-empty thinking block must surface as `.thinking` without clobbering the held reply
+/// candidate. Synthetic fixture: the CLI has only ever shipped empty blocks headless (see the
+/// redaction note on the consumer), so this pins the surfacing branch for the day it starts.
+@Test func claudeStreamConsumerSurfacesNonEmptyThinkingBlocks() {
+    let c = SZClaudeProvider().makeStreamConsumer()
+    #expect(c.consume(#"{"type":"assistant","message":{"content":[{"type":"text","text":"working on it"}]}}"#).isEmpty)
+    #expect(c.consume(#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"weighing X vs Y","signature":"CAIS"}]}}"#)
+            == [.thinking("weighing X vs Y")])
+    #expect(c.finish() == [.reply("working on it")])
+}
+
+/// `thinking` blocks stream with EMPTY text in headless mode — recorded verbatim from live
+/// `claude -p` runs (2.1.207: Fable 5 and Opus 4.8 both, aggregate events and
+/// `--include-partial-messages` thinking_deltas alike; only the signature ships). An empty block
+/// must stay invisible: no event, and no clobbering of the held reply candidate. A NON-empty block
+/// would surface as `.thinking` — none has been observed yet.
 @Test func claudeStreamConsumerIgnoresFableThinkingBlocks() {
     let c = SZClaudeProvider().makeStreamConsumer()
     #expect(c.consume(#"{"type":"assistant","message":{"content":[{"type":"text","text":"working on it"}]}}"#).isEmpty)
@@ -523,7 +545,7 @@ private extension Array where Element == String {
     // Enabled, served standard — the downgrade a user must be told about.
     let downgraded = SZClaudeProvider().makeStreamConsumer()
     #expect(downgraded.consume(#"{"type":"result","result":"done","fast_mode_state":"on","usage":{"speed":"standard"}}"#)
-            == [.activity("fast mode requested — served standard"), .reply("done")])
+            == [.thinking("fast mode requested — served standard"), .reply("done")])
 
     // Enabled and served fast: nothing to report.
     let served = SZClaudeProvider().makeStreamConsumer()
@@ -536,33 +558,50 @@ private extension Array where Element == String {
     #expect(ordinary.consume(#"{"type":"result","result":"done","fast_mode_state":"off","usage":{"speed":"standard"}}"#)
             == [.reply("done")])
 
-    // Older/leaner result events carry neither key.
+    // Older/leaner result events carry neither key (usage with tokens still reports).
     let plain = SZClaudeProvider().makeStreamConsumer()
-    #expect(plain.consume(#"{"type":"result","result":"done","usage":{"output_tokens":4}}"#) == [.reply("done")])
+    #expect(plain.consume(#"{"type":"result","result":"done","usage":{"output_tokens":4}}"#)
+            == [.usage(SZTokenUsage(inputTokens: 0, outputTokens: 4)), .reply("done")])
 }
 
 @Test func codexStreamConsumerClassifiesReplyAndTrace() {
     let c = SZCodexProvider().makeStreamConsumer()
-    // a preamble agent_message is held; a tool call streams as activity (real tool name)
+    // a preamble agent_message is held; a tool call streams as a toolCall (real tool name)
     #expect(c.consume(#"{"type":"item.completed","item":{"type":"agent_message","text":"I'll do X"}}"#).isEmpty)
     #expect(c.consume(#"{"type":"item.completed","item":{"type":"mcp_tool_call","server":"subz","tool":"agent_compile_node"}}"#)
-            == [.activity("→ agent_compile_node")])
+            == [.toolCall(name: "agent_compile_node")])
+    // a reasoning summary is codex's actual thinking
+    #expect(c.consume(#"{"type":"item.completed","item":{"type":"reasoning","text":"Considering X vs Y"}}"#)
+            == [.thinking("Considering X vs Y")])
     // a second agent_message supersedes the preamble → preamble becomes narration
-    #expect(c.consume(#"{"type":"item.completed","item":{"type":"agent_message","text":"done"}}"#) == [.activity("I'll do X")])
+    #expect(c.consume(#"{"type":"item.completed","item":{"type":"agent_message","text":"done"}}"#) == [.thinking("I'll do X")])
     // finish flushes the final message as the reply
     #expect(c.finish() == [.reply("done")])
 }
 
+/// The final `turn.completed` event carries the turn's usage — shape recorded verbatim from a live
+/// 0.144.1 run. `cached_input_tokens` is a SUBSET of `input_tokens` (OpenAI's convention, opposite
+/// of Anthropic's), so input passes through unsummed; `reasoning_output_tokens` is reported even
+/// when the turn emitted no `reasoning` summary item (this run: 46 reasoning tokens, zero items).
+@Test func codexStreamConsumerReportsUsageFromTurnCompleted() {
+    let c = SZCodexProvider().makeStreamConsumer()
+    #expect(c.consume(#"{"type":"turn.completed","usage":{"input_tokens":13305,"cached_input_tokens":10496,"output_tokens":53,"reasoning_output_tokens":46}}"#)
+            == [.usage(SZTokenUsage(inputTokens: 13305, outputTokens: 53, cachedInputTokens: 10496, reasoningOutputTokens: 46))])
+    // A turn.completed with no usable usage stays silent instead of fabricating zeros.
+    #expect(c.consume(#"{"type":"turn.completed"}"#).isEmpty)
+    #expect(c.consume(#"{"type":"turn.completed","usage":{"input_tokens":5}}"#).isEmpty)
+}
+
 /// grok streams token-level chunks (recorded from grok 0.2.93 streaming-json), so the consumer
-/// accumulates: thought chunks flush as ONE `.activity` when text starts (per-token events would
+/// accumulates: thought chunks flush as ONE `.thinking` when text starts (per-token events would
 /// spam the trace), text accumulates as the reply candidate, and a NEW thought block after text
 /// demotes that text to narration — same reply/trace split as claude/codex.
 @Test func grokStreamConsumerBatchesThoughtChunksAndAccumulatesReply() {
     let c = SZGrokProvider().makeStreamConsumer()
     #expect(c.consume(#"{"type":"thought","data":"The"}"#).isEmpty)
     #expect(c.consume(#"{"type":"thought","data":" user wants OK"}"#).isEmpty)
-    // thought → text transition flushes the batched thought as one activity
-    #expect(c.consume(#"{"type":"text","data":"hello"}"#) == [.activity("The user wants OK")])
+    // thought → text transition flushes the batched thought as one thinking event
+    #expect(c.consume(#"{"type":"text","data":"hello"}"#) == [.thinking("The user wants OK")])
     #expect(c.consume(#"{"type":"text","data":" from grok"}"#).isEmpty)
     // the end event is metadata, not a flush point (finish() is)
     #expect(c.consume(#"{"type":"end","stopReason":"EndTurn","sessionId":"abc"}"#).isEmpty)
@@ -574,8 +613,8 @@ private extension Array where Element == String {
     let c = SZGrokProvider().makeStreamConsumer()
     #expect(c.consume(#"{"type":"text","data":"I'll check the file"}"#).isEmpty)
     // a new reasoning block after text → that text was narration, not the answer
-    #expect(c.consume(#"{"type":"thought","data":"Now the real answer"}"#) == [.activity("I'll check the file")])
-    #expect(c.consume(#"{"type":"text","data":"42"}"#) == [.activity("Now the real answer")])
+    #expect(c.consume(#"{"type":"thought","data":"Now the real answer"}"#) == [.thinking("I'll check the file")])
+    #expect(c.consume(#"{"type":"text","data":"42"}"#) == [.thinking("Now the real answer")])
     #expect(c.finish() == [.reply("42")])
 }
 
@@ -585,12 +624,12 @@ private extension Array where Element == String {
     let c = SZGrokProvider().makeStreamConsumer()
     let rawTab = "{\"type\":\"thought\",\"data\":\"col1\tcol2\"}"   // literal 0x09 inside the value
     #expect(c.consume(rawTab).isEmpty)
-    #expect(c.finish() == [.activity("col1\tcol2")])
+    #expect(c.finish() == [.thinking("col1\tcol2")])
 
     // An error event surfaces in the trace (the run's failure still rides the exit code).
     let e = SZGrokProvider().makeStreamConsumer()
     #expect(e.consume(#"{"type":"error","message":"Couldn't start session"}"#)
-            == [.activity("⚠ Couldn't start session")])
+            == [.thinking("⚠ Couldn't start session")])
 }
 
 // MARK: - pi (dynamic catalog + staged MCP bridge extension; fixtures recorded from pi 0.80.6)
@@ -807,21 +846,22 @@ private let piRPCCatalogLoggedOut = """
 }
 
 /// pi streams complete messages (`message_end`) — the consumer classifies those, never the
-/// token-level deltas. Assistant text is held as the reply candidate, thinking → activity, tool
-/// starts carry the real tool name, and a superseded text demotes to narration — the same
-/// reply/trace split as claude/codex/grok. Fixture lines follow the recorded event shapes.
+/// token-level deltas. Assistant text is held as the reply candidate, thinking blocks carry REAL
+/// reasoning text (no CLI-side redaction) → `.thinking`, tool starts carry the real tool name, and
+/// a superseded text demotes to narration — the same reply/trace split as claude/codex/grok.
+/// Fixture lines follow the recorded event shapes.
 @Test func piStreamConsumerClassifiesReplyAndTrace() {
     let c = SZPiProvider().makeStreamConsumer()
     // header, lifecycle, user echo, and deltas are all silent
     #expect(c.consume(#"{"type":"session","version":3,"id":"abc"}"#).isEmpty)
     #expect(c.consume(#"{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#).isEmpty)
     #expect(c.consume(#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"O"}}"#).isEmpty)
-    // an intermediate assistant message: thinking → activity; its toolCall block is silent
+    // an intermediate assistant message: thinking text surfaces; its toolCall block is silent
     // (tool_execution_start carries the name)
     #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"toolUse","content":[{"type":"thinking","thinking":"need the graph"},{"type":"toolCall","id":"call_1","name":"agent_read_graph","arguments":{}}]}}"#)
-            == [.activity("need the graph")])
+            == [.thinking("need the graph")])
     #expect(c.consume(#"{"type":"tool_execution_start","toolCallId":"call_1","toolName":"agent_read_graph","args":{}}"#)
-            == [.activity("→ agent_read_graph")])
+            == [.toolCall(name: "agent_read_graph")])
     #expect(c.consume(#"{"type":"message_end","message":{"role":"toolResult","content":[{"type":"text","text":"GRAPH"}]}}"#).isEmpty)
     // the final assistant text is held, and finish() flushes it exactly once
     #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"done: 3 nodes"}]}}"#).isEmpty)
@@ -834,19 +874,19 @@ private let piRPCCatalogLoggedOut = """
     #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"toolUse","content":[{"type":"text","text":"I'll check the file"}]}}"#).isEmpty)
     // a later assistant message supersedes the held text → narration
     #expect(c.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"42"}]}}"#)
-            == [.activity("I'll check the file")])
+            == [.thinking("I'll check the file")])
     #expect(c.finish() == [.reply("42")])
 
     // A failed turn's error surfaces in the trace; the run's failure rides parse(), not this.
     let e = SZPiProvider().makeStreamConsumer()
     #expect(e.consume(#"{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"Codex error: model not supported","content":[]}}"#)
-            == [.activity("⚠ Codex error: model not supported")])
+            == [.thinking("⚠ Codex error: model not supported")])
     #expect(e.finish().isEmpty)
 
     // auto_retry_start (transient backend error, pi retries itself) is trace-worthy.
     let r = SZPiProvider().makeStreamConsumer()
     #expect(r.consume(#"{"type":"auto_retry_start","attempt":1,"errorMessage":"overloaded"}"#)
-            == [.activity("⚠ retrying: overloaded")])
+            == [.thinking("⚠ retrying: overloaded")])
     // stderr warnings interleave in the merged stream (e.g. the "creating a new session" notice) —
     // non-JSON lines must skip, never throw or leak into the trace.
     #expect(r.consume("Warning: No project session found with id 'x'; creating a new session with that id.").isEmpty)

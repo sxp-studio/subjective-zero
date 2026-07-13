@@ -6,7 +6,7 @@
 // The pipeline is order-preserving: provider stdout arrives off-main per chunk → an AsyncStream →
 // line-buffered → the provider's own stream consumer (claude stream-json vs codex jsonl) → classified
 // `SZAgentStreamEvent`s → appended to the scope's transcript message on the MainActor. The provider owns
-// the parsing; the host stays provider-agnostic (just routes `.reply`/`.activity`).
+// the parsing; the host stays provider-agnostic (just routes the classified events).
 import Foundation
 import SZAI
 import SZCore
@@ -32,7 +32,9 @@ extension SZHost {
             for event in events {
                 switch event {
                 case .reply(let text): store.appendChatText(text, to: assistantID, in: scope)
-                case .activity(let text): store.appendChatThinking(text + "\n", to: assistantID, in: scope)
+                case .thinking(let text): store.appendChatThinking(text + "\n", to: assistantID, in: scope)
+                case .toolCall(let name): store.appendChatThinking("→ \(name)\n", to: assistantID, in: scope)
+                case .usage(let usage): store.setChatUsage(usage, assistantID, in: scope)
                 }
             }
         }

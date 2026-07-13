@@ -557,7 +557,11 @@ public struct SZChatPanel: View {
                         // (send / stop-turn / stop-run); a second stop that wanders is worse.
                     }
                 } else if let duration = message.duration, message.role == .assistant {
-                    Text("Worked for \(szFormatDurationCompact(duration))")   // final time, kept below the reply
+                    // Final time + tokens, kept below the reply. Not every CLI reports usage.
+                    let tokens = message.usage.map {
+                        " · \(szFormatTokensCompact($0.inputTokens)) in / \(szFormatTokensCompact($0.outputTokens)) out"
+                    } ?? ""
+                    Text("Worked for \(szFormatDurationCompact(duration))\(tokens)")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
@@ -925,6 +929,17 @@ private func szFormatDuration(_ interval: TimeInterval) -> String {
 private func szFormatDurationCompact(_ interval: TimeInterval) -> String {
     let s = max(0, Int(interval.rounded()))
     return s < 60 ? "\(s)s" : "\(s / 60)m \(s % 60)s"
+}
+
+/// Compact token count for the usage readout next to the duration: `393`, `21.5k`, `1.2M`.
+/// The k→M boundary sits at 999,950 so `%.1f` can't round a k-value up to "1000.0k".
+/// `internal` (not private) for the unit tests.
+func szFormatTokensCompact(_ tokens: Int) -> String {
+    switch tokens {
+    case ..<1000: return "\(tokens)"
+    case ..<999_950: return String(format: "%.1fk", Double(tokens) / 1000)
+    default: return String(format: "%.1fM", Double(tokens) / 1_000_000)
+    }
 }
 
 /// Whether a file should preview as an image (by its extension's UTType) — the composer's pending

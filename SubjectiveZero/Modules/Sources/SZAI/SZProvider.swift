@@ -89,10 +89,16 @@ public struct SZAgentRunResult: Sendable {
     public var outcome: SZAgentOutcome
 }
 
-/// A classified piece of a provider's output stream, for the chat transcript.
+/// A classified piece of a provider's output stream, for the chat transcript. `thinking` and
+/// `toolCall` both land in the thinking section today, but are distinct cases so the seam carries
+/// what the CLI actually said — tool-call presentation (the "→ " prefix) belongs to the host's
+/// render site, not to consumers. (Provider notes/warnings still ride `.thinking` as prefixed
+/// text; a `.notice` case is unearned while they render identically.)
 public enum SZAgentStreamEvent: Sendable, Equatable {
-    case reply(String)      // text of the final answer — shown in the transcript
-    case activity(String)   // a working-trace line (tool call / reasoning) — shown in the thinking section
+    case reply(String)                // text of the final answer — shown in the transcript
+    case thinking(String)             // reasoning / superseded narration / provider notes
+    case toolCall(name: String)       // one tool invocation, by (de-namespaced) tool name
+    case usage(SZTokenUsage)          // the turn's token usage, once, where the CLI reports it
 }
 
 /// A stateful, per-turn parser for one provider's output stream. The classification logic lives in the
@@ -215,7 +221,8 @@ public protocol SZProvider: Sendable {
     func parse(output: String, exitCode: Int32, preallocatedSessionID: String?) -> SZAgentOutcome
 
     /// A fresh stream consumer for one chat turn — parses this provider's output into chat events
-    /// (`.reply` / `.activity`). Provider-specific parsing, common API. Default: a no-op consumer.
+    /// (`.reply` / `.thinking` / `.toolCall` / `.usage`). Provider-specific parsing, common API.
+    /// Default: a no-op consumer.
     func makeStreamConsumer() -> any SZAgentStreamConsumer
 
     /// Fetch the current model catalog from the CLI, for a provider whose served models are

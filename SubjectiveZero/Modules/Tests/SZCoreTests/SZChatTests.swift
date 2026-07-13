@@ -123,6 +123,23 @@ import Testing
     #expect(!raw.contains("\"duration\""))
 }
 
+@Test func chatMessageUsageRoundTripsOmitsWhenNilAndDefaultsNil() throws {
+    // Round-trip with every field set (the first nested optional in the sidecar shape).
+    let usage = SZTokenUsage(inputTokens: 21507, outputTokens: 393, cachedInputTokens: 21505,
+                             reasoningOutputTokens: 46, costUSD: 0.16683)
+    let message = SZChatMessage(role: .assistant, text: "done", usage: usage)
+    let decoded = try JSONDecoder().decode(SZChatMessage.self, from: try JSONEncoder().encode(message))
+    #expect(decoded.usage == usage)
+
+    // Nil omits the key entirely (the common case — user turns, CLIs that report nothing).
+    let plain = String(decoding: try JSONEncoder().encode(SZChatMessage(role: .user, text: "hi")), as: UTF8.self)
+    #expect(!plain.contains("\"usage\""))
+
+    // A sidecar written before the field existed decodes with no usage.
+    let old = try JSONDecoder().decode(SZChatMessage.self, from: Data(#"{"role": "assistant", "text": "42"}"#.utf8))
+    #expect(old.usage == nil)
+}
+
 @Test func chatMessageTransientRoundTripsAndDefaultsFalse() throws {
     // Non-transient (the common case) omits the key entirely; transient round-trips; a file
     // written before the field existed decodes as non-transient.

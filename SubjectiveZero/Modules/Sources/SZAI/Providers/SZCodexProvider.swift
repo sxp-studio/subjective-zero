@@ -5,6 +5,7 @@
 // continues a thread with `codex exec resume <thread_id> … <prompt>` (no `--cd` on the resume
 // subcommand — the process cwd carries the working directory instead).
 import Foundation
+import SZCore
 
 public struct SZCodexProvider: SZProvider {
     public init() {}
@@ -111,16 +112,28 @@ public struct SZCodexProvider: SZProvider {
 }
 
 /// Parses codex's `--json` jsonl. codex surfaces narration as `agent_message` items and tools as
-/// `mcp_tool_call` / `command_execution` items, plus optional `reasoning`. The final answer is the LAST
-/// `agent_message`, so messages are held: a superseded one becomes narration (`.activity`) and the last
-/// is emitted once as `.reply` at the end — matching claude's reply/trace split.
+/// `mcp_tool_call` / `command_execution` items, plus optional `reasoning` summaries (→ `.thinking`).
+/// The final answer is the LAST `agent_message`, so messages are held: a superseded one becomes
+/// narration (`.thinking`) and the last is emitted once as `.reply` at the end — matching claude's
+/// reply/trace split. The turn's usage rides the final `turn.completed` event (recorded from 0.144.1;
+/// `cached_input_tokens` is a subset of `input_tokens`, so input needs no summing, and
+/// `reasoning_output_tokens` is reported even on turns that emit no `reasoning` item).
 final class SZCodexStreamConsumer: SZAgentStreamConsumer {
     private var pendingReply: String?
 
     func consume(_ line: String) -> [SZAgentStreamEvent] {
         guard let data = line.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              obj["type"] as? String == "item.completed",
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        if obj["type"] as? String == "turn.completed" {
+            guard let usage = obj["usage"] as? [String: Any],
+                  let output = usage["output_tokens"] as? Int else { return [] }
+            return [.usage(SZTokenUsage(
+                inputTokens: usage["input_tokens"] as? Int ?? 0, outputTokens: output,
+                cachedInputTokens: usage["cached_input_tokens"] as? Int,
+                reasoningOutputTokens: usage["reasoning_output_tokens"] as? Int
+            ))]
+        }
+        guard obj["type"] as? String == "item.completed",
               let item = obj["item"] as? [String: Any],
               let type = item["type"] as? String else { return [] }
         let text = (item["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -128,17 +141,17 @@ final class SZCodexStreamConsumer: SZAgentStreamConsumer {
         case "agent_message", "assistant_message":
             guard !text.isEmpty else { return [] }
             var events: [SZAgentStreamEvent] = []
-            if let prior = pendingReply { events.append(.activity(prior)) }   // superseded → narration
+            if let prior = pendingReply { events.append(.thinking(prior)) }   // superseded → narration
             pendingReply = text
             return events
         case "reasoning":
-            return text.isEmpty ? [] : [.activity(text)]
+            return text.isEmpty ? [] : [.thinking(text)]
         case "mcp_tool_call":
-            return [.activity("→ " + (item["tool"] as? String ?? "mcp tool"))]   // the real tool name
+            return [.toolCall(name: item["tool"] as? String ?? "mcp tool")]   // the real tool name
         case "command_execution":
-            return [.activity("→ ran command")]
+            return [.toolCall(name: "ran command")]
         default:
-            return [.activity("→ " + type.replacingOccurrences(of: "_", with: " "))]
+            return [.toolCall(name: type.replacingOccurrences(of: "_", with: " "))]
         }
     }
 

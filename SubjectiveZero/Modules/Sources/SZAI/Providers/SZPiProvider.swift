@@ -295,8 +295,10 @@ enum SZPiCatalogError: Error, CustomStringConvertible {
 /// not the token-level `message_update` deltas — deltas would spam the trace (grok's lesson).
 /// An assistant message's `text` block is held as the candidate reply; a later assistant message
 /// supersedes it (the earlier text was narration — claude/codex/grok's reply/trace split), and
-/// `finish()` emits the survivor once. `thinking` blocks and `tool_execution_start` become
-/// activity. Lines are strict JSON (pi JSON.stringify's its events — verified, zero raw control
+/// `finish()` emits the survivor once. `thinking` blocks carry REAL reasoning text (pi talks to the
+/// model APIs directly — no CLI-side redaction) → `.thinking`; `tool_execution_start` → `.toolCall`.
+/// No usage events have been observed in pi's stream, so pi turns carry no `.usage`.
+/// Lines are strict JSON (pi JSON.stringify's its events — verified, zero raw control
 /// characters), but stderr warnings interleave in the merged stream, so unparseable lines skip.
 final class SZPiStreamConsumer: SZAgentStreamConsumer {
     private var pendingReply: String?
@@ -312,7 +314,7 @@ final class SZPiStreamConsumer: SZAgentStreamConsumer {
             var events: [SZAgentStreamEvent] = []
             if let error = (message["errorMessage"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty {
-                events.append(.activity("⚠ " + error))
+                events.append(.thinking("⚠ " + error))
             }
             for block in message["content"] as? [[String: Any]] ?? [] {
                 switch block["type"] as? String {
@@ -320,23 +322,23 @@ final class SZPiStreamConsumer: SZAgentStreamConsumer {
                     let text = (block["text"] as? String ?? "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { continue }
-                    if let prior = pendingReply { events.append(.activity(prior)) }  // superseded → narration
+                    if let prior = pendingReply { events.append(.thinking(prior)) }  // superseded → narration
                     pendingReply = text
                 case "thinking":
                     let thought = (block["thinking"] as? String ?? "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !thought.isEmpty { events.append(.activity(thought)) }
+                    if !thought.isEmpty { events.append(.thinking(thought)) }
                 default:
                     break   // toolCall blocks: tool_execution_start below carries the name
                 }
             }
             return events
         case "tool_execution_start":
-            return [.activity("→ " + (obj["toolName"] as? String ?? "tool"))]
+            return [.toolCall(name: obj["toolName"] as? String ?? "tool")]
         case "auto_retry_start":
             let reason = (obj["errorMessage"] as? String ?? "transient error")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return [.activity("⚠ retrying: " + reason)]
+            return [.thinking("⚠ retrying: " + reason)]
         default:
             return []   // session header, lifecycle brackets, deltas, tool results
         }

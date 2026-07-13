@@ -128,6 +128,31 @@ extension SZChatAttachment: Codable {
     }
 }
 
+/// Token usage for one agent turn, as its CLI reported it. `inputTokens` is the TOTAL prompt side
+/// including cached traffic — each provider normalizes its CLI's reporting convention at the parse
+/// site (some report the cache separately, some as a subset). A CLI that reports no usage yields no
+/// value, not zeros. The share fields exist because the sidecar is a one-way door: once a turn is
+/// persisted, a split the parser dropped can't be recovered.
+public struct SZTokenUsage: Sendable, Equatable, Codable {
+    public var inputTokens: Int
+    public var outputTokens: Int
+    /// The cached share of `inputTokens`, where the CLI reports one.
+    public var cachedInputTokens: Int?
+    /// Reasoning share of `outputTokens`, where the CLI splits it out.
+    public var reasoningOutputTokens: Int?
+    /// The turn's cost, where the CLI prices it.
+    public var costUSD: Double?
+
+    public init(inputTokens: Int, outputTokens: Int, cachedInputTokens: Int? = nil,
+                reasoningOutputTokens: Int? = nil, costUSD: Double? = nil) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cachedInputTokens = cachedInputTokens
+        self.reasoningOutputTokens = reasoningOutputTokens
+        self.costUSD = costUSD
+    }
+}
+
 public struct SZChatMessage: Identifiable, Equatable, Sendable {
     public let id: UUID
     public var role: SZChatRole
@@ -139,6 +164,9 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
     /// How long the turn took (assistant turns) — nil while in flight, set when the turn finishes; shown
     /// under the reply.
     public var duration: TimeInterval?
+    /// Token usage the turn's CLI reported (assistant turns) — nil while in flight and for CLIs that
+    /// report none; shown next to the duration.
+    public var usage: SZTokenUsage?
     /// Files attached to this turn (user turns) — copied into the agent's staging dir on send, shown
     /// as thumbnails/chips under the message. Empty for turns with no attachments.
     public var attachments: [SZChatAttachment]
@@ -148,7 +176,7 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
     public var transient: Bool
 
     public init(id: UUID = UUID(), role: SZChatRole, text: String, thinking: String = "",
-                timestamp: Date = Date(), duration: TimeInterval? = nil,
+                timestamp: Date = Date(), duration: TimeInterval? = nil, usage: SZTokenUsage? = nil,
                 attachments: [SZChatAttachment] = [], transient: Bool = false) {
         self.id = id
         self.role = role
@@ -156,6 +184,7 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
         self.thinking = thinking
         self.timestamp = timestamp
         self.duration = duration
+        self.usage = usage
         self.attachments = attachments
         self.transient = transient
     }
@@ -163,7 +192,7 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
 
 extension SZChatMessage: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, role, text, thinking, timestamp, duration, attachments, transient
+        case id, role, text, thinking, timestamp, duration, usage, attachments, transient
     }
 
     // Hand-written for append tolerance (see header).
@@ -175,6 +204,7 @@ extension SZChatMessage: Codable {
         thinking = try c.decodeIfPresent(String.self, forKey: .thinking) ?? ""
         timestamp = try c.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
         duration = try c.decodeIfPresent(TimeInterval.self, forKey: .duration)
+        usage = try c.decodeIfPresent(SZTokenUsage.self, forKey: .usage)
         attachments = try c.decodeIfPresent([SZChatAttachment].self, forKey: .attachments) ?? []
         transient = try c.decodeIfPresent(Bool.self, forKey: .transient) ?? false
     }
@@ -190,6 +220,7 @@ extension SZChatMessage: Codable {
         try c.encode(thinking, forKey: .thinking)
         try c.encode(timestamp, forKey: .timestamp)
         try c.encodeIfPresent(duration, forKey: .duration)
+        try c.encodeIfPresent(usage, forKey: .usage)
         try c.encode(attachments, forKey: .attachments)
         if transient { try c.encode(true, forKey: .transient) }
     }

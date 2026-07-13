@@ -119,11 +119,11 @@ public struct SZGrokProvider: SZProvider {
 }
 
 /// Parses grok's streaming-json: token-level `{"type":"thought"|"text","data":…}` chunks and a final
-/// `end` event (no per-line messages, no tool events — verified 0.2.93). Chunks are accumulated —
-/// emitting per token would spam the trace — and flushed at type transitions: a completed thought
-/// block becomes one `.activity` when text starts, and text superseded by a NEW thought block was
-/// narration, not the answer (matching claude/codex's reply/trace split). The reply flushes in
-/// `finish()`, the one point that knows the stream is over.
+/// `end` event (no per-line messages, no tool events, no usage — verified 0.2.93, so grok turns carry
+/// no `.usage`). Chunks are accumulated — emitting per token would spam the trace — and flushed at
+/// type transitions: a completed thought block becomes one `.thinking` when text starts, and text
+/// superseded by a NEW thought block was narration, not the answer (matching claude/codex's
+/// reply/trace split). The reply flushes in `finish()`, the one point that knows the stream is over.
 final class SZGrokStreamConsumer: SZAgentStreamConsumer {
     private var pendingThought = ""
     private var pendingReply = ""
@@ -137,7 +137,7 @@ final class SZGrokStreamConsumer: SZAgentStreamConsumer {
             var events: [SZAgentStreamEvent] = []
             let reply = pendingReply.trimmingCharacters(in: .whitespacesAndNewlines)
             if !reply.isEmpty {   // a new reasoning block after text → that text was narration
-                events.append(.activity(reply))
+                events.append(.thinking(reply))
                 pendingReply = ""
             }
             pendingThought += obj["data"] as? String ?? ""
@@ -149,7 +149,7 @@ final class SZGrokStreamConsumer: SZAgentStreamConsumer {
         case "error":
             let message = (obj["message"] as? String ?? "error")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return flushThought() + [.activity("⚠ " + message)]
+            return flushThought() + [.thinking("⚠ " + message)]
         default:   // end / max_turns_reached / auto_compact_* — metadata, nothing to render
             return []
         }
@@ -166,7 +166,7 @@ final class SZGrokStreamConsumer: SZAgentStreamConsumer {
     private func flushThought() -> [SZAgentStreamEvent] {
         let thought = pendingThought.trimmingCharacters(in: .whitespacesAndNewlines)
         pendingThought = ""
-        return thought.isEmpty ? [] : [.activity(thought)]
+        return thought.isEmpty ? [] : [.thinking(thought)]
     }
 
     /// grok emits RAW control characters inside JSON string values (verified 0.2.93 — a strict
