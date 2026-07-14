@@ -67,15 +67,15 @@ struct SZWireDragSession {
         case reconnect(SZConnectionID, SZConnectionEnd, SZPortRef)
         case disconnect(SZConnectionID)
         /// A fresh FLOW (intent) wire dropped on empty canvas — "drag into space" means "generate
-        /// something here": spawn a prompt node at `center` and join it with a flow edge.
-        /// `downstream` follows the dragged socket (flow-OUT → source feeds new; flow-IN → new feeds
-        /// source).
+        /// something here": spawn a prompt node at `center` (raw; the panel applies its snap rule)
+        /// and join it with a flow edge. `downstream` follows the dragged socket (flow-OUT → source
+        /// feeds new; flow-IN → new feeds source).
         case spawnPromptNode(center: CGPoint, source: SZPortRef, downstream: Bool)
     }
 
     /// The drop decision: a picked-up edge re-routes (or disconnects on an empty drop), a fresh wire
     /// connects, a fresh flow wire in space spawns. Pure — reads only the session.
-    func outcome(snapToGrid: Bool) -> Outcome {
+    func outcome() -> Outcome {
         if let picked {
             guard moved else { return .none }               // plain click / sub-threshold wobble: no-op
             guard let target else { return .disconnect(picked.id) }   // dropped on empty canvas
@@ -98,10 +98,9 @@ struct SZWireDragSession {
             // point; drop from a flow-IN and it grows leftward with its RIGHT edge at the drop. So
             // the wire terminates cleanly at the node's socket instead of burying the drop point in
             // the card's middle. Shift the centroid by half the (fixed) prompt-node width toward the
-            // flow direction.
+            // flow direction. Snapping is the panel's (snappedPromptCenter), not the session's.
             var center = current
             center.x += source.side == .output ? SZNodeLayout.width / 2 : -SZNodeLayout.width / 2
-            if snapToGrid { center = SZNodeLayout.snappedCenter(center, size: SZNodeLayout.promptCardSize) }
             return .spawnPromptNode(center: center,
                                     source: SZPortRef(node: source.nodeID, port: "flow"),
                                     downstream: source.side == .output)

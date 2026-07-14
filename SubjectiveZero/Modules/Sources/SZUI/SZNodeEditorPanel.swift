@@ -395,17 +395,11 @@ public struct SZNodeEditorPanel: View {
     /// Whether a node card is drawn selected (the primary single selection OR a member of the multi-set).
     private func isSelected(_ id: SZNodeID) -> Bool { selectedNodeID == id || multiSelection.contains(id) }
 
-    /// Render tier of a node: the primary (chat/edit target) selection rides above the multi-selection,
-    /// which rides above the rest — so the card being inspected is readable even when several selected
-    /// cards overlap. Shared verbatim by the canvas zIndex AND occlusion hit-testing (isOccluded), so
-    /// what you see is what you can hit.
-    private func zTier(_ id: SZNodeID) -> Int {
-        if selectedNodeID == id { return 2 }
-        if multiSelection.contains(id) { return 1 }
-        return 0
-    }
-
-    /// The non-zero tiers as a lookup for SZGraphCanvasModel.isOccluded.
+    /// Render tiers of the selected nodes (missing = 0): the primary (chat/edit target) selection
+    /// rides above the multi-selection, which rides above the rest — so the card being inspected is
+    /// readable even when several selected cards overlap. Shared verbatim by the canvas zIndex AND
+    /// the model's occlusion / hit-testing (isOccluded, topmostNode), so what you see is what you
+    /// can hit.
     private var raisedTiers: [SZNodeID: Int] {
         var tiers: [SZNodeID: Int] = [:]
         for id in multiSelection { tiers[id] = 1 }
@@ -955,8 +949,10 @@ public struct SZNodeEditorPanel: View {
         guard !isLocked(source.nodeID) else { return }   // can't wire a locked (in-progress) node
         let world = camera.worldPoint(screen: location)
         if wire?.grabbed.id != source.id {
-            wire = SZWireDragSession.begin(from: source, atWorld: world, screen: location,
-                                           in: graph, isLocked: isLocked)
+            // A refused grab (locked far end) returns BEFORE feedAutoPan — no trail/band flicker.
+            guard let session = SZWireDragSession.begin(from: source, atWorld: world, screen: location,
+                                                        in: graph, isLocked: isLocked) else { return }
+            wire = session
         } else {
             wire?.lastScreen = location
             updateWireDrag(to: world, in: graph)
@@ -972,7 +968,10 @@ public struct SZNodeEditorPanel: View {
         guard !isLocked(connection.from.node), !isLocked(connection.to.node) else { return }
         let world = camera.worldPoint(screen: screen)
         if wire?.picked?.id != connection.id {
-            wire = SZWireDragSession.begin(along: connection, atWorld: world, screen: screen, in: graph)
+            // Same rule as the socket grab: an unresolvable edge returns before feedAutoPan.
+            guard let session = SZWireDragSession.begin(along: connection, atWorld: world,
+                                                        screen: screen, in: graph) else { return }
+            wire = session
         } else {
             wire?.lastScreen = screen
             updateWireDrag(to: world, in: graph)
@@ -991,7 +990,7 @@ public struct SZNodeEditorPanel: View {
     /// construct, so no host round-trip / reload, like `addPromptNode(atScreen:)`).
     private func endWireDrag() {
         defer { wire = nil }
-        guard let outcome = wire?.outcome(snapToGrid: snapToGrid) else { return }
+        guard let outcome = wire?.outcome() else { return }
         switch outcome {
         case .none:
             break
@@ -1002,8 +1001,9 @@ public struct SZNodeEditorPanel: View {
         case let .connect(from, to, kind):
             onConnect(from, to, kind)
         case let .spawnPromptNode(center, source, downstream):
+            let snapped = snappedPromptCenter(center)
             guard let newID = store.addPromptNode(prompt: "",
-                                                  position: SZPoint(x: center.x, y: center.y))
+                                                  position: SZPoint(x: snapped.x, y: snapped.y))
             else { break }
             let newRef = SZPortRef(node: newID, port: "flow")
             if downstream {

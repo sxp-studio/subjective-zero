@@ -94,7 +94,7 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     session.update(toWorld: CGPoint(x: grab.point.x + 5, y: grab.point.y), zoom: 1,
                    in: graph, tiers: [:], isLocked: unlocked)
     #expect(!session.moved)
-    #expect(session.outcome(snapToGrid: true) == .none)
+    #expect(session.outcome() == .none)
     // The same drag past the guard, dropped on empty canvas, disconnects.
     session.update(toWorld: CGPoint(x: grab.point.x + 200, y: grab.point.y + 200), zoom: 1,
                    in: graph, tiers: [:], isLocked: unlocked)
@@ -124,7 +124,7 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
                                           in: graph, isLocked: unlocked)!
     session.update(toWorld: CGPoint(x: 300, y: 400), zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
     #expect(session.target == nil)
-    #expect(session.outcome(snapToGrid: true) == .disconnect(conn.id))
+    #expect(session.outcome() == .disconnect(conn.id))
 }
 
 @Test func droppingBackOnTheOriginalPortRestoresTheWireUntouched() {
@@ -136,7 +136,7 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     session.update(toWorld: CGPoint(x: 300, y: 400), zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
     session.update(toWorld: grab.point, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
     #expect(session.target?.id == grab.id)
-    #expect(session.outcome(snapToGrid: true) == .none)
+    #expect(session.outcome() == .none)
 }
 
 @Test func aFlowRestoreComparesNodesOnly() {
@@ -153,7 +153,7 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     session.update(toWorld: CGPoint(x: 300, y: 300), zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
     session.update(toWorld: pts.to, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
     #expect(session.target?.nodeID == b.id)
-    #expect(session.outcome(snapToGrid: true) == .none)
+    #expect(session.outcome() == .none)
 }
 
 @Test func aFreshWireOrientsOutputToInputWhicheverEndWasDragged() {
@@ -172,13 +172,13 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     var a = SZWireDragSession.begin(from: out, atWorld: out.point, screen: out.point,
                                     in: fresh, isLocked: unlocked)!
     a.update(toWorld: inp.point, zoom: 1, in: fresh, tiers: [:], isLocked: unlocked)
-    #expect(a.outcome(snapToGrid: true) == expected)
+    #expect(a.outcome() == expected)
 
     // input → output lands the SAME oriented connect
     var b = SZWireDragSession.begin(from: inp, atWorld: inp.point, screen: inp.point,
                                     in: fresh, isLocked: unlocked)!
     b.update(toWorld: out.point, zoom: 1, in: fresh, tiers: [:], isLocked: unlocked)
-    #expect(b.outcome(snapToGrid: true) == expected)
+    #expect(b.outcome() == expected)
 }
 
 @Test func aFreshFlowWireDroppedInSpaceSpawnsEdgeAnchored() {
@@ -191,21 +191,18 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     var out = SZWireDragSession.begin(from: flowOut, atWorld: flowOut.point, screen: flowOut.point,
                                       in: graph, isLocked: unlocked)!
     out.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
-    #expect(out.outcome(snapToGrid: false) == .spawnPromptNode(
+    #expect(out.outcome() == .spawnPromptNode(
         center: CGPoint(x: drop.x + SZNodeLayout.width / 2, y: drop.y),
         source: SZPortRef(node: a.id, port: "flow"), downstream: true))
 
-    // From a flow-IN the node is upstream and grows leftward — and the snap pref lands its
-    // top-left corner on the grid.
+    // From a flow-IN the node is upstream and grows leftward. The center is RAW — snapping is the
+    // panel's placement rule (snappedPromptCenter), applied at dispatch, not the session's.
     let flowIn = socket(a, .input, .flow, "")
     var inp = SZWireDragSession.begin(from: flowIn, atWorld: flowIn.point, screen: flowIn.point,
                                       in: graph, isLocked: unlocked)!
     inp.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
-    let raw = CGPoint(x: drop.x - SZNodeLayout.width / 2, y: drop.y)
-    #expect(inp.outcome(snapToGrid: false) == .spawnPromptNode(
-        center: raw, source: SZPortRef(node: a.id, port: "flow"), downstream: false))
-    #expect(inp.outcome(snapToGrid: true) == .spawnPromptNode(
-        center: SZNodeLayout.snappedCenter(raw, size: SZNodeLayout.promptCardSize),
+    #expect(inp.outcome() == .spawnPromptNode(
+        center: CGPoint(x: drop.x - SZNodeLayout.width / 2, y: drop.y),
         source: SZPortRef(node: a.id, port: "flow"), downstream: false))
 }
 
@@ -216,7 +213,7 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     var session = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
                                           in: graph, isLocked: unlocked)!
     session.update(toWorld: CGPoint(x: 500, y: 300), zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
-    #expect(session.outcome(snapToGrid: true) == .none)   // only FLOW wires spawn on empty drops
+    #expect(session.outcome() == .none)   // only FLOW wires spawn on empty drops
 }
 
 // MARK: - Target validity (SZGraphCanvasModel)
