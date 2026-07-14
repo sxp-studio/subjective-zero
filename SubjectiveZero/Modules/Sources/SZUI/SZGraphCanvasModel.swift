@@ -71,13 +71,29 @@ public enum SZGraphCanvasModel {
         for (i, node) in graph.nodes.enumerated() where node.id != socket.nodeID {
             let tier = tiers[node.id] ?? 0
             guard tier > ownerTier || (tier == ownerTier && i > ownerIndex) else { continue }
-            let size = SZNodeLayout.size(of: node)
-            let card = CGRect(x: CGFloat(node.position.x) - size.width / 2,
-                              y: CGFloat(node.position.y) - size.height / 2,
-                              width: size.width, height: size.height)
-            if card.contains(socket.point) { return true }
+            if SZNodeLayout.cardRect(of: node).contains(socket.point) { return true }
         }
         return false
+    }
+
+    /// The topmost node card under a world point (render z-order: `tiers`, ties broken by
+    /// `graph.nodes` order — the mirror of `isOccluded`'s what-you-see-is-what-you-hit rule), or nil
+    /// for empty canvas.
+    public static func topmostNode(at point: CGPoint, in graph: SZGraph,
+                                   tiers: [SZNodeID: Int] = [:]) -> SZNode? {
+        graph.nodes.enumerated()
+            .filter { SZNodeLayout.cardRect(of: $0.element).contains(point) }
+            .max { (tiers[$0.element.id] ?? 0, $0.offset) < (tiers[$1.element.id] ?? 0, $1.offset) }?
+            .element
+    }
+
+    /// World-space bounding box of every node card (each card via `SZNodeLayout.cardRect`). Nil when
+    /// the graph has no nodes.
+    public static func worldBounds(of graph: SZGraph) -> CGRect? {
+        guard !graph.nodes.isEmpty else { return nil }
+        var box = CGRect.null
+        for node in graph.nodes { box = box.union(SZNodeLayout.cardRect(of: node)) }
+        return box.isNull ? nil : box
     }
 
     /// The IDs of every socket wired by at least one connection, in one O(connections) pass — the
@@ -114,6 +130,52 @@ public enum SZGraphCanvasModel {
               let outType = portType(of: outNode, side: .output, port: out.port),
               let inType = portType(of: inNode, side: .input, port: inp.port) else { return false }
         return outType == inType
+    }
+
+    /// Whether `socket` may receive an in-flight wire anchored at `source` — the per-socket test
+    /// shared by the snap (`snapTarget`) and the compatible-slot highlight (`validTargets`), so a
+    /// highlighted dot is always one a drop would really connect. Unlocked, type-legal (`canConnect`),
+    /// and visible: a dot buried under a higher card is invisible and un-grabbable — it must not
+    /// silently catch a drop either (`isOccluded`). Connecting to an occupied data input SWAPS its
+    /// edge out, so the displaced edge must touch no locked node (same rule as deleting / picking
+    /// that wire up directly); the currently picked-up edge (`pickedConnectionID`) doesn't count —
+    /// dropping back restores it.
+    public static func isValidTarget(_ socket: SZSocket, for source: SZSocket, in graph: SZGraph,
+                                     tiers: [SZNodeID: Int], pickedConnectionID: SZConnectionID?,
+                                     isLocked: (SZNodeID) -> Bool) -> Bool {
+        guard !isLocked(socket.nodeID),
+              canConnect(source, socket, in: graph),
+              !isOccluded(socket, in: graph, tiers: tiers)
+        else { return false }
+        if let occupied = incomingDataConnection(to: socket, in: graph),
+           occupied.id != pickedConnectionID, isLocked(occupied.from.node) { return false }
+        return true
+    }
+
+    /// Nearest socket to `point` (within a zoom-aware radius) that can legally receive the wire —
+    /// the in-flight drag's snap target.
+    public static func snapTarget(for source: SZSocket, at point: CGPoint, zoom: CGFloat,
+                                  in graph: SZGraph, tiers: [SZNodeID: Int],
+                                  pickedConnectionID: SZConnectionID?,
+                                  isLocked: (SZNodeID) -> Bool) -> SZSocket? {
+        let radius = 28 / max(zoom, 0.1)
+        return sockets(in: graph)
+            .filter { isValidTarget($0, for: source, in: graph, tiers: tiers,
+                                    pickedConnectionID: pickedConnectionID, isLocked: isLocked) }
+            .map { (socket: $0, d: hypot($0.point.x - point.x, $0.point.y - point.y)) }
+            .filter { $0.d <= radius }
+            .min { $0.d < $1.d }?.socket
+    }
+
+    /// Every socket a drop would validly connect to (no radius filter) — drives the compatible-slot
+    /// highlight drawn while a wire is being dragged.
+    public static func validTargets(for source: SZSocket, in graph: SZGraph, tiers: [SZNodeID: Int],
+                                    pickedConnectionID: SZConnectionID?,
+                                    isLocked: (SZNodeID) -> Bool) -> [SZSocket] {
+        sockets(in: graph).filter {
+            isValidTarget($0, for: source, in: graph, tiers: tiers,
+                          pickedConnectionID: pickedConnectionID, isLocked: isLocked)
+        }
     }
 
     /// The data connection feeding an input data socket (nil for flow sockets, outputs, or an unwired

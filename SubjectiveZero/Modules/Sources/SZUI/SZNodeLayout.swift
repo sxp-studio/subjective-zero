@@ -59,6 +59,19 @@ public enum SZNodeLayout {
         CGSize(width: width(of: node), height: height(of: node))
     }
 
+    /// The fixed footprint of a prompt card (base width × prompt height) — what every creation site
+    /// snaps by before the card exists.
+    public static let promptCardSize = CGSize(width: width, height: promptHeight)
+
+    /// World-space card rect: `node.position` is the card CENTER, inset by half `size(of:)`. The ONE
+    /// rect shared by hit-testing, marquee membership, occlusion, and bounds math.
+    public static func cardRect(of node: SZNode) -> CGRect {
+        let size = size(of: node)
+        return CGRect(x: CGFloat(node.position.x) - size.width / 2,
+                      y: CGFloat(node.position.y) - size.height / 2,
+                      width: size.width, height: size.height)
+    }
+
     // MARK: - Content-driven card width
 
     // Text metrics mirroring the SZUI card styling (SZNodeCardStyle fonts + SZPortControl widget
