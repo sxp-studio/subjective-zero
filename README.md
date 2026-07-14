@@ -96,6 +96,8 @@ To actually drive agents, you need at least one provider CLI **installed and log
 
 - **Claude Code** - the `claude` CLI
 - **Codex** - the `codex` CLI
+- **Grok** - the `grok` CLI
+- **Pi** - the `pi` CLI
 
 SubZ drives these as subprocesses and stores no provider credentials of its own - auth belongs to
 each CLI's own interactive login. The in-app **Agent Providers** sheet shows each provider's
@@ -140,10 +142,11 @@ status, reading state, requesting UI updates as a node's contract drafts itself,
 the node library. There's a 1:1 mapping with key UI interactions so the same surface can drive
 automated, closed-loop testing while agents build.
 
-Initial providers are **Claude Code** (CLI) and **Codex** (CLI + Codex.app). For each we surface
-available models and thinking level from a static capability manifest (neither CLI enumerates
-models), with a manual override; the CLI is used for health and session control. See
-[`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md).
+Current providers are **Claude Code** (CLI), **Codex** (CLI + Codex.app), **Grok** (CLI), and
+**Pi** (CLI). Claude Code and Codex surface available models and thinking level from a static
+capability manifest (neither CLI enumerates models), with a manual override; Grok and Pi
+enumerate their models from the CLI at runtime. In every case the CLI is used for health and
+session control. See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md).
 
 ## Nodes and the node library
 
@@ -166,7 +169,7 @@ demand - so agents stay correct without blowing their context window. See
 - [`docs/RUNTIME.md`](docs/RUNTIME.md) - Metal ownership, node module shape, scheduling, hot reload.
 - [`docs/GRAPH_AND_NODES.md`](docs/GRAPH_AND_NODES.md) - node anatomy, I/O types + UI, connections.
 - [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md) - Director Agent + coding agents, behavior trees.
-- [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) - provider wrapping; capability discovery (resolved: static manifest).
+- [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) - provider wrapping; capability discovery (static manifest or runtime enumeration, per provider).
 - [`docs/MCP.md`](docs/MCP.md) - MCP server design and command surface.
 - [`docs/NODE_LIBRARY.md`](docs/NODE_LIBRARY.md) - the built-in library and how agents consume it.
 - [`docs/UI.md`](docs/UI.md) - native panels.
