@@ -26,8 +26,8 @@ especially `docs/ARCHITECTURE.md` (incl. the host seam) and `docs/BUILD_SPEC.md`
    them in place and update call sites; never maintain a migration path.
 
 4. **Least code, no speculative abstraction.** Build only what the current milestone needs, and
-   defer anything the roadmap marks deferred — the behavior-tree engine, per-node live previews,
-   MCP record/replay. Don't add third-party dependencies without asking.
+   defer anything the roadmap marks deferred — the behavior-tree engine, MCP record/replay.
+   Don't add third-party dependencies without asking.
 
 5. **Build + verify, small commits.** Every change must `swift build` clean; render-affecting changes
    must be visually or closed-loop checkable. Commit in small, reviewable steps with clear messages.

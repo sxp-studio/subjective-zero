@@ -157,6 +157,19 @@ final class SZHost {
     // SZGridCursorTrailView).
     internal(set) var gridCursorTrail: Bool = SZAppStateIO.load()?.gridCursorTrail ?? true
 
+    // Node-editor live previews (per-card thumbnails of texture outputs) — same app-state.json +
+    // restore story, mutated via setLivePreviews (SZHost+NodePreviews.swift). Toggled from the Graph
+    // menu (SZApp), beside Snap to Grid. Defaults ON: texture nodes auto-preview. The geometry gate
+    // (SZNodeLayout.previewsEnabled) is seeded FIRST thing in start() — before any project can load,
+    // so no card is ever laid out against the unseeded default — and thereafter written only
+    // together with this pref (setLivePreviews), so the card views reflow deterministically on a flip.
+    internal(set) var livePreviews: Bool = SZAppStateIO.load()?.livePreviews ?? true
+
+    // Per-node live-preview thumbs (stable observable boxes the cards hold uncompared refs to) and
+    // the ~15 Hz capture loop feeding them — both driven by SZHost+NodePreviews.swift.
+    let previewFrames = SZNodePreviewFrames()
+    var previewDriverTask: Task<Void, Never>?
+
     // Rounded corners on the viewport tile — same app-state.json + restore story, mutated via
     // setViewportRoundedCorners. Toggled from the View menu (SZApp), beside Auto-Hide Panel Headers.
     // Defaults ON: rounded tiles are the app's resting look; off squares just the viewport.
@@ -338,6 +351,10 @@ final class SZHost {
     func start(openingIfLaunchedWithFile launchFileURL: URL? = nil) async {
         guard !started else { return }
         started = true
+        // Geometry gate follows the restored pref BEFORE anything can render a card (project loads
+        // below) — and before the Metal-unavailable early return, which must not strand the gate at
+        // its compile-time default while the pref says otherwise.
+        SZNodeLayout.previewsEnabled = livePreviews
 
         guard let runtime = SZRuntime() else {
             status = "Metal device unavailable"
@@ -443,6 +460,11 @@ final class SZHost {
         // cards show WHY, not just that. After clearPerProjectState, so the details survive.
         classifyRebuildsAfterLoad()
         watchNodeSources(in: newURL)
+        // Fresh graph, fresh thumbs: drop boxes for nodes that don't exist here, (re)start the
+        // capture loop against the new project.
+        previewFrames.prune(keeping: Set(project.graph.nodes.map(\.id)))
+        previewFrames.clearImages()
+        refreshPreviewDriver()
         // 6. History — skipped for the env override so a debug launch can't clobber the user's.
         if recordInHistory {
             let path = newURL.standardizedFileURL.path
@@ -515,6 +537,10 @@ final class SZHost {
     var hasStagedGraphOp: Bool { pendingGraphOp != nil }
 
     private func clearPerProjectState() {
+        // Stop the preview capture loop before the new project's prune/clear below — a task left
+        // running across the swap could resurrect pruned boxes with old-project frames.
+        previewDriverTask?.cancel()
+        previewDriverTask = nil
         nodeAgentState = [:]
         runWorkSet = []
         pendingDirectorMessages = [:]

@@ -36,9 +36,37 @@ public enum SZNodeLayout {
     public static let socketSize: CGFloat = 12
     public static let promptHeight: CGFloat = 48
     public static let statusPillHeight: CGFloat = 18
+    /// Height of a card's live-preview body region (between header and rows) — 6 grid cells. Must be
+    /// an EVEN cell count: `node.position` is the card CENTER, so toggling the region moves each edge
+    /// by half of it — an even count keeps a snapped card's edges on grid lines through the toggle
+    /// (an odd count would strand them mid-cell until the next drag re-snapped).
+    public static let previewHeight: CGFloat = 144
+    /// Below this canvas zoom, cards render as preview-only tiles (semantic zoom). Render-only: no
+    /// geometry here reads it — card rects, sockets, and edges are identical at every zoom.
+    public static let lodZoomThreshold: CGFloat = 0.5
+
+    /// The global Live Previews gate (Graph ▸ Live Previews). Geometry-affecting: OFF collapses every
+    /// preview region (`previewInset` returns 0), so cards reflow to compact. Module state rather than
+    /// a parameter so the many pure call sites stay signature-stable; the ONE writer is SZHost's pref
+    /// plumbing (views must re-render on flip — the host threads the value into the card views so
+    /// equality sees it). Tests that flip it live in one `.serialized` suite: it is process-global,
+    /// and Swift Testing otherwise interleaves tests around the flip.
+    public static var previewsEnabled: Bool {
+        get { previewsEnabledBox.withLock { $0 } }
+        set { previewsEnabledBox.withLock { $0 = newValue } }
+    }
+    private static let previewsEnabledBox = Mutex<Bool>(true)
 
     public static func inputs(of node: SZNode) -> [SZPort] { node.contract?.inputs ?? [] }
     public static func outputs(of node: SZNode) -> [SZPort] { node.contract?.outputs ?? [] }
+
+    /// Extra card height the preview body contributes — `previewHeight` when the node effectively
+    /// previews (`SZNode.effectiveBodyMode`, the SZCore policy) AND the global gate is on, else 0.
+    /// The ONE term `height(of:)` and `rowCenterY` share, so the card frame and the socket rows can
+    /// never disagree about where the rows start.
+    public static func previewInset(of node: SZNode) -> CGFloat {
+        previewsEnabled && node.effectiveBodyMode == .preview ? previewHeight : 0
+    }
 
     /// Total card height (excludes the status pill, which floats above the card). Always a multiple
     /// of gridPitch — the metrics above are chosen so this needs no rounding slack.
@@ -48,8 +76,9 @@ public enum SZNodeLayout {
             return promptHeight
         case .generated:
             let rows = inputs(of: node).count + outputs(of: node).count
-            guard rows > 0 else { return headerHeight + bodyTopPadding + bodyBottomPadding }
-            return headerHeight + bodyTopPadding
+            let inset = previewInset(of: node)
+            guard rows > 0 else { return headerHeight + bodyTopPadding + inset + bodyBottomPadding }
+            return headerHeight + inset + bodyTopPadding
                 + CGFloat(rows) * rowHeight + CGFloat(rows - 1) * rowSpacing
                 + bodyBottomPadding
         }
@@ -126,11 +155,12 @@ public enum SZNodeLayout {
             + 2 * labelControlSpacing + controlWidth(port, fieldWidth: fieldWidth)
     }
 
-    /// Output rows: [monitor icon +] port name, trailing-aligned. Bare text sits on the same 12pt
-    /// line as the boxes and the slider value column; capsule ends optically read a hair inside their
-    /// geometric edge (rounding), which is expected — don't chase it with insets.
+    /// Output rows: [preview + monitor icons +] port name, trailing-aligned. Bare text sits on the same
+    /// 12pt line as the boxes and the slider value column; capsule ends optically read a hair inside their
+    /// geometric edge (rounding), which is expected — don't chase it with insets. Texture outputs budget
+    /// TWO leading glyphs (preview toggle + display).
     static func outputRowWidth(_ port: SZPort) -> CGFloat {
-        rowHorizontalPadding + (port.type == .texture ? 14 + 6 : 0)
+        rowHorizontalPadding + (port.type == .texture ? 2 * (14 + 6) : 0)
             + CGFloat(port.name.count) * labelCharWidth
     }
 
@@ -289,9 +319,10 @@ public enum SZNodeLayout {
         }
     }
 
-    /// Y center of the stacked port row `row` (0-based across inputs then outputs).
+    /// Y center of the stacked port row `row` (0-based across inputs then outputs). The preview body
+    /// sits between header and rows, so the rows shift down by exactly `previewInset`.
     public static func rowCenterY(of node: SZNode, row: Int) -> CGFloat {
-        let bodyTop = -height(of: node) / 2 + headerHeight + bodyTopPadding
+        let bodyTop = -height(of: node) / 2 + headerHeight + previewInset(of: node) + bodyTopPadding
         return bodyTop + rowHeight / 2 + CGFloat(row) * (rowHeight + rowSpacing)
     }
 

@@ -302,6 +302,21 @@ extension SZStore {
         return true
     }
 
+    /// Set a node's card body (preview / custom / none), or nil to clear it back to the editor's legacy
+    /// default. Presentation-only — never the port surface, so it can't raise `needsRebuild`. Callers pass a
+    /// fully-resolved `SZNodeBody` (the `ui_set_node_body` handler fills in the default preview port). Returns
+    /// whether the node was found.
+    @discardableResult
+    public func setNodeBody(id: SZNodeID, body: SZNodeBody?) -> Bool {
+        var found = false
+        mutate { project in
+            guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
+            found = true
+            project.graph.nodes[i].body = body
+        }
+        return found
+    }
+
     /// Move a node to a new canvas position. Returns whether the node was found.
     @discardableResult
     public func moveNode(id: SZNodeID, to position: SZPoint) -> Bool {

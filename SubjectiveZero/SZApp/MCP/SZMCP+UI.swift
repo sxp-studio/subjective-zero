@@ -95,6 +95,12 @@ extension SZHostBridge {
                  ]),
             tool("ui_toggle_display", "Toggle a node's texture output as the viewport render endpoint (mirrors clicking the node card's monitor icon) — switches the live viewport to that output. Pointing at the current endpoint clears it. `port` must be a `texture` output.",
                  properties: ["node": ["type": "string"], "port": ["type": "string"]]),
+            tool("ui_set_node_body", "Set a generated node card's body region (between header and rows). `mode`: \"none\" (compact card) or \"preview\" (a live thumbnail of a texture output — `port` picks which, defaulting to the display-marked/first texture output). An unset body auto-previews a texture node; an explicit value pins the choice. Geometry-affecting and persisted; echoes the applied body (including the resolved preview port).",
+                 properties: [
+                    "node": ["type": "string"],
+                    "mode": ["type": "string", "enum": ["none", "preview"]],
+                    "port": ["type": "string", "description": "preview only: which texture output to show"],
+                 ]),
             tool("ui_select_chat", "Open/select a chat tab (mirrors clicking a tab or a node's chat bubble) and show the panel. `scope` = a node uuid (opens that node's Coding Agent chat) or \"director\".",
                  properties: ["scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"]]),
             tool("ui_close_chat_tab", "Close a node's (or the Debug) chat tab, mirroring its ✕ — `scope` is required. Returns {closed:true, scope}. The Director tab has no ✕ and can't be closed: that returns {closed:false, reason}.",
@@ -140,6 +146,7 @@ extension SZHostBridge {
         case "ui_send_chat":       return try uiSendChat(arguments)
         case "ui_set_input_default": return try uiSetInputDefault(arguments)
         case "ui_toggle_display":  return try uiToggleDisplay(arguments)
+        case "ui_set_node_body":   return try uiSetNodeBody(arguments)
         case "ui_select_chat":     return try uiSelectChat(arguments)
         case "ui_close_chat_tab":  return try uiCloseChatTab(arguments)
         case "ui_reorder_chat_tab": return try uiReorderChatTab(arguments)
@@ -542,6 +549,52 @@ extension SZHostBridge {
             return SZJSONRPC.encode(["endpoint": port])
         }
         return SZJSONRPC.encode(["endpoint": NSNull()])
+    }
+
+    private func uiSetNodeBody(_ arguments: [String: Any]) throws -> String {
+        guard let id = arguments.uuid("node") else { throw SZMCPError.message("ui_set_node_body needs `node` id") }
+        guard let modeRaw = arguments.string("mode"), let mode = SZNodeBodyMode(rawValue: modeRaw),
+              mode != .custom else {   // custom cards haven't landed natively yet
+            throw SZMCPError.message("ui_set_node_body needs `mode` ∈ {none, preview}")
+        }
+        guard let node = host.store.project?.graph.node(id: id) else {
+            throw SZMCPError.message("no node \(id)")
+        }
+        // Body is a generated-card affordance: a prompt card is a single field with no body region.
+        guard node.kind == .generated else {
+            throw SZMCPError.message("node \(id) is a prompt card — it has no body region")
+        }
+
+        let body: SZNodeBody
+        if mode == .preview {
+            // The explicit `port` must be a texture output; omitted, the shared default rule picks
+            // one (`preferredTextureOutput` — the SAME pick the card's auto-preview shows, so the
+            // echoed body can never disagree with the canvas). No texture output → nothing to
+            // preview → reject, so the persisted body is always renderable.
+            let outputs = node.contract?.outputs ?? []
+            if let port = arguments.string("port") {
+                guard outputs.contains(where: { $0.name == port && $0.type == .texture }) else {
+                    throw SZMCPError.message("node \(id) has no texture output port '\(port)'")
+                }
+                body = SZNodeBody(mode: .preview, previewPort: port)
+            } else if let port = outputs.preferredTextureOutput?.name {
+                body = SZNodeBody(mode: .preview, previewPort: port)
+            } else {
+                throw SZMCPError.message("node \(id) has no texture output to preview")
+            }
+        } else {
+            body = SZNodeBody(mode: .none)
+        }
+
+        // The same host op as the card's photo toggle — one apply choreography (store write, stale
+        // thumb drop, persist, driver refresh) for human and agent edits.
+        guard host.setNodeBody(node: id, body: body) else {
+            throw SZMCPError.message("no node \(id)")
+        }
+
+        var applied: [String: Any] = ["mode": body.mode.rawValue]
+        if let previewPort = body.previewPort { applied["previewPort"] = previewPort }
+        return SZJSONRPC.encode(["body": applied])
     }
 
     /// Coerce a JSON `value` to the port's declared type.

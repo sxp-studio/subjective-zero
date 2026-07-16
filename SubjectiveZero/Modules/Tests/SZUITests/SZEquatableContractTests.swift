@@ -38,13 +38,16 @@ private func storedProperties(of subject: Any) -> Set<String> {
     #expect(storedProperties(of: view) == [
         // compared in ==
         "node", "status", "isSelected", "locked", "showPill", "errorDetail", "renderEndpoint",
-        "connectedInputs",
+        "connectedInputs", "previewsEnabled", "zoomedOut",
         // closures — deliberately excluded from == (capture only stable refs). The card's
         // bottom-left buttons: file (onOpenSource), speech (onOpenChat), and "⋯" (onOpenMenu).
         "onOpenSource", "onOpenChat", "onOpenMenu",
-        "onSetInput", "onToggleDisplay", "optionsFor",
+        "onSetInput", "onToggleDisplay", "onTogglePreview", "optionsFor",
         // the Outdated/Error pill's one-click repair request
         "onFix",
+        // the live-preview box — a stable per-node ref like the closures; only the thumb leaf
+        // reads its contents, so identity must not invalidate the card
+        "previewFrame",
         // view-local state (excluded from ==): the card hover lift
         "cardHover",
     ])
@@ -74,7 +77,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
         // compared in ==
         "graph", "strokeZoom", "space", "selectedNodeID", "multiSelection", "selectedConnectionID",
         "hiddenConnectionID", "ghostedNodeIDs", "raisedTiers", "connectedSockets", "connectedInputsByNode",
-        "nodeAgentState", "graphOpStatus", "isRunning", "runWorkSet",
+        "nodeAgentState", "graphOpStatus", "isRunning", "runWorkSet", "previewsEnabled", "zoomedOut",
         // closures — deliberately excluded from == (routed to the panel's live handlers).
         // Split/Merge/chat-open/source-open moved to the panel's right-click menu, so their
         // closures left too.
@@ -82,7 +85,10 @@ private func storedProperties(of subject: Any) -> Set<String> {
         "onSocketDragChanged", "onSocketDragEnded", "onEdgeDragChanged", "onEdgeDragEnded",
         "autoEditNodeID",
         "onOpenNodeMenu", "onOpenNodeChat", "onOpenNodeSource", "onFixNode", "onSetInputDefault",
-        "onToggleDisplay", "optionsFor", "onCommitPrompt", "onPromptEditingChanged",
+        "onToggleDisplay", "onTogglePreview", "optionsFor", "onCommitPrompt", "onPromptEditingChanged",
+        // the preview-box registry — stable host-owned ref; per-node boxes are observed by the
+        // thumb leaves, never compared here
+        "previewFrames",
     ])
 }
 
@@ -100,10 +106,13 @@ private let portRef = SZPortRef(node: node.id, port: "output")
 private func nodeView(
     node n: SZNode = node, status: SZNodeStatus = .ready, isSelected: Bool = false, locked: Bool = false,
     showPill: Bool = true, errorDetail: String? = nil, renderEndpoint: SZPortRef? = nil,
-    connectedInputs: Set<String> = []
+    previewsEnabled: Bool = true, zoomedOut: Bool = false,
+    connectedInputs: Set<String> = [], previewFrame: SZNodePreviewFrame? = nil
 ) -> SZNodeView {
     SZNodeView(node: n, status: status, isSelected: isSelected, locked: locked, showPill: showPill,
-               errorDetail: errorDetail, renderEndpoint: renderEndpoint, connectedInputs: connectedInputs)
+               errorDetail: errorDetail, renderEndpoint: renderEndpoint,
+               previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
+               connectedInputs: connectedInputs, previewFrame: previewFrame)
 }
 
 @MainActor
@@ -118,7 +127,11 @@ private func nodeView(
     #expect(nodeView(showPill: false) != nodeView())
     #expect(nodeView(errorDetail: "boom") != nodeView())
     #expect(nodeView(renderEndpoint: portRef) != nodeView())
+    #expect(nodeView(previewsEnabled: false) != nodeView())                    // gate flip must reflow the card
+    #expect(nodeView(zoomedOut: true) != nodeView())                           // LOD crossing re-renders once
     #expect(nodeView(connectedInputs: ["input"]) != nodeView())                // the clause at SZNodeView.swift:46
+    var previewing = node; previewing.body = SZNodeBody(mode: .preview)        // body rides node ==
+    #expect(nodeView(node: previewing) != nodeView())
 }
 
 @MainActor
@@ -128,11 +141,16 @@ private func nodeView(
     var moved = node; moved.position = SZPoint(x: 999, y: -999)
     #expect(nodeView(node: moved) == nodeView())
 
+    // The preview box is a stable per-node ref written at ~15 Hz — its identity (and contents)
+    // must not invalidate the card; only the thumb leaf observes it.
+    #expect(nodeView(previewFrame: SZNodePreviewFrame()) == nodeView())
+
     // Closures capture only stable refs; a fresh closure identity each render must not invalidate.
     let withClosures = SZNodeView(
         node: node, status: .ready, renderEndpoint: nil,
         onOpenSource: {}, onOpenChat: {}, onOpenMenu: {},
-        onSetInput: { _, _, _ in }, onToggleDisplay: { _ in }, optionsFor: { _ in [] })
+        onSetInput: { _, _, _ in }, onToggleDisplay: { _ in }, onTogglePreview: { _ in },
+        optionsFor: { _ in [] })
     #expect(withClosures == nodeView())
 }
 
@@ -174,7 +192,8 @@ private func canvasView(
     ghostedNodeIDs: Set<SZNodeID> = [], raisedTiers: [SZNodeID: Int] = [:],
     connectedSockets: Set<String> = [], connectedInputsByNode: [SZNodeID: Set<String>] = [:],
     nodeAgentState: [SZNodeID: SZNodeAgentState] = [:], graphOpStatus: [SZNodeID: String] = [:],
-    isRunning: Bool = false, runWorkSet: Set<SZNodeID> = [], autoEditNodeID: SZNodeID? = nil
+    isRunning: Bool = false, runWorkSet: Set<SZNodeID> = [], autoEditNodeID: SZNodeID? = nil,
+    previewsEnabled: Bool = true, zoomedOut: Bool = false, previewFrames: SZNodePreviewFrames? = nil
 ) -> SZNodeCanvasContentView {
     var v = SZNodeCanvasContentView(
         graph: graph, strokeZoom: strokeZoom, space: space, selectedNodeID: selectedNodeID,
@@ -182,7 +201,8 @@ private func canvasView(
         hiddenConnectionID: hiddenConnectionID, ghostedNodeIDs: ghostedNodeIDs, raisedTiers: raisedTiers,
         connectedSockets: connectedSockets, connectedInputsByNode: connectedInputsByNode,
         nodeAgentState: nodeAgentState, graphOpStatus: graphOpStatus, isRunning: isRunning,
-        runWorkSet: runWorkSet)
+        runWorkSet: runWorkSet, previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
+        previewFrames: previewFrames)
     v.autoEditNodeID = autoEditNodeID
     return v
 }
@@ -207,6 +227,8 @@ private func canvasView(
     #expect(canvasView(graphOpStatus: [id: "splitting"]) != canvasView())
     #expect(canvasView(isRunning: true) != canvasView())
     #expect(canvasView(runWorkSet: [id]) != canvasView())
+    #expect(canvasView(previewsEnabled: false) != canvasView())
+    #expect(canvasView(zoomedOut: true) != canvasView())
 }
 
 @MainActor
@@ -214,9 +236,13 @@ private func canvasView(
     // `autoEditNodeID` is a one-shot focus hint consumed on insertion, deliberately out of `==`.
     #expect(canvasView(autoEditNodeID: node.id) == canvasView())
 
+    // The preview registry is a stable host-owned ref — identity must not invalidate the canvas.
+    #expect(canvasView(previewFrames: SZNodePreviewFrames()) == canvasView())
+
     var withClosures = canvasView()
     withClosures.onSelectNode = { _, _ in }
     withClosures.onNodeDragEnded = {}
     withClosures.onToggleDisplay = { _, _ in }
+    withClosures.onTogglePreview = { _, _ in }
     #expect(withClosures == canvasView())
 }

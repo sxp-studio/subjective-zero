@@ -18,7 +18,11 @@ private func cameraNode(at position: SZPoint = SZPoint(x: 100, y: 200)) -> SZNod
                 SZPort(name: "camera", type: .enumeration, ui: SZPortUI(kind: .dropdown), def: .enumeration("default")),
             ],
             outputs: [SZPort(name: "texture", type: .texture, display: true)]),
-        position: position)
+        position: position,
+        // Pin the COMPACT card: a texture output would otherwise auto-preview (nil body) and grow
+        // every height/socket literal here by previewHeight. Preview geometry has its own file
+        // (SZNodeLayoutPreviewTests); this one pins the classic anatomy.
+        body: SZNodeBody(mode: .none))
 }
 
 private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {

@@ -92,6 +92,7 @@ extension SZHost {
         do {
             try SZAppStateIO.save(SZAppState(openProjectPath: lastOpenProjectPath,
                                              panelLayout: panelLayout, snapToGrid: snapToGrid,
+                                             livePreviews: livePreviews,
                                              autoHidePanelHeaders: autoHidePanelHeaders,
                                              gridCursorTrail: gridCursorTrail,
                                              viewportRoundedCorners: viewportRoundedCorners,

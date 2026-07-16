@@ -18,6 +18,8 @@ enum SZNodeCardStyle {
     static let cardFill = Color(white: 0.16)
     static let cardHoverFill = Color(white: 0.20)   // card / action-pill fill under the cursor
     static let cardStroke = Color.white.opacity(0.12)
+    static let previewPlaceholderFill = Color.black.opacity(0.35)   // thumb well before the first frame
+    static let previewCornerRadius: CGFloat = 6                     // thumb rounding inside a card body
     static let selectionStroke = Color.cyan.opacity(0.9)
     /// The user/mention accent — the chat panel's user blue, shared by composer mention tokens,
     /// transcript mention chips, and the context menu's suggestion glyphs (one voice = one color).

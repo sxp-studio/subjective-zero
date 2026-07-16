@@ -54,6 +54,12 @@ final class SZAssetManager {
         return texture
     }
 
+    /// A peek that never allocates — nil when the id has never been written. Capture paths use this
+    /// so an un-rendered node reads as absent, not as a fabricated blank.
+    func existing(id: String) -> (any MTLTexture)? {
+        pool[id]
+    }
+
     /// Drop all pooled textures (e.g. when loading a different graph).
     func reset() {
         pool.removeAll()

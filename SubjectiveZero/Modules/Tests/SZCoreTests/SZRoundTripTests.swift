@@ -47,7 +47,10 @@ private func sampleProject() -> SZProject {
             ],
             outputs: [SZPort(name: "output", type: .texture, display: true)]
         ),
-        position: SZPoint(x: 380, y: 200)
+        position: SZPoint(x: 380, y: 200),
+        // Pin the card-body field through both round-trip levels (in-memory + the .subz split —
+        // body lives in project.json with the node, NOT in the split-out contract).
+        body: SZNodeBody(mode: .preview, previewPort: "output")
     )
 
     let connection = SZConnection(
@@ -79,7 +82,8 @@ private func sampleProject() -> SZProject {
 }
 
 @Test func appStateRoundTrips() throws {
-    let app = SZAppState(windowSize: SZSize(width: 1600, height: 1000), theme: .dark, openProjectPath: "/x.subz")
+    let app = SZAppState(windowSize: SZSize(width: 1600, height: 1000), theme: .dark, openProjectPath: "/x.subz",
+                         livePreviews: false)
     let data = try JSONEncoder().encode(app)
     #expect(try JSONDecoder().decode(SZAppState.self, from: data) == app)
 }

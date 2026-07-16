@@ -40,6 +40,9 @@ public struct SZNodeEditorPanel: View {
     private let pendingNodeCount: Int             // pending prompt nodes → the Build button's count badge
     private let snapToGrid: Bool                  // host-owned pref (Graph menu); grid dots draw regardless
     private let gridCursorTrail: Bool             // host-owned pref (Graph menu); dots morph to glyphs near the cursor
+    private let livePreviews: Bool                // host-owned pref (Graph menu); mirrors SZNodeLayout.previewsEnabled
+    private let previewFrames: SZNodePreviewFrames?   // host-owned per-node thumb boxes (stable refs)
+    private let onTogglePreview: (SZNodeID, String) -> Void
     private let cameraCommand: SZCameraCommand?   // host-raised one-shot: Center View / Zoom to Fit
     private let onOpenNodeChat: (SZNodeID) -> Void   // context menu "Open Transcript" → the node's chat tab
     private let onOpenNodeSource: (SZNodeID) -> Void  // a node's file button → open its Node.swift in the editor
@@ -110,6 +113,8 @@ public struct SZNodeEditorPanel: View {
                 pendingNodeCount: Int = 0,
                 snapToGrid: Bool = true,
                 gridCursorTrail: Bool = true,
+                livePreviews: Bool = true,
+                previewFrames: SZNodePreviewFrames? = nil,
                 cameraCommand: SZCameraCommand? = nil,
                 selectedNodeID: Binding<SZNodeID?>,
                 onOpenNodeChat: @escaping (SZNodeID) -> Void,
@@ -122,6 +127,7 @@ public struct SZNodeEditorPanel: View {
                 onResetTime: @escaping () -> Void = {},
                 onSetInputDefault: @escaping (SZNodeID, String, SZPortValue, Bool) -> Void,
                 onToggleDisplay: @escaping (SZNodeID, String) -> Void = { _, _ in },
+                onTogglePreview: @escaping (SZNodeID, String) -> Void = { _, _ in },
                 optionsFor: @escaping (SZNodeID, String) -> [SZEnumOption] = { _, _ in [] },
                 onDeleteNodes: @escaping ([SZNodeID]) -> Void = { _ in },
                 onDeleteConnection: @escaping (SZConnectionID) -> Void = { _ in },
@@ -147,6 +153,8 @@ public struct SZNodeEditorPanel: View {
         self.pendingNodeCount = pendingNodeCount
         self.snapToGrid = snapToGrid
         self.gridCursorTrail = gridCursorTrail
+        self.livePreviews = livePreviews
+        self.previewFrames = previewFrames
         self.cameraCommand = cameraCommand
         self._selectedNodeID = selectedNodeID
         self.onOpenNodeChat = onOpenNodeChat
@@ -159,6 +167,7 @@ public struct SZNodeEditorPanel: View {
         self.onResetTime = onResetTime
         self.onSetInputDefault = onSetInputDefault
         self.onToggleDisplay = onToggleDisplay
+        self.onTogglePreview = onTogglePreview
         self.optionsFor = optionsFor
         self.onDeleteNodes = onDeleteNodes
         self.onDeleteConnection = onDeleteConnection
@@ -170,6 +179,11 @@ public struct SZNodeEditorPanel: View {
         self.onCreateMediaNodes = onCreateMediaNodes
         self.gearMenu = gearMenu
     }
+
+    /// The semantic-zoom tier, derived once from the panel-local camera — the ONE definition shared
+    /// by the resting canvas content and the drag-ghost overlay, so a card can never render full at
+    /// rest but tile mid-drag (or vice versa).
+    private var zoomedOut: Bool { camera.zoom < SZNodeLayout.lodZoomThreshold }
 
     /// Whether an agent currently owns this node (can't edit/delete/wire it) — the shared rule lives on
     /// SZNodeCanvasContentView (single source for content rendering, the drag-ghost overlay, and these
@@ -645,6 +659,11 @@ public struct SZNodeEditorPanel: View {
             graphOpStatus: graphOpStatus,
             isRunning: isRunning,
             runWorkSet: runWorkSet,
+            previewsEnabled: livePreviews,
+            // Compared as a Bool, so pinch ticks keep skipping the subtree — it flips only when the
+            // zoom crosses the LOD threshold, re-rendering the cards once per crossing.
+            zoomedOut: zoomedOut,
+            previewFrames: previewFrames,
             onSelectNode: { selectNode($0, additive: $1) },
             onSelectConnection: { id in
                 selectedConnectionID = id
@@ -664,6 +683,7 @@ public struct SZNodeEditorPanel: View {
             onFixNode: onFixNode,
             onSetInputDefault: onSetInputDefault,
             onToggleDisplay: onToggleDisplay,
+            onTogglePreview: onTogglePreview,
             optionsFor: optionsFor,
             onCommitPrompt: { store.updateNode(id: $0, prompt: $1) },
             onPromptEditingChanged: { id, editing in
@@ -730,6 +750,10 @@ public struct SZNodeEditorPanel: View {
             errorDetail: nodeAgentState[node.id]?.errorDetail,
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputs,
+            previewsEnabled: livePreviews,
+            zoomedOut: zoomedOut,
+            // The SAME stable box as the resting card — a dragged card keeps its live thumb.
+            previewFrame: previewFrames?.frame(for: node.id),
             optionsFor: { port in optionsFor(node.id, port) })
     }
 

@@ -106,6 +106,27 @@ private func loadedStore() -> SZStore {
     #expect(store.project?.graph.renderEndpoint == nil)
 }
 
+/// `setNodeBody` stores a fully-resolved body (callers resolve the preview port), clears back to
+/// nil (= the editor's legacy auto-preview fallback), and reports a missing node.
+@MainActor
+@Test func setNodeBodySetsClearsAndReportsMissing() {
+    let store = loadedStore()
+    let id = store.addPromptNode(prompt: nil, position: SZPoint(x: 0, y: 0))!
+    store.editPorts(node: id, .init(upsertOutputs: [SZPort(name: "output", type: .texture)]))
+
+    let body = SZNodeBody(mode: .preview, previewPort: "output")
+    #expect(store.setNodeBody(id: id, body: body) == true)
+    #expect(store.project?.graph.node(id: id)?.body == body)
+
+    #expect(store.setNodeBody(id: id, body: SZNodeBody(mode: .none)) == true)   // explicit compact pin
+    #expect(store.project?.graph.node(id: id)?.body == SZNodeBody(mode: .none))
+
+    #expect(store.setNodeBody(id: id, body: nil) == true)                       // back to unset/legacy
+    #expect(store.project?.graph.node(id: id)?.body == nil)
+
+    #expect(store.setNodeBody(id: SZNodeID(), body: body) == false)             // no such node
+}
+
 @MainActor
 @Test func dataConnectionResolvesTheFlowIntentEdge() {
     let store = loadedStore()

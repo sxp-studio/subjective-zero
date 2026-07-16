@@ -14,16 +14,22 @@ public extension SZImageBytes {
         return Self.encodePNG(cgImage)
     }
 
+    /// Fit `width`×`height` so the long edge is at most `maxDimension`: never upscales, preserves
+    /// aspect, floors at 1px per side. The ONE sizing rule shared by the CPU downscale here and the
+    /// GPU thumb capture (`SZRuntime.captureNodeOutputs`), so their output dimensions can't drift.
+    static func fittedSize(width: Int, height: Int, maxDimension: Int) -> (width: Int, height: Int) {
+        let scale = min(1, Double(maxDimension) / Double(max(width, height)))
+        return (max(1, Int((Double(width) * scale).rounded())),
+                max(1, Int((Double(height) * scale).rounded())))
+    }
+
     /// Encode as PNG downscaled so the long edge is at most `maxDimension` (never upscales), or nil on
     /// failure. Used by `agent_view_frame` to fit the frame in an agent's token budget — the model is
     /// billed by image dimensions, so a smaller image is a cheaper look.
     func pngData(maxDimension: Int) -> Data? {
         guard let source = cgImage() else { return nil }
-        let longEdge = max(width, height)
-        guard maxDimension > 0, longEdge > maxDimension else { return Self.encodePNG(source) }
-        let scale = Double(maxDimension) / Double(longEdge)
-        let w = max(1, Int((Double(width) * scale).rounded()))
-        let h = max(1, Int((Double(height) * scale).rounded()))
+        guard maxDimension > 0, max(width, height) > maxDimension else { return Self.encodePNG(source) }
+        let (w, h) = Self.fittedSize(width: width, height: height, maxDimension: maxDimension)
         guard let context = CGContext(
             data: nil, width: w, height: h,
             bitsPerComponent: 8, bytesPerRow: 0,
@@ -36,8 +42,9 @@ public extension SZImageBytes {
         return Self.encodePNG(scaled)
     }
 
-    /// Wrap the BGRA8 pixels in a `CGImage` (no copy of the byte layout), or nil on failure.
-    private func cgImage() -> CGImage? {
+    /// Wrap the BGRA8 pixels in a `CGImage` (no copy of the byte layout), or nil on failure. Public
+    /// for the node-preview thumbs, which hand the CGImage straight to SwiftUI (no encode).
+    func cgImage() -> CGImage? {
         guard width > 0, height > 0 else { return nil }
         // BGRA8 little-endian == premultiplied-first ARGB byte order.
         let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue

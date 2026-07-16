@@ -41,8 +41,12 @@ struct SZNodeCanvasContentView: View, Equatable {
     let graphOpStatus: [SZNodeID: String]
     let isRunning: Bool
     let runWorkSet: Set<SZNodeID>     // the run's captured work — members lock + read Coding; a user's mid-run draft isn't in it
+    var previewsEnabled: Bool = true  // the global Live Previews gate (mirrors SZNodeLayout.previewsEnabled)
+    var zoomedOut: Bool = false       // semantic-zoom tier: cards render as preview-only tiles, socket dots hide
 
-    // Interaction plumbing — closures excluded from `==` (see header).
+    // Interaction plumbing — closures excluded from `==` (see header). `previewFrames` rides with
+    // them: a stable registry ref whose per-node boxes are observed only by the thumb leaves.
+    var previewFrames: SZNodePreviewFrames? = nil
     var onSelectNode: (SZNodeID, _ additive: Bool) -> Void = { _, _ in }
     var onSelectConnection: (SZConnectionID) -> Void = { _ in }
     var onNodeDragChanged: (SZNodeID, _ translation: CGSize, _ location: CGPoint) -> Void = { _, _, _ in }
@@ -58,6 +62,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     var onFixNode: (SZNodeID) -> Void = { _ in }          // Outdated/Error pill → compose a rebuild request
     var onSetInputDefault: (SZNodeID, String, SZPortValue, Bool) -> Void = { _, _, _, _ in }
     var onToggleDisplay: (SZNodeID, String) -> Void = { _, _ in }
+    var onTogglePreview: (SZNodeID, String) -> Void = { _, _ in }
     var optionsFor: (SZNodeID, String) -> [SZEnumOption] = { _, _ in [] }
     var onCommitPrompt: (SZNodeID, String) -> Void = { _, _ in }
     var onPromptEditingChanged: (SZNodeID, Bool) -> Void = { _, _ in }
@@ -78,6 +83,8 @@ struct SZNodeCanvasContentView: View, Equatable {
             && lhs.graphOpStatus == rhs.graphOpStatus
             && lhs.isRunning == rhs.isRunning
             && lhs.runWorkSet == rhs.runWorkSet
+            && lhs.previewsEnabled == rhs.previewsEnabled
+            && lhs.zoomedOut == rhs.zoomedOut
     }
 
     var body: some View {
@@ -115,7 +122,12 @@ struct SZNodeCanvasContentView: View, Equatable {
                 .frame(width: 22, height: 22)            // forgiving hit target around the 12pt dot
                 .contentShape(Circle())
                 .position(socket.point)
-                .opacity(ghostedNodeIDs.contains(socket.nodeID) ? 0 : 1)
+                // Zoomed out, dots hide with the rest of the card chrome — and their hit areas go
+                // INERT: an invisible 22pt drag target over a preview tile would turn "drag the
+                // tile" into a wire drag the user never saw. Ghosting keeps hit-testing (opacity
+                // only): the live drag gesture owning those sockets must not cancel mid-drag.
+                .opacity(ghostedNodeIDs.contains(socket.nodeID) || zoomedOut ? 0 : 1)
+                .allowsHitTesting(!zoomedOut)
                 .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
                     .onChanged { onSocketDragChanged(socket, $0.location) }
                     .onEnded { _ in onSocketDragEnded() })
@@ -135,11 +147,15 @@ struct SZNodeCanvasContentView: View, Equatable {
             errorDetail: nodeAgentState[node.id]?.errorDetail,
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputsByNode[node.id] ?? [],
+            previewsEnabled: previewsEnabled,
+            zoomedOut: zoomedOut,
+            previewFrame: previewFrames?.frame(for: node.id),
             onOpenSource: { onOpenNodeSource(node.id) },
             onOpenChat: { onOpenNodeChat(node.id) },
             onOpenMenu: { onOpenNodeMenu(node.id) },
             onSetInput: { port, value, persist in onSetInputDefault(node.id, port, value, persist) },
             onToggleDisplay: { port in onToggleDisplay(node.id, port) },
+            onTogglePreview: { port in onTogglePreview(node.id, port) },
             optionsFor: { port in optionsFor(node.id, port) },
             onCommitPrompt: { onCommitPrompt(node.id, $0) },
             onPromptEditingChanged: { onPromptEditingChanged(node.id, $0) },
@@ -161,11 +177,15 @@ struct SZNodeCanvasContentView: View, Equatable {
     static func card(
         for node: SZNode, status: SZNodeStatus, isSelected: Bool, locked: Bool, isRunning: Bool,
         errorDetail: String?, renderEndpoint: SZPortRef?, connectedInputs: Set<String>,
+        previewsEnabled: Bool = true,
+        zoomedOut: Bool = false,
+        previewFrame: SZNodePreviewFrame? = nil,
         onOpenSource: (() -> Void)? = nil,
         onOpenChat: (() -> Void)? = nil,
         onOpenMenu: (() -> Void)? = nil,
         onSetInput: @escaping (String, SZPortValue, Bool) -> Void = { _, _, _ in },
         onToggleDisplay: @escaping (String) -> Void = { _ in },
+        onTogglePreview: @escaping (String) -> Void = { _ in },
         optionsFor: @escaping (String) -> [SZEnumOption] = { _ in [] },
         onCommitPrompt: @escaping (String) -> Void = { _ in },
         onPromptEditingChanged: @escaping (Bool) -> Void = { _ in },
@@ -184,12 +204,16 @@ struct SZNodeCanvasContentView: View, Equatable {
             SZNodeView(node: node, status: status, isSelected: isSelected, locked: locked,
                        showPill: showPill(status, isRunning: isRunning), errorDetail: errorDetail,
                        renderEndpoint: renderEndpoint,
+                       previewsEnabled: previewsEnabled,
+                       zoomedOut: zoomedOut,
                        connectedInputs: connectedInputs,
+                       previewFrame: previewFrame,
                        onOpenSource: onOpenSource,
                        onOpenChat: onOpenChat,
                        onOpenMenu: onOpenMenu,
                        onSetInput: onSetInput,
                        onToggleDisplay: onToggleDisplay,
+                       onTogglePreview: onTogglePreview,
                        optionsFor: optionsFor,
                        onFix: onFix)
                 .equatable()

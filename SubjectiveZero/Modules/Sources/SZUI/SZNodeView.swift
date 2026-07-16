@@ -15,15 +15,25 @@ struct SZNodeView: View, Equatable {
     var showPill: Bool = true
     var errorDetail: String? = nil   // full build diagnostic → clickable error pill
     let renderEndpoint: SZPortRef?
+    /// Mirrors `SZNodeLayout.previewsEnabled` (the host writes both together). The body derives its
+    /// preview region from SZNodeLayout — this prop exists so `==` sees a gate flip and reflows the card.
+    var previewsEnabled: Bool = true
+    /// Semantic-zoom tier (canvas zoom < `SZNodeLayout.lodZoomThreshold`): render as a preview-only
+    /// tile. Render-only — the card frame and socket geometry are identical in both tiers.
+    var zoomedOut: Bool = false
     /// Input port names currently fed by a data edge — their inline control is hidden (the wire's value
     /// wins at runtime, so an editable default would lie). The contract keeps the default untouched, so
     /// disconnecting brings the control back with its pre-connection value.
     var connectedInputs: Set<String> = []
+    /// This node's live preview box (stable per node, written by the host's capture driver). Excluded
+    /// from `==` like the closures — only SZNodePreviewThumb reads its contents.
+    var previewFrame: SZNodePreviewFrame? = nil
     var onOpenSource: (() -> Void)? = nil   // file button → open this node's Node.swift
     var onOpenChat: (() -> Void)? = nil     // speech button → this node's Coding Agent chat
     var onOpenMenu: (() -> Void)? = nil     // "⋯" → the node's context menu (split/merge/implement/…)
     var onSetInput: ((String, SZPortValue, Bool) -> Void)? = nil   // (port, value, persist) → ui_set_input_default
     var onToggleDisplay: ((String) -> Void)? = nil   // texture output monitor icon → ui_toggle_display (port)
+    var onTogglePreview: ((String) -> Void)? = nil   // texture output photo icon → toggle the card's live preview (port)
     var optionsFor: ((String) -> [SZEnumOption])? = nil   // effective enum options (dynamic ?? static) for a port
     var onFix: (() -> Void)? = nil          // Outdated/Error pill → compose a rebuild request to its Coding Agent
 
@@ -44,6 +54,8 @@ struct SZNodeView: View, Equatable {
             && lhs.showPill == rhs.showPill
             && lhs.errorDetail == rhs.errorDetail
             && lhs.renderEndpoint == rhs.renderEndpoint
+            && lhs.previewsEnabled == rhs.previewsEnabled
+            && lhs.zoomedOut == rhs.zoomedOut
             && lhs.connectedInputs == rhs.connectedInputs
     }
 
@@ -52,17 +64,26 @@ struct SZNodeView: View, Equatable {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            // The body rows must match SZNodeLayout's geometry exactly (bodyTopPadding above the first
-            // row, rowSpacing between rows) so the overlaid sockets line up with their labels.
-            // The card-wide numeric-cell width, computed ONCE per body pass (each row reuses it).
-            let fieldWidth = SZNodeLayout.numericFieldWidth(of: node)
-            VStack(spacing: SZNodeLayout.rowSpacing) {
-                ForEach(inputs, id: \.name) { inputRow($0, fieldWidth: fieldWidth) }
-                ForEach(outputs, id: \.name) { outputRow($0) }
+            if zoomedOut {
+                lodTile
+            } else {
+                header
+                // The preview body sits between header and rows, exactly `previewHeight` tall —
+                // SZNodeLayout.previewInset is the ONE term the frame below and rowCenterY share.
+                if SZNodeLayout.previewInset(of: node) > 0 {
+                    previewRegion
+                }
+                // The body rows must match SZNodeLayout's geometry exactly (bodyTopPadding above the first
+                // row, rowSpacing between rows) so the overlaid sockets line up with their labels.
+                // The card-wide numeric-cell width, computed ONCE per body pass (each row reuses it).
+                let fieldWidth = SZNodeLayout.numericFieldWidth(of: node)
+                VStack(spacing: SZNodeLayout.rowSpacing) {
+                    ForEach(inputs, id: \.name) { inputRow($0, fieldWidth: fieldWidth) }
+                    ForEach(outputs, id: \.name) { outputRow($0) }
+                }
+                .padding(.top, SZNodeLayout.bodyTopPadding)
+                .padding(.bottom, SZNodeLayout.bodyBottomPadding)
             }
-            .padding(.top, SZNodeLayout.bodyTopPadding)
-            .padding(.bottom, SZNodeLayout.bodyBottomPadding)
         }
         .frame(width: SZNodeLayout.width(of: node), height: SZNodeLayout.height(of: node), alignment: .top)
         .background(
@@ -89,7 +110,38 @@ struct SZNodeView: View, Equatable {
                 .offset(y: -(SZNodeLayout.statusPillHeight + 4))
         }
         .graphOpGlow(status, cornerRadius: SZNodeLayout.cornerRadius)
-        .overlay(alignment: .bottomLeading) { bottomButtons }
+        // No action pills from orbit — the zoomed-out tile is preview + pill only.
+        .overlay(alignment: .bottomLeading) { if !zoomedOut { bottomButtons } }
+    }
+
+    /// The in-card live-thumbnail region (between header and rows). Height is the layout's
+    /// `previewHeight` — the horizontal padding is purely visual, inside the region.
+    private var previewRegion: some View {
+        SZNodePreviewThumb(frame: previewFrame)
+            .padding(.horizontal, 8)
+            .frame(height: SZNodeLayout.previewHeight)
+    }
+
+    /// The zoomed-out card: the preview fills the whole frame; a node with no effective preview shows
+    /// an icon + title tile instead (a blank rect gives no orientation). Chrome (rows, toggles,
+    /// buttons) is gone — the status pill floating above survives.
+    @ViewBuilder
+    private var lodTile: some View {
+        if SZNodeLayout.previewInset(of: node) > 0 {
+            SZNodePreviewThumb(frame: previewFrame, cornerRadius: SZNodeLayout.cornerRadius)
+        } else {
+            VStack(spacing: 8) {
+                Image(systemName: node.sfSymbol)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+                Text(node.title)
+                    .font(SZNodeCardStyle.titleFont)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     /// The card's action buttons, tucked just BELOW the card (offset outside the frame, so they
@@ -144,16 +196,15 @@ struct SZNodeView: View, Equatable {
         HStack(spacing: 6) {
             Spacer(minLength: 0)
             if port.type == .texture {
-                let icon = Image(systemName: "display")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isRenderEndpoint(port) ? Color.cyan : .white.opacity(0.3))
-                if let onToggleDisplay, !locked {
-                    Button { onToggleDisplay(port.name) } label: { icon }
-                        .buttonStyle(.plain)
-                        .help(isRenderEndpoint(port) ? "Stop displaying this output" : "Display this output in the viewport")
-                } else {
-                    icon
-                }
+                let previewing = isPreviewPort(port)
+                toggleGlyph("photo", active: previewing, port: port.name,
+                            help: previewing ? "Hide this output's live preview"
+                                             : "Preview this output on the card",
+                            action: onTogglePreview)
+                toggleGlyph("display", active: isRenderEndpoint(port), port: port.name,
+                            help: isRenderEndpoint(port) ? "Stop displaying this output"
+                                                         : "Display this output in the viewport",
+                            action: onToggleDisplay)
             }
             Text(port.name)
                 .font(SZNodeCardStyle.labelFont)
@@ -164,8 +215,32 @@ struct SZNodeView: View, Equatable {
         .frame(height: SZNodeLayout.rowHeight)
     }
 
+    /// A texture-row toggle glyph — photo (preview) and display (endpoint) share one look: cyan when
+    /// active, dimmed otherwise; a Button only when a handler is wired and the card isn't locked.
+    @ViewBuilder
+    private func toggleGlyph(_ systemName: String, active: Bool, port: String, help: String,
+                             action: ((String) -> Void)?) -> some View {
+        let icon = Image(systemName: systemName)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(active ? Color.cyan : .white.opacity(0.3))
+        if let action, !locked {
+            Button { action(port) } label: { icon }
+                .buttonStyle(.plain)
+                .help(help)
+        } else {
+            icon
+        }
+    }
+
     private func isRenderEndpoint(_ port: SZPort) -> Bool {
         renderEndpoint?.node == node.id && renderEndpoint?.port == port.name
+    }
+
+    /// Whether `port` is the one this card's preview effectively shows — graph state only, NOT gated
+    /// on the global previews switch: the icon keeps reflecting (and toggling) the persisted choice
+    /// while the gate is off, so a click never silently mutates state behind a dead-looking control.
+    private func isPreviewPort(_ port: SZPort) -> Bool {
+        node.effectiveBodyMode == .preview && node.effectivePreviewPort == port.name
     }
 
     /// Effective enum options: the host-provided list (dynamic ?? static) when injected, else the port's

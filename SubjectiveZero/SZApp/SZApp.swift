@@ -401,6 +401,8 @@ struct SZApp: App {
                                                      set: { host.setSnapToGrid($0) }))
                 Toggle("Grid Cursor Trail", isOn: Binding(get: { host.gridCursorTrail },
                                                           set: { host.setGridCursorTrail($0) }))
+                Toggle("Live Previews", isOn: Binding(get: { host.livePreviews },
+                                                      set: { host.setLivePreviews($0) }))
             }
             // Help — the community/support links (Website / GitHub / Discord / Send Feedback). Replacing
             // .help drops the default "SubjectiveZero Help" item (there's no help book, so it only errored).
@@ -486,6 +488,8 @@ struct SZApp: App {
                                                  set: { host.setSnapToGrid($0) }))
             Toggle("Grid Cursor Trail", isOn: Binding(get: { host.gridCursorTrail },
                                                       set: { host.setGridCursorTrail($0) }))
+            Toggle("Live Previews", isOn: Binding(get: { host.livePreviews },
+                                                  set: { host.setLivePreviews($0) }))
         }
         Divider()
         Button("AI Providers…") { host.presentProviderSetup() }
@@ -575,6 +579,8 @@ struct SZApp: App {
                               pendingNodeCount: host.pendingNodeCount,
                               snapToGrid: host.snapToGrid,
                               gridCursorTrail: host.gridCursorTrail,
+                              livePreviews: host.livePreviews,
+                              previewFrames: host.previewFrames,
                               cameraCommand: host.cameraCommand,
                               selectedNodeID: $selectedNodeID,
                               onOpenNodeChat: { host.showChat(.node($0)) },
@@ -587,6 +593,7 @@ struct SZApp: App {
                               onResetTime: { host.resetPlayback() },
                               onSetInputDefault: { host.setInputDefault(node: $0, port: $1, value: $2, persist: $3) },
                               onToggleDisplay: { host.toggleDisplay(node: $0, port: $1) },
+                              onTogglePreview: { host.toggleNodePreview(node: $0, port: $1) },
                               optionsFor: { host.effectiveOptions(node: $0, port: $1) },
                               onDeleteNodes: { host.deleteNodes(ids: $0) },
                               onDeleteConnection: { host.deleteConnection(id: $0) },
