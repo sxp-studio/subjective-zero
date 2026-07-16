@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Live node previews — the host half. Owns the Graph ▸ Live Previews pref (the global gate), the
-// per-node preview toggle op (the card's photo icon + `ui_set_node_body`), and the ~15 Hz capture
-// loop: build the want-list from the graph, GPU-downscale + read back off-main
-// (`SZRuntime.captureNodeOutputs`), then write each node's `SZNodePreviewFrame` box on the main
-// actor — Observation invalidates only the thumb leaves, never the Equatable-gated cards.
-import CoreGraphics
+// per-node preview toggle op (the card's photo icon + `ui_set_node_body`), and the WATCH SET the
+// runtime's zero-copy preview stream captures: effective-preview nodes ∩ the editor's visible set,
+// capped. Event-driven end to end — graph edits arrive via Observation on the store, camera moves
+// via the panel's visible-set callback, frames via the runtime's completion callback. No polling
+// loop, no CPU pixels: the runtime publishes IOSurfaces that go straight into the cards' frame
+// boxes (and from there to CALayer.contents).
 import Foundation
 import SZCore
 import SZRuntime
 import SZUI
 
 extension SZHost {
-    /// Thumb budget per tick — bounds capture bandwidth on a huge auto-previewing graph. Graph order;
-    /// no viewport culling yet (the camera is panel-local @State — publish a visible set upward if
-    /// this cap ever bites).
+    /// Thumb budget — bounds capture bandwidth; applies to VISIBLE nodes once the editor reports.
     nonisolated static let previewMaxThumbs = 24
-    /// Long-edge pixels of a captured thumb — plenty for a 200pt card region.
-    nonisolated static let previewMaxDimension = 160
+    /// Long-edge pixels of a thumb target — 2x a ~160pt preview region, crisp on Retina.
+    nonisolated static let previewMaxDimension = 320
 
     /// Graph ▸ Live Previews — the global gate over per-card preview bodies. Order matters: the
     /// geometry gate flips first, then the observable pref re-renders the cards (their `==` compares
@@ -24,20 +23,20 @@ extension SZHost {
     func setLivePreviews(_ on: Bool) {
         SZNodeLayout.previewsEnabled = on
         livePreviews = on
-        if !on { previewFrames.clearImages() }
-        refreshPreviewDriver()
+        if !on { previewFrames.clear() }
+        refreshPreviewStream()
         persistAppState()
     }
 
     /// THE apply path for a card body — shared by the photo toggle and `ui_set_node_body`, so both
     /// ride one choreography: store write → drop the node's stale thumb (a retargeted preview must
-    /// never keep showing the old port's frame) → persist → driver refresh.
+    /// never keep showing the old port's frame) → persist → watch-set refresh.
     @discardableResult
     func setNodeBody(node id: SZNodeID, body: SZNodeBody?) -> Bool {
         guard store.setNodeBody(id: id, body: body) else { return false }
-        previewFrames.frame(for: id).image = nil
+        previewFrames.frame(for: id).surface = nil
         persistProject()
-        refreshPreviewDriver()
+        refreshPreviewStream()
         return true
     }
 
@@ -60,62 +59,87 @@ extension SZHost {
         return body
     }
 
-    /// Start or stop the capture loop to match host state. The loop itself re-reads the graph every
-    /// tick (graph edits need no refresh); this only needs calling when the RUN CONDITION changes —
-    /// gate flips, project load — so a quiet editor holds zero timers when nothing previews.
-    func refreshPreviewDriver() {
-        guard livePreviews, runtime != nil, store.project != nil else {
-            previewDriverTask?.cancel()
-            previewDriverTask = nil
-            return
-        }
-        guard previewDriverTask == nil else { return }
-        previewDriverTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                let delay = await self.previewDriverTick()
-                try? await Task.sleep(for: delay)
-            }
-        }
+    // MARK: - Watch-set maintenance (event-driven)
+
+    /// The editor's visible-node report (SZNodeEditorPanel → SZApp closure). `nil` until the first
+    /// report — no culling then, so headless/MCP sessions (no editor panel mounted) still stream.
+    func setVisiblePreviewNodes(_ nodes: Set<SZNodeID>) {
+        visiblePreviewNodes = nodes
+        refreshPreviewStream()
     }
 
-    /// One capture pass: want-list from the live graph, batch capture + CGImage conversion OFF the
-    /// main actor (`waitUntilCompleted` readback must never block UI), then box writes back on it.
-    /// Returns the next tick's delay — ~15 Hz while thumbs stream, a lazy idle poll while none do.
-    private func previewDriverTick() async -> Duration {
-        guard livePreviews, let runtime, let graph = store.project?.graph else { return .milliseconds(250) }
-        // Deleted nodes must not pin their last frame forever — the tick is the one periodic place
-        // that sees the live graph, so it owns the pruning (project switch prunes separately).
+    /// Recompute the watched set NOW and push it to the runtime iff it changed. Cheap (one graph
+    /// scan + ordered-key compare), so every mutation chokepoint just calls it: gate flips, body
+    /// edits, project load, visible-set reports, and the store observation below.
+    func refreshPreviewStream() {
+        guard let runtime else { return }
+        guard livePreviews, let graph = store.project?.graph else {
+            if lastPushedWatchKeys != [] {
+                lastPushedWatchKeys = []
+                runtime.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
+            }
+            return
+        }
         previewFrames.prune(keeping: Set(graph.nodes.map(\.id)))
         var wanted: [(node: SZNodeID, port: String)] = []
         for node in graph.nodes {
             guard let port = node.effectivePreviewPort else { continue }
+            if let visible = visiblePreviewNodes, !visible.contains(node.id) { continue }
             wanted.append((node.id, port))
             if wanted.count == Self.previewMaxThumbs { break }
         }
-        guard !wanted.isEmpty else { return .milliseconds(250) }
-        // A paused timeline holds the pool frozen: once every wanted thumb has a frame, re-capturing
-        // is pure GPU burn for pixel-identical results. A thumb enabled WHILE paused still fills
-        // (its box is empty, so this guard falls through to one capture).
-        if runtime.isPaused, wanted.allSatisfy({ previewFrames.frame(for: $0.node).image != nil }) {
-            return .milliseconds(250)
+        let keys = wanted.map { "\($0.node.uuidString):\($0.port)" }
+        guard keys != lastPushedWatchKeys else { return }
+        lastPushedWatchKeys = keys
+        runtime.setWatchedPreviews(wanted, maxDimension: Self.previewMaxDimension)
+    }
+
+    /// Observe the store for graph edits (every `mutate` reassigns `project`, so this fires on any
+    /// edit — including drags, which the 100ms debounce + set-compare absorb) and re-arm. The one
+    /// event source `refreshPreviewStream`'s explicit call sites can't cover: agent-driven edits
+    /// that add/remove/retarget texture nodes mid-run.
+    func armPreviewGraphObservation() {
+        withObservationTracking {
+            _ = store.project?.graph
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.schedulePreviewWatchRefresh()
+                self.armPreviewGraphObservation()
+            }
         }
-        let requests = wanted
-        let images = await Task.detached(priority: .utility) {
-            runtime.captureNodeOutputs(requests, maxDimension: Self.previewMaxDimension)
-                .map { $0?.cgImage() }
-        }.value
-        // Re-validate after the await: the project may have switched, the gate flipped, or the task
-        // been cancelled while the capture ran — writing then would resurrect pruned boxes with
-        // frames from the wrong world.
-        guard !Task.isCancelled, livePreviews, let current = store.project?.graph else {
-            return .milliseconds(250)
+    }
+
+    private func schedulePreviewWatchRefresh() {
+        previewWatchDebounce?.cancel()
+        previewWatchDebounce = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            self?.refreshPreviewStream()
         }
-        let live = Set(current.nodes.map(\.id))
-        for (want, image) in zip(wanted, images) where live.contains(want.node) {
-            guard let image else { continue }   // never-written port: keep the placeholder, don't blank a stale thumb
-            previewFrames.frame(for: want.node).image = image
+    }
+
+    // MARK: - Frame delivery
+
+    /// Install the runtime→host publish path (called once from `start()`). The runtime callback
+    /// fires on Metal's completion thread — hop to the main actor and apply.
+    func installPreviewFrameSink(_ runtime: SZRuntime) {
+        runtime.setPreviewFrameCallback { [weak self] frames in
+            Task { @MainActor [weak self] in
+                self?.applyPreviewFrames(frames)
+            }
         }
-        return .milliseconds(66)
+    }
+
+    /// Write published surfaces into the cards' frame boxes — re-validating each against the LIVE
+    /// graph first: a publish races project switches, deletes, and retargets (the pass was encoded
+    /// against an older world), and a stale write would resurrect pruned boxes.
+    private func applyPreviewFrames(_ frames: [SZNodePreviewSurface]) {
+        guard livePreviews, let graph = store.project?.graph else { return }
+        for frame in frames {
+            guard let node = graph.node(id: frame.node),
+                  node.effectivePreviewPort == frame.port else { continue }
+            previewFrames.frame(for: frame.node).surface = frame.surface
+        }
     }
 }

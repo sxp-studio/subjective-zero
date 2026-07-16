@@ -43,6 +43,11 @@ public struct SZNodeEditorPanel: View {
     private let livePreviews: Bool                // host-owned pref (Graph menu); mirrors SZNodeLayout.previewsEnabled
     private let previewFrames: SZNodePreviewFrames?   // host-owned per-node thumb boxes (stable refs)
     private let onTogglePreview: (SZNodeID, String) -> Void
+    /// Debounced visible-node reports for the host's preview watch-set culling (the camera is
+    /// panel-local @State — this closure is how visibility leaves the panel).
+    private let onVisibleNodesChanged: ((Set<SZNodeID>) -> Void)?
+    @State private var visiblePublishTask: Task<Void, Never>?
+    @State private var lastPublishedVisible: Set<SZNodeID>?
     private let cameraCommand: SZCameraCommand?   // host-raised one-shot: Center View / Zoom to Fit
     private let onOpenNodeChat: (SZNodeID) -> Void   // context menu "Open Transcript" → the node's chat tab
     private let onOpenNodeSource: (SZNodeID) -> Void  // a node's file button → open its Node.swift in the editor
@@ -115,6 +120,7 @@ public struct SZNodeEditorPanel: View {
                 gridCursorTrail: Bool = true,
                 livePreviews: Bool = true,
                 previewFrames: SZNodePreviewFrames? = nil,
+                onVisibleNodesChanged: ((Set<SZNodeID>) -> Void)? = nil,
                 cameraCommand: SZCameraCommand? = nil,
                 selectedNodeID: Binding<SZNodeID?>,
                 onOpenNodeChat: @escaping (SZNodeID) -> Void,
@@ -155,6 +161,7 @@ public struct SZNodeEditorPanel: View {
         self.gridCursorTrail = gridCursorTrail
         self.livePreviews = livePreviews
         self.previewFrames = previewFrames
+        self.onVisibleNodesChanged = onVisibleNodesChanged
         self.cameraCommand = cameraCommand
         self._selectedNodeID = selectedNodeID
         self.onOpenNodeChat = onOpenNodeChat
@@ -185,6 +192,30 @@ public struct SZNodeEditorPanel: View {
     /// rest but tile mid-drag (or vice versa).
     private var zoomedOut: Bool { camera.zoom < SZNodeLayout.lodZoomThreshold }
 
+    /// Debounce-publish the visible-node set (the host's preview-culling input). 120ms absorbs
+    /// pinch/scroll bursts; the set-compare in `publishVisibleNodes` keeps idle camera drift from
+    /// ever reaching the host. Node DRAGS are deliberately unhooked: a card dragged off-screen
+    /// stays watched until the next camera/graph event — brief, harmless staleness.
+    private func scheduleVisiblePublish() {
+        guard onVisibleNodesChanged != nil else { return }
+        visiblePublishTask?.cancel()
+        visiblePublishTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            publishVisibleNodes()
+        }
+    }
+
+    private func publishVisibleNodes(override: Set<SZNodeID>? = nil) {
+        guard let onVisibleNodesChanged else { return }
+        let visible = override ?? project.map {
+            SZCanvasVisibility.visibleNodes(in: $0.graph, camera: camera, viewSize: viewSize)
+        } ?? []
+        guard visible != lastPublishedVisible else { return }
+        lastPublishedVisible = visible
+        onVisibleNodesChanged(visible)
+    }
+
     /// Whether an agent currently owns this node (can't edit/delete/wire it) — the shared rule lives on
     /// SZNodeCanvasContentView (single source for content rendering, the drag-ghost overlay, and these
     /// gesture guards).
@@ -199,8 +230,11 @@ public struct SZNodeEditorPanel: View {
             // Declared AFTER the HUD → the menu always draws above it (and everything else).
             .overlay(alignment: .topLeading) { contextMenuOverlay }
             // A deleted target (agent promote/merge mid-run) closes the menu rather than leaving
-            // rows pointing at a ghost.
-            .onChange(of: project?.graph.nodes.map(\.id)) { validateContextMenuTarget() }
+            // rows pointing at a ghost. Node add/remove also moves the visible set.
+            .onChange(of: project?.graph.nodes.map(\.id)) {
+                validateContextMenuTarget()
+                scheduleVisiblePublish()
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
                 dismissContextMenu()
             }
@@ -278,14 +312,27 @@ public struct SZNodeEditorPanel: View {
             .onDeleteCommand { deleteSelected() }
             .onKeyPress(.delete) { deleteSelected(); return .handled }
             .onKeyPress(.deleteForward) { deleteSelected(); return .handled }
-            .onAppear { viewSize = proxy.size; canvasFocused = true }
-            .onChange(of: proxy.size) { _, size in viewSize = size }
+            .onAppear {
+                viewSize = proxy.size
+                canvasFocused = true
+                publishVisibleNodes()   // first report, undebounced — the host starts culled
+            }
+            .onChange(of: proxy.size) { _, size in
+                viewSize = size
+                scheduleVisiblePublish()
+            }
+            // Pinch/scroll/auto-pan/camera commands all land in `camera` — one hook covers them.
+            .onChange(of: camera) { scheduleVisiblePublish() }
             // Host-raised camera commands (Graph ▸ Center View / Zoom to Fit) — the fresh token per
             // issue makes a repeat press re-fire even when the action is unchanged.
             .onChange(of: cameraCommand) { _, command in
                 if let command { applyCameraCommand(command) }
             }
-            .onDisappear { stopAutoPan() }
+            .onDisappear {
+                stopAutoPan()
+                visiblePublishTask?.cancel()
+                publishVisibleNodes(override: [])   // closed editor ⇒ nothing visible ⇒ zero thumb GPU
+            }
         }
     }
 
@@ -356,13 +403,13 @@ public struct SZNodeEditorPanel: View {
         }
     }
 
-    /// The chat toggle's small status dot — agents working while the panel is closed.
+    /// The chat toggle's small status dot — agents working while the panel is closed. Pulses via a
+    /// repeatForever OPACITY animation: CA-animatable, so it runs on the render server —
+    /// a `TimelineView(.animation)` here invalidated SwiftUI on EVERY display frame, forever
+    /// (measured as a standing main-thread layout flush whose cost scaled with canvas zoom).
     private func chatToggleDot(_ color: Color) -> some View {
-        TimelineView(.animation) { context in
-            let phase = 0.5 + 0.5 * sin(context.date.timeIntervalSinceReferenceDate * 4)
-            Circle().fill(color)
-                .frame(width: 6, height: 6)
-                .opacity(0.4 + 0.55 * phase)
+        SZPulsingOpacity(range: 0.4...0.95, halfPeriod: 0.79) {
+            Circle().fill(color).frame(width: 6, height: 6)
         }
         .offset(x: -3, y: 3)
         .allowsHitTesting(false)
@@ -1144,10 +1191,12 @@ private struct SZHudBuildButton: View {
             .background(Capsule().fill(isRunning ? Color.orange : Color.accentColor)
                 .brightness(hover ? 0.06 : 0))
             .overlay {
+                // Render-server pulse (see chatToggleDot): the TimelineView this replaces was THE
+                // standing per-frame SwiftUI invalidation — any project with pending work paid a
+                // full-window layout flush every display frame while the editor sat idle.
                 if pulse, !isRunning {
-                    TimelineView(.animation) { context in
-                        let phase = 0.5 + 0.5 * sin(context.date.timeIntervalSinceReferenceDate * 3)
-                        Capsule().stroke(Color.white.opacity(0.15 + 0.4 * phase), lineWidth: 1.5)
+                    SZPulsingOpacity(range: 0.27...1.0, halfPeriod: 1.05) {
+                        Capsule().stroke(Color.white.opacity(0.55), lineWidth: 1.5)
                     }
                     .allowsHitTesting(false)
                 }
@@ -1225,5 +1274,27 @@ private struct SZHudMenuButton<Content: View>: View {
         .fixedSize()
         .trackingHover($hover)
         .help(help)
+    }
+}
+
+/// A slow breathing pulse that costs ZERO main-thread frames: a repeatForever animation on OPACITY
+/// (CA-animatable) runs entirely on the render server. The `TimelineView(.animation)` shape this
+/// replaces re-entered SwiftUI on every display frame for the life of the view — a standing
+/// full-window layout flush whose per-flush cost scaled with the canvas zoom (big scaled layers).
+/// Use this for any always-on attention pulse; TimelineView stays the tool for FINITE effects.
+struct SZPulsingOpacity<Content: View>: View {
+    let range: ClosedRange<Double>
+    let halfPeriod: TimeInterval
+    @ViewBuilder let content: () -> Content
+    @State private var bright = false
+
+    var body: some View {
+        content()
+            .opacity(bright ? range.upperBound : range.lowerBound)
+            .onAppear {
+                withAnimation(.easeInOut(duration: halfPeriod).repeatForever(autoreverses: true)) {
+                    bright = true
+                }
+            }
     }
 }

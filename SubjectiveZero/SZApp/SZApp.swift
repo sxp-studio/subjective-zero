@@ -581,6 +581,7 @@ struct SZApp: App {
                               gridCursorTrail: host.gridCursorTrail,
                               livePreviews: host.livePreviews,
                               previewFrames: host.previewFrames,
+                              onVisibleNodesChanged: { host.setVisiblePreviewNodes($0) },
                               cameraCommand: host.cameraCommand,
                               selectedNodeID: $selectedNodeID,
                               onOpenNodeChat: { host.showChat(.node($0)) },

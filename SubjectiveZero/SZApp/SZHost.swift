@@ -166,9 +166,15 @@ final class SZHost {
     internal(set) var livePreviews: Bool = SZAppStateIO.load()?.livePreviews ?? true
 
     // Per-node live-preview thumbs (stable observable boxes the cards hold uncompared refs to) and
-    // the ~15 Hz capture loop feeding them — both driven by SZHost+NodePreviews.swift.
+    // the watch-set plumbing feeding them — all event-driven, see SZHost+NodePreviews.swift.
     let previewFrames = SZNodePreviewFrames()
-    var previewDriverTask: Task<Void, Never>?
+    /// Debounce for store-observation-triggered watch-set recomputes.
+    var previewWatchDebounce: Task<Void, Never>?
+    /// The editor's latest visible-node report; nil = no editor report yet ⇒ no culling (headless
+    /// and MCP sessions keep streaming without a mounted panel).
+    var visiblePreviewNodes: Set<SZNodeID>?
+    /// The last watch set pushed to the runtime (ordered keys) — pushes happen only on change.
+    var lastPushedWatchKeys: [String] = []
 
     // Rounded corners on the viewport tile — same app-state.json + restore story, mutated via
     // setViewportRoundedCorners. Toggled from the View menu (SZApp), beside Auto-Hide Panel Headers.
@@ -362,6 +368,8 @@ final class SZHost {
         }
         self.runtime = runtime
         self.renderViewportFrame = { layer in runtime.drawLive(into: layer) }
+        installPreviewFrameSink(runtime)
+        armPreviewGraphObservation()
 
         // Route the launch: on a cold launch we show the welcome/home surface as the FIRST view and
         // open NOTHING yet — so launch never touches the camera/mic until the user picks a project
@@ -460,11 +468,11 @@ final class SZHost {
         // cards show WHY, not just that. After clearPerProjectState, so the details survive.
         classifyRebuildsAfterLoad()
         watchNodeSources(in: newURL)
-        // Fresh graph, fresh thumbs: drop boxes for nodes that don't exist here, (re)start the
-        // capture loop against the new project.
+        // Fresh graph, fresh thumbs: drop boxes for nodes that don't exist here, re-point the
+        // runtime's watch set at the new project.
         previewFrames.prune(keeping: Set(project.graph.nodes.map(\.id)))
-        previewFrames.clearImages()
-        refreshPreviewDriver()
+        previewFrames.clear()
+        refreshPreviewStream()
         // 6. History — skipped for the env override so a debug launch can't clobber the user's.
         if recordInHistory {
             let path = newURL.standardizedFileURL.path
@@ -537,10 +545,14 @@ final class SZHost {
     var hasStagedGraphOp: Bool { pendingGraphOp != nil }
 
     private func clearPerProjectState() {
-        // Stop the preview capture loop before the new project's prune/clear below — a task left
-        // running across the swap could resurrect pruned boxes with old-project frames.
-        previewDriverTask?.cancel()
-        previewDriverTask = nil
+        // Unwatch everything before the new project's prune/clear below — a late publish for the
+        // old graph is dropped by applyPreviewFrames' re-validation, but there's no reason to keep
+        // encoding for it. The visible set is stale for the new project until the panel re-reports.
+        previewWatchDebounce?.cancel()
+        previewWatchDebounce = nil
+        visiblePreviewNodes = nil
+        lastPushedWatchKeys = []
+        runtime?.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
         nodeAgentState = [:]
         runWorkSet = []
         pendingDirectorMessages = [:]

@@ -125,38 +125,28 @@ struct SZConnectionStrokeView: View, Equatable {
 
     private var selectionGlow: Color { (kind == .flow ? SZEdgeStyle.intentViolet : .cyan).opacity(0.75) }
 
-    /// One full motion cycle per `period`, travelling source → target (negative phase moves toward target).
-    private func flowPhase(date: Date, cycle: CGFloat, period: Double) -> CGFloat {
-        let frac = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
-        return -CGFloat(frac) * cycle
-    }
-
     // MARK: Data (committed) — solid blue wire + a gliding glow head.
 
     private var dataBody: some View {
         let z = max(zoom, 0.1)
         let width = max(2, (selected ? 5 : 3) / z)
         let base = selected ? Color.cyan : Color.blue
-        let lit = max(6, 8 / z), gap = max(90, 130 / z), cycle = lit + gap
+        let lit = max(6, 8 / z), gap = max(90, 130 / z)
         return ZStack {
             SZConnectionShape(from: from, to: to)
                 .stroke(base, style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
             if animated {
-                // The comet: a bright core dash + a wider, fainter halo dash (same pattern & phase, so
-                // they travel together). The halo replaces a per-frame `.shadow` — a plain stroke, no
-                // offscreen GPU blur pass.
-                TimelineView(.animation) { tl in
-                    let phase = flowPhase(date: tl.date, cycle: cycle, period: 1.6)
-                    let dash: [CGFloat] = [lit, gap]
-                    ZStack {
-                        SZConnectionShape(from: from, to: to)
-                            .stroke(SZEdgeStyle.dataGlow.opacity(0.22),
-                                    style: StrokeStyle(lineWidth: width * 2.0, lineCap: .round, dash: dash, dashPhase: phase))
-                        SZConnectionShape(from: from, to: to)
-                            .stroke(SZEdgeStyle.dataGlow.opacity(selected ? 0.7 : 0.95),
-                                    style: StrokeStyle(lineWidth: width * 0.85, lineCap: .round, dash: dash, dashPhase: phase))
-                    }
-                }
+                // The comet: a bright core dash + a wider, fainter halo dash (same pattern & phase,
+                // so they travel together; the halo replaces a per-frame `.shadow`). Motion runs on
+                // the render server — see SZEdgeMotionView.
+                SZEdgeMotionView(from: from, to: to, strokes: [
+                    SZEdgeDashStroke(color: NSColor(SZEdgeStyle.dataGlow).withAlphaComponent(0.22),
+                                     lineWidth: width * 2.0, dash: [lit, gap]),
+                    SZEdgeDashStroke(color: NSColor(SZEdgeStyle.dataGlow)
+                                         .withAlphaComponent(selected ? 0.7 : 0.95),
+                                     lineWidth: width * 0.85, dash: [lit, gap]),
+                ], period: 1.6, animated: true, zoom: z)
+                .allowsHitTesting(false)
             }
         }
     }
@@ -175,15 +165,14 @@ struct SZConnectionStrokeView: View, Equatable {
     private var flowingLine: some View {
         let z = max(zoom, 0.1)
         let dash: [CGFloat] = [max(4, 6 / z), max(3, 5 / z)]
-        let cycle = dash.reduce(0, +)
-        // Full-length (no end-trim) so dashes flow INTO the socket dots rather than popping into existence
-        // in mid-air. `paused` freezes the dash phase (a static dashed line) on very dense graphs.
-        return TimelineView(.animation(paused: !animated)) { tl in
-            SZConnectionShape(from: from, to: to)
-                .stroke(SZEdgeStyle.intentViolet,
-                        style: StrokeStyle(lineWidth: flowWidth, lineCap: .round, lineJoin: .round,
-                                           dash: dash, dashPhase: flowPhase(date: tl.date, cycle: cycle, period: 1.0)))
-        }
+        // Full-length (no end-trim) so dashes flow INTO the socket dots rather than popping into
+        // existence in mid-air. `animated: false` freezes the dash phase (a static dashed line) on
+        // very dense graphs. Motion runs on the render server — see SZEdgeMotionView.
+        return SZEdgeMotionView(from: from, to: to,
+                                strokes: [SZEdgeDashStroke(color: NSColor(SZEdgeStyle.intentViolet),
+                                                           lineWidth: flowWidth, dash: dash)],
+                                period: 1.0, animated: animated, zoom: z)
+            .allowsHitTesting(false)
     }
 
     private var pill: some View {

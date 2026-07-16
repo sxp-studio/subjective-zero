@@ -59,6 +59,10 @@ public final class SZRuntime: @unchecked Sendable {
         var timeline = SZTimeline()
         /// Offscreen render size; the live viewport overrides it each frame with its drawable size.
         var renderSize: (width: Int, height: Int)
+        /// The zero-copy node-preview stream (watched set + IOSurface target pairs). A class ref so
+        /// completion handlers can hold it; its vars follow this struct's lock, its atomics don't
+        /// need it — see SZPreviewStream's header.
+        let previews = SZPreviewStream()
     }
 
     private let engine: Mutex<EngineState>
@@ -393,8 +397,111 @@ public final class SZRuntime: @unchecked Sendable {
             time: timing.timeSeconds,
             width: width, height: height)
         if let endpoint { beforeCommit(commandBuffer, endpoint) }
+        // The live thumb pass rides THIS buffer (throttled inside) — after the schedule's writes,
+        // before the commit, so hazard tracking orders the downscales behind the frame's renders.
+        encodePreviewPass(state.previews, on: commandBuffer, now: CACurrentMediaTime())
         commandBuffer.commit()
         return (commandBuffer, endpoint)
+    }
+
+    /// Encode the watched-thumb downscales onto the frame's command buffer — the preview stream's
+    /// live half. Caller is inside the engine lock, pre-commit. Throttled to `minInterval`
+    /// (attempt-based), skipped while the previous pass's completion is pending, free when nothing
+    /// is watched. Paused frames never reach here (the paused path doesn't encode), so a frozen
+    /// timeline costs previews exactly zero.
+    private func encodePreviewPass(_ stream: SZPreviewStream, on commandBuffer: any MTLCommandBuffer,
+                                   now: TimeInterval) {
+        guard !stream.watched.isEmpty,
+              now - stream.lastPass >= stream.minInterval,
+              !stream.passInFlight.load(ordering: .acquiring) else { return }
+        // Burn the throttle window only when something actually encoded: a graph whose watched
+        // pools were never written (nothing rendered yet) must produce a thumb on its FIRST frame,
+        // not one interval later.
+        if encodeThumbScales(stream, on: commandBuffer) { stream.lastPass = now }
+    }
+
+    /// The shared body of the live pass and the watch-change one-shot fill: encode a downscale for
+    /// every watched port whose pool texture exists into its pair's BACK buffer, then register the
+    /// ONE completion handler that flips fronts, clears the in-flight flag, and publishes. Returns
+    /// whether anything was encoded (an unwritten pool encodes nothing — callers must not burn the
+    /// throttle window on it). The handler runs on Metal's completion thread with no lock held and
+    /// touches only atomics + its captured payload — never the runtime (class-header lock rules).
+    @discardableResult
+    private func encodeThumbScales(_ stream: SZPreviewStream, on commandBuffer: any MTLCommandBuffer) -> Bool {
+        let scaler = stream.scaler ?? MPSImageBilinearScale(device: assets.device)
+        stream.scaler = scaler
+        var payload: [(frame: SZNodePreviewSurface, pair: SZPreviewTargetPair, back: Int)] = []
+        for request in stream.watched {
+            let key = SZScheduler.textureID(node: request.node, port: request.port)
+            guard let source = assets.existing(id: key), source.pixelFormat == .bgra8Unorm else { continue }
+            let (w, h) = SZImageBytes.fittedSize(width: source.width, height: source.height,
+                                                 maxDimension: stream.maxDimension)
+            let pair: SZPreviewTargetPair
+            if let existing = stream.pairs[key], existing.width == w, existing.height == h {
+                pair = existing
+            } else {
+                // First sight of this port, or the source/maxDimension changed size: fresh pair.
+                // An in-flight pass keeps the OLD pair alive via its captured payload.
+                guard let fresh = SZPreviewTargetPair(device: assets.device, width: w, height: h) else { continue }
+                stream.pairs[key] = fresh
+                pair = fresh
+            }
+            let back = 1 - pair.front.load(ordering: .relaxed)
+            Self.encodeScale(source, into: pair.texture(at: back), scaler: scaler, on: commandBuffer)
+            payload.append((SZNodePreviewSurface(node: request.node, port: request.port,
+                                                 surface: pair.surface(at: back)), pair, back))
+        }
+        guard !payload.isEmpty else { return false }
+        stream.passInFlight.store(true, ordering: .releasing)
+        let callback = stream.onFrames
+        commandBuffer.addCompletedHandler { _ in
+            // Metal's completion thread. Touches ONLY the stream's atomics and the captured
+            // payload — never its lock-guarded vars. A late pass for a just-de-watched port flips
+            // pair objects the stream may no longer reference — harmless: the host re-validates
+            // every publish against the live graph before writing a box.
+            for item in payload { item.pair.front.store(item.back, ordering: .releasing) }
+            stream.passInFlight.store(false, ordering: .releasing)
+            callback?(payload.map(\.frame))
+        }
+        return true
+    }
+
+    /// Replace the watched preview set — pushed by the host on WATCH-LIST changes only (never per
+    /// frame). Prunes target pairs for de-watched ports. When the timeline is paused, or a newly
+    /// watched port has no target yet (scrolled into view; viewport closed), a one-shot thumb-only
+    /// buffer fills from the HELD pool textures immediately — a fresh preview must show the held
+    /// frame, not "no signal" until the next live frame.
+    public func setWatchedPreviews(_ requests: [(node: SZNodeID, port: String)], maxDimension: Int) {
+        engine.withLock { state in
+            let stream = state.previews
+            stream.watched = requests
+            if stream.maxDimension != maxDimension {
+                stream.maxDimension = maxDimension
+                stream.pairs.removeAll()   // every target is the wrong size now
+            }
+            let keys = Set(requests.map { SZScheduler.textureID(node: $0.node, port: $0.port) })
+            stream.pairs = stream.pairs.filter { keys.contains($0.key) }
+            let hasNewPort = requests.contains {
+                stream.pairs[SZScheduler.textureID(node: $0.node, port: $0.port)] == nil
+            }
+            guard !requests.isEmpty, state.timeline.paused || hasNewPort,
+                  !stream.passInFlight.load(ordering: .acquiring),
+                  let commandBuffer = assets.commandQueue.makeCommandBuffer() else { return }
+            if encodeThumbScales(stream, on: commandBuffer) { stream.lastPass = CACurrentMediaTime() }
+            commandBuffer.commit()   // commit-under-lock, same as every schedule buffer
+        }
+    }
+
+    /// Install the publish sink for preview frames. CONTRACT: the callback fires on Metal's
+    /// completion thread after each thumb pass completes; it must be fast and non-blocking (hop to
+    /// the main actor immediately) and must not synchronously re-enter runtime APIs.
+    public func setPreviewFrameCallback(_ callback: (@Sendable ([SZNodePreviewSurface]) -> Void)?) {
+        engine.withLock { $0.previews.onFrames = callback }
+    }
+
+    /// Test hook: drop the pass throttle so back-to-back `renderFrame()` calls each publish.
+    func setPreviewThrottleForTests(_ interval: TimeInterval) {
+        engine.withLock { $0.previews.minInterval = interval }
     }
 
     /// Live viewport frame, called on the DISPLAY-LINK thread (the viewport's render loop → the host-wired
@@ -481,13 +588,7 @@ public final class SZRuntime: @unchecked Sendable {
                     targets.append(nil)
                     continue
                 }
-                var transform = MPSScaleTransform(scaleX: Double(w) / Double(source.width),
-                                                  scaleY: Double(h) / Double(source.height),
-                                                  translateX: 0, translateY: 0)
-                withUnsafePointer(to: &transform) { pointer in
-                    scaler.scaleTransform = pointer
-                    scaler.encode(commandBuffer: commandBuffer, sourceTexture: source, destinationTexture: target)
-                }
+                Self.encodeScale(source, into: target, scaler: scaler, on: commandBuffer)
                 targets.append(target)
             }
             commandBuffer.commit()
@@ -561,6 +662,19 @@ public final class SZRuntime: @unchecked Sendable {
                 mipmapLevel: 0)
         }
         return SZImageBytes(width: width, height: height, bgra: bytes)
+    }
+
+    /// The ONE MPS bilinear-downscale encode — shared by the synchronous snapshot path
+    /// (`captureNodeOutputs`) and the live preview stream, so transform/scale fixes can't drift.
+    static func encodeScale(_ source: any MTLTexture, into target: any MTLTexture,
+                            scaler: MPSImageBilinearScale, on commandBuffer: any MTLCommandBuffer) {
+        var transform = MPSScaleTransform(scaleX: Double(target.width) / Double(source.width),
+                                          scaleY: Double(target.height) / Double(source.height),
+                                          translateX: 0, translateY: 0)
+        withUnsafePointer(to: &transform) { pointer in
+            scaler.scaleTransform = pointer
+            scaler.encode(commandBuffer: commandBuffer, sourceTexture: source, destinationTexture: target)
+        }
     }
 
     /// The one texture-to-texture copy both presentation (endpoint → drawable) and capture
