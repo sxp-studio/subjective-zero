@@ -43,22 +43,72 @@ public final class SZNodePreviewFrames {
     }
 }
 
-/// The preview leaf — the ONE view that reads `frame.image`. Aspect-fills its proposed frame (the
-/// card's preview region, or the whole card when zoomed out) over a dark placeholder, clipped rounded.
-struct SZNodePreviewThumb: View {
+/// The preview leaf — the ONE consumer of `frame.image`. A layer-backed NSView whose CALayer
+/// `contents` IS the frame: a new frame is one GPU texture swap, composited by Core Animation at
+/// whatever scale the canvas zoom imposes. Routing the 15 Hz stream through a SwiftUI `Image`
+/// instead re-rasterized the thumb at SCREEN resolution on every frame — cost ∝ zoom², which read
+/// as "lag when zoomed in". The view observes its box directly (withObservationTracking), so a
+/// frame tick never re-enters SwiftUI at all.
+struct SZNodePreviewThumb: NSViewRepresentable {
     let frame: SZNodePreviewFrame?
     var cornerRadius: CGFloat = SZNodeCardStyle.previewCornerRadius
 
-    var body: some View {
-        Rectangle()
-            .fill(SZNodeCardStyle.previewPlaceholderFill)
-            .overlay {
-                if let image = frame?.image {
-                    Image(decorative: image, scale: 1)
-                        .resizable()
-                        .scaledToFill()
-                }
+    func makeNSView(context: Context) -> SZPreviewLayerView { SZPreviewLayerView() }
+
+    func updateNSView(_ view: SZPreviewLayerView, context: Context) {
+        view.cornerRadius = cornerRadius
+        view.bind(to: frame)
+    }
+}
+
+/// The backing view: dark placeholder fill, aspect-fill contents, rounded clip. `bind(to:)` installs
+/// a self-re-arming observation on the box — each image write lands as a bare `layer.contents`
+/// assignment on the main actor.
+final class SZPreviewLayerView: NSView {
+    private var box: SZNodePreviewFrame?
+    /// Bumped on every rebind; a pending re-arm from a PREVIOUS binding sees a stale generation and
+    /// dies instead of stacking a second live observation on the current box.
+    private var generation = 0
+
+    var cornerRadius: CGFloat = SZNodeCardStyle.previewCornerRadius {
+        didSet { layer?.cornerRadius = cornerRadius }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.35).cgColor
+        layer?.contentsGravity = .resizeAspectFill
+        layer?.masksToBounds = true
+        layer?.cornerRadius = cornerRadius
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    /// Point at (or away from) a frame box. Idempotent per box: re-binding the same box (every
+    /// SwiftUI update pass) must not stack observations.
+    func bind(to newBox: SZNodePreviewFrame?) {
+        guard box !== newBox else { return }
+        box = newBox
+        generation += 1
+        observeBox(generation: generation)
+    }
+
+    private func observeBox(generation: Int) {
+        guard generation == self.generation else { return }   // superseded by a later bind
+        guard let box else {
+            layer?.contents = nil
+            return
+        }
+        withObservationTracking {
+            layer?.contents = box.image
+        } onChange: { [weak self] in
+            // Observation fires once per change and must re-arm; hop to main — the write side
+            // (the host driver) is already MainActor, but the closure contract is nonisolated.
+            Task { @MainActor [weak self] in
+                self?.observeBox(generation: generation)
             }
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        }
     }
 }
