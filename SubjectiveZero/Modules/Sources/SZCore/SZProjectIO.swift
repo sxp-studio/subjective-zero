@@ -13,7 +13,7 @@
 import Foundation
 
 public enum SZProjectIO {
-    public enum IOError: Error, CustomStringConvertible {
+    public enum IOError: Error, CustomStringConvertible, LocalizedError {
         case notADirectory(URL)
         case missingProjectFile(URL)
 
@@ -23,6 +23,10 @@ public enum SZProjectIO {
             case .missingProjectFile(let url): "missing project.json in \(url.path)"
             }
         }
+
+        /// Without this, NSAlert renders the useless "(SZCore.SZProjectIO.IOError error 0.)"
+        /// instead of the description above — LocalizedError is what error dialogs actually read.
+        public var errorDescription: String? { description }
     }
 
     /// Top-level `project.json` wrapper — matches the documented `{ "project": { … } }` shape.
