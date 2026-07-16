@@ -468,9 +468,8 @@ final class SZHost {
         // cards show WHY, not just that. After clearPerProjectState, so the details survive.
         classifyRebuildsAfterLoad()
         watchNodeSources(in: newURL)
-        // Fresh graph, fresh thumbs: drop boxes for nodes that don't exist here, re-point the
-        // runtime's watch set at the new project.
-        previewFrames.prune(keeping: Set(project.graph.nodes.map(\.id)))
+        // Fresh graph, fresh thumbs: blank every box (old-project frames must not flash on the new
+        // canvas) and re-point the runtime's watch set — the refresh also prunes dead boxes.
         previewFrames.clear()
         refreshPreviewStream()
         // 6. History — skipped for the env override so a debug launch can't clobber the user's.
@@ -545,14 +544,7 @@ final class SZHost {
     var hasStagedGraphOp: Bool { pendingGraphOp != nil }
 
     private func clearPerProjectState() {
-        // Unwatch everything before the new project's prune/clear below — a late publish for the
-        // old graph is dropped by applyPreviewFrames' re-validation, but there's no reason to keep
-        // encoding for it. The visible set is stale for the new project until the panel re-reports.
-        previewWatchDebounce?.cancel()
-        previewWatchDebounce = nil
-        visiblePreviewNodes = nil
-        lastPushedWatchKeys = []
-        runtime?.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
+        resetPreviewStreamForProjectSwitch()   // SZHost+NodePreviews — the one unwatch/teardown home
         nodeAgentState = [:]
         runWorkSet = []
         pendingDirectorMessages = [:]

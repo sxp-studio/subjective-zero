@@ -137,7 +137,7 @@ private func withPreviewsEnabled<T>(_ enabled: Bool, _ body: () -> T) -> T {
             #expect(stale.effectiveBodyMode == .preview)
             #expect(stale.effectivePreviewPort == "texture")
             // An explicit `.preview` on a node with NO texture outputs degrades to compact: no
-            // inset, no want-list entry (nil port), no hot capture loop for an unfillable region.
+            // inset, no watch-set entry (nil port), no GPU passes for an unfillable region.
             let impossible = scalarNode(body: SZNodeBody(mode: .preview, previewPort: "value"))
             #expect(impossible.effectiveBodyMode == .none)
             #expect(impossible.effectivePreviewPort == nil)

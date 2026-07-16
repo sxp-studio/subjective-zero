@@ -16,7 +16,8 @@ public extension SZImageBytes {
 
     /// Fit `width`×`height` so the long edge is at most `maxDimension`: never upscales, preserves
     /// aspect, floors at 1px per side. The ONE sizing rule shared by the CPU downscale here and the
-    /// GPU thumb capture (`SZRuntime.captureNodeOutputs`), so their output dimensions can't drift.
+    /// preview stream's GPU thumb targets (`SZRuntime.encodeThumbScales`), so a thumb and an
+    /// agent-frame downscale of the same source can't disagree on dimensions.
     static func fittedSize(width: Int, height: Int, maxDimension: Int) -> (width: Int, height: Int) {
         let scale = min(1, Double(maxDimension) / Double(max(width, height)))
         return (max(1, Int((Double(width) * scale).rounded())),
@@ -42,9 +43,8 @@ public extension SZImageBytes {
         return Self.encodePNG(scaled)
     }
 
-    /// Wrap the BGRA8 pixels in a `CGImage` (no copy of the byte layout), or nil on failure. Public
-    /// for the node-preview thumbs, which hand the CGImage straight to SwiftUI (no encode).
-    func cgImage() -> CGImage? {
+    /// Wrap the BGRA8 pixels in a `CGImage` (no copy of the byte layout), or nil on failure.
+    private func cgImage() -> CGImage? {
         guard width > 0, height > 0 else { return nil }
         // BGRA8 little-endian == premultiplied-first ARGB byte order.
         let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue

@@ -587,7 +587,7 @@ extension SZHostBridge {
         }
 
         // The same host op as the card's photo toggle — one apply choreography (store write, stale
-        // thumb drop, persist, driver refresh) for human and agent edits.
+        // thumb drop, persist, watch-set refresh) for human and agent edits.
         guard host.setNodeBody(node: id, body: body) else {
             throw SZMCPError.message("no node \(id)")
         }

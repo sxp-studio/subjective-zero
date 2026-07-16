@@ -47,8 +47,8 @@ public final class SZNodePreviewFrames {
     }
 }
 
-/// The preview leaf — the ONE consumer of `frame.image`. A layer-backed NSView whose CALayer
-/// `contents` IS the frame: a new frame is one GPU texture swap, composited by Core Animation at
+/// The preview leaf — the ONE consumer of `frame.surface`. A layer-backed NSView whose CALayer
+/// `contents` IS the surface: a new frame is one GPU texture swap, composited by Core Animation at
 /// whatever scale the canvas zoom imposes. Routing the 15 Hz stream through a SwiftUI `Image`
 /// instead re-rasterized the thumb at SCREEN resolution on every frame — cost ∝ zoom², which read
 /// as "lag when zoomed in". The view observes its box directly (withObservationTracking), so a
@@ -85,7 +85,7 @@ final class SZPreviewLayerView: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.35).cgColor
+        layer?.backgroundColor = NSColor(SZNodeCardStyle.previewPlaceholderFill).cgColor
         layer?.contentsGravity = .resizeAspectFill
         layer?.masksToBounds = true
         layer?.cornerRadius = cornerRadius
@@ -124,7 +124,7 @@ final class SZPreviewLayerView: NSView {
     }()
 
     /// Point at (or away from) a frame box. Idempotent per box: re-binding the same box (every
-    /// SwiftUI update pass) must not stack observations.
+    /// SwiftUI update pass) must not stack observations — each surface write re-arms exactly one.
     func bind(to newBox: SZNodePreviewFrame?) {
         guard box !== newBox else { return }
         box = newBox
@@ -144,7 +144,7 @@ final class SZPreviewLayerView: NSView {
             noSignalLayer.isHidden = box.surface != nil
         } onChange: { [weak self] in
             // Observation fires once per change and must re-arm; hop to main — the write side
-            // (the host driver) is already MainActor, but the closure contract is nonisolated.
+            // (the host's frame sink) is already MainActor, but the closure contract is nonisolated.
             Task { @MainActor [weak self] in
                 self?.observeBox(generation: generation)
             }

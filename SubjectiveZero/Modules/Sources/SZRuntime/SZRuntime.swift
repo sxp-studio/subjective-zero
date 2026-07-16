@@ -353,11 +353,6 @@ public final class SZRuntime: @unchecked Sendable {
         engine.withLock { $0.timeline.setPaused(paused, now: CACurrentMediaTime()) }
     }
 
-    /// Whether the playback clock is paused — while true the schedule never advances, so pooled node
-    /// outputs are frozen (the preview capture loop uses this to stop re-reading identical frames).
-    public var isPaused: Bool {
-        engine.withLock { $0.timeline.paused }
-    }
 
     /// Rewind the playback clock to the start (the HUD Reset Time button): the next frame restarts at
     /// `timeSeconds == 0`, `frameIndex == 0`. Preserves the paused/playing state.
@@ -447,7 +442,14 @@ public final class SZRuntime: @unchecked Sendable {
                 pair = fresh
             }
             let back = 1 - pair.front.load(ordering: .relaxed)
-            Self.encodeScale(source, into: pair.texture(at: back), scaler: scaler, on: commandBuffer)
+            let target = pair.texture(at: back)
+            var transform = MPSScaleTransform(scaleX: Double(target.width) / Double(source.width),
+                                              scaleY: Double(target.height) / Double(source.height),
+                                              translateX: 0, translateY: 0)
+            withUnsafePointer(to: &transform) { pointer in
+                scaler.scaleTransform = pointer
+                scaler.encode(commandBuffer: commandBuffer, sourceTexture: source, destinationTexture: target)
+            }
             payload.append((SZNodePreviewSurface(node: request.node, port: request.port,
                                                  surface: pair.surface(at: back)), pair, back))
         }
@@ -557,48 +559,6 @@ public final class SZRuntime: @unchecked Sendable {
         presentBuffer.commit()
     }
 
-    /// Read back downscaled snapshots of node output textures from the by-id pool — the thumbnail
-    /// stream's capture half. Observes the pool's HELD textures (the display link keeps them fresh);
-    /// never advances the schedule. GPU-downscales under the engine lock into fresh `.shared`
-    /// targets (default hazard tracking orders the scale after any in-flight frame's writes), then
-    /// waits and reads back OUTSIDE the lock — `captureFrame`'s discipline. A port that has never
-    /// been written returns nil in its slot (absence, not a fabricated blank).
-    public func captureNodeOutputs(_ requests: [(node: SZNodeID, port: String)],
-                                   maxDimension: Int) -> [SZImageBytes?] {
-        guard !requests.isEmpty, maxDimension > 0 else { return requests.map { _ in nil } }
-        let result = engine.withLock { _ -> (buffer: (any MTLCommandBuffer)?, targets: [(any MTLTexture)?]) in
-            guard let commandBuffer = assets.commandQueue.makeCommandBuffer() else {
-                return (nil, requests.map { _ in nil })
-            }
-            let scaler = MPSImageBilinearScale(device: assets.device)
-            var targets: [(any MTLTexture)?] = []
-            for request in requests {
-                guard let source = assets.existing(id: SZScheduler.textureID(node: request.node, port: request.port)),
-                      source.pixelFormat == .bgra8Unorm else {
-                    targets.append(nil)
-                    continue
-                }
-                let (w, h) = SZImageBytes.fittedSize(width: source.width, height: source.height,
-                                                    maxDimension: maxDimension)
-                let desc = MTLTextureDescriptor.texture2DDescriptor(
-                    pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
-                desc.usage = [.shaderWrite, .shaderRead]
-                desc.storageMode = .shared
-                guard let target = assets.device.makeTexture(descriptor: desc) else {
-                    targets.append(nil)
-                    continue
-                }
-                Self.encodeScale(source, into: target, scaler: scaler, on: commandBuffer)
-                targets.append(target)
-            }
-            commandBuffer.commit()
-            return (commandBuffer, targets)
-        }
-        guard let buffer = result.buffer else { return result.targets.map { _ in nil } }
-        buffer.waitUntilCompleted()
-        return result.targets.map { $0.map(Self.readback) }
-    }
-
     /// Real framebuffer readback of the render-endpoint texture (`agent_view_frame`). Renders a fresh
     /// frame and blits the endpoint into a fresh `.shared` capture texture INSIDE the same command
     /// buffer — immune to live frames re-encoding the endpoint — then waits and reads back OUTSIDE the
@@ -645,36 +605,16 @@ public final class SZRuntime: @unchecked Sendable {
 
         // GPU wait + CPU readback — no lock held; `capture` is only ever written by the buffer above.
         buffer.waitUntilCompleted()
-        return Self.readback(capture)
-    }
-
-    /// CPU readback of a completed `.shared` capture texture into `SZImageBytes` — the one
-    /// getBytes site shared by `captureFrame` and `captureNodeOutputs`, so a bytesPerRow/region
-    /// fix can't drift between the viewport capture and the node thumbs.
-    private static func readback(_ texture: any MTLTexture) -> SZImageBytes {
-        let width = texture.width, height = texture.height
+        let width = capture.width, height = capture.height
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         bytes.withUnsafeMutableBytes { raw in
-            texture.getBytes(
+            capture.getBytes(
                 raw.baseAddress!,
                 bytesPerRow: width * 4,
                 from: MTLRegionMake2D(0, 0, width, height),
                 mipmapLevel: 0)
         }
         return SZImageBytes(width: width, height: height, bgra: bytes)
-    }
-
-    /// The ONE MPS bilinear-downscale encode — shared by the synchronous snapshot path
-    /// (`captureNodeOutputs`) and the live preview stream, so transform/scale fixes can't drift.
-    static func encodeScale(_ source: any MTLTexture, into target: any MTLTexture,
-                            scaler: MPSImageBilinearScale, on commandBuffer: any MTLCommandBuffer) {
-        var transform = MPSScaleTransform(scaleX: Double(target.width) / Double(source.width),
-                                          scaleY: Double(target.height) / Double(source.height),
-                                          translateX: 0, translateY: 0)
-        withUnsafePointer(to: &transform) { pointer in
-            scaler.scaleTransform = pointer
-            scaler.encode(commandBuffer: commandBuffer, sourceTexture: source, destinationTexture: target)
-        }
     }
 
     /// The one texture-to-texture copy both presentation (endpoint → drawable) and capture

@@ -25,7 +25,7 @@ struct SZNodeView: View, Equatable {
     /// wins at runtime, so an editable default would lie). The contract keeps the default untouched, so
     /// disconnecting brings the control back with its pre-connection value.
     var connectedInputs: Set<String> = []
-    /// This node's live preview box (stable per node, written by the host's capture driver). Excluded
+    /// This node's live preview box (stable per node, written by the host's preview frame sink). Excluded
     /// from `==` like the closures — only SZNodePreviewThumb reads its contents.
     var previewFrame: SZNodePreviewFrame? = nil
     var onOpenSource: (() -> Void)? = nil   // file button → open this node's Node.swift

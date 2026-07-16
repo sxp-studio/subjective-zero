@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The MOVING half of an edge (the data comet, the flow dashes): CAShapeLayers whose `lineDashPhase`
 // is driven by a repeating Core Animation, so the motion runs entirely on the render server — zero
-// main-thread frames. The per-edge `TimelineView(.animation)` this replaces re-entered SwiftUI on
-// every display frame for every animated edge, and each pass re-rasterized the stroked layers at
-// canvas scale (cost ∝ zoom²) — the residual "slow when zoomed in" after the HUD pulse fix.
-// Animations are wall-clock phased (`timeOffset`), so every edge's motion stays in lockstep exactly
-// like the shared TimelineView clock did.
+// main-thread frames. A per-edge `TimelineView(.animation)` would re-enter SwiftUI on every display
+// frame for every animated edge and re-rasterize the stroked layers at canvas scale (cost ∝ zoom²).
+// Animations are wall-clock phased (`timeOffset`), so every edge's motion stays in lockstep off one
+// shared clock.
 import AppKit
 import SwiftUI
 

@@ -68,6 +68,18 @@ extension SZHost {
         refreshPreviewStream()
     }
 
+    /// Project-switch teardown — the ONE unwatch home (clearPerProjectState calls it): cancel any
+    /// pending refresh, forget the old project's visible-set report (the panel re-reports for the
+    /// new graph), and unwatch everything. A late in-flight publish is dropped by
+    /// `applyPreviewFrames`' re-validation; this just stops encoding for a dead graph.
+    func resetPreviewStreamForProjectSwitch() {
+        previewWatchDebounce?.cancel()
+        previewWatchDebounce = nil
+        visiblePreviewNodes = nil
+        lastPushedWatchKeys = []
+        runtime?.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
+    }
+
     /// Recompute the watched set NOW and push it to the runtime iff it changed. Cheap (one graph
     /// scan + ordered-key compare), so every mutation chokepoint just calls it: gate flips, body
     /// edits, project load, visible-set reports, and the store observation below.

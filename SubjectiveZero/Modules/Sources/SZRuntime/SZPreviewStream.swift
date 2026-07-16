@@ -80,8 +80,10 @@ final class SZPreviewTargetPair: @unchecked Sendable {
 final class SZPreviewStream: @unchecked Sendable {
     /// The watched (node, port) outputs, in host priority order.
     var watched: [(node: SZNodeID, port: String)] = []
-    /// Long-edge pixels of a thumb target.
-    var maxDimension = 320
+    /// Long-edge pixels of a thumb target. No independent default: nothing encodes until the first
+    /// `setWatchedPreviews`, which always sets it — the ONE home for the value is the host's
+    /// `previewMaxDimension`.
+    var maxDimension = 0
     /// The host's publish sink. Fires on Metal's completion thread — see
     /// `SZRuntime.setPreviewFrameCallback` for the contract.
     var onFrames: (@Sendable ([SZNodePreviewSurface]) -> Void)?
