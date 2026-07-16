@@ -101,7 +101,8 @@ extension SZHost {
                                              providerGenerationSettings: providerGenerationSettings.isEmpty
                                                 ? nil : providerGenerationSettings,
                                              showWelcomeAtStartup: showWelcomeAtStartup,
-                                             showTokenCounts: showTokenCounts))
+                                             showTokenCounts: showTokenCounts,
+                                             telemetryEnabled: telemetryEnabled))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

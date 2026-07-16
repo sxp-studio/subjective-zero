@@ -11,6 +11,8 @@ extension SZHost {
         static let github = URL(string: "https://github.com/sxp-studio/subjective-zero")!
         static let discord = URL(string: "https://discord.gg/Y3JZxpXExs")!
         static let feedbackEmail = "subz@sxp.studio"
+        // The download page carries the telemetry disclaimer (what's sent, with a sample payload).
+        static let privacyInfo = URL(string: "https://sxp.studio/apps/subjectivezero/download")!
     }
 
     /// Open the SubjectiveZero website in the default browser.
@@ -21,6 +23,9 @@ extension SZHost {
 
     /// Open the community Discord invite in the default browser.
     func joinDiscord() { NSWorkspace.shared.open(SZLinks.discord) }
+
+    /// Open the telemetry disclosure (the welcome screen's ⓘ beside "Share anonymous usage data").
+    func openPrivacyInfo() { NSWorkspace.shared.open(SZLinks.privacyInfo) }
 
     /// Compose a feedback email (default mail client) with a pre-filled subject.
     func sendFeedbackEmail() {

@@ -50,6 +50,7 @@ public struct SZWelcomeOverlay: View {
     private let taglines: [String]
     private let recents: [SZWelcomeRecent]
     private let showAtStartup: Bool
+    private let shareUsageData: Bool
     private let githubIcon: Image
     private let discordIcon: Image
     private let onOpenRecent: (String) -> Void
@@ -60,12 +61,15 @@ public struct SZWelcomeOverlay: View {
     private let onJoinDiscord: () -> Void
     private let onOpenWebsite: () -> Void
     private let onSetShowAtStartup: (Bool) -> Void
+    private let onSetShareUsageData: (Bool) -> Void
+    private let onOpenPrivacyInfo: () -> Void
     private let onClose: () -> Void
 
     public init(versionText: String,
                 taglines: [String],
                 recents: [SZWelcomeRecent],
                 showAtStartup: Bool,
+                shareUsageData: Bool,
                 githubIcon: Image,
                 discordIcon: Image,
                 onOpenRecent: @escaping (String) -> Void,
@@ -76,11 +80,14 @@ public struct SZWelcomeOverlay: View {
                 onJoinDiscord: @escaping () -> Void,
                 onOpenWebsite: @escaping () -> Void,
                 onSetShowAtStartup: @escaping (Bool) -> Void,
+                onSetShareUsageData: @escaping (Bool) -> Void,
+                onOpenPrivacyInfo: @escaping () -> Void,
                 onClose: @escaping () -> Void) {
         self.versionText = versionText
         self.taglines = taglines
         self.recents = recents
         self.showAtStartup = showAtStartup
+        self.shareUsageData = shareUsageData
         self.githubIcon = githubIcon
         self.discordIcon = discordIcon
         self.onOpenRecent = onOpenRecent
@@ -91,6 +98,8 @@ public struct SZWelcomeOverlay: View {
         self.onJoinDiscord = onJoinDiscord
         self.onOpenWebsite = onOpenWebsite
         self.onSetShowAtStartup = onSetShowAtStartup
+        self.onSetShareUsageData = onSetShareUsageData
+        self.onOpenPrivacyInfo = onOpenPrivacyInfo
         self.onClose = onClose
     }
 
@@ -169,8 +178,22 @@ public struct SZWelcomeOverlay: View {
                 SZWelcomeButton(title: "Official Website", icon: Image(systemName: "globe"), action: onOpenWebsite)
             }
 
-            Toggle(isOn: Binding(get: { showAtStartup }, set: { onSetShowAtStartup($0) })) {
-                Text("Show this window at startup").font(.system(size: 12)).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 9) {
+                Toggle(isOn: Binding(get: { showAtStartup }, set: { onSetShowAtStartup($0) })) {
+                    Text("Show this window at startup").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 5) {
+                    Toggle(isOn: Binding(get: { shareUsageData }, set: { onSetShareUsageData($0) })) {
+                        Text("Share anonymous usage data").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    Button { onOpenPrivacyInfo() } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("What's collected and why — anonymous events only, never project content or prompts.")
+                }
             }
             .toggleStyle(.checkbox)
             .tint(SZWelcomeStyle.accent)

@@ -3,10 +3,13 @@ import AppKit
 import Darwin
 import Foundation
 
-// App-level anonymous usage telemetry: app_launch, agent_provider_default, and a
-// 15-minute active-only heartbeat, all fire-and-forget over the Jellystat wire
-// layer (SZJellystatClient.swift). A missing/empty JellystatConfig.json disables
-// telemetry entirely; DEBUG builds print payloads instead of sending.
+// App-level anonymous usage telemetry: app_launch, agent_provider_default, the
+// first-run setup funnel (setup_shown / setup_skipped / setup_completed /
+// setup_stuck_relaunch), and a 15-minute active-only heartbeat, all fire-and-forget
+// over the Jellystat wire layer (SZJellystatClient.swift). A missing/empty
+// JellystatConfig.json disables telemetry entirely; DEBUG builds print payloads
+// instead of sending; the user's "Share anonymous usage data" pref (welcome screen)
+// gates every send via the isEnabled closure.
 
 @MainActor
 final class SZTelemetry {
@@ -22,31 +25,40 @@ final class SZTelemetry {
     }
 
     private static let installUIDDefaultsKey = "studio.sxp.subjectivezero.jellystat.installUID"
+    private static let hasLaunchedBeforeDefaultsKey = "studio.sxp.subjectivezero.jellystat.hasLaunchedBefore"
     private static let heartbeatInterval: TimeInterval = 15 * 60
     private static let heartbeatCheckInterval: TimeInterval = 60
 
     private let config: SZJellystatConfig?
     private let installUID: String
+    private let userDefaults: UserDefaults
     private var contextProvider: (() -> Context?)?
+    // Deny-until-wired: nothing sends before start() hands over the live pref check.
+    private var isEnabled: () -> Bool = { false }
     private var startedAt: Date?
     private var lastHeartbeatAt: Date?
     private var heartbeatTimer: Timer?
     private var lastProviderSignature: String?
+    private var sentSetupShown = false
+    private var sentSetupSkipped = false
 
     init(bundle: Bundle = .main, userDefaults: UserDefaults = .standard) {
         self.config = SZJellystatConfig.load(bundle: bundle)
         self.installUID = Self.installUID(userDefaults: userDefaults)
+        self.userDefaults = userDefaults
     }
 
-    func start(contextProvider: @escaping () -> Context?) {
+    func start(contextProvider: @escaping () -> Context?, isEnabled: @escaping () -> Bool) {
         if startedAt != nil {
             self.contextProvider = contextProvider
+            self.isEnabled = isEnabled
             return
         }
         let now = Date()
         startedAt = now
         lastHeartbeatAt = now
         self.contextProvider = contextProvider
+        self.isEnabled = isEnabled
         trackLaunch()
         startHeartbeatTimer()
     }
@@ -69,6 +81,48 @@ final class SZTelemetry {
         report["reasoning_effort"] = .string(context.reasoningEffort)
         report["fast_mode"] = .int(context.fastMode ? 1 : 0)
         send(report)
+    }
+
+    // MARK: - First-run setup funnel
+
+    /// The Agent Providers sheet presented while no default is confirmed. Once per process —
+    /// a skip → menu-reopen in one session is one funnel touch, not two; each relaunch (a new
+    /// process) is a fresh touch, which is exactly the funnel granularity we want.
+    func trackSetupShown(providers: String, auto: Bool) {
+        guard !sentSetupShown else { return }
+        sentSetupShown = true
+        var report = baseReport(event: "setup_shown")
+        report["providers"] = .string(providers)
+        report["auto"] = .int(auto ? 1 : 0)
+        send(report)
+    }
+
+    /// Skip for Now / sheet swipe-down while still unconfigured. Once per process.
+    func trackSetupSkipped(providers: String) {
+        guard !sentSetupSkipped else { return }
+        sentSetupSkipped = true
+        var report = baseReport(event: "setup_skipped")
+        report["providers"] = .string(providers)
+        send(report)
+    }
+
+    /// First-run Confirm — the funnel terminator. The call site gates on the nil→set
+    /// transition of the persisted default, so this is once per install by construction.
+    func trackSetupCompleted(providerID: String, providers: String) {
+        var report = baseReport(event: "setup_completed")
+        report["provider_id"] = .string(providerID)
+        report["providers"] = .string(providers)
+        send(report)
+    }
+
+    /// A relaunch that still has no confirmed default: the user came back but remains stuck
+    /// at setup. The marker records launches, not sends — it is set even when telemetry is
+    /// disabled or unconfigured, so a later opt-in doesn't misread launch #2 as launch #1.
+    func trackSetupStuckRelaunchIfNeeded(setupPending: Bool) {
+        let hasLaunchedBefore = userDefaults.bool(forKey: Self.hasLaunchedBeforeDefaultsKey)
+        userDefaults.set(true, forKey: Self.hasLaunchedBeforeDefaultsKey)
+        guard hasLaunchedBefore, setupPending else { return }
+        send(baseReport(event: "setup_stuck_relaunch"))
     }
 
     private func startHeartbeatTimer() {
@@ -122,7 +176,9 @@ final class SZTelemetry {
     }
 
     private func send(_ report: [String: SZJellystatReportValue]) {
-        guard let config else { return }
+        // The user pref gates every event, heartbeat included. Dedup flags and signatures are
+        // still consumed while disabled — opt-out drops events, it doesn't defer them.
+        guard isEnabled(), let config else { return }
         let payload = SZJellystatPayload(apiKey: config.apiKey, installUID: installUID, report: report)
 
         #if DEBUG

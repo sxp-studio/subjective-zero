@@ -112,6 +112,24 @@ private func temporaryURL() -> URL {
     #expect(loaded?.defaultProviderID == "claude")
 }
 
+@Test func roundTripPreservesTelemetryEnabled() throws {
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try SZAppStateIO.save(SZAppState(telemetryEnabled: false), to: url)
+    #expect(SZAppStateIO.load(from: url)?.telemetryEnabled == false)
+}
+
+@Test func fileWithoutTelemetryEnabledStillDecodes() throws {
+    // An app-state.json predating the opt-out (no telemetryEnabled key) → nil, host reads as ON.
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"windowSize":{"width":1440,"height":900},"theme":"system"}"#.utf8).write(to: url)
+    let loaded = SZAppStateIO.load(from: url)
+    #expect(loaded != nil)
+    #expect(loaded?.telemetryEnabled == nil)
+}
+
 @Test func noteRecentProjectDedupesToFront() {
     var state = SZAppState(recentProjectPaths: ["/tmp/A.subz", "/tmp/B.subz", "/tmp/C.subz"])
     state.noteRecentProject(path: "/tmp/B.subz")
