@@ -348,6 +348,10 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// same decode-compatibility reason; nil means setup hasn't been confirmed yet (the sheet
     /// auto-presents on launch until it is).
     public var defaultProviderID: String?
+    /// Providers the user disabled from the Agent Providers sheet: skipped by health checks and
+    /// probes, dimmed in the composer picker, refused by pre-flights — the sheet card is the way
+    /// back (Enable). Optional for the same decode-compatibility reason; nil means none disabled.
+    public var disabledProviderIDs: [String]?
     /// File ▸ Open Recent, most recent first (`.subz` paths). Optional for the same
     /// decode-compatibility reason; nil means no recents yet.
     public var recentProjectPaths: [String]?
@@ -378,6 +382,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         gridCursorTrail: Bool? = nil,
         viewportRoundedCorners: Bool? = nil,
         defaultProviderID: String? = nil,
+        disabledProviderIDs: [String]? = nil,
         recentProjectPaths: [String]? = nil,
         providerGenerationSettings: [String: SZProviderGenerationSettings]? = nil,
         showWelcomeAtStartup: Bool? = nil,
@@ -393,6 +398,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.gridCursorTrail = gridCursorTrail
         self.viewportRoundedCorners = viewportRoundedCorners
         self.defaultProviderID = defaultProviderID
+        self.disabledProviderIDs = disabledProviderIDs
         self.recentProjectPaths = recentProjectPaths
         self.providerGenerationSettings = providerGenerationSettings
         self.showWelcomeAtStartup = showWelcomeAtStartup

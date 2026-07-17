@@ -97,6 +97,8 @@ extension SZHost {
                                              gridCursorTrail: gridCursorTrail,
                                              viewportRoundedCorners: viewportRoundedCorners,
                                              defaultProviderID: defaultProviderID,
+                                             disabledProviderIDs: disabledProviderIDs.isEmpty
+                                                ? nil : disabledProviderIDs.sorted(),
                                              recentProjectPaths: recentProjectPaths.isEmpty ? nil : recentProjectPaths,
                                              providerGenerationSettings: providerGenerationSettings.isEmpty
                                                 ? nil : providerGenerationSettings,

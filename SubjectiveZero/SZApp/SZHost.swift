@@ -273,6 +273,11 @@ final class SZHost {
     /// The setup sheet's confirmed default. nil = first-run setup not confirmed yet, which is the
     /// sheet's auto-present gate. Same app-state.json home + restore story as the layout prefs.
     internal(set) var defaultProviderID: String? = SZAppStateIO.load()?.defaultProviderID
+    /// Providers the user disabled from the setup sheet — skipped by health checks and probes,
+    /// dimmed in the composer picker, refused by the pre-flights and `setActiveProvider`. Same
+    /// app-state.json home + restore story as the layout prefs; the card's Enable is the way back
+    /// (SZHost+ProviderHealth owns the mutator and its never-strand/never-empty guards).
+    internal(set) var disabledProviderIDs: Set<String> = Set(SZAppStateIO.load()?.disabledProviderIDs ?? [])
     /// Latest cheap-tier report (install + auth — token-free) per provider id.
     internal(set) var providerHealth: [String: SZProviderHealthReport] = [:]
     /// Sticky probe verdicts (tier 3, token-costing). Displayed over a bare cheap `ready`
@@ -850,7 +855,9 @@ final class SZHost {
     /// context-rebuild story.
     @discardableResult
     func setActiveProvider(_ id: String) -> Bool {
-        guard SZProviderRegistry.shared.provider(id: id) != nil else { return false }
+        // A disabled id is refused like an unknown one — covers `ui_set_provider` and stale UI.
+        guard SZProviderRegistry.shared.provider(id: id) != nil,
+              !disabledProviderIDs.contains(id) else { return false }
         guard id != activeProviderID else { return true }   // no-op switch: nothing to reset or persist
         guard !isRunning, chatInFlight.isEmpty else { return false }
         activeProviderID = id

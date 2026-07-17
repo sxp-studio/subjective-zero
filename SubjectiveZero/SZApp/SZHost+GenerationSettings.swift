@@ -21,10 +21,15 @@ extension SZHost {
             let status = displayedProviderHealth(provider.id)?.status
             let resolved = provider.resolvedGenerationSettings(from: providerGenerationSettings[provider.id])
             let selectedModel = resolved.model ?? provider.defaultModel
+            // A user-disabled provider stays listed but dimmed WITH the reason in its label —
+            // menu rows carry no tooltip, and its health entry is empty (checks skip it), so
+            // without the suffix a dimmed row would read as a mystery.
+            let disabled = disabledProviderIDs.contains(provider.id)
             return SZProviderGenerationPickerItem(
                 id: provider.id,
-                label: provider.displayName,
-                isEnabled: status == nil || status == .ready,   // unknown stays permissive, like the pre-flights
+                label: disabled ? "\(provider.displayName) (disabled)" : provider.displayName,
+                isEnabled: !disabled
+                    && (status == nil || status == .ready),   // unknown stays permissive, like the pre-flights
                 isActive: provider.id == activeProviderID,
                 models: provider.models.map {
                     SZProviderGenerationPickerModelItem(id: $0.id, label: $0.displayName)

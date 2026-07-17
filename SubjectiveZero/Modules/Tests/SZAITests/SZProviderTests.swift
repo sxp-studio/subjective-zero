@@ -67,9 +67,11 @@ private extension Array where Element == String {
     #expect(reg.defaultProvider.id == "claude")
     #expect(reg.provider(id: "claude")?.defaultModel == "claude-opus-4-8")
     #expect(reg.provider(id: "codex")?.defaultModel == "gpt-5.6-terra")
-    #expect(reg.provider(id: "grok")?.defaultModel == "grok-composer-2.5-fast")
-    // pi's catalog is runtime-enumerated (BYOK — the user's pi decides): at rest it serves
-    // NOTHING, deliberately — no hardcoded pi model id exists anywhere in this codebase.
+    // grok's and pi's catalogs are runtime-enumerated (grok's backend re-points unversioned ids;
+    // pi is BYOK — the user's pi decides): at rest they serve NOTHING, deliberately — no
+    // hardcoded grok or pi model id exists anywhere in this codebase.
+    #expect(reg.provider(id: "grok")?.models.isEmpty == true)
+    #expect(reg.provider(id: "grok")?.defaultModel == "")
     #expect(reg.provider(id: "pi")?.models.isEmpty == true)
     #expect(reg.provider(id: "pi")?.defaultModel == "")
 }
@@ -169,7 +171,9 @@ private extension Array where Element == String {
     let call = try #require(stub.lastCall)
     #expect(call.launchPath == "/usr/bin/env")
     #expect(call.arguments.prefix(3) == ["grok", "-p", "make it grayscale"])
-    #expect(call.arguments.value(after: "-m") == "grok-composer-2.5-fast")
+    // No catalog fetched yet → no `-m`: the CLI's own default carries the run (a pinned id is
+    // exactly what broke when the backend re-pointed the served catalog — see the provider).
+    #expect(!call.arguments.contains("-m"))
     #expect(call.arguments.value(after: "--output-format") == "streaming-json")
     #expect(call.arguments.contains("--always-approve"))
     // MCP rides the staged config file, never argv.
@@ -211,6 +215,9 @@ private extension Array where Element == String {
 /// CLI would swallow it silently rather than reject it, so this is the only guard.
 @Test func grokHasNoEffortOrFastSurface() {
     let grok = SZGrokProvider()
+    grok.seedModelCatalog(SZProviderModelCatalog(
+        models: [SZProviderModel(id: "grok-4.5", displayName: "Grok 4.5")],
+        defaultModelID: "grok-4.5"))
     #expect(grok.supportedReasoningEfforts.isEmpty)
     #expect(!grok.supportsFastMode)
     for model in grok.models {
@@ -218,14 +225,76 @@ private extension Array where Element == String {
         #expect(!grok.supportsFastMode(for: model.id))
     }
 
+    // A stale stored id (the backend retired it) clamps to the catalog's default.
     let resolved = grok.resolvedGenerationSettings(
         from: SZProviderGenerationSettings(model: "grok-build", reasoningEffort: "high", fastMode: true))
-    #expect(resolved == SZProviderGenerationSettings(model: "grok-build", reasoningEffort: nil, fastMode: false))
+    #expect(resolved == SZProviderGenerationSettings(model: "grok-4.5", reasoningEffort: nil, fastMode: false))
 
     // Even a request that (wrongly) carries an effort never puts the flag on argv.
     let argv = grok.launch(request(port: nil, reasoningEffort: "high"), preallocatedSessionID: "x").arguments
     #expect(!argv.contains("--reasoning-effort"))
     #expect(!argv.contains("--effort"))
+}
+
+// Recorded `grok models` outputs — the shapes the catalog parser must keep matching.
+private let grokModelsSingle =   // grok 0.2.93, 2026-07-16: the backend re-pointed to one model
+    "You are logged in with grok.com.\n\nDefault model: grok-4.5\n\nAvailable models:\n  * grok-4.5 (default)"
+private let grokModelsPair =     // grok 0.2.93, 2026-07-12: the earlier two-model catalog
+    "You are logged in with grok.com.\n\nDefault model: grok-composer-2.5-fast\n\n" +
+    "Available models:\n  * grok-composer-2.5-fast (default)\n  - grok-build"
+private let grokModelsLoggedOut =
+    "You are not authenticated.\n\nDefault model: grok-4.5\n\nAvailable models:"
+
+/// The catalog mapper against both recorded shapes: `*`/`-` bullets strip, "(default)" annotates,
+/// the "Default model:" line wins, and display names derive from ids keeping the Grok brand
+/// (these ids don't self-identify the way "Opus 4.8" does).
+@Test func grokCatalogSnapshotMapsRecordedModelsOutput() throws {
+    let single = try #require(SZGrokProvider.catalogSnapshot(fromModelsOutput: grokModelsSingle))
+    #expect(single.models.map(\.id) == ["grok-4.5"])
+    #expect(single.models.map(\.displayName) == ["Grok 4.5"])
+    #expect(single.defaultModelID == "grok-4.5")
+
+    let pair = try #require(SZGrokProvider.catalogSnapshot(fromModelsOutput: grokModelsPair))
+    #expect(pair.models.map(\.id) == ["grok-composer-2.5-fast", "grok-build"])
+    #expect(pair.models.map(\.displayName) == ["Grok Composer 2.5 Fast", "Grok Build"])
+    #expect(pair.defaultModelID == "grok-composer-2.5-fast")
+
+    // An empty list (the logged-out tail) is unparseable, not a zero-model catalog — grok's
+    // served models are backend-global, so "no list" never means "no models".
+    #expect(SZGrokProvider.catalogSnapshot(fromModelsOutput: grokModelsLoggedOut) == nil)
+}
+
+/// refreshModelCatalog is one token-free `grok models` spawn: the parsed snapshot becomes what
+/// `models`/`defaultModel` serve, and a known model rides argv as `-m` again.
+@Test func grokRefreshModelCatalogFetchesAndServes() async throws {
+    let grok = SZGrokProvider()
+    let stub = StubRunner(output: grokModelsSingle)
+    let snapshot = try #require(try await grok.refreshModelCatalog(runner: stub))
+
+    let call = try #require(stub.lastCall)
+    #expect(call.arguments == ["grok", "models"])
+    #expect(snapshot.models.map(\.id) == ["grok-4.5"])
+    #expect(grok.models.map(\.id) == ["grok-4.5"])
+    #expect(grok.defaultModel == "grok-4.5")
+
+    let argv = grok.launch(request(port: nil), preallocatedSessionID: "x").arguments
+    #expect(argv.value(after: "-m") == "grok-4.5")
+}
+
+/// A logged-out fetch throws (the host keeps the last-known catalog — grok's models are
+/// backend-global, so yesterday's snapshot outranks a logged-out blank), and a seeded snapshot
+/// restores service without a fetch (the offline relaunch story).
+@Test func grokRefreshModelCatalogLoggedOutKeepsLastKnown() async throws {
+    let grok = SZGrokProvider()
+    grok.seedModelCatalog(SZProviderModelCatalog(
+        models: [SZProviderModel(id: "grok-4.5", displayName: "Grok 4.5")],
+        defaultModelID: "grok-4.5"))
+
+    await #expect(throws: (any Error).self) {
+        try await grok.refreshModelCatalog(runner: StubRunner(output: grokModelsLoggedOut))
+    }
+    #expect(grok.models.map(\.id) == ["grok-4.5"])   // seeded truth survives the failed fetch
+    #expect(grok.defaultModel == "grok-4.5")
 }
 
 /// Generation-settings overrides ride through each provider's argv; fast mode expands to each

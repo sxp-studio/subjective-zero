@@ -22,6 +22,7 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
         case needsLogin     // authNeeded → Terminal login launcher
         case failed         // healthFailed → detail popover
         case unavailable    // reserved statuses (invalidConfig / unsupported)
+        case disabled       // user-disabled → Enable is the only remedy
     }
 
     public var id: String
@@ -35,11 +36,18 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
     public var isTesting: Bool          // probe in flight → Test button spins
     public var isSelectable: Bool
     public var isConfirmable: Bool      // Confirm gates on the SELECTED card's readiness
+    /// Display name of the ready provider a failing card offers as the way out ("Use X Instead");
+    /// nil = no ready alternative exists, the button hides.
+    public var fallbackName: String?
+    /// Whether the not-ready remedies include Disable (false on the last enabled provider —
+    /// disabling everything would leave no way to run agents at all).
+    public var canDisable: Bool
 
     public init(id: String, displayName: String, statusLabel: String, message: String,
                 readiness: Readiness, detail: String? = nil, cliPath: String? = nil,
                 installCommand: String? = nil, isTesting: Bool = false,
-                isSelectable: Bool = true, isConfirmable: Bool = false) {
+                isSelectable: Bool = true, isConfirmable: Bool = false,
+                fallbackName: String? = nil, canDisable: Bool = false) {
         self.id = id
         self.displayName = displayName
         self.statusLabel = statusLabel
@@ -51,6 +59,8 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
         self.isTesting = isTesting
         self.isSelectable = isSelectable
         self.isConfirmable = isConfirmable
+        self.fallbackName = fallbackName
+        self.canDisable = canDisable
     }
 }
 
@@ -61,6 +71,8 @@ public struct SZProviderSetupSheet: View {
     private let onRefresh: () -> Void
     private let onTest: (String) -> Void
     private let onOpenLogin: (String) -> Void
+    private let onUseFallback: (String) -> Void
+    private let onSetEnabled: (String, Bool) -> Void
     private let onConfirm: () -> Void
     private let onSkip: () -> Void
     private let onOpenSetupGuide: () -> Void
@@ -68,6 +80,8 @@ public struct SZProviderSetupSheet: View {
     public init(cards: [SZProviderSetupCard], selectedID: String?,
                 onSelect: @escaping (String) -> Void, onRefresh: @escaping () -> Void,
                 onTest: @escaping (String) -> Void, onOpenLogin: @escaping (String) -> Void,
+                onUseFallback: @escaping (String) -> Void,
+                onSetEnabled: @escaping (String, Bool) -> Void,
                 onConfirm: @escaping () -> Void, onSkip: @escaping () -> Void,
                 onOpenSetupGuide: @escaping () -> Void) {
         self.cards = cards
@@ -76,6 +90,8 @@ public struct SZProviderSetupSheet: View {
         self.onRefresh = onRefresh
         self.onTest = onTest
         self.onOpenLogin = onOpenLogin
+        self.onUseFallback = onUseFallback
+        self.onSetEnabled = onSetEnabled
         self.onConfirm = onConfirm
         self.onSkip = onSkip
         self.onOpenSetupGuide = onOpenSetupGuide
@@ -147,11 +163,15 @@ public struct SZProviderSetupSheet: View {
 
                 remedyRow(card)
 
-                Text(card.cliPath ?? "not found on the app's search path")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                // No path line on a disabled card: checks skip it, so there is no fresh lookup to
+                // report — "not found" would be a claim nobody made.
+                if card.readiness != .disabled {
+                    Text(card.cliPath ?? "not found on the app's search path")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
         }
         .padding(12)
@@ -186,15 +206,16 @@ public struct SZProviderSetupSheet: View {
         case .ready, .verified: .green
         case .needsInstall, .needsLogin: .orange
         case .failed: .red
-        case .checking, .unavailable: .secondary
+        case .checking, .unavailable, .disabled: .secondary
         }
     }
 
-    /// The probe on demand. Hidden while the CLI isn't even installed — there's nothing to test.
+    /// The probe on demand. Hidden while the CLI isn't even installed — there's nothing to test —
+    /// and while the provider is user-disabled (Enable first).
     @ViewBuilder
     private func testButton(_ card: SZProviderSetupCard) -> some View {
         switch card.readiness {
-        case .needsInstall, .unavailable, .checking:
+        case .needsInstall, .unavailable, .checking, .disabled:
             EmptyView()
         default:
             Button {
@@ -215,13 +236,15 @@ public struct SZProviderSetupSheet: View {
         }
     }
 
-    /// Fix-in-place, not instructions: each unhealthy card carries its exact remedy.
+    /// Fix-in-place, not instructions: each unhealthy card carries its exact remedy — plus the
+    /// ways OUT of the nag: a failing card offers the first ready provider instead, and every
+    /// not-ready card can be disabled (a provider the user doesn't subscribe to shouldn't nag).
     @ViewBuilder
     private func remedyRow(_ card: SZProviderSetupCard) -> some View {
         switch card.readiness {
         case .needsInstall:
-            if let command = card.installCommand {
-                HStack(spacing: 6) {
+            HStack(spacing: 6) {
+                if let command = card.installCommand {
                     Text(command)
                         .font(.system(size: 11, design: .monospaced))
                         .textSelection(.enabled)
@@ -237,21 +260,46 @@ public struct SZProviderSetupSheet: View {
                     .controlSize(.small)
                     .help("Copy the install command")
                 }
+                disableButton(card)
             }
         case .needsLogin:
-            Button {
-                onOpenLogin(card.id)
-            } label: {
-                Label("Open Terminal to Log In", systemImage: "terminal")
+            HStack(spacing: 6) {
+                Button {
+                    onOpenLogin(card.id)
+                } label: {
+                    Label("Open Terminal to Log In", systemImage: "terminal")
+                }
+                .controlSize(.small)
+                .help("Login is interactive — it runs in Terminal, and this card turns green when it lands")
+                disableButton(card)
             }
-            .controlSize(.small)
-            .help("Login is interactive — it runs in Terminal, and this card turns green when it lands")
         case .failed:
-            if let detail = card.detail {
-                SZCopyableDetailDisclosure(detail: detail)
+            HStack(spacing: 6) {
+                if let detail = card.detail {
+                    SZCopyableDetailDisclosure(detail: detail)
+                }
+                if let fallbackName = card.fallbackName {
+                    Button("Use \(fallbackName) Instead") { onUseFallback(card.id) }
+                        .controlSize(.small)
+                        .help("Make \(fallbackName) the default provider and close this sheet — \(card.displayName) stays available here if it recovers")
+                }
+                disableButton(card)
             }
+        case .disabled:
+            Button("Enable") { onSetEnabled(card.id, true) }
+                .controlSize(.small)
+                .help("Include \(card.displayName) in health checks and the provider picker again")
         case .checking, .ready, .verified, .unavailable:
             EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func disableButton(_ card: SZProviderSetupCard) -> some View {
+        if card.canDisable {
+            Button("Disable") { onSetEnabled(card.id, false) }
+                .controlSize(.small)
+                .help("Stop checking \(card.displayName) and hide it from runs — re-enable it here any time")
         }
     }
 }

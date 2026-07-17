@@ -439,9 +439,14 @@ extension SZHostBridge {
         // Provider first (a switch resets sessions and re-targets the option setters), then each
         // present option through the same intents the composer cluster uses.
         guard host.setActiveProvider(provider) else {
-            throw SZMCPError.message(SZProviderRegistry.shared.provider(id: provider) == nil
-                ? "unknown provider \(provider)"
-                : "cannot switch provider while a run or chat turn is in flight")
+            let reason = if SZProviderRegistry.shared.provider(id: provider) == nil {
+                "unknown provider \(provider)"
+            } else if host.disabledProviderIDs.contains(provider) {
+                "\(provider) is disabled — enable it in Agent Providers first"
+            } else {
+                "cannot switch provider while a run or chat turn is in flight"
+            }
+            throw SZMCPError.message(reason)
         }
         if let model = arguments.string("model"), !host.setActiveModel(model) {
             throw SZMCPError.message("\(provider) has no model \(model)")

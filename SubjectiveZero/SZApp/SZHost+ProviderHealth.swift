@@ -20,6 +20,13 @@ extension SZHost {
     /// the sheet opens onto warm health either way.
     func checkProviderSetupOnLaunch() {
         seedProviderModelCatalogs()
+        // A restored active provider that is user-disabled (possible only via a hand-edited
+        // app-state.json — the mutator moves the active elsewhere first) clamps to the first
+        // enabled one, BEFORE anything runs on it.
+        if disabledProviderIDs.contains(activeProviderID),
+           let fallback = enabledProviders.first {
+            setActiveProvider(fallback.id)
+        }
         Task { @MainActor in
             await refreshProviderHealthOnce()
             autoPresentProviderSetupIfNeeded()
@@ -87,10 +94,69 @@ extension SZHost {
         selectedSetupProviderID = id
     }
 
-    /// Default-selection heuristic: keep a valid current
-    /// selection → the active provider if ready → the first ready provider → the first provider.
+    /// The escape hatch a failing card offers: the first enabled, displayed-ready provider that
+    /// isn't `id` (registry order). nil = no ready alternative — the card's button hides.
+    func fallbackProvider(insteadOf id: String) -> (any SZProvider)? {
+        enabledProviders.first { $0.id != id && displayedProviderHealth($0.id)?.status == .ready }
+    }
+
+    /// A failing card's "Use X Instead": adopt the fallback as the default — Confirm's shape,
+    /// aimed by the failing card instead of the radio. Setting a default also retires the
+    /// first-run auto-present for good, which is what ends the launch-time nag. The failing
+    /// provider stays enabled (still visible here, still recoverable) — disabling is a separate,
+    /// deliberate act.
+    func adoptFallbackProvider(insteadOf id: String) {
+        guard let fallback = fallbackProvider(insteadOf: id),
+              setActiveProvider(fallback.id) else { return }
+        defaultProviderID = fallback.id
+        persistAppState()
+        status = "default provider: \(fallback.id) (\(id) left as-is)"
+        providerSetupPresented = false
+        stopProviderHealthPolling()
+    }
+
+    /// The card's Disable/Enable. Disable never strands work: the last enabled provider refuses,
+    /// and disabling the ACTIVE provider first moves active to the fallback — which itself
+    /// refuses while agents are busy (`setActiveProvider`'s guard), so a live run is never cut
+    /// over or left on a disabled provider. Enable drops the stale verdicts so the card shows
+    /// "Checking…" and then fresh truth from the next pass.
+    @discardableResult
+    func setProviderEnabled(_ id: String, _ enabled: Bool) -> Bool {
+        guard SZProviderRegistry.shared.provider(id: id) != nil else { return false }
+        if enabled {
+            guard disabledProviderIDs.remove(id) != nil else { return true }   // already enabled
+            providerHealth[id] = nil
+            providerProbes[id] = nil
+            persistAppState()
+            status = "\(id) enabled"
+            Task { @MainActor in await refreshProviderHealthOnce() }
+            return true
+        }
+        guard !disabledProviderIDs.contains(id) else { return true }   // already disabled
+        guard enabledProviders.contains(where: { $0.id != id }) else {
+            status = "cannot disable \(id) — it is the last enabled provider"
+            return false
+        }
+        if id == activeProviderID {
+            let target = fallbackProvider(insteadOf: id) ?? enabledProviders.first { $0.id != id }
+            guard let target, setActiveProvider(target.id) else {
+                status = "cannot disable \(id) while agents are running"
+                return false
+            }
+        }
+        disabledProviderIDs.insert(id)
+        providerHealth[id] = nil
+        providerProbes[id] = nil
+        persistAppState()
+        status = "\(id) disabled"
+        return true
+    }
+
+    /// Default-selection heuristic over the ENABLED providers (a disabled card is never the
+    /// radio): keep a valid current selection → the active provider if ready → the first ready
+    /// provider → the first enabled provider.
     private func defaultSetupSelection() -> String? {
-        let ids = SZProviderRegistry.shared.providers.map(\.id)
+        let ids = enabledProviders.map(\.id)
         if let current = selectedSetupProviderID, ids.contains(current) { return current }
         if displayedProviderHealth(activeProviderID)?.status == .ready { return activeProviderID }
         return ids.first { displayedProviderHealth($0)?.status == .ready } ?? ids.first
@@ -98,11 +164,19 @@ extension SZHost {
 
     // MARK: - Health refresh (cheap tiers — token-free)
 
-    /// One install+auth pass over all providers, concurrently. Safe anywhere: launch, Refresh,
-    /// the poll loop. Never probes.
+    /// Registry order minus user-disabled providers — the set health checks, probes, the picker's
+    /// selectable rows, and the pre-flights operate on. The setup sheet still shows every provider
+    /// (a disabled card is the re-enable affordance). Never empty: `setProviderEnabled` refuses to
+    /// disable the last one.
+    var enabledProviders: [any SZProvider] {
+        SZProviderRegistry.shared.providers.filter { !disabledProviderIDs.contains($0.id) }
+    }
+
+    /// One install+auth pass over the enabled providers, concurrently (a disabled provider spawns
+    /// nothing). Safe anywhere: launch, Refresh, the poll loop. Never probes.
     func refreshProviderHealthOnce() async {
         let reports = await withTaskGroup(of: SZProviderHealthReport.self) { group in
-            for provider in SZProviderRegistry.shared.providers {
+            for provider in enabledProviders {
                 group.addTask { await provider.healthReport() }
             }
             var collected: [SZProviderHealthReport] = []
@@ -172,16 +246,18 @@ extension SZHost {
     /// the cheap status transitions, so this fires at most once per provider per state change.
     func autoProbeProvidersIfFirstRun() {
         guard defaultProviderID == nil else { return }
-        for provider in SZProviderRegistry.shared.providers
+        for provider in enabledProviders
         where providerHealth[provider.id]?.status == .ready && providerProbes[provider.id] == nil {
             runProviderProbe(provider.id)
         }
     }
 
     /// One real one-shot prompt through the provider's launch path (the per-card Test button and
-    /// the first-run auto-probe above).
+    /// the first-run auto-probe above). Disabled providers refuse — their card hides Test, this
+    /// guard covers any other route in.
     func runProviderProbe(_ id: String) {
         guard let provider = SZProviderRegistry.shared.provider(id: id),
+              !disabledProviderIDs.contains(id),
               !probingProviders.contains(id) else { return }
         probingProviders.insert(id)
         Task { @MainActor in
@@ -204,9 +280,11 @@ extension SZHost {
 
     /// Pre-flight for NEW work (a run, a first-turn chat). Unknown health — no pass finished
     /// yet — stays permissive: a fluke must never block what worked yesterday; the CLI's own
-    /// failure still surfaces downstream.
+    /// failure still surfaces downstream. A user-disabled provider is never ready — that's a
+    /// choice, not a fluke.
     func isProviderReadyForNewWork(_ id: String) -> Bool {
-        displayedProviderHealth(id).map { $0.status == .ready } ?? true
+        guard !disabledProviderIDs.contains(id) else { return false }
+        return displayedProviderHealth(id).map { $0.status == .ready } ?? true
     }
 
     /// Refuse-and-point — the visible "no provider" surface (roadmap Task 2): a status line that
@@ -216,7 +294,10 @@ extension SZHost {
     /// session's provider, not necessarily the active one.
     func surfaceProviderNotReady(_ providerID: String? = nil) {
         let id = providerID ?? activeProviderID
-        let message = displayedProviderHealth(id)?.message ?? "set up Agent Providers"
+        // A disabled provider carries no health entry (checks skip it) — name the real reason.
+        let message = disabledProviderIDs.contains(id)
+            ? "disabled — enable it in Agent Providers"
+            : displayedProviderHealth(id)?.message ?? "set up Agent Providers"
         status = "\(id) not ready — \(message)"
         presentProviderSetup()
     }
@@ -289,9 +370,21 @@ extension SZHost {
 
     // MARK: - SZAI → SZUI mapping (SZUI can't import SZAI; it gets dumb value structs)
 
-    /// The sheet's cards, mapped from the merged health truth.
+    /// The sheet's cards, mapped from the merged health truth. Every registry provider appears —
+    /// including disabled ones, whose card (Enable) is the way back in.
     var providerSetupCards: [SZProviderSetupCard] {
-        SZProviderRegistry.shared.providers.map { provider in
+        let canDisableAnother = enabledProviders.count > 1
+        return SZProviderRegistry.shared.providers.map { provider in
+            if disabledProviderIDs.contains(provider.id) {
+                return SZProviderSetupCard(
+                    id: provider.id,
+                    displayName: provider.displayName,
+                    statusLabel: Self.cardStatusLabel(.disabled),
+                    message: "Disabled — skipped by health checks and unavailable for runs.",
+                    readiness: .disabled,
+                    installCommand: provider.installCommand,
+                    isSelectable: false)
+            }
             let report = displayedProviderHealth(provider.id)
             let readiness = Self.cardReadiness(report)
             return SZProviderSetupCard(
@@ -306,7 +399,10 @@ extension SZHost {
                 installCommand: provider.installCommand,
                 isTesting: probingProviders.contains(provider.id),
                 isSelectable: readiness != .unavailable,
-                isConfirmable: readiness == .ready || readiness == .verified)
+                isConfirmable: readiness == .ready || readiness == .verified,
+                fallbackName: readiness == .failed
+                    ? fallbackProvider(insteadOf: provider.id)?.displayName : nil,
+                canDisable: canDisableAnother)
         }
     }
 
@@ -330,6 +426,7 @@ extension SZHost {
         case .needsLogin: "Login Needed"
         case .failed: "Failing"
         case .unavailable: "Unavailable"
+        case .disabled: "Disabled"
         }
     }
 

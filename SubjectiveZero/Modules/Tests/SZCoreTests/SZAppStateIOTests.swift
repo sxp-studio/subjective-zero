@@ -88,6 +88,26 @@ private func temporaryURL() -> URL {
     #expect(loaded?.defaultProviderID == "claude")   // the new field's absence loses nothing else
 }
 
+@Test func roundTripPreservesDisabledProviderIDs() throws {
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try SZAppStateIO.save(SZAppState(disabledProviderIDs: ["grok", "pi"]), to: url)
+    #expect(SZAppStateIO.load(from: url)?.disabledProviderIDs == ["grok", "pi"])
+}
+
+@Test func fileWithoutDisabledProviderIDsStillDecodes() throws {
+    // An app-state.json predating per-provider disable (no disabledProviderIDs key).
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"windowSize":{"width":1440,"height":900},"theme":"system","defaultProviderID":"claude"}"#.utf8)
+        .write(to: url)
+    let loaded = SZAppStateIO.load(from: url)
+    #expect(loaded != nil)
+    #expect(loaded?.disabledProviderIDs == nil)   // nil means none disabled
+    #expect(loaded?.defaultProviderID == "claude")
+}
+
 @Test func roundTripPreservesProviderGenerationSettings() throws {
     let url = temporaryURL()
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

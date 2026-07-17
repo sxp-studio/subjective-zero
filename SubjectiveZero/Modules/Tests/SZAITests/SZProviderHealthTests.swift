@@ -320,7 +320,9 @@ private let piProbeLoggedOut = SZProcessResult(
     _ = await SZGrokProvider().healthProbe(runner: grokStub)
     let grokArgv = try! #require(grokStub.recordedCalls.first)
     #expect(grokArgv.contains("Reply with exactly: OK"))
-    #expect(grokArgv[grokArgv.firstIndex(of: "-m")! + 1] == SZGrokProvider().defaultModel)
+    // At-rest catalog is empty → no `-m`: the probe runs on the CLI's OWN default — the only id
+    // guaranteed served, since grok's unversioned aliases re-point underneath a pinned manifest.
+    #expect(!grokArgv.contains("-m"))
     #expect(!grokArgv.contains("--reasoning-effort"))
 
     let piStub = ScriptedStubRunner([
