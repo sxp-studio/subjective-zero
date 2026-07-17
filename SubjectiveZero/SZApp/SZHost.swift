@@ -190,6 +190,12 @@ final class SZHost {
     // always captured into the transcript, so turning it on later reveals past turns too.
     internal(set) var showTokenCounts: Bool = SZAppStateIO.load()?.showTokenCounts ?? false
 
+    // Anonymous-telemetry opt-out — same app-state.json + restore story, mutated via
+    // setTelemetryEnabled (SZHost+Telemetry). Defaults ON (nil/absent in app-state.json means ON);
+    // SZTelemetry consults this live per send, so a mid-session toggle takes effect immediately,
+    // heartbeat included.
+    internal(set) var telemetryEnabled: Bool = SZAppStateIO.load()?.telemetryEnabled ?? true
+
     // Node-editor camera commands (Graph ▸ Center View / Zoom to Fit). The camera (zoom/offset) is
     // panel-local @State, unreachable from here, so the host raises a one-shot command the panel
     // observes and applies. Transient (never persisted): the camera itself resets on panel appear.

@@ -174,6 +174,25 @@ demand - so agents stay correct without blowing their context window. See
 - [`docs/NODE_LIBRARY.md`](docs/NODE_LIBRARY.md) - the built-in library and how agents consume it.
 - [`docs/UI.md`](docs/UI.md) - native panels.
 
+## Privacy & telemetry
+
+Release builds send a small set of anonymous usage events so we can see where new
+users get stuck and keep the app healthy:
+
+- **Identity**: a random install ID (a UUID minted on first launch). No account,
+  no email, no fingerprinting beyond OS version, CPU architecture, and Mac model.
+- **Events**: `app_launch`, `app_active_heartbeat`, `agent_provider_default`,
+  and the first-run setup funnel — `setup_shown`, `setup_skipped`,
+  `setup_completed`, `setup_stuck_relaunch` (each carries at most provider names
+  and their readiness, e.g. `claude:ready`).
+- **Never sent**: project content, graphs, prompts, chat transcripts, file paths,
+  or code.
+- **Opting out**: uncheck **"Share anonymous usage data"** on the welcome screen
+  (Help ▸ Welcome). The preference persists in
+  `~/Library/Application Support/SubjectiveZero/app-state.json`.
+- **Source builds**: DEBUG builds print payloads to the console instead of
+  sending, and builds without a bundled reporting key send nothing at all.
+
 ## License
 
 SubZ is open source under the **AGPL-3.0** ([`LICENSE`](LICENSE)). In plain terms:

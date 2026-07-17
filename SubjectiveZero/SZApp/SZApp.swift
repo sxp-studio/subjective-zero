@@ -309,7 +309,8 @@ struct SZApp: App {
                                      onSetEnabled: { host.setProviderEnabled($0, $1) },
                                      onConfirm: { host.confirmDefaultProvider() },
                                      onSkip: { host.skipProviderSetup() },
-                                     onOpenSetupGuide: { host.openProviderSetupGuide() })
+                                     onOpenSetupGuide: { host.openProviderSetupGuide() },
+                                     onJoinDiscord: { host.joinDiscord() })
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)
@@ -545,6 +546,7 @@ struct SZApp: App {
                                 path: path)
             },
             showAtStartup: host.showWelcomeAtStartup,
+            shareUsageData: host.telemetryEnabled,
             githubIcon: Image("github"),      // symbolsets live in the app bundle, not SZUI's
             discordIcon: Image("discord"),
             onOpenRecent: { host.openProject(at: URL(filePath: $0)) },
@@ -555,6 +557,8 @@ struct SZApp: App {
             onJoinDiscord: { host.joinDiscord() },
             onOpenWebsite: { host.openWebsite() },
             onSetShowAtStartup: { host.setShowWelcomeAtStartup($0) },
+            onSetShareUsageData: { host.setTelemetryEnabled($0) },
+            onOpenPrivacyInfo: { host.openPrivacyInfo() },
             onClose: { host.continueFromWelcome() })
     }
 

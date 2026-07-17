@@ -76,6 +76,7 @@ public struct SZProviderSetupSheet: View {
     private let onConfirm: () -> Void
     private let onSkip: () -> Void
     private let onOpenSetupGuide: () -> Void
+    private let onJoinDiscord: () -> Void
 
     public init(cards: [SZProviderSetupCard], selectedID: String?,
                 onSelect: @escaping (String) -> Void, onRefresh: @escaping () -> Void,
@@ -83,7 +84,8 @@ public struct SZProviderSetupSheet: View {
                 onUseFallback: @escaping (String) -> Void,
                 onSetEnabled: @escaping (String, Bool) -> Void,
                 onConfirm: @escaping () -> Void, onSkip: @escaping () -> Void,
-                onOpenSetupGuide: @escaping () -> Void) {
+                onOpenSetupGuide: @escaping () -> Void,
+                onJoinDiscord: @escaping () -> Void) {
         self.cards = cards
         self.selectedID = selectedID
         self.onSelect = onSelect
@@ -95,6 +97,7 @@ public struct SZProviderSetupSheet: View {
         self.onConfirm = onConfirm
         self.onSkip = onSkip
         self.onOpenSetupGuide = onOpenSetupGuide
+        self.onJoinDiscord = onJoinDiscord
     }
 
     private var selectedCard: SZProviderSetupCard? { cards.first { $0.id == selectedID } }
@@ -125,6 +128,8 @@ public struct SZProviderSetupSheet: View {
             HStack(spacing: 10) {
                 Button { onOpenSetupGuide() } label: { Label("Setup Guide", systemImage: "doc.text") }
                     .help("The agent-readable install & verification guide (APP_SETUP.md)")
+                Button { onJoinDiscord() } label: { Label("Ask on Discord", systemImage: "questionmark.bubble") }
+                    .help("Stuck? The community Discord can help you get set up.")
                 Spacer()
                 Button("Skip for Now") { onSkip() }
                 Button("Confirm") { onConfirm() }

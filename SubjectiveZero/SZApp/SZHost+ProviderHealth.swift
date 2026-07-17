@@ -50,25 +50,31 @@ extension SZHost {
     func autoPresentProviderSetupIfNeeded() {
         guard defaultProviderID == nil, !providerSetupAutoPresented, !welcomePresented else { return }
         providerSetupAutoPresented = true
-        presentProviderSetup()
+        presentProviderSetup(auto: true)
     }
 
     // MARK: - Sheet lifecycle
 
     /// Open the sheet (first-run, app menu ⌘,, HUD dot, or a failed pre-flight) and start the
-    /// re-check loop so remedies flip cards green the moment they land.
-    func presentProviderSetup() {
+    /// re-check loop so remedies flip cards green the moment they land. While no default is
+    /// confirmed, any present — auto or manual — is the same funnel state, so both count as
+    /// `setup_shown` (SZTelemetry's per-process dedup absorbs repeats within one session).
+    func presentProviderSetup(auto: Bool = false) {
         // Never stack over the welcome/home surface (they're mutually-exclusive branches): ⌘, from the
         // home screen is a no-op until the user is in the workspace. Mirrors presentWelcome's guard.
         guard !welcomePresented else { return }
         selectedSetupProviderID = defaultSetupSelection()
         providerSetupPresented = true
+        if defaultProviderID == nil { trackSetupShownTelemetry(auto: auto) }
         startProviderHealthPolling()
     }
 
     /// Dismiss without confirming (Skip for Now / sheet swipe-down). On a first-run launch the
     /// sheet simply returns next launch — the gate is the persisted default, not a "seen it" flag.
     func skipProviderSetup() {
+        // Only an actually-open, still-unconfigured sheet is a funnel skip — the sheet binding's
+        // set-false also lands here after Confirm already dismissed, and that must stay silent.
+        if providerSetupPresented, defaultProviderID == nil { trackSetupSkippedTelemetry() }
         providerSetupPresented = false
         stopProviderHealthPolling()
     }
@@ -77,11 +83,15 @@ extension SZHost {
     /// retires the first-run auto-present), and dismiss. Only a `ready` card confirms — the sheet
     /// disables the button otherwise; this guard is the model-side belt.
     func confirmDefaultProvider() {
+        // The nil→set transition of the persisted default IS "first-run setup completed" —
+        // captured before setActiveProvider fires the (separate) agent_provider_default event.
+        let wasFirstRun = defaultProviderID == nil
         guard let id = selectedSetupProviderID,
               displayedProviderHealth(id)?.status == .ready,
               setActiveProvider(id) else { return }
         defaultProviderID = id
         persistAppState()
+        if wasFirstRun { trackSetupCompletedTelemetry(providerID: id) }
         status = "default provider: \(id)"
         providerSetupPresented = false
         stopProviderHealthPolling()
@@ -106,10 +116,14 @@ extension SZHost {
     /// provider stays enabled (still visible here, still recoverable) — disabling is a separate,
     /// deliberate act.
     func adoptFallbackProvider(insteadOf id: String) {
+        // The nil→set transition IS "first-run setup completed", whichever button drove it —
+        // same funnel capture as confirmDefaultProvider.
+        let wasFirstRun = defaultProviderID == nil
         guard let fallback = fallbackProvider(insteadOf: id),
               setActiveProvider(fallback.id) else { return }
         defaultProviderID = fallback.id
         persistAppState()
+        if wasFirstRun { trackSetupCompletedTelemetry(providerID: fallback.id) }
         status = "default provider: \(fallback.id) (\(id) left as-is)"
         providerSetupPresented = false
         stopProviderHealthPolling()
