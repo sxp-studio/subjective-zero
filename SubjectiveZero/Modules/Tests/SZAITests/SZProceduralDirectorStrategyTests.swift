@@ -13,13 +13,16 @@ import Testing
 private final class RecordingRunner: SZProcessRunning {
     private let calls = Mutex<[[String]]>([])   // argv per invocation
     var argvs: [[String]] { calls.withLock { $0 } }
+    private let recordedBudgets = Mutex<[(timeout: TimeInterval?, inactivity: TimeInterval?)]>([])
+    var budgets: [(timeout: TimeInterval?, inactivity: TimeInterval?)] { recordedBudgets.withLock { $0 } }
 
     func run(
         _ launchPath: String, _ arguments: [String],
         environment: [String: String], currentDirectoryURL: URL?,
-        input: Data?, timeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
+        input: Data?, timeout: TimeInterval?, inactivityTimeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
     ) async throws -> SZProcessResult {
         calls.withLock { $0.append(arguments) }
+        recordedBudgets.withLock { $0.append((timeout, inactivityTimeout)) }
         return SZProcessResult(exitCode: 0, output: "")
     }
 }
@@ -81,6 +84,24 @@ private func dirtyStore() -> SZStore {
     #expect(argv.contains("gpt-5.6-terra"))
     #expect(argv.contains(#"model_reasoning_effort="max""#))
     #expect(argv.contains(#"service_tier="fast""#))
+}
+
+/// A coding turn's budgets are inactivity-first: silence kills it (`codingInactivityTimeout`, each output
+/// chunk resets the clock — see SZProcessTests), while the wall clock stays as the hard cap for a CLI that
+/// wedges (or loops) while still emitting. Both must reach the runner, or a long-but-streaming agent dies
+/// to the blind wall alone.
+@MainActor
+@Test func codingDispatchCarriesInactivityAndHardCapBudgets() async throws {
+    let tmp = FileManager.default.temporaryDirectory.appending(path: "orch-budget-test-\(UUID().uuidString)")
+    let runner = RecordingRunner()
+
+    try await SZProceduralDirectorStrategy().run(SZOrchestrationContext(
+        providerID: "claude", store: dirtyStore(), mcpPort: 42100,
+        projectURL: tmp, cacheDirectory: tmp, runner: runner))
+
+    let budget = try #require(runner.budgets.first)
+    #expect(budget.timeout == SZProceduralDirectorStrategy.codingTimeout)
+    #expect(budget.inactivity == SZProceduralDirectorStrategy.codingInactivityTimeout)
 }
 
 @Test func portDerivationFollowsWiring() {

@@ -80,6 +80,12 @@ public enum SZRebuildReason: String, Codable, Sendable {
     /// interface and building it — the sibling of a `.prompt` node's Draft.
     case contractChanged
 
+    /// The node's intent moved: its prompt was edited after it was built. Nothing is broken — the build
+    /// still renders, it just implements what the prompt *used* to say — but the fleet must regenerate it
+    /// against the new intent. Raised by `SZStore.updateNode` on the same terms `editPorts` raises
+    /// `.contractChanged` (a real change, on a built node, never downgrading a reason already raised).
+    case intentChanged
+
     /// The code names ports the contract does not declare, so those reads resolve to `nil` every frame and the
     /// node silently falls back to its hardcoded defaults. A real fault: `agent_compile_node` refuses to
     /// promote source in this state (`SZPortBindingAudit` calls it an error, not a warning).

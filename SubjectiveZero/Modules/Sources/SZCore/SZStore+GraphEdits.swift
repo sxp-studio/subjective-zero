@@ -66,12 +66,22 @@ extension SZStore {
         return removed
     }
 
-    /// Update a node's presentation / identity in place (nil = leave that field unchanged). Returns whether the
-    /// node was found.
+    public struct SZNodeUpdateResult: Equatable, Sendable {
+        /// The node existed and the edit applied.
+        public var found: Bool
+        /// The prompt (intent) moved on a node that already had a build, so it must be regenerated.
+        public var raisedRebuild: Bool
+    }
+
+    /// Update a node's presentation / identity in place (nil = leave that field unchanged).
     ///
     /// Deliberately CANNOT touch the port surface — that goes through `editPorts`, which is the only path that
-    /// diffs the surface and can therefore raise `needsRebuild`. A whole-contract `PUT` here is what silently
+    /// diffs the surface and can therefore raise `.contractChanged`. A whole-contract `PUT` here is what silently
     /// dropped a node's controls: a caller that re-sent the contract while omitting ports deleted them.
+    ///
+    /// A `prompt` change DOES invalidate a build, though: the code still renders, but it implements what the
+    /// prompt used to say. Raised here — the one shared mutation path for the editor's inline prompt commit and
+    /// `ui_update_node` — on the same terms as `editPorts`' surface check below.
     @discardableResult
     public func updateNode(
         id: SZNodeID,
@@ -80,15 +90,25 @@ extension SZStore {
         prompt: String? = nil,
         summary: String? = nil,
         permissions: [SZEntitlement]? = nil
-    ) -> Bool {
+    ) -> SZNodeUpdateResult {
         assertFenceCleared([id])
-        var found = false
+        var result = SZNodeUpdateResult(found: false, raisedRebuild: false)
         mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
-            found = true
+            result.found = true
             if let title { project.graph.nodes[i].title = title }
             if let sfSymbol { project.graph.nodes[i].sfSymbol = sfSymbol }
-            if let prompt { project.graph.nodes[i].prompt = prompt }
+            if let prompt {
+                // Intent moved on a built node → it needs regenerating. Mirror of the port-surface check in
+                // `editPorts`: only a real change, only on a built node, and never downgrading a reason
+                // already raised (`.sourceMismatch` is the stronger claim).
+                let node = project.graph.nodes[i]
+                if prompt != node.prompt, node.kind == .generated, node.rebuildReason == nil {
+                    project.graph.nodes[i].rebuildReason = .intentChanged
+                    result.raisedRebuild = true
+                }
+                project.graph.nodes[i].prompt = prompt
+            }
 
             // `summary` and `permissions` live inside the contract, so a node that has none yet needs one
             // synthesized — otherwise declaring a node's permissions BEFORE its ports (a natural order: "this
@@ -99,7 +119,7 @@ extension SZStore {
                 project.graph.nodes[i].contract = SZNodeContract(
                     title: node.title, sfSymbol: node.sfSymbol, summary: node.prompt ?? node.title)
             }
-            // None of these are in the port surface, so none of them invalidate a build.
+            // None of these touch the port surface or the intent, so none of them invalidate a build.
             if project.graph.nodes[i].contract != nil {
                 if let summary { project.graph.nodes[i].contract?.summary = summary }
                 if let permissions { project.graph.nodes[i].contract?.permissions = permissions }
@@ -107,7 +127,7 @@ extension SZStore {
                 if let sfSymbol { project.graph.nodes[i].contract?.sfSymbol = sfSymbol }
             }
         }
-        return found
+        return result
     }
 
     /// A typed port delta. Omission means "leave alone" and removal is explicit — so a caller that forgets a

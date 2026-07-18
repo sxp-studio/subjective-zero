@@ -52,6 +52,36 @@ struct SZProcessTests {
         #expect(!alive, "descendant \(childPID) survived the tree kill")
     }
 
+    // The inactivity bound (coding agents ride it): SILENCE kills a turn, streaming keeps it alive,
+    // and the wall clock stays as the hard cap for a CLI that streams forever.
+
+    @Test func silenceKillsAtTheInactivityBoundNotTheWallClock() async throws {
+        let started = ContinuousClock.now
+        let result = try await runner.run("/bin/sh", ["-c", "sleep 30"], timeout: 25, inactivityTimeout: 1)
+        #expect(result.timedOut)
+        #expect(ContinuousClock.now - started < .seconds(10), "silent process outlived the inactivity bound")
+    }
+
+    @Test func streamingOutputKeepsATurnAliveAcrossTheInactivityWindow() async throws {
+        // A chunk every 0.3s for ~3s — each one pushes the 1s silence deadline forward, so the run
+        // must complete normally, well past the point a silent process would have died.
+        let result = try await runner.run(
+            "/bin/sh", ["-c", "for i in 1 2 3 4 5 6 7 8 9 10; do echo tick$i; sleep 0.3; done"],
+            timeout: 30, inactivityTimeout: 1)
+        #expect(!result.timedOut)
+        #expect(result.exitCode == 0)
+        #expect(result.output.contains("tick10"))   // it streamed to the end
+    }
+
+    @Test func theWallClockCapStillBoundsAForeverStreamingProcess() async throws {
+        let started = ContinuousClock.now
+        let result = try await runner.run(
+            "/bin/sh", ["-c", "while true; do echo tick; sleep 0.2; done"],
+            timeout: 1, inactivityTimeout: 10)
+        #expect(result.timedOut)
+        #expect(ContinuousClock.now - started < .seconds(10), "wall-clock cap did not fire")
+    }
+
     @Test func normalExitDoesNotBlockOnAnOrphanHoldingThePipe() async throws {
         // The shell backgrounds a long sleeper that INHERITS the merged pipe, prints its pid, then exits
         // immediately (no `wait`). The sleeper is not a live child at any kill snapshot, so nothing kills

@@ -9,11 +9,15 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
   Editing the ports of a node that is already implemented marks it **needs rebuild** — it keeps rendering its
   old code until a Coding Agent regenerates it against the new contract. That is expected: declare the ports
   you want, then let the run (or a node chat) implement them. Never assume a port you just declared is live.
-  Only changing a node's PORTS needs a rebuild. Wiring an edge into a port the node already declares
+  Changing a node's PORTS or its PROMPT needs a rebuild — an implemented node's code keeps doing what the old
+  prompt said until it is regenerated. Wiring an edge into a port the node already declares
   (`ui_connect`) needs none — its code already reads that port, and the incoming value simply replaces the
   unconnected default at runtime. Prefer driving an existing input over declaring a new one.
 - `ui_update_node { "node": "<id>", "title": "...", "sfSymbol": "...", "summary": "...", "prompt": "...",
   "permissions": ["camera"] }` — a node's identity and intent. It **cannot** change ports; use `ui_edit_ports`.
+  Sending a new `prompt` to an implemented node marks it **needs rebuild** (the response echoes
+  `needsRebuild`); the fleet then re-implements it against the new intent — editing the prompt alone never
+  changes what renders.
 - `ui_connect { "from": "<id>", "fromPort": "<output>", "to": "<id>", "toPort": "<input>", "kind": "data" }`
   — wire an upstream output port to a downstream input port. Green **flow** edges are the user's *drawing
   intent* ("A should feed B"); laying the `data` edge along one **realizes and clears it** (like resolving
