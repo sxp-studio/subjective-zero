@@ -182,13 +182,23 @@ extension SZHost {
             scope = resolved
         }
 
-        // A node-scoped message DURING a run from an agent is the Director messaging that node's
-        // Coding Agent. Record it (returns immediately — deadlock-safe: no nested agent turn inside a
-        // synchronous MCP handler); the reconcile loop delivers it on the node's next retry. Does NOT
-        // steal the tab. A USER's mid-run node message falls through to the busy guard below instead.
-        if origin == .agent, isRunning, let nodeID = scope.nodeID {
-            recordDirectorMessage(node: nodeID, message: trimmed)
-            return .recordedForReconcile
+        // Agent-origin messages DURING a run are fleet-internal steering — recorded, never a nested
+        // turn inside a synchronous MCP handler (deadlock-safe: its connection thread is blocked on a
+        // semaphore until we return). Neither path steals the tab. A USER's mid-run message falls
+        // through instead.
+        if origin == .agent, isRunning {
+            // Director → a node the run owns: folded into that node's reconcile retry.
+            if let nodeID = scope.nodeID, ledger.holder(of: .node(nodeID)) == runClaim {
+                recordDirectorMessage(node: nodeID, message: trimmed)
+                return .recordedForReconcile
+            }
+            // Coding agent → the Director: rendered into the next reconcile turn's prompt
+            // (previously appended to the tab and read by no LLM — a silent black hole).
+            if scope == .director {
+                recordDirectorInboxMessage(trimmed)
+                return .recordedForReconcile
+            }
+            // A node the run does NOT own falls through to the normal send path below.
         }
 
         showChat(scope)   // reveal/focus the tab — 1:1 with clicking it before typing

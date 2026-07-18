@@ -116,7 +116,7 @@ extension SZHost {
         store.removeChat(scopeKey: scope.key)
         agentSessions[scope.key] = nil
         restoredSessions[scope.key] = nil
-        if let nodeID = scope.nodeID { pendingDirectorMessages[nodeID] = nil }
+        mailbox.removeAll(for: scope.key)   // queued messages die with the conversation (waiters resume .removed)
         if let url = loadedProjectURL { SZChatTranscriptIO.remove(scopeKey: scope.key, projectURL: url) }
     }
 

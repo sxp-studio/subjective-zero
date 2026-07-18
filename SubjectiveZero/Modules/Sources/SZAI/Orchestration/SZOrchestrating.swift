@@ -94,6 +94,11 @@ public struct SZOrchestrationContext {
     /// (its `ui_send_chat`-to-a-node calls, recorded by the host). The reconcile loop calls this after each
     /// reconcile turn and folds each message into the matching node's retry prompt. Default empty.
     public let takeDirectorMessages: @MainActor @Sendable () -> [SZNodeID: String]
+    /// Drain (take + clear) the messages CODING agents sent the Director during this run (their
+    /// `ui_send_chat scope=director` calls). The reconcile loop drains these BEFORE each reconcile
+    /// turn and renders them into its prompt — the reverse feedback lane of `takeDirectorMessages`.
+    /// Default empty.
+    public let takeDirectorInbox: @MainActor @Sendable () -> [String]
     /// The run's captured WORK SET (host `runWorkSet`), read LIVE so nodes the Director/split/merge add
     /// mid-run join it. `plans` scopes dispatch to it. `nil` = no host (tests) → all prompt nodes;
     /// non-nil (even `[]`) = authoritative → only these ids are the fleet's work.
@@ -120,6 +125,7 @@ public struct SZOrchestrationContext {
         directorTurn: (@MainActor @Sendable (String) async throws -> SZAgentRunResult)? = nil,
         nodeStatus: @escaping @MainActor @Sendable () -> [SZNodeID: String] = { [:] },
         takeDirectorMessages: @escaping @MainActor @Sendable () -> [SZNodeID: String] = { [:] },
+        takeDirectorInbox: @escaping @MainActor @Sendable () -> [String] = { [] },
         workSet: @escaping @MainActor @Sendable () -> Set<SZNodeID>? = { nil },
         stagedPieces: @escaping @MainActor @Sendable () -> Set<SZNodeID> = { [] }
     ) {
@@ -139,6 +145,7 @@ public struct SZOrchestrationContext {
         self.directorTurn = directorTurn
         self.nodeStatus = nodeStatus
         self.takeDirectorMessages = takeDirectorMessages
+        self.takeDirectorInbox = takeDirectorInbox
         self.workSet = workSet
         self.stagedPieces = stagedPieces
     }

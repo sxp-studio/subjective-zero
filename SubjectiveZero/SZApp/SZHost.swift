@@ -70,12 +70,9 @@ final class SZHost {
     /// consult this set. Single-writer (host/MCP writes; the UI only reads). Cleared at run end — a
     /// node chat runs with this empty. This is the seed of the behavior-tree's per-step in-flight set.
     internal(set) var runWorkSet: Set<SZNodeID> = []
-    /// Messages the Director Agent authored for coding agents DURING a run (`ui_send_chat` to a node
-    /// while `isRunning`), keyed by node id. Recorded — not delivered inline (deadlock-safe); the reconcile
-    /// loop drains them (`takeDirectorMessages`) and folds each into the node's retry. Each is also shown
-    /// immediately in the node's tab as a `.director` chat message (`recordDirectorMessage`); this map is
-    /// only the delivery side-channel, so it stays modestly named — not a first-class type.
-    internal(set) var pendingDirectorMessages: [SZNodeID: String] = [:]
+    // Mid-run Director↔fleet messages live as `.steer` envelopes in `mailbox` (recorded — never a
+    // nested turn inside a synchronous MCP handler; the reconcile loop drains them). See
+    // `recordDirectorMessage` / `recordDirectorInboxMessage` / `takeDirectorMessages`.
     /// Debug test affordance: node uuids to force-fail (report `needsInput`, no agent run) on their
     /// NEXT coding dispatch — set via `debug_fail_node_once`, consumed once. Lets the reconcile loop be
     /// driven live & repeatably without waiting for a real agent to flakily fail (the agents rarely do).
@@ -594,7 +591,12 @@ final class SZHost {
         resetPreviewStreamForProjectSwitch()   // SZHost+NodePreviews — the one unwatch/teardown home
         nodeAgentState = [:]
         runWorkSet = []
-        pendingDirectorMessages = [:]
+        // IN-MEMORY reset only — never a disk write: this runs while `loadedProjectURL` still points
+        // at the OLD project, and a flush-empty here would delete that project's queue file (the
+        // envelopes that were supposed to survive the switch). Parked waiters resume `.removed`.
+        mailbox.reset()
+        assert(!ledger.anyWaiting && !mailbox.anyAwaiting,
+               "project teardown with a parked wait — a continuation would leak")
         forcedFailNodes = [:]
         graphOpStatus = [:]
         hiddenPieces = []
@@ -1053,16 +1055,37 @@ final class SZHost {
 
     /// Record a Director-authored message for a node's Coding Agent during a run (the `ui_send_chat`
     /// during-run path). Two things happen: it's shown in the node's tab right away as a `.director`
-    /// message (the node tab reads as a multi-party thread), and it's stashed for the reconcile loop to
-    /// drain (`takeDirectorMessages`) and fold into the node's retry prompt — the actual delivery.
+    /// message (the node tab reads as a multi-party thread), and it's enqueued as a `.steer` envelope
+    /// for the reconcile loop to drain (`takeDirectorMessages`) and fold into the node's retry prompt
+    /// — the actual delivery. Two steers to one node are two envelopes, FIFO (the old single-slot
+    /// dict silently overwrote the first).
     func recordDirectorMessage(node: SZNodeID, message: String) {
-        pendingDirectorMessages[node] = message
+        mailbox.enqueue(SZMessageEnvelope(
+            recipient: SZChatScope.node(node).key, sender: SZChatScope.directorKey, intent: .steer,
+            message: SZChatMessage(role: .director, text: message)))
         store.appendChatMessage(SZChatMessage(role: .director, text: message), to: .node(node))
         if SZChatScope.node(node).key != activeChatScope.key {   // a Director note lands off-screen → unread dot
             unreadScopes.insert(SZChatScope.node(node).key)
         }
         flushTranscript(.node(node))   // safe mid-stream: the in-flight coding reply is filtered out
         print("[SZHost] Director message for node \(node.uuidString.prefix(8)): \(message.prefix(80))")
+    }
+
+    /// Record a CODING agent's mid-run message TO the Director (`ui_send_chat scope=director` during a
+    /// run) — previously a silent black hole: the bubble landed in the tab, the turn was rejected, and
+    /// no LLM ever read the words. Now a `.steer` envelope the reconcile loop drains into the next
+    /// Director turn's prompt (`takeDirectorInboxMessages`), with a `.director`-role bubble marking it
+    /// as fleet-internal traffic in the Director tab (the wire carries no finer sender identity).
+    func recordDirectorInboxMessage(_ message: String) {
+        mailbox.enqueue(SZMessageEnvelope(
+            recipient: SZChatScope.directorKey, intent: .steer,
+            message: SZChatMessage(role: .director, text: message)))
+        store.appendChatMessage(
+            SZChatMessage(role: .director, text: "(from a coding agent) \(message)"), to: .director)
+        if SZChatScope.directorKey != activeChatScope.key {
+            unreadScopes.insert(SZChatScope.directorKey)
+        }
+        flushTranscript(.director)
     }
 
     /// Open a node's `Node.swift` in the user's default `.swift` editor (the card's file button). Saving the

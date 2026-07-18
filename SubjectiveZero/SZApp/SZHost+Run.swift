@@ -281,6 +281,9 @@ extension SZHost {
             // The Director's during-run messages to nodes (its `ui_send_chat`-to-a-node calls),
             // drained by the reconcile loop and folded into each node's retry.
             takeDirectorMessages: { [weak self] in self?.takeDirectorMessages() ?? [:] },
+            // The coding agents' during-run messages TO the Director, rendered into the next
+            // reconcile turn's prompt.
+            takeDirectorInbox: { [weak self] in self?.takeDirectorInboxMessages() ?? [] },
             // This run's captured work set — read LIVE (each dispatch/reconcile round) so Director- and
             // split/merge-added nodes join it; a user's mid-run draft never does. Host alive ⇒ non-nil
             // authoritative scope (even empty); nil only with no host (tests) ⇒ strategy sees all prompt nodes.
@@ -351,6 +354,7 @@ extension SZHost {
                 // Release the CAPTURED claim, not `runClaim` — after an eager `cancelRun` this is
                 // the zombie task's idempotent second settle, and `runClaim` may already belong to
                 // a newer run (guarded below so we never clobber it).
+                sweepUnconsumedSteers()   // steers are run-scoped; resume any parked ack waiters
                 ledger.releaseAll(of: claim)
                 if runClaim == claim { runClaim = nil }
                 if mailbox.steerConsumer == claim { mailbox.steerConsumer = nil }
@@ -410,6 +414,7 @@ extension SZHost {
         // stay safe because the pump's delivery precondition also checks the scope's in-flight
         // marker, so nothing new streams into a transcript a zombie is still writing.
         if let claim = runClaim {
+            sweepUnconsumedSteers()
             ledger.releaseAll(of: claim)
             if mailbox.steerConsumer == claim { mailbox.steerConsumer = nil }
             runClaim = nil
@@ -469,11 +474,38 @@ extension SZHost {
         return "chat turn '\(scope.key)'"
     }
 
-    /// Drain the Director's recorded messages (take + clear) — called by the reconcile loop after each
-    /// reconcile turn so the next round starts fresh.
+    /// Drain the Director's queued `.steer` envelopes to nodes (mark processed) — called by the
+    /// reconcile loop after each reconcile turn so the next round starts fresh. Multiple steers to
+    /// one node fold in FIFO order, joined by a blank line, so `CodingReconcile.directorMessage`
+    /// stays one string and the strategy is untouched.
     func takeDirectorMessages() -> [SZNodeID: String] {
-        let taken = pendingDirectorMessages
-        pendingDirectorMessages = [:]
+        var taken: [SZNodeID: [String]] = [:]
+        for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued {
+            guard let node = SZChatScope(key: envelope.recipient)?.nodeID else { continue }
+            taken[node, default: []].append(envelope.message.text)
+            mailbox.markProcessed(envelope.id)
+        }
+        return taken.mapValues { $0.joined(separator: "\n\n") }
+    }
+
+    /// Drain the coding agents' queued `.steer` envelopes TO the Director — rendered into the next
+    /// reconcile Director turn's prompt (the reverse lane of `takeDirectorMessages`). FIFO.
+    func takeDirectorInboxMessages() -> [String] {
+        var taken: [String] = []
+        for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued
+            && envelope.recipient == SZChatScope.directorKey {
+            taken.append(envelope.message.text)
+            mailbox.markProcessed(envelope.id)
+        }
         return taken
+    }
+
+    /// Fail every `.steer` still queued when its run ends (run-task defer AND eager cancel) — a steer
+    /// is run-scoped: leaving it queued would leak a dead run's steering into an unrelated next run
+    /// (the old dict's exact bug), and any `awaitProcessed` waiter must resume, not park forever.
+    func sweepUnconsumedSteers() {
+        for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued {
+            mailbox.markFailed(envelope.id, reason: "run ended before the steer was consumed")
+        }
     }
 }

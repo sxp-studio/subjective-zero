@@ -77,6 +77,7 @@ public struct SZAgenticDirectorStrategy: SZOrchestrating {
                 do {
                     _ = try await directorTurn(SZDirectorPrompt.renderReconcile(
                         graph: graph, unresolved: unresolved.map(\.node), statuses: statuses,
+                        inbox: context.takeDirectorInbox(),   // the fleet's messages TO the Director
                         round: round, cap: Self.reconcileCap))
                 } catch {
                     print("[SZAgenticDirectorStrategy] reconcile turn \(round) failed: \(error) — retrying nodes as-is")
