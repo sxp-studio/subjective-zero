@@ -702,6 +702,11 @@ public struct SZChatPanel: View {
                     onSetFastMode: onSetFastMode,
                     onOpenProviderSetup: onOpenProviderSetup)
             }
+            // The Stop rides NEXT TO send while a run / this scope's turn is in flight — the input
+            // stays live (a send queues), but stopping is always one click, on every tab.
+            if let stop = activeStop {
+                stopButton(stop.action, help: stop.help)
+            }
             sendButton
         }
     }
@@ -727,9 +732,9 @@ public struct SZChatPanel: View {
         }
     }
 
-    /// The "a turn/run is in flight" state — a Stop + live timer, centered, replacing the input so
-    /// there's no doubt you can't type. Works for a whole run and for one conversation's turn; with
-    /// no stoppable control (a node mid split/merge) it's the centered status + timer alone.
+    /// The structurally-locked state (a node mid split/merge — the one case the input still tears
+    /// down): centered status + live timer, plus a Stop when a run is also in flight. Runs and
+    /// streaming turns no longer come through here — their Stop rides the normal composer.
     private var lockedComposer: some View {
         HStack(spacing: 12) {
             if let stop = activeStop {
@@ -825,13 +830,10 @@ public struct SZChatPanel: View {
         !draft.isEmpty || !pendingAttachments.isEmpty
     }
 
-    /// A Stop is showing: a run in flight (offered on ANY tab) or this scope's own turn streaming.
-    /// It renders ALONGSIDE a live composer now — a send while something streams simply queues
-    /// (the message shows a "queued" chip and delivers when the agent frees), so the input no
-    /// longer tears down for the whole run.
-    private var showsStop: Bool { isRunning || (canStopTurn && streaming) }
     /// Text input is inert only while the node is structurally owned (mid-split/merge — it may not
-    /// exist when the op settles). Every other busy state queues instead of locking.
+    /// exist when the op settles). Every other busy state queues instead of locking: the Stop for
+    /// a run/streaming turn renders ALONGSIDE the live composer (`activeStop` in the bottom bar),
+    /// and a send while something streams simply queues with a chip on its bubble.
     private var inputLocked: Bool { scopeLocked }
 
     /// The action slot's Stop — orange, pulsing, and hover-reactive. Stays full-strength while the
