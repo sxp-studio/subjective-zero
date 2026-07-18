@@ -85,6 +85,9 @@ extension SZHost {
         case .contractChanged:
             ask = " has ports its code doesn't implement yet — implement them in Node.swift against the current "
                 + "contract, keeping everything that already works."
+        case .intentChanged:
+            ask = " was re-briefed after it was built — re-implement Node.swift against the node's current "
+                + "prompt, keeping its declared ports and everything the new intent doesn't change."
         }
         injectComposerDraft(SZComposerDraft(segments: [mention, .text(ask)]), scope: .node(id))
     }

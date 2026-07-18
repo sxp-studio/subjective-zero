@@ -315,7 +315,7 @@ extension SZHostBridge {
                 return e
             }
         }
-        let found = host.store.updateNode(
+        let result = host.store.updateNode(
             id: id,
             title: arguments.string("title"),
             sfSymbol: arguments.string("sfSymbol"),
@@ -323,9 +323,16 @@ extension SZHostBridge {
             summary: arguments.string("summary"),
             permissions: permissions
         )
-        guard found else { throw SZMCPError.message("no node \(id)") }
+        guard result.found else { throw SZMCPError.message("no node \(id)") }
+        // A prompt edit on a built node raised `.intentChanged` — join it to any run in flight, exactly as
+        // `ui_edit_ports` does for a raised port change. Otherwise a Director re-briefing a node mid-run
+        // creates work no one is scoped to pick up, and the node keeps running its old build.
+        if result.raisedRebuild { host.noteRunCreatedWork([id]) }
         host.persistGraphEditAndReload(action: "update node")
-        return SZJSONRPC.encode(["updated": true])
+        // Report the node's STATE, not what this call changed (same terms as `ui_edit_ports`): a node
+        // already awaiting a rebuild is still awaiting one.
+        let stillNeedsRebuild = host.store.project?.graph.node(id: id)?.needsRebuild ?? result.raisedRebuild
+        return SZJSONRPC.encode(["updated": true, "needsRebuild": stillNeedsRebuild])
     }
 
     /// The single path that mutates a node's typed I/O. Applies the delta, prunes what it invalidated, and —

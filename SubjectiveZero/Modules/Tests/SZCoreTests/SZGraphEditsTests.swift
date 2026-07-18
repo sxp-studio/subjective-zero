@@ -31,7 +31,7 @@ private func loadedStore() -> SZStore {
     #expect(store.connect(from: SZPortRef(node: SZNodeID(), port: "o"),
                           to: SZPortRef(node: SZNodeID(), port: "i"), kind: .data) == nil)
     #expect(store.disconnect(connection: SZConnectionID()) == false)
-    #expect(store.updateNode(id: SZNodeID(), title: "x") == false)
+    #expect(store.updateNode(id: SZNodeID(), title: "x").found == false)
     #expect(store.moveNode(id: SZNodeID(), to: SZPoint(x: 1, y: 1)) == false)
 }
 
@@ -56,7 +56,7 @@ private func loadedStore() -> SZStore {
     let id = store.addPromptNode(prompt: "old", position: SZPoint(x: 0, y: 0))!
     store.editPorts(node: id, .init(upsertOutputs: [SZPort(name: "output", type: .texture, display: true)]))
     #expect(store.updateNode(id: id, title: "Grayscale", sfSymbol: "circle.lefthalf.filled",
-                             prompt: "new", summary: "luminance") == true)
+                             prompt: "new", summary: "luminance").found == true)
     let node = store.project?.graph.node(id: id)
     #expect(node?.title == "Grayscale")
     #expect(node?.sfSymbol == "circle.lefthalf.filled")
@@ -64,9 +64,9 @@ private func loadedStore() -> SZStore {
     #expect(node?.contract?.summary == "luminance")   // contract identity tracks the node's
     #expect(node?.contract?.outputs.first?.name == "output")
     // A nil field leaves the existing value untouched.
-    #expect(store.updateNode(id: id, sfSymbol: "sparkles") == true)
+    #expect(store.updateNode(id: id, sfSymbol: "sparkles").found == true)
     #expect(store.project?.graph.node(id: id)?.title == "Grayscale")
-    #expect(store.updateNode(id: SZNodeID(), title: "x") == false)   // missing node
+    #expect(store.updateNode(id: SZNodeID(), title: "x").found == false)   // missing node
 }
 
 @MainActor
@@ -314,8 +314,65 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
     #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.type == .texture)
 }
 
-/// Nothing outside the port surface may invalidate a build — over-invalidation would regenerate a node on every
-/// slider drag or rename. One case per excluded field.
+// The regression these pin: a Director edited a built node's prompt (`ui_update_node`) and nothing raised a
+// rebuild flag, so the node kept running its old build while the user repeated the ask for three turns —
+// the toolbelt prompt even taught "only changing a node's PORTS needs a rebuild".
+
+@MainActor
+@Test func aPromptEditOnABuiltNodeMarksRebuildButNeverUnbuildsIt() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "input", type: .texture)])
+
+    let result = store.updateNode(id: id, prompt: "make it pulse with the beat")
+    #expect(result.raisedRebuild)
+    let node = store.project!.graph.node(id: id)!
+    #expect(node.rebuildReason == .intentChanged)
+    #expect(node.prompt == "make it pulse with the beat")
+    // The black-frame guard, same as a port edit: the old build keeps rendering until regenerated.
+    #expect(node.kind == .generated)
+    #expect(node.needsImplementation)
+}
+
+@MainActor
+@Test func aPromptEditOnAnUnbuiltNodeNeverMarksRebuild() {
+    let store = loadedStore()
+    let id = store.addPromptNode(prompt: "old intent", position: SZPoint(x: 0, y: 0))!
+    let result = store.updateNode(id: id, prompt: "new intent")
+    #expect(result.raisedRebuild == false)
+    let node = store.project!.graph.node(id: id)!
+    #expect(node.needsRebuild == false)     // nothing built → nothing to invalidate
+    #expect(node.needsImplementation)       // still pending, because it was never built
+}
+
+@MainActor
+@Test func resendingTheSamePromptDoesNotMarkRebuild() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "input", type: .texture)])
+    store.updateNode(id: id, prompt: "same")
+    store.mutate { p in   // discharge the first raise, as a promote would
+        guard let i = p.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
+        p.graph.nodes[i].rebuildReason = nil
+    }
+    let result = store.updateNode(id: id, prompt: "same")
+    #expect(result.raisedRebuild == false)
+    #expect(store.project!.graph.node(id: id)!.needsRebuild == false)
+}
+
+@MainActor
+@Test func aPromptEditNeverDowngradesASourceMismatch() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "input", type: .texture)])
+    store.mutate { p in   // the host's audit found a real fault
+        guard let i = p.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
+        p.graph.nodes[i].rebuildReason = .sourceMismatch
+    }
+    let result = store.updateNode(id: id, prompt: "new intent")
+    #expect(result.raisedRebuild == false)   // already awaiting a rebuild — no new work raised
+    #expect(store.project!.graph.node(id: id)!.rebuildReason == .sourceMismatch)
+}
+
+/// Nothing outside the port surface or the intent may invalidate a build — over-invalidation would regenerate
+/// a node on every slider drag or rename. One case per excluded field.
 @MainActor
 @Test func presentationAndValueEditsNeverMarkRebuild() {
     let store = loadedStore()
@@ -323,9 +380,9 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
                            inputs: [SZPort(name: "amount", type: .float, ui: SZPortUI(kind: .slider, min: 0, max: 1))],
                            outputs: [SZPort(name: "output", type: .texture)])
 
-    // identity + summary + permissions
-    #expect(store.updateNode(id: id, title: "T", sfSymbol: "star", prompt: "p", summary: "s",
-                             permissions: [.microphone]) == true)
+    // identity + summary + permissions (`prompt` is NOT presentation — see the intent tests below)
+    #expect(store.updateNode(id: id, title: "T", sfSymbol: "star", summary: "s",
+                             permissions: [.microphone]).found == true)
     #expect(store.project!.graph.node(id: id)!.needsRebuild == false)
 
     // an unconnected input's default
@@ -413,7 +470,7 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
     let id = store.addPromptNode(prompt: "capture the mic", position: SZPoint(x: 0, y: 0))!
     #expect(store.project!.graph.node(id: id)!.contract == nil)   // nothing declared yet
 
-    #expect(store.updateNode(id: id, title: "Microphone", summary: "live mic", permissions: [.microphone]) == true)
+    #expect(store.updateNode(id: id, title: "Microphone", summary: "live mic", permissions: [.microphone]).found == true)
     #expect(store.project!.graph.node(id: id)!.contract?.permissions == [.microphone])
 
     // Declaring ports afterwards must not clobber the permissions already recorded.
