@@ -32,6 +32,12 @@ struct SZGridCursorTrailView: View {
     private struct DotKey: Hashable { let kx: Int; let ky: Int }
 
     @State private var trail: [Sample] = []
+    /// The last RECORDED sample position — the sample gate compares against this, not `trail.last`,
+    /// because `trail` prunes itself to empty: gating on the pruned array meant any ≥1px jitter of a
+    /// resting hand re-appended a sample and remounted the TimelineView for another full fade window,
+    /// forever. This survives pruning, so a resting pointer's sub-`sampleGap` jitter appends nothing
+    /// and the timeline stays dismounted.
+    @State private var lastSamplePoint: CGPoint?
 
     // Tuning. Base grid dots are 1pt-radius, white @ 0.16.
     private static let fadeWindow: TimeInterval = 0.8   // how long a passed-over cell takes to settle back ("slow")
@@ -75,10 +81,11 @@ struct SZGridCursorTrailView: View {
         // Record trail samples as the pointer moves. Distance-gated so a fast sweep yields a bounded number
         // of samples and an idle hover yields none.
         .onChange(of: cursor) { _, new in
-            guard let new else { return }
-            if let last = trail.last, hypot(new.x - last.point.x, new.y - last.point.y) < Self.sampleGap {
+            guard let new else { lastSamplePoint = nil; return }
+            if let last = lastSamplePoint, hypot(new.x - last.x, new.y - last.y) < Self.sampleGap {
                 return
             }
+            lastSamplePoint = new
             trail.append(Sample(point: new, birth: Date().timeIntervalSinceReferenceDate))
             if trail.count > Self.trailCap { trail.removeFirst(trail.count - Self.trailCap) }
         }
