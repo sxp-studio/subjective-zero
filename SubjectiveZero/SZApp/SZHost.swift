@@ -122,6 +122,14 @@ final class SZHost {
     /// value — a session re-minted this process never matches, so it can never be dropped by
     /// mistake), `sendChat` drops it and the next message cold-starts with the transcript recap.
     var restoredSessions: [String: SZAgentSession] = [:]
+    /// The resource ledger — the single home for "who may touch what right now" (SZResourceLedger).
+    /// Every agent turn claims its scope's resources for the stream's duration (`deliver`); a run
+    /// claims its work set; the busy flags and lock affordances derive from the claims table.
+    let ledger = SZResourceLedger()
+    /// The message queue — the single home for "what is waiting to be said to whom"
+    /// (SZMessageQueue). Sends that can't run immediately enqueue here instead of being rejected;
+    /// the host's pump delivers them as their resources free.
+    let mailbox = SZMessageQueue()
 
     // Panel layout — the window's split tree (SZPanelLayoutState, SZCore), host-owned like the chat
     // tab state below; mutated via SZHost+PanelLayout.swift (header drags, dividers, close/reopen),

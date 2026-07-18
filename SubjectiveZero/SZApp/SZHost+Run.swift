@@ -46,16 +46,39 @@ extension SZHost {
     /// mailbox when mid-run user messaging lands. See docs/AGENT_ORCHESTRATION.md "Cross-agent messaging".
     /// `existingAssistantID` lets a caller (the chat path) reuse an assistant message it already opened for
     /// its synchronous guard replies; nil → `deliver` opens its own.
+    /// `claim` is the ledger token that already holds this scope's resources (a run's coding/Director
+    /// turns pass the run's claim); nil → the turn claims them itself for the stream's duration, a
+    /// real hold so `isBusyForProjectOps`' `anyHeld` covers chat turns and the fence sees mid-chat
+    /// nodes as held.
     @MainActor
     @discardableResult
     func deliver(
         scope: SZChatScope, request: SZAgentRunRequest, provider: any SZProvider,
-        persistSession: Bool = true, existingAssistantID: UUID? = nil
+        persistSession: Bool = true, existingAssistantID: UUID? = nil,
+        claim: SZClaimToken? = nil
     ) async throws -> (result: SZAgentRunResult, assistantID: UUID) {
+        let turnResources = Self.turnResources(for: scope)
+        var selfClaim: SZClaimToken?
+        if let claim {
+            assert(ledger.holder(of: .transcript(scope)) == claim,
+                   "deliver: caller claim '\(claim.label)' does not hold transcript/\(scope.key)")
+        } else {
+            let token = SZClaimToken(label: turnLabel(for: scope))
+            if ledger.tryAcquire(turnResources, as: token) {
+                selfClaim = token
+            } else {
+                // Shadow-mode tripwire: the legacy guards (chatInFlight / isRunning) should make
+                // contention here impossible. A firing assertion means the claim model and
+                // reality disagree — fix the model, don't ship the divergence.
+                assertionFailure("deliver: could not claim \(scope.key) — blocked by "
+                    + ledger.blockers(of: turnResources).map(\.label).joined(separator: ", "))
+            }
+        }
         let assistantID = existingAssistantID ?? store.appendChatMessage(SZChatMessage(role: .assistant, text: ""), to: scope)
         inFlightAssistantIDs[scope.key] = assistantID   // also flips chatInFlight (derived)
         let started = Date()
         defer {
+            if let selfClaim { ledger.releaseAll(of: selfClaim) }
             inFlightAssistantIDs[scope.key] = nil
             store.setChatDuration(Date().timeIntervalSince(started), assistantID, in: scope)
             // A turn finishing off-screen marks its tab unread (static dot until visited).
@@ -389,6 +412,24 @@ extension SZHost {
             narrateDirector("\(node.title) didn't finish — \(reason).")
         }
         return (implemented, failed)
+    }
+
+    /// The ledger resources one agent turn on `scope` occupies: the transcript (one turn per scope),
+    /// and for a node scope the node itself — so a mid-chat node reads as HELD to the mutation fence
+    /// and to other claimants, not just to the view layer's `isChatting` affordance.
+    static func turnResources(for scope: SZChatScope) -> Set<SZResourceID> {
+        var resources: Set<SZResourceID> = [.transcript(scope)]
+        if let node = scope.nodeID { resources.insert(.node(node)) }
+        return resources
+    }
+
+    /// Human label for a turn's claim token — what deadlock/deadline/refusal diagnostics print.
+    func turnLabel(for scope: SZChatScope) -> String {
+        if let id = scope.nodeID {
+            let title = store.project?.graph.node(id: id)?.title ?? String(id.uuidString.prefix(8))
+            return "chat turn '\(title)'"
+        }
+        return "chat turn '\(scope.key)'"
     }
 
     /// Drain the Director's recorded messages (take + clear) — called by the reconcile loop after each
