@@ -46,17 +46,54 @@ extension SZHost {
     /// mailbox when mid-run user messaging lands. See docs/AGENT_ORCHESTRATION.md "Cross-agent messaging".
     /// `existingAssistantID` lets a caller (the chat path) reuse an assistant message it already opened for
     /// its synchronous guard replies; nil → `deliver` opens its own.
+    /// `claim` is the ledger token that already holds this scope's resources (a run's coding/Director
+    /// turns pass the run's claim); nil → the turn claims them itself for the stream's duration, a
+    /// real hold so `isBusyForProjectOps`' `anyHeld` covers chat turns and the fence sees mid-chat
+    /// nodes as held.
     @MainActor
     @discardableResult
     func deliver(
         scope: SZChatScope, request: SZAgentRunRequest, provider: any SZProvider,
-        persistSession: Bool = true, existingAssistantID: UUID? = nil
+        persistSession: Bool = true, existingAssistantID: UUID? = nil,
+        claim: SZClaimToken? = nil
     ) async throws -> (result: SZAgentRunResult, assistantID: UUID) {
+        let turnResources = Self.turnResources(for: scope)
+        var selfClaim: SZClaimToken?
+        if let claim {
+            // A cancelled run's zombie dispatch presents its RELEASED token while someone else (a
+            // pump delivery, a new run) may already own the scope — streaming would interleave two
+            // turns in one transcript and clobber its in-flight marker. Bow out; the strategy
+            // treats it like any cancelled turn. A holder mismatch WITHOUT cancellation is a real
+            // claim-model divergence and stays a debug tripwire.
+            guard ledger.holder(of: .transcript(scope)) == claim else {
+                assert(Task.isCancelled,
+                       "deliver: caller claim '\(claim.label)' does not hold transcript/\(scope.key)")
+                throw CancellationError()
+            }
+        } else {
+            let token = SZClaimToken(label: turnLabel(for: scope))
+            if ledger.tryAcquire(turnResources, as: token) {
+                selfClaim = token
+            } else if Task.isCancelled {
+                // Zombie path post-cancel: the scope has a new owner — do not stream into it.
+                throw CancellationError()
+            } else {
+                // Tripwire: the admission paths (pump claim / run claim) should make contention
+                // here impossible. A firing assertion means the claim model and reality disagree —
+                // fix the model, don't ship the divergence.
+                assertionFailure("deliver: could not claim \(scope.key) — blocked by "
+                    + ledger.blockers(of: turnResources).map(\.label).joined(separator: ", "))
+            }
+        }
         let assistantID = existingAssistantID ?? store.appendChatMessage(SZChatMessage(role: .assistant, text: ""), to: scope)
         inFlightAssistantIDs[scope.key] = assistantID   // also flips chatInFlight (derived)
         let started = Date()
         defer {
-            inFlightAssistantIDs[scope.key] = nil
+            if let selfClaim { ledger.releaseAll(of: selfClaim) }
+            // Ownership-checked: if a later turn overwrote this scope's marker (a race this guard
+            // is the last line of defense against), leave THEIRS in place — nilling it would let a
+            // flush persist their half-streamed reply.
+            if inFlightAssistantIDs[scope.key] == assistantID { inFlightAssistantIDs[scope.key] = nil }
             store.setChatDuration(Date().timeIntervalSince(started), assistantID, in: scope)
             // A turn finishing off-screen marks its tab unread (static dot until visited).
             if scope.key != activeChatScope.key { unreadScopes.insert(scope.key) }
@@ -88,7 +125,8 @@ extension SZHost {
     /// see `isLocked` in `SZNodeEditorPanel`), so this doesn't touch `isChatting`.
     @MainActor
     func streamCodingAgent(
-        node: SZNodeID, request: SZAgentRunRequest, provider: any SZProvider
+        node: SZNodeID, request: SZAgentRunRequest, provider: any SZProvider,
+        claim: SZClaimToken? = nil
     ) async throws -> SZAgentRunResult {
         let scope = SZChatScope.node(node)
         // Debug test affordance: force this node to fail its first dispatch once — report `needsInput`
@@ -102,7 +140,11 @@ extension SZHost {
             throw SZMCPError.message("(debug) forced needsInput: \(blocker)")
         }
         openChatTab(scope)
-        let result = try await deliver(scope: scope, request: request, provider: provider).result
+        // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
+        // A cancelled run's zombie dispatch presents its released token; deliver detects that and
+        // bows out instead of double-streaming into a scope someone else now owns.
+        let result = try await deliver(scope: scope, request: request, provider: provider,
+                                       claim: claim ?? runClaim).result
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
         // (timeout, CLI error) is invisible and the node reads as a silent Draft. `deliver` already
         // streamed the turn into `scope`; this adds the terminal error line beneath it.
@@ -158,7 +200,8 @@ extension SZHost {
             cacheDirectory: cacheDirectory, mcpServerPort: mcpPort,
             model: generation.model, reasoningEffort: generation.reasoningEffort,
             fastMode: generation.fastMode ?? false, timeout: 300)
-        let result = try await deliver(scope: scope, request: request, provider: provider).result
+        let result = try await deliver(scope: scope, request: request, provider: provider,
+                                       claim: runClaim).result
         // The agentic strategy discards the Director result (it re-reads the graph instead), so a
         // mid-turn provider death would otherwise vanish — land it in the Director tab like a
         // coding turn's terminal error line.
@@ -214,7 +257,7 @@ extension SZHost {
     /// host degrades gracefully. Kept separate from `startRun` so its run body reads as build-context → run.
     private func makeOrchestrationContext(
         providerID: String, mcpPort: UInt16, projectURL: URL, cacheDirectory: URL,
-        instruction: String, directorAlreadyBriefed: Bool
+        instruction: String, directorAlreadyBriefed: Bool, claim: SZClaimToken
     ) -> SZOrchestrationContext {
         SZOrchestrationContext(
             providerID: providerID,
@@ -223,10 +266,13 @@ extension SZHost {
             generationSettings: resolvedGenerationSettings(for: providerID),
             store: store, mcpPort: mcpPort,
             projectURL: projectURL, cacheDirectory: cacheDirectory,
-            // Stream each coding agent's output into its node's Coding Agent tab.
+            // Stream each coding agent's output into its node's Coding Agent tab, under THIS run's
+            // claim (captured, not read live: after a cancel, a zombie dispatch must present its
+            // own released token — which deliver detects — never a NEWER run's live claim).
             turnRunner: { [weak self] node, request, provider in
                 guard let self else { return try await provider.run(request) }
-                return try await self.streamCodingAgent(node: node, request: request, provider: provider)
+                return try await self.streamCodingAgent(node: node, request: request,
+                                                        provider: provider, claim: claim)
             },
             // A chat-triggered run carries the user's words into the decompose prompt — unless the
             // Director's own chat turn requested it, in which case that turn WAS the decompose.
@@ -254,6 +300,9 @@ extension SZHost {
             // The Director's during-run messages to nodes (its `ui_send_chat`-to-a-node calls),
             // drained by the reconcile loop and folded into each node's retry.
             takeDirectorMessages: { [weak self] in self?.takeDirectorMessages() ?? [:] },
+            // The coding agents' during-run messages TO the Director, rendered into the next
+            // reconcile turn's prompt.
+            takeDirectorInbox: { [weak self] in self?.takeDirectorInboxMessages() ?? [] },
             // This run's captured work set — read LIVE (each dispatch/reconcile round) so Director- and
             // split/merge-added nodes join it; a user's mid-run draft never does. Host alive ⇒ non-nil
             // authoritative scope (even empty); nil only with no host (tests) ⇒ strategy sees all prompt nodes.
@@ -288,22 +337,46 @@ extension SZHost {
         }
         let providerID = activeProviderID
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
-        isRunning = true
-        status = "running \(providerID)…"
-        showChat(.director)                                  // a run narrates into the Director Agent tab
         // Capture this run's WORK SET: the prompt nodes dirty at start. It grows as the run's own tooling
         // creates work (`noteRunCreatedWork`), and drives dispatch, the editor lock/pill, and the
         // `ui_connect` guard. A node the user adds mid-run is never noted, so it stays out of the fleet.
-        runWorkSet = Set((store.project?.graph.nodes ?? []).filter(\.needsImplementation).map(\.id))
+        let workSet = Set((store.project?.graph.nodes ?? []).filter(\.needsImplementation).map(\.id))
+        // Claim ONLY what this run touches — atomically, refuse on contention (today's refuse-a-
+        // second-run semantics; an awaited acquire would let a second Build queue behind the first
+        // while `isRunning` still reads false). The claim also closes a latent race: previously
+        // nothing stopped a run while a chat turn streamed into a work-set node's transcript.
+        var claimSet: Set<SZResourceID> = [.run, .transcript(.director)]
+        for id in workSet {
+            claimSet.insert(.node(id))
+            claimSet.insert(.transcript(.node(id)))
+        }
+        let claim = SZClaimToken(label: "run (\(providerID))")
+        guard ledger.tryAcquire(claimSet, as: claim) else {
+            let holders = ledger.blockers(of: claimSet).map(\.label).joined(separator: ", ")
+            status = "cannot start run — \(holders) in flight"
+            narrateDirector("Run not started — \(holders) is still working. Wait for it to finish (or stop it), then build again.")
+            return
+        }
+        runClaim = claim   // `.steer` ack waits derive their consumer from the `.run` holder
+        runWorkSet = workSet
+        status = "running \(providerID)…"
+        showChat(.director)                                  // a run narrates into the Director Agent tab
         let dirtyCount = runWorkSet.count
         narrateDirector(dirtyCount == 0
             ? "Run started (\(providerID)) — no nodes need implementing."
             : "Run started (\(providerID)) — implementing \(dirtyCount) node\(dirtyCount == 1 ? "" : "s")…")
         runTask = Task { @MainActor in
-            // stays true for the WHOLE run, not per-promote; pins last one run (promotes already consumed
-            // them by here) — anything still owned by an in-flight graph op is cleared by its commit/rollback.
+            // pins last one run (promotes already consumed them by here) — anything still owned by
+            // an in-flight graph op is cleared by its commit/rollback.
             defer {
-                isRunning = false; runTask = nil
+                // Release the CAPTURED claim, not `runClaim` — after an eager `cancelRun` this is
+                // the zombie task's idempotent second settle, and `runClaim` may already belong to
+                // a newer run (guarded so we never clobber it — including the sweep: an unguarded
+                // sweep here would fail a NEW run's queued steers when the zombie finally exits).
+                if runClaim == claim { sweepUnconsumedSteers() }
+                ledger.releaseAll(of: claim)
+                if runClaim == claim { runClaim = nil }
+                runTask = nil
                 runWorkSet = []            // run over → the work set is cleared (a node chat runs with it empty)
                 pinnedContracts = pinnedContracts.filter { hiddenPieces.contains($0.key) }
                 flushAllTranscripts()      // run end = flush point (success, throw, or cancel)
@@ -313,7 +386,8 @@ extension SZHost {
                 let sessions = try await orchestrator.run(makeOrchestrationContext(
                     providerID: providerID, mcpPort: mcpPort,
                     projectURL: projectURL, cacheDirectory: cacheDirectory,
-                    instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed))
+                    instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed,
+                    claim: claim))
                 // Remember each node's coding-agent session so a chat turn can resume it. A
                 // freshly-minted session replaces any disk-restored one → off probation.
                 for (node, sessionID) in sessions {
@@ -353,7 +427,16 @@ extension SZHost {
     func cancelRun() {
         runTask?.cancel()
         runTask = nil
-        isRunning = false
+        // Eager release: composers and project ops unlock NOW, not when the cancelled task's CLI
+        // agents finally die (they can outlive cancellation by a long way). The zombie task's
+        // deferred releaseAll of the same token is an idempotent no-op; its still-streaming turns
+        // stay safe because the pump's delivery precondition also checks the scope's in-flight
+        // marker, so nothing new streams into a transcript a zombie is still writing.
+        if let claim = runClaim {
+            sweepUnconsumedSteers()
+            ledger.releaseAll(of: claim)
+            runClaim = nil
+        }
         status = "run cancelled"
         narrateDirector("Run cancelled.")
         // Settle a staged split/merge NOW rather than waiting on the cancelled task. Cancellation is
@@ -391,11 +474,56 @@ extension SZHost {
         return (implemented, failed)
     }
 
-    /// Drain the Director's recorded messages (take + clear) — called by the reconcile loop after each
-    /// reconcile turn so the next round starts fresh.
+    /// The ledger resources one agent turn on `scope` occupies: the transcript (one turn per scope),
+    /// and for a node scope the node itself — so a mid-chat node reads as HELD to the mutation fence
+    /// and to other claimants, not just to the view layer's `isChatting` affordance.
+    static func turnResources(for scope: SZChatScope) -> Set<SZResourceID> {
+        var resources: Set<SZResourceID> = [.transcript(scope)]
+        if let node = scope.nodeID { resources.insert(.node(node)) }
+        return resources
+    }
+
+    /// Human label for a turn's claim token — what deadlock/deadline/refusal diagnostics print.
+    func turnLabel(for scope: SZChatScope) -> String {
+        if let id = scope.nodeID {
+            let title = store.project?.graph.node(id: id)?.title ?? String(id.uuidString.prefix(8))
+            return "chat turn '\(title)'"
+        }
+        return "chat turn '\(scope.key)'"
+    }
+
+    /// Drain the Director's queued `.steer` envelopes to nodes (mark processed) — called by the
+    /// reconcile loop after each reconcile turn so the next round starts fresh. Multiple steers to
+    /// one node fold in FIFO order, joined by a blank line, so `CodingReconcile.directorMessage`
+    /// stays one string and the strategy is untouched.
     func takeDirectorMessages() -> [SZNodeID: String] {
-        let taken = pendingDirectorMessages
-        pendingDirectorMessages = [:]
+        var taken: [SZNodeID: [String]] = [:]
+        for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued {
+            guard let node = SZChatScope(key: envelope.recipient)?.nodeID else { continue }
+            taken[node, default: []].append(envelope.message.text)
+            mailbox.markProcessed(envelope.id)
+        }
+        return taken.mapValues { $0.joined(separator: "\n\n") }
+    }
+
+    /// Drain the coding agents' queued `.steer` envelopes TO the Director — rendered into the next
+    /// reconcile Director turn's prompt (the reverse lane of `takeDirectorMessages`). FIFO.
+    func takeDirectorInboxMessages() -> [String] {
+        var taken: [String] = []
+        for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued
+            && envelope.recipient == SZChatScope.directorKey {
+            taken.append(envelope.message.text)
+            mailbox.markProcessed(envelope.id)
+        }
         return taken
+    }
+
+    /// Fail every `.steer` still queued when its run ends (run-task defer AND eager cancel) — a steer
+    /// is run-scoped: leaving it queued would leak a dead run's steering into an unrelated next run
+    /// (the old dict's exact bug), and any `awaitProcessed` waiter must resume, not park forever.
+    func sweepUnconsumedSteers() {
+        for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued {
+            mailbox.markFailed(envelope.id, reason: "run ended before the steer was consumed")
+        }
     }
 }

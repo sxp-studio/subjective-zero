@@ -32,7 +32,11 @@ extension SZHost {
     /// ride one choreography: store write → drop the node's stale thumb (a retargeted preview must
     /// never keep showing the old port's frame) → persist → watch-set refresh.
     @discardableResult
-    func setNodeBody(node id: SZNodeID, body: SZNodeBody?) -> Bool {
+    func setNodeBody(node id: SZNodeID, body: SZNodeBody?, origin: SZMutationOrigin = .user) -> Bool {
+        if let denial = fenceDenial(nodes: [id], origin: origin) {
+            status = denial
+            return false
+        }
         guard store.setNodeBody(id: id, body: body) else { return false }
         previewFrames.frame(for: id).surface = nil
         persistProject()

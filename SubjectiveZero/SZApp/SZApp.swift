@@ -89,6 +89,7 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     /// SIGKILL/crash skips this and loses only messages since the last completion flush (bounded).
     func applicationWillTerminate(_ notification: Notification) {
         host?.flushAllTranscripts()
+        host?.flushMessageQueue()   // a queued-not-delivered message redelivers next launch
         host?.persistAgentSessions()
         host?.releaseProjectLock()
     }
@@ -574,7 +575,8 @@ struct SZApp: App {
                               status: host.status, isRunning: host.isRunning,
                               isPaused: host.isPaused,
                               nodeAgentState: host.nodeAgentState,
-                              graphOpStatus: host.graphOpStatus, runWorkSet: host.runWorkSet, hiddenPieces: host.hiddenPieces,
+                              graphOpStatus: host.graphOpStatus, runWorkSet: host.runWorkSet,
+                              lockedNodes: host.lockedNodes, hiddenPieces: host.hiddenPieces,
                               chatShown: host.chatVisible,
                               agentsWorking: host.isRunning || !host.chatInFlight.isEmpty,
                               // "There's unimplemented work you should kick off" — pending nodes, no
@@ -617,6 +619,9 @@ struct SZApp: App {
                               // changes (Observation) so disabled states / toggles stay live.
                               gearMenu: AnyView(gearMenuContent))
         case .chat:
+            // One pass over the (small) live queue per body evaluation, not a scan per bubble row —
+            // the panel calls isQueued for every user message on every streamed token.
+            let queuedIDs = Set(host.mailbox.envelopes.lazy.filter { $0.state == .queued }.map(\.id))
             SZChatPanel(store: host.store, scope: host.activeChatScope, tabs: host.chatTabs,
                         project: host.store.project, provider: host.activeProviderID,
                         streaming: host.chatInFlight.contains(host.activeChatScope.key),
@@ -625,6 +630,7 @@ struct SZApp: App {
                         workingScopes: host.chatInFlight,
                         unreadScopes: host.unreadScopes,
                         needsInputScopes: host.needsInputScopes,
+                        isQueued: { queuedIDs.contains($0) },   // envelope id == bubble id (sendChat)
                         onSend: { host.sendChat(scope: host.activeChatScope, message: $0, attachments: $1) },
                         onSelectScope: { host.showChat($0) },
                         onCloseTab: { host.closeChatTab($0) },

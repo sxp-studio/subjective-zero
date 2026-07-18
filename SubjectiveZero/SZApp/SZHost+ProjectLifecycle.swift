@@ -11,9 +11,15 @@ import SZCore
 import UniformTypeIdentifiers
 
 extension SZHost {
-    /// Project ops refuse while an agent owns the graph — a run or any chat turn in flight.
+    /// Project ops refuse while an agent owns anything — a run, any streaming turn, a staged graph
+    /// op: every such activity holds a ledger claim (`deliver` claims per turn, `startRun` per run).
+    /// The `chatInFlight` term is NOT redundant with the claims: `cancelRun` releases eagerly while
+    /// a killed CLI can stream for seconds more — during that window the ledger reads free but the
+    /// physical stream (its in-flight marker) is still writing, and tearing the project down under
+    /// it would land its output in the NEXT project's store. Queued-but-undelivered messages
+    /// deliberately do NOT block (they persist and redeliver on reopen).
     /// Menu items disable on this; the methods guard on it too (the MCP surface can race a click).
-    var isBusyForProjectOps: Bool { isRunning || !chatInFlight.isEmpty }
+    var isBusyForProjectOps: Bool { ledger.anyHeld || !chatInFlight.isEmpty }
 
     /// The `.subz` package content type for the save/open panels. Prefers the app's exported UTI
     /// (`studio.sxp.subz`, declared in Info.plist as a `com.apple.package`); falls back to a plain

@@ -70,12 +70,9 @@ final class SZHost {
     /// consult this set. Single-writer (host/MCP writes; the UI only reads). Cleared at run end — a
     /// node chat runs with this empty. This is the seed of the behavior-tree's per-step in-flight set.
     internal(set) var runWorkSet: Set<SZNodeID> = []
-    /// Messages the Director Agent authored for coding agents DURING a run (`ui_send_chat` to a node
-    /// while `isRunning`), keyed by node id. Recorded — not delivered inline (deadlock-safe); the reconcile
-    /// loop drains them (`takeDirectorMessages`) and folds each into the node's retry. Each is also shown
-    /// immediately in the node's tab as a `.director` chat message (`recordDirectorMessage`); this map is
-    /// only the delivery side-channel, so it stays modestly named — not a first-class type.
-    internal(set) var pendingDirectorMessages: [SZNodeID: String] = [:]
+    // Mid-run Director↔fleet messages live as `.steer` envelopes in `mailbox` (recorded — never a
+    // nested turn inside a synchronous MCP handler; the reconcile loop drains them). See
+    // `recordDirectorMessage` / `recordDirectorInboxMessage` / `takeDirectorMessages`.
     /// Debug test affordance: node uuids to force-fail (report `needsInput`, no agent run) on their
     /// NEXT coding dispatch — set via `debug_fail_node_once`, consumed once. Lets the reconcile loop be
     /// driven live & repeatably without waiting for a real agent to flakily fail (the agents rarely do).
@@ -94,6 +91,10 @@ final class SZHost {
     /// operation commits, so the user never sees placeholder/draft cards (only the flagged originals,
     /// then the finished result). Cleared (revealed) at commit.
     internal(set) var hiddenPieces: Set<SZNodeID> = []
+    /// The staged split/merge's claim on the single `.graphOp` ledger slot — taken at staging,
+    /// released when the op settles (commit or rollback). Makes the staged op ledger-visible
+    /// (project ops block via `anyHeld`; diagnostics name it). See SZHost+Fence.swift.
+    internal(set) var graphOpClaim: SZClaimToken?
     /// The staged split/merge waiting on the run that implements its pieces — drained by that run's tail
     /// (`drainPendingGraphOp`), which commits it or rolls it back. AT MOST ONE: `startRun` serializes runs,
     /// and `rollbackGraphOp` clears the shared `hiddenPieces` bag wholesale, so a second concurrent op
@@ -122,6 +123,22 @@ final class SZHost {
     /// value — a session re-minted this process never matches, so it can never be dropped by
     /// mistake), `sendChat` drops it and the next message cold-starts with the transcript recap.
     var restoredSessions: [String: SZAgentSession] = [:]
+    /// The resource ledger — the single home for "who may touch what right now" (SZResourceLedger).
+    /// Every agent turn claims its scope's resources for the stream's duration (`deliver`); a run
+    /// claims its work set; the busy flags and lock affordances derive from the claims table.
+    let ledger = SZResourceLedger()
+    /// The message queue — the single home for "what is waiting to be said to whom"
+    /// (SZMessageQueue). Sends that can't run immediately enqueue here instead of being rejected;
+    /// the host's pump delivers them as their resources free (SZHost+Mailbox.swift).
+    let mailbox = SZMessageQueue()
+    /// In-flight pump deliveries (bounded by `deliveryCap` so a run-end release can't spawn one CLI
+    /// process per queued scope at once). Pump-owned; mutated only on the MainActor.
+    var activeDeliveries = 0
+    /// True for the duration of `switchProject` — the pump must not start a turn mid-swap.
+    var pumpSuspended = false
+    /// The persistable queue content of the last `flushMessageQueue` write (id:state lines) — the
+    /// skip-if-unchanged signature. Reset on project switch so the new project always flushes.
+    var lastFlushedQueueSignature: [String]?
 
     // Panel layout — the window's split tree (SZPanelLayoutState, SZCore), host-owned like the chat
     // tab state below; mutated via SZHost+PanelLayout.swift (header drags, dividers, close/reopen),
@@ -330,8 +347,14 @@ final class SZHost {
     internal(set) var chatTurnTasks: [String: Task<Void, Never>] = [:]
     /// True for the whole duration of a Director run (drives the HUD Run↔Stop state; node locking is
     /// per-node — while running, only the unimplemented `.prompt` nodes lock, see `isLocked` in
-    /// `SZNodeEditorPanel`).
-    internal(set) var isRunning = false
+    /// `SZNodeEditorPanel`). A VIEW over the ledger: the run's claim on `.run` IS the run state, so
+    /// this can never drift from what the run actually holds. `cancelRun` releases eagerly (the
+    /// zombie task's deferred release is idempotent), which is what flips this false at Stop.
+    var isRunning: Bool { ledger.isHeld(.run) }
+    /// The in-flight run's claim token — holds `.run`, the Director transcript, and the work set's
+    /// node+transcript pairs. Set by `startRun`, threaded into the run's `deliver` calls, released
+    /// (eagerly by `cancelRun`, deferredly by the run task) and cleared with the run.
+    internal(set) var runClaim: SZClaimToken?
 
     /// HUD playback state — whether the render timeline is paused (drives the Pause/Play toggle). The
     /// runtime owns the actual clock; this mirrors it for the observable UI. Reset to `false` on every
@@ -368,6 +391,13 @@ final class SZHost {
     func start(openingIfLaunchedWithFile launchFileURL: URL? = nil) async {
         guard !started else { return }
         started = true
+        installStoreFenceBackstop()   // the fence's debug tripwire (SZHost+Fence.swift)
+        // The pump's wake signal: every ledger release (turn end, run end, cancel) retries queued
+        // deliveries. Event-driven — the only other pump entries are enqueue and restore.
+        ledger.onAvailabilityChanged = { [weak self] in self?.pumpMailboxes() }
+        // Queue durability: every enqueue/state change flushes the sidecar (queue-before-transcript
+        // at enqueue is what makes the crash direction tolerable — see sendChat).
+        mailbox.onChange = { [weak self] in self?.flushMessageQueue() }
         // Geometry gate follows the restored pref BEFORE anything can render a card (project loads
         // below) — and before the Metal-unavailable early return, which must not strand the gate at
         // its compile-time default while the pref says otherwise.
@@ -444,6 +474,19 @@ final class SZHost {
         let project = try SZProjectIO.load(from: newURL)
         // 2. The only await: permissions (camera…) before the camera node's setup runs.
         try await runtime.requestDeclaredPermissions(at: newURL)
+        // Re-check after the await: the busy guard above passed, but an event-driven delivery (the
+        // mailbox pump fires on ledger releases) can start a turn inside that one suspension —
+        // and everything below tears the project down under it. The pump is also suspended for the
+        // rest of the swap (resumed by the defer installed here, on every exit path).
+        pumpSuspended = true
+        defer {
+            pumpSuspended = false
+            pumpMailboxes()
+        }
+        guard !isBusyForProjectOps else {
+            status = "busy — a turn started while opening; try again"
+            return false
+        }
         // 2b. Take the per-instance lock before disturbing the old project — a second running
         // instance holding this project surfaces as `alreadyOpenElsewhere`, and the old project
         // (and its lock) stay fully live. Held locally until the point of no return.
@@ -544,11 +587,21 @@ final class SZHost {
     }
 
     /// Note nodes CREATED by the run's own tooling (Director split/merge, `ui_add_prompt_node` mid-run)
-    /// into its work set — the single place the "created via the run" rule lives. No-op outside a run,
-    /// so callers invoke it unconditionally.
+    /// into its work set — the single place the "created via the run" rule lives. No-op outside a run
+    /// (including a cancelled run's zombie tooling — `isRunning` reads the released claim), so callers
+    /// invoke it unconditionally. The run's claim grows with the work set: the new nodes' resources
+    /// are free by construction (fresh uuids), so the acquire cannot contend.
     func noteRunCreatedWork(_ ids: Set<SZNodeID>) {
-        guard isRunning else { return }
+        guard isRunning, let runClaim else { return }
         runWorkSet.formUnion(ids)
+        var resources: Set<SZResourceID> = []
+        for id in ids {
+            resources.insert(.node(id))
+            resources.insert(.transcript(.node(id)))
+        }
+        let claimed = ledger.tryAcquire(resources, as: runClaim)
+        assert(claimed, "noteRunCreatedWork: fresh nodes unexpectedly contended — "
+            + ledger.blockers(of: resources).map(\.label).joined(separator: ", "))
     }
 
     /// A split/merge is staged and awaiting its run's commit. Only one at a time (see `pendingGraphOp`).
@@ -558,7 +611,13 @@ final class SZHost {
         resetPreviewStreamForProjectSwitch()   // SZHost+NodePreviews — the one unwatch/teardown home
         nodeAgentState = [:]
         runWorkSet = []
-        pendingDirectorMessages = [:]
+        // IN-MEMORY reset only — never a disk write: this runs while `loadedProjectURL` still points
+        // at the OLD project, and a flush-empty here would delete that project's queue file (the
+        // envelopes that were supposed to survive the switch). Parked waiters resume `.removed`.
+        mailbox.reset()
+        lastFlushedQueueSignature = nil   // the new project's first flush must not be skipped
+        assert(!ledger.anyWaiting && !mailbox.anyAwaiting,
+               "project teardown with a parked wait — a continuation would leak")
         forcedFailNodes = [:]
         graphOpStatus = [:]
         hiddenPieces = []
@@ -809,7 +868,11 @@ final class SZHost {
     /// (`onDeleteConnection`) and `ui_disconnect`. The runtime has no incremental topology API
     /// (`reloadNode` is source-only), so this reloads like split/merge and promote do.
     @discardableResult
-    func deleteConnection(id: SZConnectionID) -> Bool {
+    func deleteConnection(id: SZConnectionID, origin: SZMutationOrigin = .user) -> Bool {
+        if let denial = fenceDenial(nodes: connectionEndpoints(id), origin: origin) {
+            status = denial
+            return false
+        }
         guard store.disconnect(connection: id) else { return false }
         persistGraphEditAndReload(action: "removed connection")
         return true
@@ -820,7 +883,12 @@ final class SZHost {
     /// (`onConnect`) and `ui_connect`. Wiring an occupied data input swaps the old edge out
     /// (`SZStore.connect` enforces single-incoming on data inputs).
     @discardableResult
-    func addConnection(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind) -> SZConnectionID? {
+    func addConnection(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind,
+                       origin: SZMutationOrigin = .user) -> SZConnectionID? {
+        if let denial = fenceDenial(nodes: [from.node, to.node], origin: origin) {
+            status = denial
+            return nil
+        }
         guard let id = store.connect(from: from, to: to, kind: kind) else { return nil }
         persistGraphEditAndReload(action: "connected")
         return id
@@ -831,7 +899,12 @@ final class SZHost {
     /// runtime reload. The store's swap rule applies at the destination, so landing on an occupied
     /// data input replaces its edge.
     @discardableResult
-    func reconnectConnection(id: SZConnectionID, end: SZConnectionEnd, to newRef: SZPortRef) -> Bool {
+    func reconnectConnection(id: SZConnectionID, end: SZConnectionEnd, to newRef: SZPortRef,
+                             origin: SZMutationOrigin = .user) -> Bool {
+        if let denial = fenceDenial(nodes: connectionEndpoints(id) + [newRef.node], origin: origin) {
+            status = denial
+            return false
+        }
         guard let old = store.project?.graph.connections.first(where: { $0.id == id }),
               store.disconnect(connection: id),
               store.connect(from: end == .from ? newRef : old.from,
@@ -906,7 +979,13 @@ final class SZHost {
     /// an out-of-range agent write would render live at 100 while the contract persists the clamped 5.
     /// Returns the applied value so a caller (the MCP tool) can echo the truth back.
     @discardableResult
-    func setInputDefault(node: SZNodeID, port: String, value rawValue: SZPortValue, persist: Bool = true) -> SZPortValue {
+    func setInputDefault(node: SZNodeID, port: String, value rawValue: SZPortValue, persist: Bool = true,
+                         origin: SZMutationOrigin = .user) -> SZPortValue {
+        if let denial = fenceDenial(nodes: [node], origin: origin) {
+            status = denial
+            return store.project?.graph.node(id: node)?.contract?.inputs
+                .first { $0.name == port }?.def ?? rawValue   // echo the unchanged truth
+        }
         let portModel = store.project?.graph.node(id: node)?.contract?.inputs.first { $0.name == port }
         let value = portModel?.clampedDefault(rawValue) ?? rawValue
         if let floats = value.floats { runtime?.setInputValue(node: node, port: port, floats: floats) }     // live (v3)
@@ -921,7 +1000,11 @@ final class SZHost {
     /// Updates the store + persists to disk + pushes the change into the runtime live (no reload). Returns
     /// the new endpoint (nil if cleared / the target wasn't a valid texture output).
     @discardableResult
-    func toggleDisplay(node: SZNodeID, port: String) -> SZPortRef? {
+    func toggleDisplay(node: SZNodeID, port: String, origin: SZMutationOrigin = .user) -> SZPortRef? {
+        if let denial = fenceDenial(nodes: [node], origin: origin) {
+            status = denial
+            return store.project?.graph.renderEndpoint
+        }
         let ref = SZPortRef(node: node, port: port)
         let newEndpoint: SZPortRef? = (store.project?.graph.renderEndpoint == ref) ? nil : ref
         guard store.setRenderEndpoint(newEndpoint) else { return store.project?.graph.renderEndpoint }
@@ -993,16 +1076,43 @@ final class SZHost {
 
     /// Record a Director-authored message for a node's Coding Agent during a run (the `ui_send_chat`
     /// during-run path). Two things happen: it's shown in the node's tab right away as a `.director`
-    /// message (the node tab reads as a multi-party thread), and it's stashed for the reconcile loop to
-    /// drain (`takeDirectorMessages`) and fold into the node's retry prompt — the actual delivery.
-    func recordDirectorMessage(node: SZNodeID, message: String) {
-        pendingDirectorMessages[node] = message
-        store.appendChatMessage(SZChatMessage(role: .director, text: message), to: .node(node))
-        if SZChatScope.node(node).key != activeChatScope.key {   // a Director note lands off-screen → unread dot
-            unreadScopes.insert(SZChatScope.node(node).key)
-        }
-        flushTranscript(.node(node))   // safe mid-stream: the in-flight coding reply is filtered out
+    /// message (the node tab reads as a multi-party thread), and it's enqueued as a `.steer` envelope
+    /// for the reconcile loop to drain (`takeDirectorMessages`) and fold into the node's retry prompt
+    /// — the actual delivery. Two steers to one node are two envelopes, FIFO (the old single-slot
+    /// dict silently overwrote the first).
+    @discardableResult
+    func recordDirectorMessage(node: SZNodeID, message: String) -> UUID {
+        let id = recordSteer(to: .node(node), sender: SZChatScope.directorKey,
+                             text: message, bubbleText: message)
         print("[SZHost] Director message for node \(node.uuidString.prefix(8)): \(message.prefix(80))")
+        return id
+    }
+
+    /// Record a CODING agent's mid-run message TO the Director (`ui_send_chat scope=director` during a
+    /// run) — previously a silent black hole: the bubble landed in the tab, the turn was rejected, and
+    /// no LLM ever read the words. Now a `.steer` envelope the reconcile loop drains into the next
+    /// Director turn's prompt (`takeDirectorInboxMessages`), with a `.director`-role bubble marking it
+    /// as fleet-internal traffic in the Director tab (the wire carries no finer sender identity).
+    @discardableResult
+    func recordDirectorInboxMessage(_ message: String) -> UUID {
+        recordSteer(to: .director, text: message, bubbleText: "(from a coding agent) \(message)")
+    }
+
+    /// The ONE steer-recording choreography both lanes share (Director→node and node→Director):
+    /// enqueue the `.steer` envelope, land the `.director`-role bubble in the recipient's tab,
+    /// mark it unread when off-screen, and flush (safe mid-stream: the in-flight reply is
+    /// filtered out of flushes). Two wrappers, one ritual — the lanes cannot drift.
+    @discardableResult
+    private func recordSteer(to scope: SZChatScope, sender: String? = nil,
+                             text: String, bubbleText: String) -> UUID {
+        let envelope = SZMessageEnvelope(
+            recipient: scope.key, sender: sender, intent: .steer,
+            message: SZChatMessage(role: .director, text: text))
+        mailbox.enqueue(envelope)
+        store.appendChatMessage(SZChatMessage(role: .director, text: bubbleText), to: scope)
+        if scope.key != activeChatScope.key { unreadScopes.insert(scope.key) }
+        flushTranscript(scope)
+        return envelope.id
     }
 
     /// Open a node's `Node.swift` in the user's default `.swift` editor (the card's file button). Saving the

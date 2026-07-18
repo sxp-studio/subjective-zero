@@ -29,6 +29,8 @@ extension SZHost {
         // A staged op is drained by ONE run; a second would share the `hiddenPieces` bag and be rolled back
         // with the first. Refuse rather than corrupt (the caller surfaces the reason).
         guard !(run && hasStagedGraphOp) else { return nil }
+        // The fence: never split a node another activity holds (mid-chat, another op's original).
+        if let denial = fenceDenial(nodes: [id], origin: .agent) { status = denial; return nil }
         guard let original = store.project?.graph.node(id: id) else { return nil }
         let title = original.title
         // The node's PURPOSE, not its seed prompt: prefer the contract summary (terse, stable) so
@@ -48,6 +50,7 @@ extension SZHost {
             graphOpStatus[id] = "Splitting"                 // the original stays, flagged
             hiddenPieces.formUnion(pieceIDs)                // the stages stay hidden until commit
             pendingGraphOp = .split(original: id, pieces: pieceIDs, title: title)
+            claimGraphOpSlot(label: "split of '\(title)'")
             persistGraphEditAndReload(action: "splitting \(title)…")
             narrateDirector("Splitting \(title) into \(pieceIDs.count) stages…")
         }
@@ -94,6 +97,7 @@ extension SZHost {
     @discardableResult
     func mergeNodes(ids: [SZNodeID], run: Bool = true, instruction: String? = nil) -> SZNodeID? {
         guard !(run && hasStagedGraphOp) else { return nil }   // one staged op at a time — see `splitNode`
+        if let denial = fenceDenial(nodes: ids, origin: .agent) { status = denial; return nil }
         // Capture each constituent's purpose + real source BEFORE the edit, so the agent fuses real code.
         let constituents = ids.compactMap { store.project?.graph.node(id: $0) }
             .map { (title: $0.title, intent: $0.contract?.summary ?? $0.prompt ?? $0.title, source: nodeSource($0.id)) }
@@ -112,6 +116,7 @@ extension SZHost {
             for cid in ids { graphOpStatus[cid] = "Merging" }   // the constituents stay, flagged
             hiddenPieces.insert(mergedID)                        // the merged node stays hidden until commit
             pendingGraphOp = .merge(constituents: ids, merged: mergedID)
+            claimGraphOpSlot(label: "merge of \(ids.count) nodes")
             persistGraphEditAndReload(action: "merging \(constituents.count) nodes…")
             narrateDirector("Merging \(constituents.map(\.title).joined(separator: " + ")) into one node…")
         }
@@ -165,6 +170,7 @@ extension SZHost {
     func drainPendingGraphOp() {
         guard let op = pendingGraphOp else { return }
         pendingGraphOp = nil
+        releaseGraphOpSlot()   // the op settles below (commit or its internal rollback)
         switch op {
         case .split(let original, let pieces, let title):
             commitSplit(original: original, pieces: pieces, title: title)
@@ -181,6 +187,7 @@ extension SZHost {
         // Reached both from a run's drain (op already taken) and from `startOrJoinRun` when no run could
         // start (op still staged) — clear it either way, or the next split is refused by a ghost.
         pendingGraphOp = nil
+        releaseGraphOpSlot()   // idempotent (the drain may have released already)
         // Clear the op flags even on this early-out: `graphOpStatus` now drives `activeScopeLocked`,
         // so a stale entry (pieces emptied out-of-band) would permanently lock that node's composer
         // with no Stop and no recovery.

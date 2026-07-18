@@ -28,6 +28,7 @@ public struct SZChatPanel: View {
     private let workingScopes: Set<String>         // scopes with a streaming turn → their tab dot pulses
     private let unreadScopes: Set<String>          // finished-unvisited scopes → static tab dot until visited
     private let needsInputScopes: Set<String>      // agents blocked on the USER → amber tab dot until resolved
+    private let isQueued: (UUID) -> Bool           // message id → still waiting in the mailbox (queued chip)
     private let onSend: (String, [URL]) -> Void    // (message, attachment source URLs)
     private let onSelectScope: (SZChatScope) -> Void
     private let onCloseTab: (SZChatScope) -> Void
@@ -119,6 +120,7 @@ public struct SZChatPanel: View {
                 workingScopes: Set<String> = [],
                 unreadScopes: Set<String> = [],
                 needsInputScopes: Set<String> = [],
+                isQueued: @escaping (UUID) -> Bool = { _ in false },
                 onSend: @escaping (String, [URL]) -> Void,
                 onSelectScope: @escaping (SZChatScope) -> Void,
                 onCloseTab: @escaping (SZChatScope) -> Void,
@@ -148,6 +150,7 @@ public struct SZChatPanel: View {
         self.workingScopes = workingScopes
         self.unreadScopes = unreadScopes
         self.needsInputScopes = needsInputScopes
+        self.isQueued = isQueued
         self.onSend = onSend
         self.onSelectScope = onSelectScope
         self.onCloseTab = onCloseTab
@@ -552,6 +555,20 @@ public struct SZChatPanel: View {
                 if !message.attachments.isEmpty {
                     SZAttachmentRow(attachments: message.attachments)   // thumbnails / file chips, read-only
                 }
+                if isUser, isQueued(message.id) {
+                    // Waiting in the mailbox — delivers when the agent frees (a run holds it, or an
+                    // earlier message is still being answered). Breathes softly while it waits and
+                    // fades out the moment delivery starts.
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                        Text("queued")
+                    }
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .textCase(.uppercase)
+                    .foregroundStyle(.tertiary)
+                    .modifier(SZQueuedBreathe())
+                    .transition(.opacity)
+                }
                 if working {
                     HStack(spacing: 7) {   // dots + live elapsed timer while the turn runs
                         SZTypingIndicator()
@@ -572,6 +589,8 @@ public struct SZChatPanel: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Drives the queued chip's fade-in/out (the .transition above needs an animated change).
+        .animation(.easeInOut(duration: 0.35), value: isQueued(message.id))
     }
 
     // The Codex-style input card: a rounded two-row surface floating on the panel background —
@@ -688,6 +707,11 @@ public struct SZChatPanel: View {
                     onSetFastMode: onSetFastMode,
                     onOpenProviderSetup: onOpenProviderSetup)
             }
+            // The Stop rides NEXT TO send while a run / this scope's turn is in flight — the input
+            // stays live (a send queues), but stopping is always one click, on every tab.
+            if let stop = activeStop {
+                stopButton(stop.action, help: stop.help)
+            }
             sendButton
         }
     }
@@ -713,9 +737,9 @@ public struct SZChatPanel: View {
         }
     }
 
-    /// The "a turn/run is in flight" state — a Stop + live timer, centered, replacing the input so
-    /// there's no doubt you can't type. Works for a whole run and for one conversation's turn; with
-    /// no stoppable control (a node mid split/merge) it's the centered status + timer alone.
+    /// The structurally-locked state (a node mid split/merge — the one case the input still tears
+    /// down): centered status + live timer, plus a Stop when a run is also in flight. Runs and
+    /// streaming turns no longer come through here — their Stop rides the normal composer.
     private var lockedComposer: some View {
         HStack(spacing: 12) {
             if let stop = activeStop {
@@ -808,14 +832,14 @@ public struct SZChatPanel: View {
     }
 
     private var canSend: Bool {
-        (!draft.isEmpty || !pendingAttachments.isEmpty) && !isRunning
+        !draft.isEmpty || !pendingAttachments.isEmpty
     }
 
-    /// A Stop is showing: a run in flight (offered on ANY tab) or this scope's own turn streaming.
-    /// Same instant the text input goes inert (you can't message a busy agent).
-    private var showsStop: Bool { isRunning || (canStopTurn && streaming) }
-    /// Text input is inert: a Stop is showing, or the node is agent-owned (implementing, no Stop).
-    private var inputLocked: Bool { showsStop || scopeLocked }
+    /// Text input is inert only while the node is structurally owned (mid-split/merge — it may not
+    /// exist when the op settles). Every other busy state queues instead of locking: the Stop for
+    /// a run/streaming turn renders ALONGSIDE the live composer (`activeStop` in the bottom bar),
+    /// and a send while something streams simply queues with a chip on its bubble.
+    private var inputLocked: Bool { scopeLocked }
 
     /// The action slot's Stop — orange, pulsing, and hover-reactive. Stays full-strength while the
     /// rest of the composer is locked/greyed, so it reads as the one live control.
@@ -848,7 +872,6 @@ public struct SZChatPanel: View {
     }
 
     private func send() {
-        guard !isRunning else { return }   // Return must not slip past the disabled send mid-run
         // The wire form: mention markup inline — the host parses it for routing/expansion and
         // stores it canonically in the transcript.
         let message = draft.canonicalText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1114,6 +1137,17 @@ private struct SZStopPulse: ViewModifier {
         TimelineView(.animation) { context in
             let phase = 0.5 + 0.5 * sin(context.date.timeIntervalSinceReferenceDate * 3)
             content.opacity(0.55 + 0.45 * phase)
+        }
+    }
+}
+
+/// The queued chip's soft breathe — the Stop pulse's calmer sibling (slower, dimmer): it says
+/// "waiting its turn", not "act now".
+private struct SZQueuedBreathe: ViewModifier {
+    func body(content: Content) -> some View {
+        TimelineView(.animation) { context in
+            let phase = 0.5 + 0.5 * sin(context.date.timeIntervalSinceReferenceDate * 1.6)
+            content.opacity(0.45 + 0.4 * phase)
         }
     }
 }

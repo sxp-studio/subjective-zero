@@ -247,7 +247,8 @@ public enum SZDirectorPrompt {
     /// one's current contract/intent and its last reported blocker, so the Director decides per node how to
     /// unblock it (adjust contract/prompt via `ui_*`) before the fleet retries.
     public static func renderReconcile(
-        graph: SZGraph, unresolved: [SZNodeID], statuses: [SZNodeID: String], round: Int, cap: Int
+        graph: SZGraph, unresolved: [SZNodeID], statuses: [SZNodeID: String],
+        inbox: [String] = [], round: Int, cap: Int
     ) -> String {
         let blocks = unresolved.map { id -> String in
             let node = graph.node(id: id)
@@ -260,6 +261,9 @@ public enum SZDirectorPrompt {
         return SZPromptTemplate.render(SZPrompts.directorReconcile, [
             "graph": graphSummary(graph),
             "blockers": blocks.isEmpty ? "- (none)" : blocks,
+            // The coding agents' mid-run `ui_send_chat scope=director` messages — previously a
+            // silent black hole (appended to the tab, read by no LLM). FIFO, verbatim.
+            "inbox": inbox.isEmpty ? "- (none)" : inbox.map { "- \($0)" }.joined(separator: "\n"),
             "round": String(round),
             "cap": String(cap),
         ])

@@ -28,6 +28,7 @@ extension SZStore {
     @discardableResult
     public func connect(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind) -> SZConnectionID? {
         guard let graph = project?.graph else { return nil }
+        assertFenceCleared([from.node, to.node])
         // Flow compares node pairs (port names vary: "" / "flow") because flow is node-to-node intent.
         if let existing = graph.connections.first(where: {
             $0.kind == kind && (kind == .flow
@@ -53,6 +54,9 @@ extension SZStore {
     /// Remove a connection by id. Returns whether one was removed.
     @discardableResult
     public func disconnect(connection id: SZConnectionID) -> Bool {
+        if let c = project?.graph.connections.first(where: { $0.id == id }) {
+            assertFenceCleared([c.from.node, c.to.node])
+        }
         var removed = false
         mutate { project in
             let before = project.graph.connections.count
@@ -77,6 +81,7 @@ extension SZStore {
         summary: String? = nil,
         permissions: [SZEntitlement]? = nil
     ) -> Bool {
+        assertFenceCleared([id])
         var found = false
         mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
@@ -149,6 +154,7 @@ extension SZStore {
     /// intent and carry no port identity, so they survive untouched.
     @discardableResult
     public func editPorts(node id: SZNodeID, _ edit: SZPortEdit) -> SZPortEditResult {
+        assertFenceCleared([id])
         var result = SZPortEditResult(found: false, raisedRebuild: false,
                                       droppedConnections: [], clearedRenderEndpoint: false)
         mutate { project in
@@ -255,6 +261,7 @@ extension SZStore {
     /// the node. Returns whether a node was removed.
     @discardableResult
     public func removeNode(id: SZNodeID) -> Bool {
+        assertFenceCleared([id])
         var removed = false
         mutate { project in
             let before = project.graph.nodes.count
@@ -276,6 +283,7 @@ extension SZStore {
     /// a caller that already clamped (the host, to keep its live runtime push in step) is unaffected.
     @discardableResult
     public func setInputDefault(node id: SZNodeID, port: String, value: SZPortValue) -> Bool {
+        assertFenceCleared([id])
         var found = false
         mutate { project in
             guard let ni = project.graph.nodes.firstIndex(where: { $0.id == id }),
@@ -308,6 +316,7 @@ extension SZStore {
     /// whether the node was found.
     @discardableResult
     public func setNodeBody(id: SZNodeID, body: SZNodeBody?) -> Bool {
+        assertFenceCleared([id])
         var found = false
         mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
