@@ -341,7 +341,7 @@ public final class SZResourceLedger {
             return false
         }
 
-        for start in targets(of: target, from: token) {
+        for start in targets(of: target, from: token, excludingOwnHolds: reserves) {
             if start == token { return [token.label, token.label] }
             guard visited.insert(start).inserted else { continue }
             path.append(start)
@@ -351,8 +351,13 @@ public final class SZResourceLedger {
         return nil
     }
 
-    /// Every token the given wait target is blocked by right now.
-    private func targets(of target: ExternalWait.Target, from: SZClaimToken) -> [SZClaimToken] {
+    /// Every token the given wait target is blocked by right now. `excludingOwnHolds` is true only
+    /// for an ACQUIRE candidate's own edges: its holds are reentrant-satisfiable, so they don't
+    /// block it. An EXTERNAL wait resolves via a third party (the pump's delivery under its own
+    /// token), so the origin's own hold blocks it like anyone else's — a token holding the very
+    /// resource its ack needs is a direct self-deadlock and must flag.
+    private func targets(of target: ExternalWait.Target, from: SZClaimToken,
+                         excludingOwnHolds: Bool = false) -> [SZClaimToken] {
         switch target {
         case .consumer(let consumer):
             return [consumer]
@@ -362,7 +367,8 @@ public final class SZResourceLedger {
             var seen = Set<SZClaimToken>()
             var out: [SZClaimToken] = []
             for r in resources {
-                if let h = holders[r], h != from, seen.insert(h).inserted { out.append(h) }
+                guard let h = holders[r], !(excludingOwnHolds && h == from) else { continue }
+                if seen.insert(h).inserted { out.append(h) }
             }
             for w in waiters where w.token != from && !w.wanted.isDisjoint(with: resources) {
                 if seen.insert(w.token).inserted { out.append(w.token) }
