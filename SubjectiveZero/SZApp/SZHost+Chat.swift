@@ -83,12 +83,13 @@ extension SZHost {
         !isRunning && pendingNodeCount > 0
     }
 
-    /// The active node is agent-owned OUTSIDE a run (its Coding Agent is mid-chat-turn, or it's
-    /// splitting/merging) → its composer is locked. The run case (which locks EVERY tab) is handled
-    /// in the panel via `isRunning`; this covers only the node-specific busy states.
+    /// The active node is mid-split/merge → its composer is locked (the node may not exist when the
+    /// op settles, so queueing to it would be a lie). A node that is merely mid-chat no longer
+    /// locks its composer: a send while its agent streams simply queues — the whole point of the
+    /// mailbox — and the queue serializes delivery.
     var activeScopeLocked: Bool {
         guard case .node(let id) = activeChatScope else { return false }
-        return nodeAgentState[id]?.isChatting == true || graphOpStatus[id] != nil
+        return graphOpStatus[id] != nil
     }
 
     /// HUD message icon — a plain toggle for the Director Agent chat: show it (scoped to the Director)
@@ -144,9 +145,15 @@ extension SZHost {
     /// user messaging).
     enum SZChatSendOrigin { case user, agent }
 
-    /// How `sendChat` routed a message: streamed to the agent (or answered synchronously by a guard
-    /// reply in the transcript), or recorded for the reconcile loop to deliver on the node's retry.
-    enum SZChatSendRouting { case sent, recordedForReconcile }
+    /// How `sendChat` routed a message: answered synchronously by a transient guard reply (`.sent`,
+    /// no envelope), enqueued for delivery (`.queued` — possibly starting immediately; the id is
+    /// the envelope's, pollable via `ui_message_status`), or recorded as a `.steer` for the
+    /// reconcile loop (`.recordedForReconcile`).
+    enum SZChatSendRouting: Equatable {
+        case sent
+        case queued(UUID)
+        case recordedForReconcile(UUID)
+    }
 
     /// Send a chat message to an agent — THE single entry point for both the chat panel's composer and
     /// the `ui_send_chat` MCP tool, so the two paths can't drift. Reveals the scope's tab,
@@ -189,194 +196,72 @@ extension SZHost {
         if origin == .agent, isRunning {
             // Director → a node the run owns: folded into that node's reconcile retry.
             if let nodeID = scope.nodeID, ledger.holder(of: .node(nodeID)) == runClaim {
-                recordDirectorMessage(node: nodeID, message: trimmed)
-                return .recordedForReconcile
+                return .recordedForReconcile(recordDirectorMessage(node: nodeID, message: trimmed))
             }
             // Coding agent → the Director: rendered into the next reconcile turn's prompt
             // (previously appended to the tab and read by no LLM — a silent black hole).
             if scope == .director {
-                recordDirectorInboxMessage(trimmed)
-                return .recordedForReconcile
+                return .recordedForReconcile(recordDirectorInboxMessage(trimmed))
             }
-            // A node the run does NOT own falls through to the normal send path below.
+            // A node the run does NOT own falls through to the normal enqueue path below.
         }
 
         showChat(scope)   // reveal/focus the tab — 1:1 with clicking it before typing
 
-        // Catch-up (the portable path): a turn with no resumable session but restored history
-        // replays that history into the fresh session's first prompt — covers another machine (no
-        // session store), an expired session (self-heal drop), and post-crash. Computed BEFORE this
-        // turn's messages land in the store so the recap is strictly prior conversation.
-        let recap = agentSessions[scope.key] == nil ? transcriptRecap(for: scope) : nil
-
-        // Stage attachments on disk first (the native layer owns the bytes): copy each picked/dropped/
-        // pasted file into the agent's working dir so a real CLI agent can Read it by absolute path, and
-        // so the copy outlives the source URL. The user turn carries the staged records (chips/thumbnails).
-        let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
-        let workingDirectory = cacheDirectory.appending(path: "agent/\(scope.key)")
-        try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
-        let staged = Self.stageAttachments(attachments, into: workingDirectory)
-        // The message carries the DURABLE records (bundle copies that persist + travel); the agent
-        // manifest below keeps pointing at the staging copies (its own working dir — unchanged
-        // permission surface). `.debug` stays staging-only, ephemeral like its transcript.
-        let durable = scope == .debug ? staged : persistAttachmentCopies(staged)
-        store.appendChatMessage(SZChatMessage(role: .user, text: trimmed, attachments: durable), to: scope)
-        flushTranscript(scope)   // the user's words are durable even if the turn below dies
-
         // A pre-flight rejection: shown in the tab but TRANSIENT — never flushed, never recapped.
         // It isn't conversation; restoring "(busy…)" as assistant history (or replaying it to a
-        // fresh session) would misrepresent what was said.
+        // fresh session) would misrepresent what was said. Only checks queueing can't fix reject
+        // here — a busy scope/run is exactly what the queue is for.
         @discardableResult
         func reject(_ note: String) -> SZChatSendRouting {
             store.appendChatMessage(SZChatMessage(role: .assistant, text: note, transient: true), to: scope)
             return .sent
         }
 
-        // One turn per scope at a time: a second send while this scope streams would overwrite its
-        // in-flight marker (inFlightAssistantIDs is one id per scope), letting a flush persist the
-        // half-streamed first reply — the invariant the marker exists to protect.
-        guard !chatInFlight.contains(scope.key) else {
-            return reject("(still replying — wait for the current answer to finish)")
-        }
-        guard !isRunning else { return reject("(busy — finish or stop the agent run first)") }
-        guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {   // agents dial the debug-free bus
+        // Stage attachments on disk first (the native layer owns the bytes): copy each picked/dropped/
+        // pasted file into the agent's working dir so a real CLI agent can Read it by absolute path, and
+        // so the copy outlives the source URL. The user turn carries the DURABLE records (bundle copies
+        // that persist + travel — and that a delivery after a restart can still point the agent at).
+        // `.debug` stays staging-only, ephemeral like its transcript.
+        let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
+        let workingDirectory = cacheDirectory.appending(path: "agent/\(scope.key)")
+        try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
+        let staged = Self.stageAttachments(attachments, into: workingDirectory)
+        let durable = scope == .debug ? staged : persistAttachmentCopies(staged)
+        let userMessage = SZChatMessage(role: .user, text: trimmed, attachments: durable)
+        store.appendChatMessage(userMessage, to: scope)
+
+        // Enqueue-time pre-flights — problems no amount of waiting fixes. (Provider readiness is
+        // ALSO checked at delivery; the world can change while a message waits.)
+        guard agentMCPServer?.port != nil, loadedProjectURL != nil else {
+            flushTranscript(scope)
             return reject("(host not ready)")
         }
         let existing = agentSessions[scope.key]
         let providerID = existing?.providerID ?? activeProviderID
-        guard let provider = SZProviderRegistry.shared.provider(id: providerID) else {
+        if SZProviderRegistry.shared.provider(id: providerID) == nil {
+            flushTranscript(scope)
             return reject("(unknown provider \(providerID))")
         }
-        // Pre-flight NEW sessions only: a resume must continue on the CLI that owns it, and its
-        // failure already narrates in this tab. A fresh turn on a missing/logged-out CLI refuses
-        // with the setup sheet + remedy instead of a dead spawn (roadmap Task 2).
         if existing == nil, !isProviderReadyForNewWork(providerID) {
             surfaceProviderNotReady()
+            flushTranscript(scope)
             return reject("(\(providerID) is not ready — open Agent Providers)")
         }
 
-        let assistantID = store.appendChatMessage(SZChatMessage(role: .assistant, text: ""), to: scope)
-
-        // A synchronous fallback on a REAL turn's empty/failed outcome — genuine history, persisted.
-        @discardableResult
-        func reply(_ note: String) -> SZChatSendRouting {
-            store.appendChatText(note, to: assistantID, in: scope)
-            flushTranscript(scope)
-            return .sent
-        }
-
-        // CLI egress: the transcript stores the CANONICAL mention markup; the agent receives the
-        // expanded form — inline @display plus a manifest resolving each mentioned entity against
-        // the live graph (uuid + current title, actionable via the MCP tools).
-        let graphNodes = (store.project?.graph.nodes ?? []).map { (id: $0.id, title: $0.title) }
-        let expanded = SZMentionExpansion.agentText(trimmed, nodes: graphNodes)
-
-        // A node with no session yet (e.g. a hand-authored node, no prior run) cold-starts a fresh
-        // Coding Agent seeded with the node's current contract + Node.swift; later turns resume that
-        // session. An already-sessioned node chat sends the raw message (its context is the session).
-        var chatPrompt = expanded
-        if case .node(let nodeID) = scope, existing == nil {
-            let nodeDir = projectURL.appending(path: "nodes/\(nodeID.uuidString)")
-            let source = (try? String(contentsOf: nodeDir.appending(path: "Node.swift"), encoding: .utf8))
-                ?? "(this node has no Node.swift yet)"
-            let contract = (try? String(contentsOf: nodeDir.appending(path: "node-contract.json"), encoding: .utf8))
-                ?? "(no contract yet)"
-            chatPrompt = SZChatPrompts.nodeColdStart(
-                node: nodeID.uuidString, userMessage: expanded, currentContract: contract, currentSource: source)
-        } else if scope == .director {
-            // A fresh Director Agent chat gets its real framing (persona + live graph + the shared ui_*
-            // toolbelt + the ui_run rules). A RESUMED one still gets the live graph, just without re-sending
-            // the persona: its session's memory of the graph is a snapshot that every run invalidates, and it
-            // will otherwise answer questions about node state from that stale snapshot without re-reading.
-            let graph = store.project?.graph ?? SZGraph(nodes: [])
-            chatPrompt = existing == nil
-                ? SZDirectorPrompt.renderChat(graph: graph, message: expanded)
-                : SZDirectorPrompt.renderResumedChat(graph: graph, message: expanded)
-        } else if scope == .debug, existing == nil {
-            // Frame the debug chat agent on its first turn so it answers as a plain conversational
-            // assistant (it has no graph context and no MCP tools — just the Read tool for attachments).
-            chatPrompt = """
-            You are a helpful assistant in a debug chat panel of the SubjectiveZero macOS app. Reply \
-            conversationally to the user. If files are attached, you may Read them to answer.
-
-            User: \(expanded)
-            """
-        }
-        if let recap { chatPrompt = recap + "\n\n" + chatPrompt }
-        // Point the agent at the staged files (it Reads them by absolute path).
-        if !staged.isEmpty { chatPrompt += Self.attachmentManifest(staged) }
-
-        status = "chatting (\(scope.key.prefix(8))…)"
-        // Mark a node's card Coding + locked for the duration of the turn (a node chat recompiles it).
-        let workingNodeID: SZNodeID? = { if case .node(let id) = scope { return id } else { return nil } }()
-        if let workingNodeID { setNodeChatting(workingNodeID, true) }
-
-        chatTurnTasks[scope.key] = Task { @MainActor in
-            defer {
-                chatTurnTasks[scope.key] = nil
-                if let workingNodeID { setNodeChatting(workingNodeID, false) }   // in-flight + duration: `deliver`
-            }
-            // Resolved for the session's own provider (a resume continues on the CLI that owns it).
-            // A resumed turn picks up the current effort/fast selection — argv re-sends both on every
-            // resume, and they retune the thread rather than reinterpret it. The model can't drift
-            // here: picking a new one reset this provider's sessions (`setActiveModel`), so a resume
-            // always carries the model that opened the thread.
-            let generation = resolvedGenerationSettings(for: providerID)
-            let request = SZAgentRunRequest(
-                prompt: chatPrompt,
-                workingDirectory: workingDirectory,
-                packageDirectory: projectURL,
-                cacheDirectory: cacheDirectory,
-                mcpServerPort: scope == .debug ? nil : mcpPort,   // the debug chat agent is tool-free (no graph mutation)
-                resumeSessionID: existing?.sessionID,
-                model: generation.model,
-                reasoningEffort: generation.reasoningEffort,
-                fastMode: generation.fastMode ?? false,
-                timeout: 300)
-            do {
-                // The shared agent-turn substrate — streams into this scope's transcript, reusing the
-                // assistant message already opened above for the guard replies, and persists the session.
-                let result = try await deliver(
-                    scope: scope, request: request, provider: provider, existingAssistantID: assistantID).result
-                // A stopped turn (the transcript's stop control): SZProcess SIGKILLed the CLI, so
-                // deliver returns a failed exit — but it's a user choice, not a dead session (a
-                // killed resume is still resumable), so no self-heal drop and no failure reply.
-                if Task.isCancelled {
-                    let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
-                    reply(empty ? "(stopped)" : "\n(stopped)")
-                    status = "chat turn stopped"
-                    pendingDirectorRun = nil   // a stopped turn's queued run dies with it — user's choice
-                    return
-                }
-                if result.outcome.failed { dropSessionIfStale(scope) }
-                // Generic status FIRST — when the failure is provider-shaped,
-                // providerFailureDetail overrides it with the actionable "<id> not ready" line
-                // (setting it after would clobber that surface).
-                status = result.outcome.failed ? "chat turn failed" : "chat reply ready"
-                let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
-                if let detail = await providerFailureDetail(result: result, provider: provider) {
-                    // A mid-turn provider death. The resume path has no pre-flight (deliberate),
-                    // so this line is its only surface — appended even when partial text already
-                    // streamed, which would otherwise fail silently.
-                    reply((empty ? "" : "\n") + "⚠️ Provider error: \(detail)")
-                } else if empty {
-                    reply(result.outcome.failed ? "(agent run failed)" : "(no text response)")
-                }
-            } catch {
-                dropSessionIfStale(scope)
-                reply("(chat failed: \(error))")
-                status = "chat failed"
-            }
-            // A ui_run recorded during THIS Director turn starts now — the chat turn was the
-            // decompose turn (its ui_* shaping is done), and starting mid-turn would have raced
-            // the same transcript. Applies even if the turn's exit was a late failure: the tool
-            // call happened, the graph is shaped.
-            if scope == .director, let instruction = pendingDirectorRun {
-                pendingDirectorRun = nil
-                startRun(instruction: instruction, directorAlreadyBriefed: true)
-            }
-        }
-        return .sent
+        // Queue-everywhere: EVERY send is an envelope; the pump delivers it the moment the scope is
+        // free (immediately for an idle scope — the common case is one synchronous hop away). The
+        // old rejections ("still replying…", "busy — stop the run…") are gone: a busy scope just
+        // means the message waits its turn, visibly queued on its bubble. Envelope BEFORE the
+        // transcript flush: a crash between the two leaves envelope-without-bubble (tolerated —
+        // redelivery re-appends), never bubble-without-envelope (silent loss).
+        let envelope = SZMessageEnvelope(
+            recipient: scope.key, sender: origin == .user ? "user" : nil, intent: .chat,
+            message: userMessage, transcriptMessageID: userMessage.id)
+        mailbox.enqueue(envelope)
+        flushTranscript(scope)   // the user's words are durable even if delivery waits or dies
+        pumpMailboxes()
+        return .queued(envelope.id)
     }
 
     /// Stop one scope's in-flight chat turn (the transcript's per-turn stop control): cancel its
@@ -392,7 +277,7 @@ extension SZHost {
     /// message cold-starts with the transcript recap instead of failing forever against a dead
     /// provider thread. Compared by VALUE: a session minted this process never matches the disk
     /// snapshot, so a transient failure can never cost live conversation context.
-    private func dropSessionIfStale(_ scope: SZChatScope) {
+    func dropSessionIfStale(_ scope: SZChatScope) {
         guard let restored = restoredSessions.removeValue(forKey: scope.key),
               agentSessions[scope.key] == restored else { return }
         agentSessions[scope.key] = nil

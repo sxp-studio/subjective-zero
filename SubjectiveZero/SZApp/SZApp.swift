@@ -625,6 +625,7 @@ struct SZApp: App {
                         workingScopes: host.chatInFlight,
                         unreadScopes: host.unreadScopes,
                         needsInputScopes: host.needsInputScopes,
+                        isQueued: { host.mailbox.state(of: $0) == .queued },
                         onSend: { host.sendChat(scope: host.activeChatScope, message: $0, attachments: $1) },
                         onSelectScope: { host.showChat($0) },
                         onCloseTab: { host.closeChatTab($0) },

@@ -129,8 +129,13 @@ final class SZHost {
     let ledger = SZResourceLedger()
     /// The message queue — the single home for "what is waiting to be said to whom"
     /// (SZMessageQueue). Sends that can't run immediately enqueue here instead of being rejected;
-    /// the host's pump delivers them as their resources free.
+    /// the host's pump delivers them as their resources free (SZHost+Mailbox.swift).
     let mailbox = SZMessageQueue()
+    /// In-flight pump deliveries (bounded by `deliveryCap` so a run-end release can't spawn one CLI
+    /// process per queued scope at once). Pump-owned; mutated only on the MainActor.
+    var activeDeliveries = 0
+    /// True for the duration of `switchProject` — the pump must not start a turn mid-swap.
+    var pumpSuspended = false
 
     // Panel layout — the window's split tree (SZPanelLayoutState, SZCore), host-owned like the chat
     // tab state below; mutated via SZHost+PanelLayout.swift (header drags, dividers, close/reopen),
@@ -384,6 +389,9 @@ final class SZHost {
         guard !started else { return }
         started = true
         installStoreFenceBackstop()   // the fence's debug tripwire (SZHost+Fence.swift)
+        // The pump's wake signal: every ledger release (turn end, run end, cancel) retries queued
+        // deliveries. Event-driven — the only other pump entries are enqueue and restore.
+        ledger.onAvailabilityChanged = { [weak self] in self?.pumpMailboxes() }
         // Geometry gate follows the restored pref BEFORE anything can render a card (project loads
         // below) — and before the Metal-unavailable early return, which must not strand the gate at
         // its compile-time default while the pref says otherwise.
@@ -462,7 +470,13 @@ final class SZHost {
         try await runtime.requestDeclaredPermissions(at: newURL)
         // Re-check after the await: the busy guard above passed, but an event-driven delivery (the
         // mailbox pump fires on ledger releases) can start a turn inside that one suspension —
-        // and everything below tears the project down under it.
+        // and everything below tears the project down under it. The pump is also suspended for the
+        // rest of the swap (resumed by the defer installed here, on every exit path).
+        pumpSuspended = true
+        defer {
+            pumpSuspended = false
+            pumpMailboxes()
+        }
         guard !isBusyForProjectOps else {
             status = "busy — a turn started while opening; try again"
             return false
@@ -1059,16 +1073,19 @@ final class SZHost {
     /// for the reconcile loop to drain (`takeDirectorMessages`) and fold into the node's retry prompt
     /// — the actual delivery. Two steers to one node are two envelopes, FIFO (the old single-slot
     /// dict silently overwrote the first).
-    func recordDirectorMessage(node: SZNodeID, message: String) {
-        mailbox.enqueue(SZMessageEnvelope(
+    @discardableResult
+    func recordDirectorMessage(node: SZNodeID, message: String) -> UUID {
+        let envelope = SZMessageEnvelope(
             recipient: SZChatScope.node(node).key, sender: SZChatScope.directorKey, intent: .steer,
-            message: SZChatMessage(role: .director, text: message)))
+            message: SZChatMessage(role: .director, text: message))
+        mailbox.enqueue(envelope)
         store.appendChatMessage(SZChatMessage(role: .director, text: message), to: .node(node))
         if SZChatScope.node(node).key != activeChatScope.key {   // a Director note lands off-screen → unread dot
             unreadScopes.insert(SZChatScope.node(node).key)
         }
         flushTranscript(.node(node))   // safe mid-stream: the in-flight coding reply is filtered out
         print("[SZHost] Director message for node \(node.uuidString.prefix(8)): \(message.prefix(80))")
+        return envelope.id
     }
 
     /// Record a CODING agent's mid-run message TO the Director (`ui_send_chat scope=director` during a
@@ -1076,16 +1093,19 @@ final class SZHost {
     /// no LLM ever read the words. Now a `.steer` envelope the reconcile loop drains into the next
     /// Director turn's prompt (`takeDirectorInboxMessages`), with a `.director`-role bubble marking it
     /// as fleet-internal traffic in the Director tab (the wire carries no finer sender identity).
-    func recordDirectorInboxMessage(_ message: String) {
-        mailbox.enqueue(SZMessageEnvelope(
+    @discardableResult
+    func recordDirectorInboxMessage(_ message: String) -> UUID {
+        let envelope = SZMessageEnvelope(
             recipient: SZChatScope.directorKey, intent: .steer,
-            message: SZChatMessage(role: .director, text: message)))
+            message: SZChatMessage(role: .director, text: message))
+        mailbox.enqueue(envelope)
         store.appendChatMessage(
             SZChatMessage(role: .director, text: "(from a coding agent) \(message)"), to: .director)
         if SZChatScope.directorKey != activeChatScope.key {
             unreadScopes.insert(SZChatScope.directorKey)
         }
         flushTranscript(.director)
+        return envelope.id
     }
 
     /// Open a node's `Node.swift` in the user's default `.swift` editor (the card's file button). Saving the

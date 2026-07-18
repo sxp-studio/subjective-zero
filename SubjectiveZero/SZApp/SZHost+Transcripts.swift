@@ -142,9 +142,12 @@ extension SZHost {
     /// the context, no framing prose beyond the one-line header.
     /// NOTE: this is the exact seam a future memory system replaces (TODO: distilled project/node
     /// memory files instead of transcript replay).
-    func transcriptRecap(for scope: SZChatScope) -> String? {
+    /// `excluding` keeps the recap "strictly prior conversation" for a QUEUED delivery: the message
+    /// being delivered (and every still-queued bubble behind it) already sits in the store, and a
+    /// cold-start recap that replayed it would send the same words twice in one prompt.
+    func transcriptRecap(for scope: SZChatScope, excluding: Set<UUID> = []) -> String? {
         guard scope != .debug else { return nil }
-        let messages = persistableMessages(for: scope)
+        let messages = persistableMessages(for: scope).filter { !excluding.contains($0.id) }
         guard !messages.isEmpty else { return nil }
 
         let tail = messages.suffix(20)

@@ -508,10 +508,16 @@ extension SZHostBridge {
         }
         let scope = try chatScope(arguments, tool: "ui_send_chat")
         // One entry point with the GUI composer (`SZHost.sendChat`); `.agent` origin routes a mid-run
-        // node message to the Director→Coding record path instead of the user busy guard.
-        let routing = host.sendChat(scope: scope, message: message, origin: .agent)
-        return SZJSONRPC.encode(
-            ["status": routing == .recordedForReconcile ? "recorded" : "sent", "scope": scope.key])
+        // message to the steer record paths instead of the user flow. Every enqueued/recorded message
+        // carries its id so the caller can poll `ui_message_status`.
+        switch host.sendChat(scope: scope, message: message, origin: .agent) {
+        case .sent:
+            return SZJSONRPC.encode(["status": "sent", "scope": scope.key])
+        case .queued(let id):
+            return SZJSONRPC.encode(["status": "queued", "message_id": id.uuidString, "scope": scope.key])
+        case .recordedForReconcile(let id):
+            return SZJSONRPC.encode(["status": "recorded", "message_id": id.uuidString, "scope": scope.key])
+        }
     }
 
     private func uiSetInputDefault(_ arguments: [String: Any]) throws -> String {
