@@ -281,6 +281,21 @@ extension SZHost {
         guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {   // agents dial the debug-free bus
             print("[SZHost] cannot run — MCP server or project not ready"); return
         }
+        // This run's WORK SET candidates: the nodes dirty right now (never built, or built against a
+        // contract/intent that has since moved). Computed before the run flips live so an empty one can
+        // answer without an orchestrator.
+        let dirty = Set((store.project?.graph.nodes ?? []).filter(\.needsImplementation).map(\.id))
+        // Nothing to implement, nothing asked → skip the strategy entirely: a full run here would still
+        // burn a Director decompose turn (latency + tokens) to conclude "no work". A run WITH an
+        // `instruction` or a Director-briefed one still goes through — the Director may CREATE work
+        // mid-run (contracts, nodes) — and a staged split/merge always runs: its pieces are the work and
+        // its commit rides the run task's drain.
+        if dirty.isEmpty, instruction.isEmpty, !directorAlreadyBriefed, !ownsGraphOp {
+            showChat(.director)
+            narrateDirector("Nothing to implement — every node is built and current.")
+            status = "nothing to implement"
+            return
+        }
         // Pre-flight: a missing/logged-out CLI refuses with the setup sheet + remedy instead of
         // the old silent generic run failure (roadmap Task 2). Unknown health stays permissive.
         guard isProviderReadyForNewWork(activeProviderID) else {
@@ -291,10 +306,10 @@ extension SZHost {
         isRunning = true
         status = "running \(providerID)…"
         showChat(.director)                                  // a run narrates into the Director Agent tab
-        // Capture this run's WORK SET: the prompt nodes dirty at start. It grows as the run's own tooling
+        // Capture this run's WORK SET: the nodes dirty at start. It grows as the run's own tooling
         // creates work (`noteRunCreatedWork`), and drives dispatch, the editor lock/pill, and the
         // `ui_connect` guard. A node the user adds mid-run is never noted, so it stays out of the fleet.
-        runWorkSet = Set((store.project?.graph.nodes ?? []).filter(\.needsImplementation).map(\.id))
+        runWorkSet = dirty
         let dirtyCount = runWorkSet.count
         narrateDirector(dirtyCount == 0
             ? "Run started (\(providerID)) — no nodes need implementing."
