@@ -74,7 +74,9 @@ extension SZHost {
     /// Delete a node through the host — THE delete path for both the editor panel (`onDeleteNodes`)
     /// and the `ui_remove_node` MCP tool, so the two can't drift.
     @discardableResult
-    func deleteNode(id: SZNodeID) -> Bool { deleteNodes(ids: [id]) }
+    func deleteNode(id: SZNodeID, origin: SZMutationOrigin = .user) -> Bool {
+        deleteNodes(ids: [id], origin: origin)
+    }
 
     /// Batch node delete, done properly: store removal + chat-artifact purge + watcher stop, then ONE
     /// persist + runtime reload (a marquee delete reloads once, not per node) — so deletion is real:
@@ -89,7 +91,13 @@ extension SZHost {
     /// edits still persist only via run/promote — unifying edit persistence belongs to that command/
     /// checkpoint layer, not a delete fix.
     @discardableResult
-    func deleteNodes(ids: [SZNodeID]) -> Bool {
+    func deleteNodes(ids: [SZNodeID], origin: SZMutationOrigin = .user) -> Bool {
+        // The fence, not the view filter, is what actually stops a delete of a held node — the
+        // keyboard path's isLocked filter is an affordance any future caller can forget.
+        if let denial = fenceDenial(nodes: ids, origin: origin) {
+            status = denial
+            return false
+        }
         let titles = ids.compactMap { store.project?.graph.node(id: $0)?.title }
         let removed = ids.filter { store.removeNode(id: $0) }
         guard !removed.isEmpty else { return false }

@@ -94,6 +94,10 @@ final class SZHost {
     /// operation commits, so the user never sees placeholder/draft cards (only the flagged originals,
     /// then the finished result). Cleared (revealed) at commit.
     internal(set) var hiddenPieces: Set<SZNodeID> = []
+    /// The staged split/merge's claim on the single `.graphOp` ledger slot — taken at staging,
+    /// released when the op settles (commit or rollback). Makes the staged op ledger-visible
+    /// (project ops block via `anyHeld`; diagnostics name it). See SZHost+Fence.swift.
+    internal(set) var graphOpClaim: SZClaimToken?
     /// The staged split/merge waiting on the run that implements its pieces — drained by that run's tail
     /// (`drainPendingGraphOp`), which commits it or rolls it back. AT MOST ONE: `startRun` serializes runs,
     /// and `rollbackGraphOp` clears the shared `hiddenPieces` bag wholesale, so a second concurrent op
@@ -382,6 +386,7 @@ final class SZHost {
     func start(openingIfLaunchedWithFile launchFileURL: URL? = nil) async {
         guard !started else { return }
         started = true
+        installStoreFenceBackstop()   // the fence's debug tripwire (SZHost+Fence.swift)
         // Geometry gate follows the restored pref BEFORE anything can render a card (project loads
         // below) — and before the Metal-unavailable early return, which must not strand the gate at
         // its compile-time default while the pref says otherwise.
@@ -840,7 +845,11 @@ final class SZHost {
     /// (`onDeleteConnection`) and `ui_disconnect`. The runtime has no incremental topology API
     /// (`reloadNode` is source-only), so this reloads like split/merge and promote do.
     @discardableResult
-    func deleteConnection(id: SZConnectionID) -> Bool {
+    func deleteConnection(id: SZConnectionID, origin: SZMutationOrigin = .user) -> Bool {
+        if let denial = fenceDenial(nodes: connectionEndpoints(id), origin: origin) {
+            status = denial
+            return false
+        }
         guard store.disconnect(connection: id) else { return false }
         persistGraphEditAndReload(action: "removed connection")
         return true
@@ -851,7 +860,12 @@ final class SZHost {
     /// (`onConnect`) and `ui_connect`. Wiring an occupied data input swaps the old edge out
     /// (`SZStore.connect` enforces single-incoming on data inputs).
     @discardableResult
-    func addConnection(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind) -> SZConnectionID? {
+    func addConnection(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind,
+                       origin: SZMutationOrigin = .user) -> SZConnectionID? {
+        if let denial = fenceDenial(nodes: [from.node, to.node], origin: origin) {
+            status = denial
+            return nil
+        }
         guard let id = store.connect(from: from, to: to, kind: kind) else { return nil }
         persistGraphEditAndReload(action: "connected")
         return id
@@ -862,7 +876,12 @@ final class SZHost {
     /// runtime reload. The store's swap rule applies at the destination, so landing on an occupied
     /// data input replaces its edge.
     @discardableResult
-    func reconnectConnection(id: SZConnectionID, end: SZConnectionEnd, to newRef: SZPortRef) -> Bool {
+    func reconnectConnection(id: SZConnectionID, end: SZConnectionEnd, to newRef: SZPortRef,
+                             origin: SZMutationOrigin = .user) -> Bool {
+        if let denial = fenceDenial(nodes: connectionEndpoints(id) + [newRef.node], origin: origin) {
+            status = denial
+            return false
+        }
         guard let old = store.project?.graph.connections.first(where: { $0.id == id }),
               store.disconnect(connection: id),
               store.connect(from: end == .from ? newRef : old.from,
@@ -937,7 +956,13 @@ final class SZHost {
     /// an out-of-range agent write would render live at 100 while the contract persists the clamped 5.
     /// Returns the applied value so a caller (the MCP tool) can echo the truth back.
     @discardableResult
-    func setInputDefault(node: SZNodeID, port: String, value rawValue: SZPortValue, persist: Bool = true) -> SZPortValue {
+    func setInputDefault(node: SZNodeID, port: String, value rawValue: SZPortValue, persist: Bool = true,
+                         origin: SZMutationOrigin = .user) -> SZPortValue {
+        if let denial = fenceDenial(nodes: [node], origin: origin) {
+            status = denial
+            return store.project?.graph.node(id: node)?.contract?.inputs
+                .first { $0.name == port }?.def ?? rawValue   // echo the unchanged truth
+        }
         let portModel = store.project?.graph.node(id: node)?.contract?.inputs.first { $0.name == port }
         let value = portModel?.clampedDefault(rawValue) ?? rawValue
         if let floats = value.floats { runtime?.setInputValue(node: node, port: port, floats: floats) }     // live (v3)
@@ -952,7 +977,11 @@ final class SZHost {
     /// Updates the store + persists to disk + pushes the change into the runtime live (no reload). Returns
     /// the new endpoint (nil if cleared / the target wasn't a valid texture output).
     @discardableResult
-    func toggleDisplay(node: SZNodeID, port: String) -> SZPortRef? {
+    func toggleDisplay(node: SZNodeID, port: String, origin: SZMutationOrigin = .user) -> SZPortRef? {
+        if let denial = fenceDenial(nodes: [node], origin: origin) {
+            status = denial
+            return store.project?.graph.renderEndpoint
+        }
         let ref = SZPortRef(node: node, port: port)
         let newEndpoint: SZPortRef? = (store.project?.graph.renderEndpoint == ref) ? nil : ref
         guard store.setRenderEndpoint(newEndpoint) else { return store.project?.graph.renderEndpoint }

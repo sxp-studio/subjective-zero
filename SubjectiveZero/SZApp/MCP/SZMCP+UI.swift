@@ -223,6 +223,15 @@ extension SZHostBridge {
         ])
     }
 
+    /// Fence pre-check for the agent surface (SZHost+Fence.swift): throws the refusal naming the
+    /// holder ("node 'Blur' is held by chat turn 'Blur'…") so an agent learns the real reason,
+    /// instead of the host funnel's silent `false`. The funnels still guard (belt-and-braces).
+    private func requireUnfenced(_ nodes: [SZNodeID]) throws {
+        if let denial = host.fenceDenial(nodes: nodes, origin: .agent) {
+            throw SZMCPError.message(denial)
+        }
+    }
+
     private func uiConnect(_ arguments: [String: Any]) throws -> String {
         guard let from = arguments.uuid("from"), let to = arguments.uuid("to") else {
             throw SZMCPError.message("ui_connect needs `from` and `to` node ids")
@@ -271,11 +280,13 @@ extension SZHostBridge {
             if from == to { throw SZMCPError.message("cannot connect node \(from) to itself") }
             throw SZMCPError.message("incompatible \(kindRaw) connection \(fromNode.title):\(fromPort) → \(toNode.title):\(toPort) (port types differ)")
         }
+        try requireUnfenced([from, to])
         // Through the host (not bare store.connect) so the new edge persists + reloads the runtime.
         let connection = host.addConnection(
             from: SZPortRef(node: from, port: fromPort),
             to: SZPortRef(node: to, port: toPort),
-            kind: kind
+            kind: kind,
+            origin: .agent
         )
         guard let connection else { throw SZMCPError.message("no project loaded") }
         return SZJSONRPC.encode(["id": connection.uuidString])
@@ -289,8 +300,9 @@ extension SZHostBridge {
 
     private func uiDisconnect(_ arguments: [String: Any]) throws -> String {
         guard let id = arguments.uuid("connection") else { throw SZMCPError.message("ui_disconnect needs `connection` id") }
+        try requireUnfenced(host.connectionEndpoints(id))
         // Through the host (not bare store.disconnect) so the removal persists + reloads the runtime.
-        return SZJSONRPC.encode(["removed": host.deleteConnection(id: id)])
+        return SZJSONRPC.encode(["removed": host.deleteConnection(id: id, origin: .agent)])
     }
 
     private func uiUpdateNode(_ arguments: [String: Any]) throws -> String {
@@ -315,6 +327,7 @@ extension SZHostBridge {
                 return e
             }
         }
+        try requireUnfenced([id])
         let found = host.store.updateNode(
             id: id,
             title: arguments.string("title"),
@@ -348,6 +361,7 @@ extension SZHostBridge {
                                       upsertOutputs: outputs.upsert, removeOutputs: outputs.remove)
         guard !edit.isEmpty else { throw SZMCPError.message("ui_edit_ports needs at least one upsert or remove") }
 
+        try requireUnfenced([id])
         let result = host.store.editPorts(node: id, edit)
         guard result.found else { throw SZMCPError.message("no node \(id)") }
         // The store guessed `.contractChanged`; only reading the live source can tell whether the code is merely
@@ -390,8 +404,9 @@ extension SZHostBridge {
 
     private func uiRemoveNode(_ arguments: [String: Any]) throws -> String {
         guard let id = arguments.uuid("node") else { throw SZMCPError.message("ui_remove_node needs `node` id") }
+        try requireUnfenced([id])
         // Through the host (not bare store.removeNode) so the node's chat artifacts are purged too.
-        return SZJSONRPC.encode(["removed": host.deleteNode(id: id)])
+        return SZJSONRPC.encode(["removed": host.deleteNode(id: id, origin: .agent)])
     }
 
     private func uiTidyGraph(_ arguments: [String: Any]) throws -> String {
@@ -408,6 +423,7 @@ extension SZHostBridge {
         if run, host.hasStagedGraphOp {
             throw SZMCPError.message("a split/merge is already staged — it commits when the current run ends")
         }
+        try requireUnfenced([node])
         guard let ids = host.splitNode(id: node, pieces: pieces, run: run,
                                        instruction: arguments.string("instruction")) else {
             throw SZMCPError.message("cannot split \(node) (missing node, pieces < 2, no project, or no run could start)")
@@ -425,6 +441,7 @@ extension SZHostBridge {
         if run, host.hasStagedGraphOp {
             throw SZMCPError.message("a split/merge is already staged — it commits when the current run ends")
         }
+        try requireUnfenced(ids)
         guard let merged = host.mergeNodes(ids: ids, run: run,
                                            instruction: arguments.string("instruction")) else {
             throw SZMCPError.message("cannot merge (the ids must form a connected linear data chain, or no run could start)")
@@ -504,10 +521,11 @@ extension SZHostBridge {
             throw SZMCPError.message("no input port \(port) on node \(node)")
         }
         let value = try Self.portValue(portModel.type, from: arguments["value"])
+        try requireUnfenced([node])
         // The host clamps a slider port to its declared range, exactly as the slider does. Echo the
         // APPLIED value (like ui_move_node echoes the snapped x/y) so the agent's world model tracks
         // the truth instead of the value it asked for.
-        let applied = host.setInputDefault(node: node, port: port, value: value)
+        let applied = host.setInputDefault(node: node, port: port, value: value, origin: .agent)
         var response: [String: Any] = ["set": port]
         if let json = Self.jsonValue(applied) { response["value"] = json }
         return SZJSONRPC.encode(response)
@@ -549,7 +567,8 @@ extension SZHostBridge {
                 "node \(node) is a staged split/merge piece, hidden until the operation commits — "
                 + "the host moves the render endpoint to it then; leave the endpoint where it is")
         }
-        let endpoint = host.toggleDisplay(node: node, port: port)
+        try requireUnfenced([node])
+        let endpoint = host.toggleDisplay(node: node, port: port, origin: .agent)
         if let endpoint, endpoint.node == node, endpoint.port == port {
             return SZJSONRPC.encode(["endpoint": port])
         }
@@ -593,7 +612,8 @@ extension SZHostBridge {
 
         // The same host op as the card's photo toggle — one apply choreography (store write, stale
         // thumb drop, persist, watch-set refresh) for human and agent edits.
-        guard host.setNodeBody(node: id, body: body) else {
+        try requireUnfenced([id])
+        guard host.setNodeBody(node: id, body: body, origin: .agent) else {
             throw SZMCPError.message("no node \(id)")
         }
 

@@ -18,6 +18,20 @@ public final class SZStore {
     /// surface. `internal(set)` so those same-module ops can write it.
     public internal(set) var chat: [String: [SZChatMessage]] = [:]
 
+    /// The host-installed fence tripwire (SZHost+Fence.swift): returns a reason when a fenced-class
+    /// mutation on these nodes should have been refused upstream, nil when it may proceed. The
+    /// store stays lock-blind — ops assert this is nil (debug only, never a throw) so a future
+    /// caller that bypasses the host funnels is caught in development instead of silently
+    /// mutating a held node. nil closure (tests, no host) = no check.
+    @ObservationIgnored public var fenceBackstop: ((Set<SZNodeID>) -> String?)?
+
+    /// Debug-assert a fenced-class mutation was pre-cleared. Call sites are the destructive/content
+    /// ops in SZStore+GraphEdits; move/add are open by design and never call this.
+    func assertFenceCleared(_ ids: Set<SZNodeID>) {
+        assert(fenceBackstop?(ids) == nil,
+               "unfenced store mutation: \(fenceBackstop?(ids) ?? "") — route through the host funnel")
+    }
+
     public init() {}
 
     /// Replace the loaded project (e.g. after `SZProjectIO.load`).
