@@ -125,7 +125,10 @@ extension SZHost {
             throw SZMCPError.message("(debug) forced needsInput: \(blocker)")
         }
         openChatTab(scope)
-        let result = try await deliver(scope: scope, request: request, provider: provider).result
+        // Under the run's claim (it holds every work-set node + transcript). After an eager
+        // cancelRun, `runClaim` is nil and the zombie turn self-claims the freed scope instead.
+        let result = try await deliver(scope: scope, request: request, provider: provider,
+                                       claim: runClaim).result
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
         // (timeout, CLI error) is invisible and the node reads as a silent Draft. `deliver` already
         // streamed the turn into `scope`; this adds the terminal error line beneath it.
@@ -181,7 +184,8 @@ extension SZHost {
             cacheDirectory: cacheDirectory, mcpServerPort: mcpPort,
             model: generation.model, reasoningEffort: generation.reasoningEffort,
             fastMode: generation.fastMode ?? false, timeout: 300)
-        let result = try await deliver(scope: scope, request: request, provider: provider).result
+        let result = try await deliver(scope: scope, request: request, provider: provider,
+                                       claim: runClaim).result
         // The agentic strategy discards the Director result (it re-reads the graph instead), so a
         // mid-turn provider death would otherwise vanish — land it in the Director tab like a
         // coding turn's terminal error line.
@@ -311,22 +315,46 @@ extension SZHost {
         }
         let providerID = activeProviderID
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
-        isRunning = true
-        status = "running \(providerID)…"
-        showChat(.director)                                  // a run narrates into the Director Agent tab
         // Capture this run's WORK SET: the prompt nodes dirty at start. It grows as the run's own tooling
         // creates work (`noteRunCreatedWork`), and drives dispatch, the editor lock/pill, and the
         // `ui_connect` guard. A node the user adds mid-run is never noted, so it stays out of the fleet.
-        runWorkSet = Set((store.project?.graph.nodes ?? []).filter(\.needsImplementation).map(\.id))
+        let workSet = Set((store.project?.graph.nodes ?? []).filter(\.needsImplementation).map(\.id))
+        // Claim ONLY what this run touches — atomically, refuse on contention (today's refuse-a-
+        // second-run semantics; an awaited acquire would let a second Build queue behind the first
+        // while `isRunning` still reads false). The claim also closes a latent race: previously
+        // nothing stopped a run while a chat turn streamed into a work-set node's transcript.
+        var claimSet: Set<SZResourceID> = [.run, .transcript(.director)]
+        for id in workSet {
+            claimSet.insert(.node(id))
+            claimSet.insert(.transcript(.node(id)))
+        }
+        let claim = SZClaimToken(label: "run (\(providerID))")
+        guard ledger.tryAcquire(claimSet, as: claim) else {
+            let holders = ledger.blockers(of: claimSet).map(\.label).joined(separator: ", ")
+            status = "cannot start run — \(holders) in flight"
+            narrateDirector("Run not started — \(holders) is still working. Wait for it to finish (or stop it), then build again.")
+            return
+        }
+        runClaim = claim
+        mailbox.steerConsumer = claim   // `.steer` ack waits edge to the run for its duration
+        runWorkSet = workSet
+        status = "running \(providerID)…"
+        showChat(.director)                                  // a run narrates into the Director Agent tab
         let dirtyCount = runWorkSet.count
         narrateDirector(dirtyCount == 0
             ? "Run started (\(providerID)) — no nodes need implementing."
             : "Run started (\(providerID)) — implementing \(dirtyCount) node\(dirtyCount == 1 ? "" : "s")…")
         runTask = Task { @MainActor in
-            // stays true for the WHOLE run, not per-promote; pins last one run (promotes already consumed
-            // them by here) — anything still owned by an in-flight graph op is cleared by its commit/rollback.
+            // pins last one run (promotes already consumed them by here) — anything still owned by
+            // an in-flight graph op is cleared by its commit/rollback.
             defer {
-                isRunning = false; runTask = nil
+                // Release the CAPTURED claim, not `runClaim` — after an eager `cancelRun` this is
+                // the zombie task's idempotent second settle, and `runClaim` may already belong to
+                // a newer run (guarded below so we never clobber it).
+                ledger.releaseAll(of: claim)
+                if runClaim == claim { runClaim = nil }
+                if mailbox.steerConsumer == claim { mailbox.steerConsumer = nil }
+                runTask = nil
                 runWorkSet = []            // run over → the work set is cleared (a node chat runs with it empty)
                 pinnedContracts = pinnedContracts.filter { hiddenPieces.contains($0.key) }
                 flushAllTranscripts()      // run end = flush point (success, throw, or cancel)
@@ -376,7 +404,16 @@ extension SZHost {
     func cancelRun() {
         runTask?.cancel()
         runTask = nil
-        isRunning = false
+        // Eager release: composers and project ops unlock NOW, not when the cancelled task's CLI
+        // agents finally die (they can outlive cancellation by a long way). The zombie task's
+        // deferred releaseAll of the same token is an idempotent no-op; its still-streaming turns
+        // stay safe because the pump's delivery precondition also checks the scope's in-flight
+        // marker, so nothing new streams into a transcript a zombie is still writing.
+        if let claim = runClaim {
+            ledger.releaseAll(of: claim)
+            if mailbox.steerConsumer == claim { mailbox.steerConsumer = nil }
+            runClaim = nil
+        }
         status = "run cancelled"
         narrateDirector("Run cancelled.")
         // Settle a staged split/merge NOW rather than waiting on the cancelled task. Cancellation is

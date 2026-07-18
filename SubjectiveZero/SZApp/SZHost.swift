@@ -338,8 +338,14 @@ final class SZHost {
     internal(set) var chatTurnTasks: [String: Task<Void, Never>] = [:]
     /// True for the whole duration of a Director run (drives the HUD Run↔Stop state; node locking is
     /// per-node — while running, only the unimplemented `.prompt` nodes lock, see `isLocked` in
-    /// `SZNodeEditorPanel`).
-    internal(set) var isRunning = false
+    /// `SZNodeEditorPanel`). A VIEW over the ledger: the run's claim on `.run` IS the run state, so
+    /// this can never drift from what the run actually holds. `cancelRun` releases eagerly (the
+    /// zombie task's deferred release is idempotent), which is what flips this false at Stop.
+    var isRunning: Bool { ledger.isHeld(.run) }
+    /// The in-flight run's claim token — holds `.run`, the Director transcript, and the work set's
+    /// node+transcript pairs. Set by `startRun`, threaded into the run's `deliver` calls, released
+    /// (eagerly by `cancelRun`, deferredly by the run task) and cleared with the run.
+    internal(set) var runClaim: SZClaimToken?
 
     /// HUD playback state — whether the render timeline is paused (drives the Pause/Play toggle). The
     /// runtime owns the actual clock; this mirrors it for the observable UI. Reset to `false` on every
@@ -452,6 +458,13 @@ final class SZHost {
         let project = try SZProjectIO.load(from: newURL)
         // 2. The only await: permissions (camera…) before the camera node's setup runs.
         try await runtime.requestDeclaredPermissions(at: newURL)
+        // Re-check after the await: the busy guard above passed, but an event-driven delivery (the
+        // mailbox pump fires on ledger releases) can start a turn inside that one suspension —
+        // and everything below tears the project down under it.
+        guard !isBusyForProjectOps else {
+            status = "busy — a turn started while opening; try again"
+            return false
+        }
         // 2b. Take the per-instance lock before disturbing the old project — a second running
         // instance holding this project surfaces as `alreadyOpenElsewhere`, and the old project
         // (and its lock) stay fully live. Held locally until the point of no return.
@@ -552,11 +565,21 @@ final class SZHost {
     }
 
     /// Note nodes CREATED by the run's own tooling (Director split/merge, `ui_add_prompt_node` mid-run)
-    /// into its work set — the single place the "created via the run" rule lives. No-op outside a run,
-    /// so callers invoke it unconditionally.
+    /// into its work set — the single place the "created via the run" rule lives. No-op outside a run
+    /// (including a cancelled run's zombie tooling — `isRunning` reads the released claim), so callers
+    /// invoke it unconditionally. The run's claim grows with the work set: the new nodes' resources
+    /// are free by construction (fresh uuids), so the acquire cannot contend.
     func noteRunCreatedWork(_ ids: Set<SZNodeID>) {
-        guard isRunning else { return }
+        guard isRunning, let runClaim else { return }
         runWorkSet.formUnion(ids)
+        var resources: Set<SZResourceID> = []
+        for id in ids {
+            resources.insert(.node(id))
+            resources.insert(.transcript(.node(id)))
+        }
+        let claimed = ledger.tryAcquire(resources, as: runClaim)
+        assert(claimed, "noteRunCreatedWork: fresh nodes unexpectedly contended — "
+            + ledger.blockers(of: resources).map(\.label).joined(separator: ", "))
     }
 
     /// A split/merge is staged and awaiting its run's commit. Only one at a time (see `pendingGraphOp`).
