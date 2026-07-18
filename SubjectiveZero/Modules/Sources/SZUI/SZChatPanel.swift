@@ -106,7 +106,7 @@ public struct SZChatPanel: View {
     // state (`SZNodeStatusPill`) and the pulsing-orange streaming tab dot; the Director = the violet of
     // the flow/"then" edges it owns (`SZEdgeStyle.intentViolet`). Deliberate reuse of the app's semantic
     // palette so the panel reads as part of the same tool, not a bolt-on.
-    private static let userColor = Color(red: 0.50, green: 0.64, blue: 1.0)
+    fileprivate static let userColor = Color(red: 0.50, green: 0.64, blue: 1.0)   // fileprivate: SZChatTurnRow styles mention tokens with it
     private static let agentColor = Color(red: 0.96, green: 0.60, blue: 0.30)       // coding agent — warm orange, kin to the node's "coding" state
     private static let directorColor = SZEdgeStyle.intentViolet                     // Director = its own flow-edge violet
     private static let debugColor = Color(red: 0.70, green: 0.62, blue: 0.85)       // the debug chat agent — a muted "this is a tool" lilac
@@ -377,11 +377,12 @@ public struct SZChatPanel: View {
     @ViewBuilder
     private func tabActivityDot(_ tab: SZChatScope) -> some View {
         if workingScopes.contains(tab.key) {
-            TimelineView(.animation) { context in
-                let phase = 0.5 + 0.5 * sin(context.date.timeIntervalSinceReferenceDate * 4)
+            // Render-server pulse (SZPulsingOpacity): a TimelineView(.animation) here was a standing
+            // per-display-frame SwiftUI update for the whole streaming turn. Half-period π/4 keeps
+            // the old sin(t·4) cadence.
+            SZPulsingOpacity(range: 0.35...0.95, halfPeriod: 0.79) {
                 Circle().fill(SZNodeStatus.building.color)
                     .frame(width: 5, height: 5)
-                    .opacity(0.35 + 0.6 * phase)
             }
         } else if needsInputScopes.contains(tab.key) {
             Circle().fill(SZNodeStatus.needsInput.color).frame(width: 5, height: 5)
@@ -422,72 +423,35 @@ public struct SZChatPanel: View {
         .padding(.bottom, 9)
     }
 
-    /// Render an agent reply as **inline** Markdown — bold / italic / inline `code` / links — preserving
-    /// line breaks. User text stays literal (the user typed it) apart from mention TOKENS, which
-    /// render styled (see `mentionStyledText`). Block-level Markdown (fenced ```code``` blocks,
-    /// bullet/numbered lists, headers) is NOT laid out — SwiftUI `Text` can't; that's a separate
-    /// follow-up. Falls back to plain text if the source doesn't parse.
-    private func markdownText(_ raw: String, isUser: Bool) -> Text {
-        if isUser { return mentionStyledText(raw) }
-        guard var attributed = try? AttributedString(markdown: raw, options: .init(
-                interpretedSyntax: .inlineOnlyPreservingWhitespace,
-                failurePolicy: .returnPartiallyParsedIfPossible))
-        else { return Text(raw) }
-        // Inline `code` runs carry only `.code` presentation intent, no explicit font — SwiftUI renders
-        // them monospaced but the body 12.5pt makes them read visibly LARGER than the surrounding prose,
-        // since SF Mono's x-height/stroke run heavier than SF Pro at the same point size. Pin code runs a
-        // notch down (~0.88×, the usual inline-code ratio) so they sit level with the 12.5pt body text.
-        for run in attributed.runs where run.inlinePresentationIntent?.contains(.code) == true {
-            attributed[run.range].font = .system(size: 11, design: .monospaced)
-        }
-        return Text(attributed)
-    }
-
-    /// A user message with its stored mention markup rendered as accent tokens — the display frozen
-    /// at send time (what the user actually said); a mention whose node has since been deleted dims
-    /// and strikes through (the tombstone). Plain messages pass through literal.
-    private func mentionStyledText(_ raw: String) -> Text {
-        let segments = SZMentionMarkup.parse(raw)
-        guard segments.contains(where: { if case .mention = $0 { true } else { false } }) else {
-            return Text(raw)
-        }
-        return segments.reduce(Text("")) { result, segment in
-            switch segment {
-            case .text(let t):
-                return result + Text(t)
-            case .mention(let target, let display):
-                let deleted: Bool = {
-                    if case .node(let id) = target { return project?.graph.node(id: id) == nil }
-                    return false
-                }()
-                let token = Text("@\(display)").fontWeight(.medium)
-                return result + (deleted
-                    ? token.strikethrough().foregroundColor(.secondary)
-                    : token.foregroundColor(Self.userColor))
-            }
-        }
-    }
-
     private func nodeFor(_ s: SZChatScope) -> SZNode? {
         if case .node(let id) = s { return project?.graph.node(id: id) }
         return nil
     }
 
     private func transcript(_ messages: [SZChatMessage]) -> some View {
-        ScrollViewReader { proxy in
+        // Computed once per transcript render, shared by every row's tombstone check — it changes
+        // only on graph edits, which is exactly when mention tombstones must re-render.
+        let liveNodeIDs = Set(project?.graph.nodes.map(\.id) ?? [])
+        return ScrollViewReader { proxy in
             ScrollView {
                 if messages.isEmpty {
                     emptyState
                 } else {
                     LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(messages) { turn(for: $0, isLast: $0.id == messages.last?.id) }
+                        ForEach(messages) {
+                            turn(for: $0, isLast: $0.id == messages.last?.id, liveNodeIDs: liveNodeIDs)
+                        }
                         Color.clear.frame(height: 1).id(Self.bottomID)   // scroll anchor
                     }
                     .padding(14)
                 }
             }
             .onChange(of: messages.last?.id) { scrollToBottom(proxy) }
-            .onChange(of: messages.last?.text) { scrollToBottom(proxy) }
+            // Streaming growth: compare the cheap count (not the whole string) and pin WITHOUT
+            // animation — at flush cadence a hard bottom-pin reads as ticker tape, steadier than
+            // an interruptible 0.15s animation restarted per flush. The animated scroll stays for
+            // new-message transitions only (above).
+            .onChange(of: messages.last?.text.count) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
         }
     }
 
@@ -510,68 +474,34 @@ public struct SZChatPanel: View {
         .padding(.top, 48)
     }
 
-    @ViewBuilder
-    private func turn(for message: SZChatMessage, isLast: Bool) -> some View {
+    /// One transcript row, packaged into value-only props for an `.equatable()` skip (the
+    /// `SZNodeCanvasContentView` idiom): a streaming flush changes only the growing LAST row's
+    /// `message`, so every older row fails fast on `==` and never re-runs its body — including its
+    /// markdown parse. A graph edit changes `liveNodeIDs`, correctly re-rendering all rows' mention
+    /// tombstones.
+    private func turn(for message: SZChatMessage, isLast: Bool, liveNodeIDs: Set<SZNodeID>) -> some View {
         let isUser = message.role == .user
         // The Director's identity reads the same everywhere: its own replies in the Director tab AND
         // the messages it posts into a node's tab → one accent + symbol, so the violet "director agent" never
         // gets mistaken for the orange "coding agent" whose tab it's speaking in.
         let isDebugReply = isDebug && !isUser   // the debug chat agent's reply (its own tab)
         let isDirector = !isDebugReply && (message.role == .director || (message.role == .assistant && node == nil))
-        let accent = isUser ? Self.userColor
-            : (isDebugReply ? Self.debugColor : (isDirector ? Self.directorColor : Self.agentColor))
-        let label = isUser ? "you"
-            : (isDebugReply ? "debug agent" : (isDirector ? "director agent" : "coding agent"))
-        // Symbol next to the label (accessibility — not color-only): the Director's `eyeglasses` (matching
-        // its tab), the node's own sfSymbol for its Coding Agent (matching that tab), a person for the user.
-        let symbol = isUser ? "person.fill"
-            : (isDebugReply ? "ladybug.fill" : (isDirector ? "eyeglasses" : (node?.sfSymbol ?? "sparkles")))
-        // Dots = this turn is still in flight (works for codex's preamble-then-tools order, not just
-        // "text empty"): the in-flight assistant turn is always the last message.
-        let working = streaming && isLast && message.role == .assistant
-        HStack(alignment: .top, spacing: 10) {
-            Capsule().fill(accent.opacity(0.8)).frame(width: 2)   // the left rail — the signature
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 4) {
-                    Image(systemName: symbol).font(.system(size: 9, weight: .semibold))
-                    Text(label)
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .textCase(.uppercase)
-                }
-                .foregroundStyle(accent)
-                if !message.thinking.isEmpty {
-                    SZThinkingView(text: message.thinking)   // collapsible activity + reasoning trace
-                }
-                if !message.text.isEmpty {
-                    markdownText(message.text, isUser: isUser)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(isUser ? .primary : Color.primary.opacity(0.92))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if !message.attachments.isEmpty {
-                    SZAttachmentRow(attachments: message.attachments)   // thumbnails / file chips, read-only
-                }
-                if working {
-                    HStack(spacing: 7) {   // dots + live elapsed timer while the turn runs
-                        SZTypingIndicator()
-                        SZElapsedLabel(since: message.timestamp)
-                        // No inline stop here — the composer's send slot IS the action slot
-                        // (send / stop-turn / stop-run); a second stop that wanders is worse.
-                    }
-                } else if let duration = message.duration, message.role == .assistant {
-                    // Final time + tokens, kept below the reply. Tokens are opt-in (View ▸ Show
-                    // Token Counts), and not every CLI reports usage.
-                    let tokens = showTokenCounts ? message.usage.map {
-                        " · \(szFormatTokensCompact($0.inputTokens)) in / \(szFormatTokensCompact($0.outputTokens)) out"
-                    } ?? "" : ""
-                    Text("Worked for \(szFormatDurationCompact(duration))\(tokens)")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        return SZChatTurnRow(
+            message: message,
+            // Dots = this turn is still in flight (works for codex's preamble-then-tools order, not
+            // just "text empty"): the in-flight assistant turn is always the last message.
+            working: streaming && isLast && message.role == .assistant,
+            showTokenCounts: showTokenCounts,
+            accent: isUser ? Self.userColor
+                : (isDebugReply ? Self.debugColor : (isDirector ? Self.directorColor : Self.agentColor)),
+            label: isUser ? "you"
+                : (isDebugReply ? "debug agent" : (isDirector ? "director agent" : "coding agent")),
+            // Symbol next to the label (accessibility — not color-only): the Director's `eyeglasses`
+            // (matching its tab), the node's own sfSymbol for its Coding Agent, a person for the user.
+            symbol: isUser ? "person.fill"
+                : (isDebugReply ? "ladybug.fill" : (isDirector ? "eyeglasses" : (node?.sfSymbol ?? "sparkles"))),
+            liveNodeIDs: liveNodeIDs)
+            .equatable()
     }
 
     // The Codex-style input card: a rounded two-row surface floating on the panel background —
@@ -884,25 +814,135 @@ private struct SZTabFramesKey: PreferenceKey {
     }
 }
 
-/// A small "agent is working" pulse shown while an assistant turn is still empty — echoes the
-/// blinking status pill the node editor uses during a run.
-private struct SZTypingIndicator: View {
-    // Smooth, time-driven pulse: a continuous TimelineView(.animation) cadence with a sine-based opacity
-    // (a traveling wave across the three dots), independent of the transcript's constant re-renders.
+/// One transcript turn, `.equatable()`-gated by the panel. VALUE-ONLY stored props — adding a
+/// closure or reference prop here silently breaks the `==` skip (every row would re-render per
+/// streaming flush again), so anything the row can DO stays on the panel and anything it RENDERS
+/// arrives as a compared value. Row identity is the message id (ForEach), so `SZThinkingView`'s
+/// `@State expanded` survives streaming re-renders of the growing row.
+private struct SZChatTurnRow: View, Equatable {
+    let message: SZChatMessage
+    let working: Bool               // this turn is still in flight → dots + live elapsed timer
+    let showTokenCounts: Bool
+    let accent: Color
+    let label: String
+    let symbol: String
+    let liveNodeIDs: Set<SZNodeID>  // mention-tombstone check; changes only on graph edits
+
+    private var isUser: Bool { message.role == .user }
+
     var body: some View {
-        TimelineView(.animation) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 4) {
-                ForEach(0..<3, id: \.self) { i in
-                    let phase = 0.5 + 0.5 * sin(t * 4.2 - Double(i) * 0.9)   // 0…1, offset per dot
-                    Circle()
-                        .fill(Color.secondary)
-                        .frame(width: 5, height: 5)
-                        .opacity(0.28 + 0.62 * phase)
-                        .scaleEffect(0.82 + 0.18 * phase)
+        HStack(alignment: .top, spacing: 10) {
+            Capsule().fill(accent.opacity(0.8)).frame(width: 2)   // the left rail — the signature
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 4) {
+                    Image(systemName: symbol).font(.system(size: 9, weight: .semibold))
+                    Text(label)
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .textCase(.uppercase)
+                }
+                .foregroundStyle(accent)
+                if !message.thinking.isEmpty {
+                    SZThinkingView(text: message.thinking)   // collapsible activity + reasoning trace
+                }
+                if !message.text.isEmpty {
+                    markdownText(message.text)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(isUser ? .primary : Color.primary.opacity(0.92))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !message.attachments.isEmpty {
+                    SZAttachmentRow(attachments: message.attachments)   // thumbnails / file chips, read-only
+                }
+                if working {
+                    HStack(spacing: 7) {   // dots + live elapsed timer while the turn runs
+                        SZTypingIndicator()
+                        SZElapsedLabel(since: message.timestamp)
+                        // No inline stop here — the composer's send slot IS the action slot
+                        // (send / stop-turn / stop-run); a second stop that wanders is worse.
+                    }
+                } else if let duration = message.duration, message.role == .assistant {
+                    // Final time + tokens, kept below the reply. Tokens are opt-in (View ▸ Show
+                    // Token Counts), and not every CLI reports usage.
+                    let tokens = showTokenCounts ? message.usage.map {
+                        " · \(szFormatTokensCompact($0.inputTokens)) in / \(szFormatTokensCompact($0.outputTokens)) out"
+                    } ?? "" : ""
+                    Text("Worked for \(szFormatDurationCompact(duration))\(tokens)")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tertiary)
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Render an agent reply as **inline** Markdown — bold / italic / inline `code` / links — preserving
+    /// line breaks. User text stays literal (the user typed it) apart from mention TOKENS, which
+    /// render styled (see `mentionStyledText`). Block-level Markdown (fenced ```code``` blocks,
+    /// bullet/numbered lists, headers) is NOT laid out — SwiftUI `Text` can't; that's a separate
+    /// follow-up. Falls back to plain text if the source doesn't parse.
+    private func markdownText(_ raw: String) -> Text {
+        if isUser { return mentionStyledText(raw) }
+        guard var attributed = try? AttributedString(markdown: raw, options: .init(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace,
+                failurePolicy: .returnPartiallyParsedIfPossible))
+        else { return Text(raw) }
+        // Inline `code` runs carry only `.code` presentation intent, no explicit font — SwiftUI renders
+        // them monospaced but the body 12.5pt makes them read visibly LARGER than the surrounding prose,
+        // since SF Mono's x-height/stroke run heavier than SF Pro at the same point size. Pin code runs a
+        // notch down (~0.88×, the usual inline-code ratio) so they sit level with the 12.5pt body text.
+        for run in attributed.runs where run.inlinePresentationIntent?.contains(.code) == true {
+            attributed[run.range].font = .system(size: 11, design: .monospaced)
+        }
+        return Text(attributed)
+    }
+
+    /// A user message with its stored mention markup rendered as accent tokens — the display frozen
+    /// at send time (what the user actually said); a mention whose node has since been deleted dims
+    /// and strikes through (the tombstone). Plain messages pass through literal.
+    private func mentionStyledText(_ raw: String) -> Text {
+        let segments = SZMentionMarkup.parse(raw)
+        guard segments.contains(where: { if case .mention = $0 { true } else { false } }) else {
+            return Text(raw)
+        }
+        return segments.reduce(Text("")) { result, segment in
+            switch segment {
+            case .text(let t):
+                return result + Text(t)
+            case .mention(let target, let display):
+                let deleted: Bool = {
+                    if case .node(let id) = target { return !liveNodeIDs.contains(id) }
+                    return false
+                }()
+                let token = Text("@\(display)").fontWeight(.medium)
+                return result + (deleted
+                    ? token.strikethrough().foregroundColor(.secondary)
+                    : token.foregroundColor(SZChatPanel.userColor))
+            }
+        }
+    }
+}
+
+/// A small "agent is working" pulse shown while an assistant turn is still empty — echoes the
+/// blinking status pill the node editor uses during a run.
+private struct SZTypingIndicator: View {
+    // repeatForever animations run on the render server — zero main-thread frames, unlike the
+    // TimelineView(.animation) this replaces, which re-entered SwiftUI every display frame for the
+    // whole turn. The per-dot delay keeps the traveling-wave feel of the old sin(t·4.2 − i·0.9).
+    @State private var bright = false
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 5, height: 5)
+                    .opacity(bright ? 0.9 : 0.28)
+                    .scaleEffect(bright ? 1.0 : 0.82)
+                    .animation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)
+                        .delay(Double(i) * 0.21), value: bright)
+            }
+        }
+        .onAppear { bright = true }
     }
 }
 
@@ -1108,12 +1148,9 @@ private struct SZThinkingView: View {
 }
 
 /// The active Stop button's "a run is in flight" pulse — a quiet opacity breathe, no glow.
-/// Continuous via TimelineView while the Stop is shown.
+/// Runs on the render server (SZPulsingOpacity); half-period π/3 keeps the old sin(t·3) cadence.
 private struct SZStopPulse: ViewModifier {
     func body(content: Content) -> some View {
-        TimelineView(.animation) { context in
-            let phase = 0.5 + 0.5 * sin(context.date.timeIntervalSinceReferenceDate * 3)
-            content.opacity(0.55 + 0.45 * phase)
-        }
+        SZPulsingOpacity(range: 0.55...1.0, halfPeriod: 1.05) { content }
     }
 }
