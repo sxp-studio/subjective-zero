@@ -26,14 +26,20 @@ extension SZHost {
     ) async throws -> SZAgentRunResult {
         // Provider output (off-main, per chunk) is funnelled through an AsyncStream and consumed serially
         // on the MainActor — line-buffered, parsed by the provider's consumer, appended to the transcript.
+        // Text appends ride a coalescer (~15 Hz + trailing flush) instead of landing per chunk: every
+        // store append reassigns the scope's whole message array and fires @Observable, so chunk-rate
+        // appends re-evaluated the chat panel at chunk rate for the life of the turn.
         let (chunks, chunksContinuation) = AsyncStream<String>.makeStream()
         let streamConsumer = provider.makeStreamConsumer()
+        let coalescer = SZChatStreamCoalescer(
+            onReply: { [store] in store.appendChatText($0, to: assistantID, in: scope) },
+            onThinking: { [store] in store.appendChatThinking($0, to: assistantID, in: scope) })
         let route: @MainActor ([SZAgentStreamEvent]) -> Void = { [store] events in
             for event in events {
                 switch event {
-                case .reply(let text): store.appendChatText(text, to: assistantID, in: scope)
-                case .thinking(let text): store.appendChatThinking(text + "\n", to: assistantID, in: scope)
-                case .toolCall(let name): store.appendChatThinking("→ \(name)\n", to: assistantID, in: scope)
+                case .reply(let text): coalescer.addReply(text)
+                case .thinking(let text): coalescer.addThinking(text + "\n")
+                case .toolCall(let name): coalescer.addThinking("→ \(name)\n")
                 case .usage(let usage): store.setChatUsage(usage, assistantID, in: scope)
                 }
             }
@@ -46,6 +52,8 @@ extension SZHost {
                 }
             }
             route(streamConsumer.finish())   // flush the finalized reply
+            coalescer.finish()               // synchronous final flush, BEFORE the task returns —
+                                             // `await consumer.value` below thus sees complete text
         }
 
         // Feed the stream from the run's output, keeping any caller-supplied onOutput.
