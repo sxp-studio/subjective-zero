@@ -33,6 +33,12 @@ public struct SZResourceID: Hashable, Sendable, CustomStringConvertible {
     public static func node(_ id: SZNodeID) -> SZResourceID {
         SZResourceID(key: "node/\(id.uuidString)")
     }
+    /// The node id a `.node(_:)` resource names — nil for every other resource kind. The reverse of
+    /// the constructor, so ledger queries ("which nodes are held?") stay one map away.
+    public var nodeID: SZNodeID? {
+        guard key.hasPrefix("node/") else { return nil }
+        return SZNodeID(uuidString: String(key.dropFirst("node/".count)))
+    }
     /// The single staged split/merge slot.
     public static let graphOp = SZResourceID(key: "graph-op")
     /// The one-run-at-a-time slot.

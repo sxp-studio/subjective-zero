@@ -33,10 +33,34 @@ extension SZHost {
                 return "node '\(title)' is mid-\(op.lowercased()) — the operation settles when its run ends (or Stop the run)"
             }
             guard let holder = ledger.holder(of: .node(id)) else { continue }
-            if origin == .agent, let runClaim, holder == runClaim { continue }
+            if let runClaim, holder == runClaim {
+                if origin == .agent { continue }   // the run steering its own fleet's work
+                // The run holds every work-set node to run end (a reconcile turn can flip a
+                // promoted node back to needsImplementation), but a SETTLED generated node is the
+                // user's again — the canvas unlocks it at promote, and the fence must agree with
+                // the affordance. Only in-flight (.prompt) work refuses the user.
+                if store.project?.graph.node(id: id)?.kind == .generated { continue }
+            }
             return "node '\(title)' is held by \(holder.label) — wait for it to finish or stop it"
         }
         return nil
+    }
+
+    /// Node ids a user-origin mutation would be refused on right now — THE ledger-backed source for
+    /// the canvas/panel lock affordances (`SZNodeCanvasContentView.isLocked`), so what the UI dims
+    /// and what the fence refuses can never drift. Mirrors `fenceDenial`'s user rule: held by a
+    /// chat turn → locked; held by the run and still in-flight (`.prompt`) → locked; settled
+    /// generated work → free. (Mid-split/merge originals are covered by `graphOpStatus`, which the
+    /// view checks alongside this.)
+    var lockedNodes: Set<SZNodeID> {
+        var locked: Set<SZNodeID> = []
+        for (resource, holder) in ledger.holders {
+            guard let id = resource.nodeID else { continue }
+            if let runClaim, holder == runClaim,
+               store.project?.graph.node(id: id)?.kind == .generated { continue }
+            locked.insert(id)
+        }
+        return locked
     }
 
     /// Endpoint node ids of a connection — what wiring mutations are fenced on.

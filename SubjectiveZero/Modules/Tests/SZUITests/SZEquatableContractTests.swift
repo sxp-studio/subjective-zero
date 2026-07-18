@@ -72,12 +72,12 @@ private func storedProperties(of subject: Any) -> Set<String> {
         graph: SZGraph(), strokeZoom: 1, space: "s", selectedNodeID: nil, multiSelection: [],
         selectedConnectionID: nil, hiddenConnectionID: nil, ghostedNodeIDs: [], raisedTiers: [:],
         connectedSockets: [], connectedInputsByNode: [:], nodeAgentState: [:], graphOpStatus: [:],
-        isRunning: false, runWorkSet: [])
+        isRunning: false, runWorkSet: [], lockedNodes: [])
     #expect(storedProperties(of: view) == [
         // compared in ==
         "graph", "strokeZoom", "space", "selectedNodeID", "multiSelection", "selectedConnectionID",
         "hiddenConnectionID", "ghostedNodeIDs", "raisedTiers", "connectedSockets", "connectedInputsByNode",
-        "nodeAgentState", "graphOpStatus", "isRunning", "runWorkSet", "previewsEnabled", "zoomedOut",
+        "nodeAgentState", "graphOpStatus", "isRunning", "runWorkSet", "lockedNodes", "previewsEnabled", "zoomedOut",
         // closures — deliberately excluded from == (routed to the panel's live handlers).
         // Split/Merge/chat-open/source-open moved to the panel's right-click menu, so their
         // closures left too.
@@ -192,7 +192,8 @@ private func canvasView(
     ghostedNodeIDs: Set<SZNodeID> = [], raisedTiers: [SZNodeID: Int] = [:],
     connectedSockets: Set<String> = [], connectedInputsByNode: [SZNodeID: Set<String>] = [:],
     nodeAgentState: [SZNodeID: SZNodeAgentState] = [:], graphOpStatus: [SZNodeID: String] = [:],
-    isRunning: Bool = false, runWorkSet: Set<SZNodeID> = [], autoEditNodeID: SZNodeID? = nil,
+    isRunning: Bool = false, runWorkSet: Set<SZNodeID> = [], lockedNodes: Set<SZNodeID> = [],
+    autoEditNodeID: SZNodeID? = nil,
     previewsEnabled: Bool = true, zoomedOut: Bool = false, previewFrames: SZNodePreviewFrames? = nil
 ) -> SZNodeCanvasContentView {
     var v = SZNodeCanvasContentView(
@@ -201,7 +202,7 @@ private func canvasView(
         hiddenConnectionID: hiddenConnectionID, ghostedNodeIDs: ghostedNodeIDs, raisedTiers: raisedTiers,
         connectedSockets: connectedSockets, connectedInputsByNode: connectedInputsByNode,
         nodeAgentState: nodeAgentState, graphOpStatus: graphOpStatus, isRunning: isRunning,
-        runWorkSet: runWorkSet, previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
+        runWorkSet: runWorkSet, lockedNodes: lockedNodes, previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
         previewFrames: previewFrames)
     v.autoEditNodeID = autoEditNodeID
     return v

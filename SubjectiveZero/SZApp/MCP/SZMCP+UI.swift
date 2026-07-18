@@ -83,11 +83,13 @@ extension SZHostBridge {
                  ]),
             tool("ui_stop", "Stop the in-flight run (mirrors the HUD Stop button) — cancels the Director and every coding agent. Returns {status: \"stopped\"} if a run was cancelled, or {status: \"not_running\"} if nothing was in flight.",
                  properties: [:]),
-            tool("ui_send_chat", "Send a chat message to an agent and stream its reply into the transcript. `scope` is a node id (chat that node's Coding Agent) or \"director\" (the Director Agent). A fresh Director Agent chat uses the active provider; resuming continues on the session's own CLI.",
+            tool("ui_send_chat", "Send a chat message to an agent. `scope` is a node id (chat that node's Coding Agent) or \"director\" (the Director Agent). Every accepted message returns a `message_id`; `status` is \"queued\" (enqueued — delivers as a real turn when the recipient is free; poll ui_message_status if you need the outcome) or \"recorded\" (a mid-run steer, folded into the recipient's next prompt). A fresh Director Agent chat uses the active provider; resuming continues on the session's own CLI.",
                  properties: [
                     "scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"],
                     "message": ["type": "string"],
                  ]),
+            tool("ui_message_status", "Delivery state of a message you sent (`message_id` from ui_send_chat): {state: queued|delivering|processed|failed, reason?}. `failed` carries the reason. Unknown ids (e.g. from before an app restart) return {state: \"unknown\"}. Poll between your own steps — the send never blocks.",
+                 properties: ["message_id": ["type": "string"]]),
             tool("ui_set_input_default", "Set an unconnected input's default value (mirrors its slider/toggle/dropdown) — changes the live render. `value` is coerced to the port's declared type (number, bool, or array of numbers). A slider port's value is clamped to its `ui.min/max` and snapped to `ui.step`, exactly as dragging the slider would; the returned `value` is the APPLIED one, which may differ from what you asked for.",
                  properties: [
                     "node": ["type": "string"], "port": ["type": "string"],
@@ -144,6 +146,7 @@ extension SZHostBridge {
         case "ui_run":             return uiRun(arguments)
         case "ui_stop":            return uiStop(arguments)
         case "ui_send_chat":       return try uiSendChat(arguments)
+        case "ui_message_status":  return try uiMessageStatus(arguments)
         case "ui_set_input_default": return try uiSetInputDefault(arguments)
         case "ui_toggle_display":  return try uiToggleDisplay(arguments)
         case "ui_set_node_body":   return try uiSetNodeBody(arguments)
@@ -518,6 +521,23 @@ extension SZHostBridge {
         case .recordedForReconcile(let id):
             return SZJSONRPC.encode(["status": "recorded", "message_id": id.uuidString, "scope": scope.key])
         }
+    }
+
+    /// Poll a sent message's delivery state — the MCP-shaped ack (handlers are synchronous and must
+    /// never block; the in-process `awaitProcessed` is the real primitive, for in-process callers
+    /// like the future behavior-tree engine). Answers from the live queue + the bounded tombstone
+    /// list; a message from before a restart is honestly `unknown`.
+    private func uiMessageStatus(_ arguments: [String: Any]) throws -> String {
+        guard let raw = arguments.string("message_id"), let id = UUID(uuidString: raw) else {
+            throw SZMCPError.message("ui_message_status needs `message_id` (a uuid from ui_send_chat)")
+        }
+        guard let envelope = host.mailbox.envelope(for: id) else {
+            return SZJSONRPC.encode(["state": "unknown",
+                                     "detail": "no record of that message (it may predate an app restart)"])
+        }
+        var response: [String: Any] = ["state": envelope.state.rawValue]
+        if let reason = envelope.failureReason { response["reason"] = reason }
+        return SZJSONRPC.encode(response)
     }
 
     private func uiSetInputDefault(_ arguments: [String: Any]) throws -> String {

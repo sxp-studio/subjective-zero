@@ -32,7 +32,8 @@ public struct SZNodeEditorPanel: View {
     private let isPaused: Bool                     // HUD Pause/Play toggle state (owned by SZHost)
     private let nodeAgentState: [SZNodeID: SZNodeAgentState]   // typed per-node agent state (pill / lock / error popover)
     private let graphOpStatus: [SZNodeID: String]   // original node id → "Splitting"/"Merging"
-    private let runWorkSet: Set<SZNodeID>   // the run's captured work (host-owned) — members lock + read Coding
+    private let runWorkSet: Set<SZNodeID>   // the run's captured work (host-owned) — members read Coding
+    private let lockedNodes: Set<SZNodeID>  // ledger-held nodes (host-owned) — the lock affordance's source
     private let hiddenPieces: Set<SZNodeID>          // staged split/merge pieces hidden until commit
     private let chatShown: Bool                   // for the HUD icon state; chat/tab state is owned by SZApp
     private let agentsWorking: Bool               // any run/turn in flight → the closed-panel chat-toggle dot
@@ -111,7 +112,8 @@ public struct SZNodeEditorPanel: View {
     public init(store: SZStore, project: SZProject?, status: String, isRunning: Bool,
                 isPaused: Bool = false,
                 nodeAgentState: [SZNodeID: SZNodeAgentState] = [:],
-                graphOpStatus: [SZNodeID: String] = [:], runWorkSet: Set<SZNodeID> = [], hiddenPieces: Set<SZNodeID> = [],
+                graphOpStatus: [SZNodeID: String] = [:], runWorkSet: Set<SZNodeID> = [],
+                lockedNodes: Set<SZNodeID> = [], hiddenPieces: Set<SZNodeID> = [],
                 chatShown: Bool,
                 agentsWorking: Bool = false,
                 pendingWorkHint: Bool = false,
@@ -152,6 +154,7 @@ public struct SZNodeEditorPanel: View {
         self.nodeAgentState = nodeAgentState
         self.graphOpStatus = graphOpStatus
         self.runWorkSet = runWorkSet
+        self.lockedNodes = lockedNodes
         self.hiddenPieces = hiddenPieces
         self.chatShown = chatShown
         self.agentsWorking = agentsWorking
@@ -218,10 +221,9 @@ public struct SZNodeEditorPanel: View {
 
     /// Whether an agent currently owns this node (can't edit/delete/wire it) — the shared rule lives on
     /// SZNodeCanvasContentView (single source for content rendering, the drag-ghost overlay, and these
-    /// gesture guards).
+    /// gesture guards), fed by the host's ledger-backed `lockedNodes`.
     private func isLocked(_ id: SZNodeID) -> Bool {
-        SZNodeCanvasContentView.isLocked(id, agentState: nodeAgentState, ops: graphOpStatus,
-                                         isRunning: isRunning, graph: project?.graph, workSet: runWorkSet)
+        SZNodeCanvasContentView.isLocked(id, ops: graphOpStatus, lockedNodes: lockedNodes)
     }
 
     public var body: some View {
@@ -706,6 +708,7 @@ public struct SZNodeEditorPanel: View {
             graphOpStatus: graphOpStatus,
             isRunning: isRunning,
             runWorkSet: runWorkSet,
+            lockedNodes: lockedNodes,
             previewsEnabled: livePreviews,
             // Compared as a Bool, so pinch ticks keep skipping the subtree — it flips only when the
             // zoom crosses the LOD threshold, re-rendering the cards once per crossing.

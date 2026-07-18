@@ -44,21 +44,20 @@ import SZCore
 
     // MARK: isLocked
 
-    /// A work-set prompt node locks mid-run; a non-work prompt node (user draft) does not.
-    @Test func workSetNodeLocksDuringRunButNonWorkDoesNot() {
+    /// The lock affordance is a pure view over the host's ledger-backed `lockedNodes` (a held node
+    /// locks; an unheld one — e.g. a user's mid-run draft, never claimed — does not) plus the
+    /// staged split/merge originals in `ops`.
+    @Test func heldNodesLockAndUnheldDoNot() {
         let fleet = node(), draft = node()
-        let graph = SZGraph(nodes: [fleet, draft])
-        #expect(SZNodeCanvasContentView.isLocked(fleet.id, agentState: [:], ops: [:], isRunning: true,
-                                                 graph: graph, workSet: [fleet.id]) == true)
-        #expect(SZNodeCanvasContentView.isLocked(draft.id, agentState: [:], ops: [:], isRunning: true,
-                                                 graph: graph, workSet: [fleet.id]) == false)
+        #expect(SZNodeCanvasContentView.isLocked(fleet.id, ops: [:], lockedNodes: [fleet.id]) == true)
+        #expect(SZNodeCanvasContentView.isLocked(draft.id, ops: [:], lockedNodes: [fleet.id]) == false)
     }
 
-    /// Nothing locks when no run is in flight.
-    @Test func nothingLocksWhenNotRunning() {
+    /// A staged split/merge original locks through `ops` even with no ledger hold on the node.
+    @Test func stagedOpOriginalLocks() {
         let n = node()
-        #expect(SZNodeCanvasContentView.isLocked(n.id, agentState: [:], ops: [:], isRunning: false,
-                                                 graph: SZGraph(nodes: [n]), workSet: [n.id]) == false)
+        #expect(SZNodeCanvasContentView.isLocked(n.id, ops: [n.id: "Splitting"], lockedNodes: []) == true)
+        #expect(SZNodeCanvasContentView.isLocked(n.id, ops: [:], lockedNodes: []) == false)
     }
 }
 

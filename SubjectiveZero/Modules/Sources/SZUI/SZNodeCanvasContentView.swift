@@ -40,7 +40,8 @@ struct SZNodeCanvasContentView: View, Equatable {
     let nodeAgentState: [SZNodeID: SZNodeAgentState]
     let graphOpStatus: [SZNodeID: String]
     let isRunning: Bool
-    let runWorkSet: Set<SZNodeID>     // the run's captured work — members lock + read Coding; a user's mid-run draft isn't in it
+    let runWorkSet: Set<SZNodeID>     // the run's captured work — members read Coding; a user's mid-run draft isn't in it
+    let lockedNodes: Set<SZNodeID>    // ledger-held nodes (host-owned) — the lock affordance's source
     var previewsEnabled: Bool = true  // the global Live Previews gate (mirrors SZNodeLayout.previewsEnabled)
     var zoomedOut: Bool = false       // semantic-zoom tier: cards render as preview-only tiles, socket dots hide
 
@@ -83,6 +84,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             && lhs.graphOpStatus == rhs.graphOpStatus
             && lhs.isRunning == rhs.isRunning
             && lhs.runWorkSet == rhs.runWorkSet
+            && lhs.lockedNodes == rhs.lockedNodes
             && lhs.previewsEnabled == rhs.previewsEnabled
             && lhs.zoomedOut == rhs.zoomedOut
     }
@@ -141,8 +143,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             status: Self.pillStatus(for: node, agentState: nodeAgentState, ops: graphOpStatus,
                                     isRunning: isRunning, workSet: runWorkSet),
             isSelected: selectedNodeID == node.id || multiSelection.contains(node.id),
-            locked: Self.isLocked(node.id, agentState: nodeAgentState, ops: graphOpStatus,
-                                  isRunning: isRunning, graph: graph, workSet: runWorkSet),
+            locked: Self.isLocked(node.id, ops: graphOpStatus, lockedNodes: lockedNodes),
             isRunning: isRunning,
             errorDetail: nodeAgentState[node.id]?.errorDetail,
             renderEndpoint: graph.renderEndpoint,
@@ -278,21 +279,17 @@ struct SZNodeCanvasContentView: View, Equatable {
         }
     }
 
-    /// A node is locked only while an agent owns it: its Coding Agent is mid-chat-turn, it's the
-    /// original of an in-flight split/merge, or — during a run — it's an unimplemented (`.prompt`)
-    /// node IN this run's captured `workSet` (the coding fleet's in-flight work; a promoted node
-    /// unlocks the moment it flips to `.generated`). A prompt node NOT in the work set — a draft the
-    /// user added on the canvas mid-run — stays editable; it's theirs, not the fleet's.
+    /// A node is locked only while an agent owns it — `lockedNodes` is the host's LEDGER-backed
+    /// view (SZHost.lockedNodes: a chat turn's claim, or the run's claim on still-in-flight
+    /// `.prompt` work; a promoted node unlocks the moment it flips to `.generated`, and a draft the
+    /// user added mid-run was never claimed), and `ops` flags the originals of an in-flight
+    /// split/merge. The affordance and the mutation fence read the same source, so what the UI dims
+    /// and what the host refuses can't drift.
     /// A locked node can't be edited/deleted/wired — but it CAN still be repositioned (drag-move
     /// stays allowed), so the user can tidy the canvas mid-run without fighting the agents on the
-    /// parts that matter (contracts/wiring/values). Settled generated nodes stay fully editable
-    /// while a run is in flight.
-    static func isLocked(_ id: SZNodeID, agentState: [SZNodeID: SZNodeAgentState],
-                         ops: [SZNodeID: String], isRunning: Bool, graph: SZGraph?,
-                         workSet: Set<SZNodeID> = []) -> Bool {
-        if agentState[id]?.isChatting == true { return true }
-        if ops[id] != nil { return true }
-        guard isRunning else { return false }
-        return graph?.node(id: id)?.kind == .prompt && workSet.contains(id)
+    /// parts that matter (contracts/wiring/values).
+    static func isLocked(_ id: SZNodeID, ops: [SZNodeID: String],
+                         lockedNodes: Set<SZNodeID>) -> Bool {
+        ops[id] != nil || lockedNodes.contains(id)
     }
 }

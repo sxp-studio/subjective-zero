@@ -575,7 +575,8 @@ struct SZApp: App {
                               status: host.status, isRunning: host.isRunning,
                               isPaused: host.isPaused,
                               nodeAgentState: host.nodeAgentState,
-                              graphOpStatus: host.graphOpStatus, runWorkSet: host.runWorkSet, hiddenPieces: host.hiddenPieces,
+                              graphOpStatus: host.graphOpStatus, runWorkSet: host.runWorkSet,
+                              lockedNodes: host.lockedNodes, hiddenPieces: host.hiddenPieces,
                               chatShown: host.chatVisible,
                               agentsWorking: host.isRunning || !host.chatInFlight.isEmpty,
                               // "There's unimplemented work you should kick off" — pending nodes, no
