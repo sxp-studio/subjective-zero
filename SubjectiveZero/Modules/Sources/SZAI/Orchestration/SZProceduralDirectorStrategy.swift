@@ -23,12 +23,19 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
         self.registry = registry
     }
 
-    /// Per-coding-turn wall-clock budget, in seconds. Overridable via `SZ_AGENT_TIMEOUT` (TODO: expose as
-    /// a Settings slider); default 300 (5 min). A bigger budget lets a large from-scratch node
-    /// finish, at the cost of longer waits + more tokens on a possibly-doomed turn — decomposing the work
-    /// is the structural fix; this is the power-user escape hatch.
+    /// Per-coding-turn budgets, in seconds. The working bound is SILENCE, not wall clock: a turn dies
+    /// after `codingInactivityTimeout` with no output (every streamed chunk resets the clock), so a large
+    /// node whose agent is still visibly working is never cut off mid-stream — the blind 300s wall that
+    /// used to kill streaming agents was the worst observed run friction. `codingTimeout` remains as the
+    /// wall-clock hard cap for a CLI that wedges (or loops) while still emitting. Overridable via
+    /// `SZ_AGENT_TIMEOUT` / `SZ_AGENT_INACTIVITY_TIMEOUT` (TODO: expose as Settings sliders);
+    /// decomposing the work is the structural fix — these are the power-user escape hatches.
     static var codingTimeout: TimeInterval {
-        ProcessInfo.processInfo.environment["SZ_AGENT_TIMEOUT"].flatMap(TimeInterval.init) ?? 300
+        ProcessInfo.processInfo.environment["SZ_AGENT_TIMEOUT"].flatMap(TimeInterval.init) ?? 900
+    }
+
+    static var codingInactivityTimeout: TimeInterval {
+        ProcessInfo.processInfo.environment["SZ_AGENT_INACTIVITY_TIMEOUT"].flatMap(TimeInterval.init) ?? 120
     }
 
     /// One coding assignment — Sendable so it can cross into the per-agent child tasks. Carries the
@@ -205,7 +212,8 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
             model: generationSettings.model,
             reasoningEffort: generationSettings.reasoningEffort,
             fastMode: generationSettings.fastMode ?? false,
-            timeout: Self.codingTimeout)
+            timeout: Self.codingTimeout,
+            inactivityTimeout: Self.codingInactivityTimeout)
         print("[SZProceduralDirectorStrategy] spawning coding agent for \(plan.node) (provider=\(provider.id))")
         do {
             // Stream into the node's Coding Agent tab when the host injected a turn runner; else run

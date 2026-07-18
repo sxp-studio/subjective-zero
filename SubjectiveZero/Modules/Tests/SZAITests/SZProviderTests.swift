@@ -31,7 +31,7 @@ private final class StubRunner: SZProcessRunning {
     func run(
         _ launchPath: String, _ arguments: [String],
         environment: [String: String], currentDirectoryURL: URL?,
-        input: Data?, timeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
+        input: Data?, timeout: TimeInterval?, inactivityTimeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
     ) async throws -> SZProcessResult {
         calls.withLock { $0.append(Call(launchPath: launchPath, arguments: arguments, input: input)) }
         return SZProcessResult(exitCode: exitCode, output: output)

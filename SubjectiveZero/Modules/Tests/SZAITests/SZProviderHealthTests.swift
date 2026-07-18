@@ -27,7 +27,7 @@ private final class ScriptedStubRunner: SZProcessRunning {
     func run(
         _ launchPath: String, _ arguments: [String],
         environment: [String: String], currentDirectoryURL: URL?,
-        input: Data?, timeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
+        input: Data?, timeout: TimeInterval?, inactivityTimeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
     ) async throws -> SZProcessResult {
         calls.withLock { $0.append(arguments) }
         for script in scripts where arguments.starts(with: script.argvPrefix) {

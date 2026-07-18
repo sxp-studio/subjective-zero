@@ -8,11 +8,14 @@
 //   - output drain: `readabilityHandler` bridged to an `AsyncStream<Data>` (chunked, not byte-by-byte
 //     AsyncBytes), collected by a child task;
 //   - termination: `terminationHandler` bridged to an `AsyncStream` signal;
-//   - timeout: a task-group race against `Task.sleep`;
+//   - timeouts: a task-group race against `Task.sleep` — a wall-clock deadline, and an optional
+//     inactivity deadline that every output chunk pushes forward (the drain and the watchdog share one
+//     atomic last-output timestamp; a plain counter, not a lock — see `SZActivityClock`);
 //   - cancellation: `withTaskCancellationHandler` SIGTERMs the process.
 // We signal by pid (Sendable Int32), never capturing the non-Sendable `Process` in a @Sendable
 // closure.
 import Foundation
+import Synchronization
 
 /// The outcome of one subprocess run. `exitCode` is 124 on timeout (matching `timeout(1)`).
 public struct SZProcessResult: Sendable {
@@ -46,11 +49,27 @@ public protocol SZProcessRunning: Sendable {
         currentDirectoryURL: URL?,
         input: Data?,
         timeout: TimeInterval?,
+        inactivityTimeout: TimeInterval?,
         onOutput: (@Sendable (String) -> Void)?
     ) async throws -> SZProcessResult
 }
 
 public extension SZProcessRunning {
+    /// Source-compatible overload for a spawn with no inactivity bound (wall clock only).
+    func run(
+        _ launchPath: String,
+        _ arguments: [String],
+        environment: [String: String],
+        currentDirectoryURL: URL?,
+        input: Data?,
+        timeout: TimeInterval?,
+        onOutput: (@Sendable (String) -> Void)?
+    ) async throws -> SZProcessResult {
+        try await run(launchPath, arguments, environment: environment,
+                      currentDirectoryURL: currentDirectoryURL, input: input,
+                      timeout: timeout, inactivityTimeout: nil, onOutput: onOutput)
+    }
+
     /// Source-compatible overload for the common no-stdin spawn.
     func run(
         _ launchPath: String,
@@ -62,7 +81,7 @@ public extension SZProcessRunning {
     ) async throws -> SZProcessResult {
         try await run(launchPath, arguments, environment: environment,
                       currentDirectoryURL: currentDirectoryURL, input: nil,
-                      timeout: timeout, onOutput: onOutput)
+                      timeout: timeout, inactivityTimeout: nil, onOutput: onOutput)
     }
 }
 
@@ -77,6 +96,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         currentDirectoryURL: URL? = nil,
         input: Data? = nil,
         timeout: TimeInterval? = nil,
+        inactivityTimeout: TimeInterval? = nil,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> SZProcessResult {
         let process = Process()
@@ -125,11 +145,25 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         }
         let pid = process.processIdentifier
 
+        // Inactivity bound: `inactivityTimeout` seconds of SILENCE kills the turn, where every output
+        // chunk pushes the deadline forward — an agent still streaming progress is alive by definition,
+        // however long the turn runs. `timeout` stays the wall-clock cap for a CLI that wedges (or
+        // streams) forever. The drain task sees every chunk, so it stamps the clock; the watchdog in
+        // `awaitExit` sleeps to the stamped deadline.
+        let activity: SZActivityClock? = inactivityTimeout != nil ? SZActivityClock() : nil
+        let observedOutput: (@Sendable (String) -> Void)?
+        if let activity {
+            observedOutput = { chunk in activity.touch(); onOutput?(chunk) }
+        } else {
+            observedOutput = onOutput
+        }
+
         // Drain stdout+stderr in its own task — a *local* buffer, so no synchronization. An explicit
         // Task (not `async let`) so the kill path below can bound and cancel it.
-        let collectTask = Task { await Self.collect(pipe.fileHandleForReading, onOutput: onOutput) }
+        let collectTask = Task { await Self.collect(pipe.fileHandleForReading, onOutput: observedOutput) }
 
-        let timedOut = await Self.awaitExit(terminations, timeout: timeout, pid: pid)
+        let timedOut = await Self.awaitExit(terminations, timeout: timeout,
+                                            inactivityTimeout: inactivityTimeout, activity: activity, pid: pid)
         let cancelled = Task.isCancelled
         // On timeout the cancellation handler didn't fire; on cancel it only SIGTERM'd. Either way
         // SIGKILL so the process actually exits, the pipe reaches EOF (`collect` completes), and we
@@ -232,8 +266,11 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         return output
     }
 
-    /// Wait for the process to exit, returning `true` if `timeout` won the race. SIGTERMs on cancel.
-    private static func awaitExit(_ terminations: AsyncStream<Void>, timeout: TimeInterval?, pid: Int32) async -> Bool {
+    /// Wait for the process to exit, returning `true` if either deadline — wall clock, or silence past
+    /// `inactivityTimeout` — won the race. SIGTERMs on cancel.
+    private static func awaitExit(_ terminations: AsyncStream<Void>, timeout: TimeInterval?,
+                                  inactivityTimeout: TimeInterval? = nil, activity: SZActivityClock? = nil,
+                                  pid: Int32) async -> Bool {
         await withTaskCancellationHandler {
             await withTaskGroup(of: Bool.self) { group in
                 group.addTask {
@@ -246,6 +283,19 @@ public struct SZSystemProcessRunner: SZProcessRunning {
                         catch { return false }       // cancelled because the process exited first
                     }
                 }
+                if let inactivityTimeout, let activity {
+                    group.addTask {
+                        // Sleep to the CURRENT silence deadline. A chunk that lands while we sleep moves
+                        // the deadline, so on wake either it moved (loop and sleep again) or the window
+                        // truly elapsed in silence.
+                        while true {
+                            let deadline = activity.lastActivity.advanced(by: .seconds(inactivityTimeout))
+                            if ContinuousClock.now >= deadline { return true }
+                            do { try await Task.sleep(until: deadline, clock: .continuous) }
+                            catch { return false }   // cancelled because the process exited first
+                        }
+                    }
+                }
                 let timedOut = await group.next() ?? false
                 group.cancelAll()
                 return timedOut
@@ -253,6 +303,27 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         } onCancel: {
             signalProcessTree(pid, SIGTERM)
         }
+    }
+}
+
+/// The one shared datum between the output drain (writer) and the inactivity watchdog (reader): when
+/// output last arrived. A single atomic timestamp — not a lock, and not shared *mutable structure* —
+/// because the two sides never need mutual exclusion, only a coherent read of "how fresh".
+/// Stored as nanoseconds since the clock's creation so it fits an `Atomic<UInt64>`.
+private final class SZActivityClock: Sendable {
+    private let start = ContinuousClock.now
+    private let sinceStartNanos = Atomic<UInt64>(0)
+
+    /// Stamp "output arrived now" — pushes the watchdog's deadline forward.
+    func touch() {
+        let elapsed = (ContinuousClock.now - start).components
+        let nanos = UInt64(elapsed.seconds) &* 1_000_000_000 &+ UInt64(elapsed.attoseconds / 1_000_000_000)
+        sinceStartNanos.store(nanos, ordering: .relaxed)
+    }
+
+    /// The spawn instant until the first chunk, then the latest chunk's instant.
+    var lastActivity: ContinuousClock.Instant {
+        start.advanced(by: .nanoseconds(Int64(sinceStartNanos.load(ordering: .relaxed))))
     }
 }
 

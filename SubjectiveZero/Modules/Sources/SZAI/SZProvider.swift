@@ -42,6 +42,10 @@ public struct SZAgentRunRequest: Sendable {
     public var reasoningEffort: String?
     public var fastMode: Bool
     public var timeout: TimeInterval?
+    /// Max SILENCE (seconds without output) before the turn is killed; every output chunk resets the
+    /// clock. nil = no silence bound. Rides alongside `timeout`, which stays the wall-clock hard cap —
+    /// a CLI that is still streaming is alive, but one can also wedge (or loop) while emitting forever.
+    public var inactivityTimeout: TimeInterval?
     public var onOutput: (@Sendable (String) -> Void)?
 
     public init(
@@ -55,6 +59,7 @@ public struct SZAgentRunRequest: Sendable {
         reasoningEffort: String? = nil,
         fastMode: Bool = false,
         timeout: TimeInterval? = nil,
+        inactivityTimeout: TimeInterval? = nil,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) {
         self.prompt = prompt
@@ -67,6 +72,7 @@ public struct SZAgentRunRequest: Sendable {
         self.reasoningEffort = reasoningEffort
         self.fastMode = fastMode
         self.timeout = timeout
+        self.inactivityTimeout = inactivityTimeout
         self.onOutput = onOutput
     }
 }
@@ -320,7 +326,8 @@ public extension SZProvider {
         let result = try await runner.run(
             launch.executable, launch.arguments,
             environment: launch.environment, currentDirectoryURL: request.workingDirectory,
-            timeout: request.timeout, onOutput: request.onOutput
+            input: nil, timeout: request.timeout, inactivityTimeout: request.inactivityTimeout,
+            onOutput: request.onOutput
         )
         var outcome = parse(output: result.output, exitCode: result.exitCode, preallocatedSessionID: preallocated)
         if outcome.sessionID == nil { outcome.sessionID = request.resumeSessionID }
