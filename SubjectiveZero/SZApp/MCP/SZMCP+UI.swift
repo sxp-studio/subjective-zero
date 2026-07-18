@@ -83,7 +83,7 @@ extension SZHostBridge {
                  ]),
             tool("ui_stop", "Stop the in-flight run (mirrors the HUD Stop button) — cancels the Director and every coding agent. Returns {status: \"stopped\"} if a run was cancelled, or {status: \"not_running\"} if nothing was in flight.",
                  properties: [:]),
-            tool("ui_send_chat", "Send a chat message to an agent. `scope` is a node id (chat that node's Coding Agent) or \"director\" (the Director Agent). Every accepted message returns a `message_id`; `status` is \"queued\" (enqueued — delivers as a real turn when the recipient is free; poll ui_message_status if you need the outcome) or \"recorded\" (a mid-run steer, folded into the recipient's next prompt). A fresh Director Agent chat uses the active provider; resuming continues on the session's own CLI.",
+            tool("ui_send_chat", "Send a chat message to an agent. `scope` is a node id (chat that node's Coding Agent) or \"director\" (the Director Agent). Every accepted message returns a `message_id`; `status` is \"queued\" (enqueued — delivers as a real turn when the recipient is free; poll ui_message_status if you need the outcome), \"recorded\" (a mid-run steer, folded into the recipient's next prompt), or \"rejected\" (pre-flight refusal — the message will NOT deliver; `detail` says why). A fresh Director Agent chat uses the active provider; resuming continues on the session's own CLI.",
                  properties: [
                     "scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"],
                     "message": ["type": "string"],
@@ -501,6 +501,12 @@ extension SZHostBridge {
                                      "detail": "the run starts when your current turn ends"])
         }
         host.startRun(instruction: instruction)   // returns immediately; the run streams into the tabs
+        // startRun can refuse synchronously (its atomic claim hits a chat turn / delivery holding a
+        // work-set node) — answering "started" then would leave the caller waiting on a run that
+        // doesn't exist. `isRunning` right after the call is the truth (both on the MainActor).
+        guard host.isRunning else {
+            return SZJSONRPC.encode(["status": "refused", "reason": host.status])
+        }
         return SZJSONRPC.encode(["status": "started", "provider": host.activeProviderID])
     }
 
@@ -514,8 +520,12 @@ extension SZHostBridge {
         // message to the steer record paths instead of the user flow. Every enqueued/recorded message
         // carries its id so the caller can poll `ui_message_status`.
         switch host.sendChat(scope: scope, message: message, origin: .agent) {
-        case .sent:
-            return SZJSONRPC.encode(["status": "sent", "scope": scope.key])
+        case .rejected:
+            // A pre-flight refusal (provider/host not ready, dead mention) — the message will NOT
+            // deliver. The old wire meaning of "sent" was "a turn started"; answering that here
+            // would tell the caller a dropped message succeeded.
+            return SZJSONRPC.encode(["status": "rejected", "scope": scope.key,
+                                     "detail": "not deliverable — \(host.status)"])
         case .queued(let id):
             return SZJSONRPC.encode(["status": "queued", "message_id": id.uuidString, "scope": scope.key])
         case .recordedForReconcile(let id):

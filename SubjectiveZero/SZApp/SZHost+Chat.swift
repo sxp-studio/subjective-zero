@@ -145,12 +145,12 @@ extension SZHost {
     /// user messaging).
     enum SZChatSendOrigin { case user, agent }
 
-    /// How `sendChat` routed a message: answered synchronously by a transient guard reply (`.sent`,
-    /// no envelope), enqueued for delivery (`.queued` — possibly starting immediately; the id is
-    /// the envelope's, pollable via `ui_message_status`), or recorded as a `.steer` for the
-    /// reconcile loop (`.recordedForReconcile`).
+    /// How `sendChat` routed a message: refused synchronously by a transient guard reply
+    /// (`.rejected` — no envelope, nothing will deliver), enqueued for delivery (`.queued` —
+    /// possibly starting immediately; the id is pollable via `ui_message_status`), or recorded as
+    /// a `.steer` for the reconcile loop (`.recordedForReconcile`).
     enum SZChatSendRouting: Equatable {
-        case sent
+        case rejected
         case queued(UUID)
         case recordedForReconcile(UUID)
     }
@@ -167,7 +167,7 @@ extension SZHost {
     func sendChat(scope: SZChatScope, message: String, attachments: [URL] = [],
                   origin: SZChatSendOrigin = .user) -> SZChatSendRouting {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !attachments.isEmpty else { return .sent }
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return .rejected }
 
         // V1 routing (SZChatRouting — the policy seam): a USER message that leads with a mention
         // goes to that entity's agent; `scope` (the composing tab) is only the fallback. Agent-
@@ -184,7 +184,7 @@ extension SZHost {
                     SZChatMessage(role: .assistant,
                                   text: "(that mention's node no longer exists — message not sent)",
                                   transient: true), to: scope)
-                return .sent
+                return .rejected
             }
             scope = resolved
         }
@@ -206,7 +206,9 @@ extension SZHost {
             // A node the run does NOT own falls through to the normal enqueue path below.
         }
 
-        showChat(scope)   // reveal/focus the tab — 1:1 with clicking it before typing
+        // A user send reveals/focuses the tab — 1:1 with clicking it before typing. An AGENT send
+        // must never steal the user's active tab (background traffic); it surfaces without focus.
+        if origin == .user { showChat(scope) } else { openChatTab(scope) }
 
         // A pre-flight rejection: shown in the tab but TRANSIENT — never flushed, never recapped.
         // It isn't conversation; restoring "(busy…)" as assistant history (or replaying it to a
@@ -215,7 +217,7 @@ extension SZHost {
         @discardableResult
         func reject(_ note: String) -> SZChatSendRouting {
             store.appendChatMessage(SZChatMessage(role: .assistant, text: note, transient: true), to: scope)
-            return .sent
+            return .rejected
         }
 
         // Stage attachments on disk first (the native layer owns the bytes): copy each picked/dropped/
@@ -255,7 +257,10 @@ extension SZHost {
         // means the message waits its turn, visibly queued on its bubble. Envelope BEFORE the
         // transcript flush: a crash between the two leaves envelope-without-bubble (tolerated —
         // redelivery re-appends), never bubble-without-envelope (silent loss).
+        // The envelope's id IS the bubble's id: the panel's queued chip looks messages up by the
+        // bubble id, and one shared id keeps envelope, bubble, and `ui_message_status` congruent.
         let envelope = SZMessageEnvelope(
+            id: userMessage.id,
             recipient: scope.key, sender: origin == .user ? "user" : nil, intent: .chat,
             message: userMessage, transcriptMessageID: userMessage.id)
         mailbox.enqueue(envelope)

@@ -60,16 +60,27 @@ extension SZHost {
         let turnResources = Self.turnResources(for: scope)
         var selfClaim: SZClaimToken?
         if let claim {
-            assert(ledger.holder(of: .transcript(scope)) == claim,
-                   "deliver: caller claim '\(claim.label)' does not hold transcript/\(scope.key)")
+            // A cancelled run's zombie dispatch presents its RELEASED token while someone else (a
+            // pump delivery, a new run) may already own the scope — streaming would interleave two
+            // turns in one transcript and clobber its in-flight marker. Bow out; the strategy
+            // treats it like any cancelled turn. A holder mismatch WITHOUT cancellation is a real
+            // claim-model divergence and stays a debug tripwire.
+            guard ledger.holder(of: .transcript(scope)) == claim else {
+                assert(Task.isCancelled,
+                       "deliver: caller claim '\(claim.label)' does not hold transcript/\(scope.key)")
+                throw CancellationError()
+            }
         } else {
             let token = SZClaimToken(label: turnLabel(for: scope))
             if ledger.tryAcquire(turnResources, as: token) {
                 selfClaim = token
+            } else if Task.isCancelled {
+                // Zombie path post-cancel: the scope has a new owner — do not stream into it.
+                throw CancellationError()
             } else {
-                // Shadow-mode tripwire: the legacy guards (chatInFlight / isRunning) should make
-                // contention here impossible. A firing assertion means the claim model and
-                // reality disagree — fix the model, don't ship the divergence.
+                // Tripwire: the admission paths (pump claim / run claim) should make contention
+                // here impossible. A firing assertion means the claim model and reality disagree —
+                // fix the model, don't ship the divergence.
                 assertionFailure("deliver: could not claim \(scope.key) — blocked by "
                     + ledger.blockers(of: turnResources).map(\.label).joined(separator: ", "))
             }
@@ -79,7 +90,10 @@ extension SZHost {
         let started = Date()
         defer {
             if let selfClaim { ledger.releaseAll(of: selfClaim) }
-            inFlightAssistantIDs[scope.key] = nil
+            // Ownership-checked: if a later turn overwrote this scope's marker (a race this guard
+            // is the last line of defense against), leave THEIRS in place — nilling it would let a
+            // flush persist their half-streamed reply.
+            if inFlightAssistantIDs[scope.key] == assistantID { inFlightAssistantIDs[scope.key] = nil }
             store.setChatDuration(Date().timeIntervalSince(started), assistantID, in: scope)
             // A turn finishing off-screen marks its tab unread (static dot until visited).
             if scope.key != activeChatScope.key { unreadScopes.insert(scope.key) }
@@ -111,7 +125,8 @@ extension SZHost {
     /// see `isLocked` in `SZNodeEditorPanel`), so this doesn't touch `isChatting`.
     @MainActor
     func streamCodingAgent(
-        node: SZNodeID, request: SZAgentRunRequest, provider: any SZProvider
+        node: SZNodeID, request: SZAgentRunRequest, provider: any SZProvider,
+        claim: SZClaimToken? = nil
     ) async throws -> SZAgentRunResult {
         let scope = SZChatScope.node(node)
         // Debug test affordance: force this node to fail its first dispatch once — report `needsInput`
@@ -125,10 +140,11 @@ extension SZHost {
             throw SZMCPError.message("(debug) forced needsInput: \(blocker)")
         }
         openChatTab(scope)
-        // Under the run's claim (it holds every work-set node + transcript). After an eager
-        // cancelRun, `runClaim` is nil and the zombie turn self-claims the freed scope instead.
+        // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
+        // A cancelled run's zombie dispatch presents its released token; deliver detects that and
+        // bows out instead of double-streaming into a scope someone else now owns.
         let result = try await deliver(scope: scope, request: request, provider: provider,
-                                       claim: runClaim).result
+                                       claim: claim ?? runClaim).result
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
         // (timeout, CLI error) is invisible and the node reads as a silent Draft. `deliver` already
         // streamed the turn into `scope`; this adds the terminal error line beneath it.
@@ -241,7 +257,7 @@ extension SZHost {
     /// host degrades gracefully. Kept separate from `startRun` so its run body reads as build-context → run.
     private func makeOrchestrationContext(
         providerID: String, mcpPort: UInt16, projectURL: URL, cacheDirectory: URL,
-        instruction: String, directorAlreadyBriefed: Bool
+        instruction: String, directorAlreadyBriefed: Bool, claim: SZClaimToken
     ) -> SZOrchestrationContext {
         SZOrchestrationContext(
             providerID: providerID,
@@ -250,10 +266,13 @@ extension SZHost {
             generationSettings: resolvedGenerationSettings(for: providerID),
             store: store, mcpPort: mcpPort,
             projectURL: projectURL, cacheDirectory: cacheDirectory,
-            // Stream each coding agent's output into its node's Coding Agent tab.
+            // Stream each coding agent's output into its node's Coding Agent tab, under THIS run's
+            // claim (captured, not read live: after a cancel, a zombie dispatch must present its
+            // own released token — which deliver detects — never a NEWER run's live claim).
             turnRunner: { [weak self] node, request, provider in
                 guard let self else { return try await provider.run(request) }
-                return try await self.streamCodingAgent(node: node, request: request, provider: provider)
+                return try await self.streamCodingAgent(node: node, request: request,
+                                                        provider: provider, claim: claim)
             },
             // A chat-triggered run carries the user's words into the decompose prompt — unless the
             // Director's own chat turn requested it, in which case that turn WAS the decompose.
@@ -353,8 +372,9 @@ extension SZHost {
             defer {
                 // Release the CAPTURED claim, not `runClaim` — after an eager `cancelRun` this is
                 // the zombie task's idempotent second settle, and `runClaim` may already belong to
-                // a newer run (guarded below so we never clobber it).
-                sweepUnconsumedSteers()   // steers are run-scoped; resume any parked ack waiters
+                // a newer run (guarded so we never clobber it — including the sweep: an unguarded
+                // sweep here would fail a NEW run's queued steers when the zombie finally exits).
+                if runClaim == claim { sweepUnconsumedSteers() }
                 ledger.releaseAll(of: claim)
                 if runClaim == claim { runClaim = nil }
                 if mailbox.steerConsumer == claim { mailbox.steerConsumer = nil }
@@ -368,7 +388,8 @@ extension SZHost {
                 let sessions = try await orchestrator.run(makeOrchestrationContext(
                     providerID: providerID, mcpPort: mcpPort,
                     projectURL: projectURL, cacheDirectory: cacheDirectory,
-                    instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed))
+                    instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed,
+                    claim: claim))
                 // Remember each node's coding-agent session so a chat turn can resume it. A
                 // freshly-minted session replaces any disk-restored one → off probation.
                 for (node, sessionID) in sessions {

@@ -136,6 +136,9 @@ final class SZHost {
     var activeDeliveries = 0
     /// True for the duration of `switchProject` — the pump must not start a turn mid-swap.
     var pumpSuspended = false
+    /// The persistable queue content of the last `flushMessageQueue` write (id:state lines) — the
+    /// skip-if-unchanged signature. Reset on project switch so the new project always flushes.
+    var lastFlushedQueueSignature: [String]?
 
     // Panel layout — the window's split tree (SZPanelLayoutState, SZCore), host-owned like the chat
     // tab state below; mutated via SZHost+PanelLayout.swift (header drags, dividers, close/reopen),
@@ -612,6 +615,7 @@ final class SZHost {
         // at the OLD project, and a flush-empty here would delete that project's queue file (the
         // envelopes that were supposed to survive the switch). Parked waiters resume `.removed`.
         mailbox.reset()
+        lastFlushedQueueSignature = nil   // the new project's first flush must not be skipped
         assert(!ledger.anyWaiting && !mailbox.anyAwaiting,
                "project teardown with a parked wait — a continuation would leak")
         forcedFailNodes = [:]

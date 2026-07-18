@@ -619,6 +619,9 @@ struct SZApp: App {
                               // changes (Observation) so disabled states / toggles stay live.
                               gearMenu: AnyView(gearMenuContent))
         case .chat:
+            // One pass over the (small) live queue per body evaluation, not a scan per bubble row —
+            // the panel calls isQueued for every user message on every streamed token.
+            let queuedIDs = Set(host.mailbox.envelopes.lazy.filter { $0.state == .queued }.map(\.id))
             SZChatPanel(store: host.store, scope: host.activeChatScope, tabs: host.chatTabs,
                         project: host.store.project, provider: host.activeProviderID,
                         streaming: host.chatInFlight.contains(host.activeChatScope.key),
@@ -627,7 +630,7 @@ struct SZApp: App {
                         workingScopes: host.chatInFlight,
                         unreadScopes: host.unreadScopes,
                         needsInputScopes: host.needsInputScopes,
-                        isQueued: { host.mailbox.state(of: $0) == .queued },
+                        isQueued: { queuedIDs.contains($0) },   // envelope id == bubble id (sendChat)
                         onSend: { host.sendChat(scope: host.activeChatScope, message: $0, attachments: $1) },
                         onSelectScope: { host.showChat($0) },
                         onCloseTab: { host.closeChatTab($0) },

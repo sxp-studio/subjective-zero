@@ -39,11 +39,17 @@ extension SZHost {
 
     /// Flush the undelivered message queue to `.staging/message-queue.json` — wired to
     /// `mailbox.onChange`, so every enqueue/state change lands on disk (KB-scale, same no-dirty-
-    /// tracking stance as transcripts). `SZMessageQueueIO` filters to what redelivery needs.
+    /// tracking stance as transcripts). Skips the write when the PERSISTABLE subset didn't change:
+    /// most transitions can't affect it (steers never persist; `.delivering` reloads as `.queued`
+    /// anyway), and a reconcile drain would otherwise burst N byte-identical writes.
     /// NOTE: `mailbox.reset()` deliberately does NOT fire onChange — project teardown must never
     /// write an empty queue over the OLD project's file (see clearPerProjectState).
     func flushMessageQueue() {
         guard let url = loadedProjectURL else { return }
+        let persistable = SZMessageQueueIO.persistable(mailbox.envelopes)
+            .map { "\($0.id):\($0.state == .delivering ? SZMessageDeliveryState.queued : $0.state)" }
+        guard persistable != lastFlushedQueueSignature else { return }
+        lastFlushedQueueSignature = persistable
         try? SZMessageQueueIO.save(mailbox.envelopes, projectURL: url)
     }
 
@@ -95,6 +101,7 @@ extension SZHost {
     private func restoreMessageQueue(live: Set<String>) {
         guard let url = loadedProjectURL else { return }
         var restoredIDs = Set<UUID>()
+        var checkedScopes = Set<String>()   // the answered-check applies to each scope's FIFO head only
         for envelope in SZMessageQueueIO.load(projectURL: url) {
             guard envelope.intent == .chat, live.contains(envelope.recipient),
                   let scope = SZChatScope(key: envelope.recipient) else { continue }
@@ -105,8 +112,13 @@ extension SZHost {
                 return a
             }
             if let bubbleID = restored.transcriptMessageID {
+                // Deliveries are FIFO per scope, so only the FIRST pending envelope can have been
+                // mid-delivery at the crash — later envelopes' bubbles are followed by EARLIER
+                // messages' replies (replies append at the end, after every queued bubble), and
+                // treating those as "answered" silently dropped the later messages.
                 let messages = store.messages(for: scope)
-                if let i = messages.firstIndex(where: { $0.id == bubbleID }),
+                if checkedScopes.insert(scope.key).inserted,
+                   let i = messages.firstIndex(where: { $0.id == bubbleID }),
                    messages[(i + 1)...].contains(where: { $0.role == .assistant && !$0.transient && !$0.text.isEmpty }) {
                     continue   // already answered — the queue flush just never caught up
                 }

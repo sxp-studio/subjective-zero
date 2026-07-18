@@ -32,6 +32,7 @@ extension SZHost {
     /// delivery. Steers are never pumped (their consumer drains them).
     func pumpMailboxes() {
         guard !pumpSuspended else { return }
+        fireQueuedDirectorRunIfPossible()
         for key in mailbox.recipientsWithPending {
             guard activeDeliveries < Self.deliveryCap else { break }
             guard let scope = SZChatScope(key: key),
@@ -47,6 +48,19 @@ extension SZHost {
                 await performChatTurn(envelopeID, scope: scope, claim: claim)
             }
         }
+    }
+
+    /// Start the run a Director turn queued (`ui_run` mid-turn → `pendingDirectorRun`) the moment
+    /// it can actually claim what it needs. Runs at the head of every pump pass — i.e. on every
+    /// ledger release — so the ORDERING is structural: the promised run always beats the next
+    /// queued Director message to the freed transcript, and a start refused by a transient claim
+    /// (a concurrent delivery holding a work-set node) retries on the next release instead of
+    /// being dropped. Cleared only on a SUCCESSFUL start (or by stopping the Director's turn).
+    private func fireQueuedDirectorRunIfPossible() {
+        guard let instruction = pendingDirectorRun, !isRunning,
+              ledger.holder(of: .transcript(.director)) == nil else { return }
+        startRun(instruction: instruction, directorAlreadyBriefed: true)
+        if isRunning { pendingDirectorRun = nil }
     }
 
     /// Deliver one envelope as a real agent turn on its scope — the body `sendChat` used to run
@@ -152,7 +166,9 @@ extension SZHost {
                 let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
                 reply(empty ? "(stopped)" : "\n(stopped)")
                 status = "chat turn stopped"
-                pendingDirectorRun = nil   // a stopped turn's queued run dies with it
+                // Only the DIRECTOR turn's Stop kills its own queued run — stopping some other
+                // scope's concurrent delivery must not discard a run the Director promised.
+                if scope == .director { pendingDirectorRun = nil }
                 mailbox.markProcessed(envelopeID)
                 return
             }
@@ -189,14 +205,10 @@ extension SZHost {
             status = "chat failed"
             mailbox.markFailed(envelopeID, reason: "\(error)")
         }
-        // A ui_run recorded during THIS Director turn starts now — AFTER the ack and AFTER this
-        // delivery releases the director transcript, or startRun's atomic acquire would hit our own
-        // claim and silently drop the queued run.
-        if scope == .director, let instruction = pendingDirectorRun {
-            releaseClaim()
-            pendingDirectorRun = nil
-            startRun(instruction: instruction, directorAlreadyBriefed: true)
-        }
+        // A ui_run recorded during THIS Director turn fires from the pump: the defer's release
+        // triggers `fireQueuedDirectorRunIfPossible` at the head of the very next pump pass —
+        // after our claim is gone (so startRun can take the transcript) and BEFORE the next queued
+        // Director message is considered (so the promised run wins the freed transcript).
     }
 
     /// The per-scope prompt framing — cold-start seeds, Director framing, debug framing, recap
