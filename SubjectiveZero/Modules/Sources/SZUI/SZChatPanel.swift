@@ -557,7 +557,8 @@ public struct SZChatPanel: View {
                 }
                 if isUser, isQueued(message.id) {
                     // Waiting in the mailbox — delivers when the agent frees (a run holds it, or an
-                    // earlier message is still being answered). Clears the moment delivery starts.
+                    // earlier message is still being answered). Breathes softly while it waits and
+                    // fades out the moment delivery starts.
                     HStack(spacing: 4) {
                         Image(systemName: "clock")
                         Text("queued")
@@ -565,6 +566,8 @@ public struct SZChatPanel: View {
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .textCase(.uppercase)
                     .foregroundStyle(.tertiary)
+                    .modifier(SZQueuedBreathe())
+                    .transition(.opacity)
                 }
                 if working {
                     HStack(spacing: 7) {   // dots + live elapsed timer while the turn runs
@@ -586,6 +589,8 @@ public struct SZChatPanel: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Drives the queued chip's fade-in/out (the .transition above needs an animated change).
+        .animation(.easeInOut(duration: 0.35), value: isQueued(message.id))
     }
 
     // The Codex-style input card: a rounded two-row surface floating on the panel background —
@@ -1132,6 +1137,17 @@ private struct SZStopPulse: ViewModifier {
         TimelineView(.animation) { context in
             let phase = 0.5 + 0.5 * sin(context.date.timeIntervalSinceReferenceDate * 3)
             content.opacity(0.55 + 0.45 * phase)
+        }
+    }
+}
+
+/// The queued chip's soft breathe — the Stop pulse's calmer sibling (slower, dimmer): it says
+/// "waiting its turn", not "act now".
+private struct SZQueuedBreathe: ViewModifier {
+    func body(content: Content) -> some View {
+        TimelineView(.animation) { context in
+            let phase = 0.5 + 0.5 * sin(context.date.timeIntervalSinceReferenceDate * 1.6)
+            content.opacity(0.45 + 0.4 * phase)
         }
     }
 }
