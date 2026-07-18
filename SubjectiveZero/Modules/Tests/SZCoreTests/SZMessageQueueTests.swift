@@ -209,7 +209,7 @@ private func chatEnvelope(to recipient: String, text: String, sender: String? = 
     let queue = SZMessageQueue()
     let ledger = SZResourceLedger()
     let run = SZClaimToken(label: "run")
-    queue.steerConsumer = run
+    // The steer consumer IS whoever holds `.run` — no mirror state to register.
     #expect(ledger.tryAcquire([.run, .transcript(.director)], as: run))
 
     let node = SZNodeID().uuidString
@@ -248,8 +248,8 @@ private func chatEnvelope(to recipient: String, text: String, sender: String? = 
     let queue = SZMessageQueue()
     let ledger = SZResourceLedger()
     let run = SZClaimToken(label: "run"), chat = SZClaimToken(label: "chat turn")
-    queue.steerConsumer = run
     let node = SZNodeID()
+    #expect(ledger.tryAcquire([.run], as: run))   // the consumer edge derives from the .run holder
     #expect(ledger.tryAcquire([.node(node)], as: chat))
 
     let steer = chatEnvelope(to: node.uuidString, text: "steer", sender: "director", intent: .steer)

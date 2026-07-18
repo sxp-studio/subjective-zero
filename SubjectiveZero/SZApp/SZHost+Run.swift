@@ -357,8 +357,7 @@ extension SZHost {
             narrateDirector("Run not started — \(holders) is still working. Wait for it to finish (or stop it), then build again.")
             return
         }
-        runClaim = claim
-        mailbox.steerConsumer = claim   // `.steer` ack waits edge to the run for its duration
+        runClaim = claim   // `.steer` ack waits derive their consumer from the `.run` holder
         runWorkSet = workSet
         status = "running \(providerID)…"
         showChat(.director)                                  // a run narrates into the Director Agent tab
@@ -377,7 +376,6 @@ extension SZHost {
                 if runClaim == claim { sweepUnconsumedSteers() }
                 ledger.releaseAll(of: claim)
                 if runClaim == claim { runClaim = nil }
-                if mailbox.steerConsumer == claim { mailbox.steerConsumer = nil }
                 runTask = nil
                 runWorkSet = []            // run over → the work set is cleared (a node chat runs with it empty)
                 pinnedContracts = pinnedContracts.filter { hiddenPieces.contains($0.key) }
@@ -437,7 +435,6 @@ extension SZHost {
         if let claim = runClaim {
             sweepUnconsumedSteers()
             ledger.releaseAll(of: claim)
-            if mailbox.steerConsumer == claim { mailbox.steerConsumer = nil }
             runClaim = nil
         }
         status = "run cancelled"

@@ -124,11 +124,6 @@ public final class SZMessageQueue {
     public private(set) var tombstones: [SZMessageEnvelope] = []
     private let tombstoneCap = 128
 
-    /// The token that drains `.steer` envelopes right now (the run), registered by the host at
-    /// run start and cleared at run end. `.steer` ack waits edge to it; nil (no run) parks the
-    /// wait edge-less — only its deadline can end it early.
-    @ObservationIgnored public var steerConsumer: SZClaimToken?
-
     /// Fired after any state change worth persisting (enqueue, mark*, removal) — the host's
     /// flush + pump hook.
     @ObservationIgnored public var onChange: (() -> Void)?
@@ -250,7 +245,9 @@ public final class SZMessageQueue {
     /// Suspend until the envelope reaches a terminal state, and return it (`.processed`/`.failed`
     /// — inspect `failureReason` via `envelope(for:)`). The wait registers an edge in `ledger`'s
     /// wait graph so it deadlock-checks against resource waits: `.chat` → the recipient
-    /// transcript's holders/reservers, `.steer` → the current `steerConsumer` (self-edge legal).
+    /// transcript's holders/reservers, `.steer` → whoever holds `.run` at registration — the run
+    /// IS the steer consumer, read straight from the ledger so there is no mirror state to drift
+    /// (self-edge legal; no run parked = edge-less, only the deadline ends it early).
     /// Throws `.wouldDeadlock` at registration, `.deadlineExceeded` when the optional deadline
     /// passes, `.removed` if the envelope is removed, `CancellationError` on task cancellation.
     public func awaitProcessed(_ id: UUID, as token: SZClaimToken, ledger: SZResourceLedger,
@@ -270,7 +267,7 @@ public final class SZMessageQueue {
                     from: token, on: [.transcript(scope)], label: ackLabel)
             }
         case .steer:
-            if let consumer = steerConsumer {
+            if let consumer = ledger.holder(of: .run) {
                 registration = try ledger.registerExternalWait(
                     from: token, onConsumer: consumer, label: ackLabel)
             }

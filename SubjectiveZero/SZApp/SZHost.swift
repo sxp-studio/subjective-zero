@@ -1082,17 +1082,10 @@ final class SZHost {
     /// dict silently overwrote the first).
     @discardableResult
     func recordDirectorMessage(node: SZNodeID, message: String) -> UUID {
-        let envelope = SZMessageEnvelope(
-            recipient: SZChatScope.node(node).key, sender: SZChatScope.directorKey, intent: .steer,
-            message: SZChatMessage(role: .director, text: message))
-        mailbox.enqueue(envelope)
-        store.appendChatMessage(SZChatMessage(role: .director, text: message), to: .node(node))
-        if SZChatScope.node(node).key != activeChatScope.key {   // a Director note lands off-screen → unread dot
-            unreadScopes.insert(SZChatScope.node(node).key)
-        }
-        flushTranscript(.node(node))   // safe mid-stream: the in-flight coding reply is filtered out
+        let id = recordSteer(to: .node(node), sender: SZChatScope.directorKey,
+                             text: message, bubbleText: message)
         print("[SZHost] Director message for node \(node.uuidString.prefix(8)): \(message.prefix(80))")
-        return envelope.id
+        return id
     }
 
     /// Record a CODING agent's mid-run message TO the Director (`ui_send_chat scope=director` during a
@@ -1102,16 +1095,23 @@ final class SZHost {
     /// as fleet-internal traffic in the Director tab (the wire carries no finer sender identity).
     @discardableResult
     func recordDirectorInboxMessage(_ message: String) -> UUID {
+        recordSteer(to: .director, text: message, bubbleText: "(from a coding agent) \(message)")
+    }
+
+    /// The ONE steer-recording choreography both lanes share (Director→node and node→Director):
+    /// enqueue the `.steer` envelope, land the `.director`-role bubble in the recipient's tab,
+    /// mark it unread when off-screen, and flush (safe mid-stream: the in-flight reply is
+    /// filtered out of flushes). Two wrappers, one ritual — the lanes cannot drift.
+    @discardableResult
+    private func recordSteer(to scope: SZChatScope, sender: String? = nil,
+                             text: String, bubbleText: String) -> UUID {
         let envelope = SZMessageEnvelope(
-            recipient: SZChatScope.directorKey, intent: .steer,
-            message: SZChatMessage(role: .director, text: message))
+            recipient: scope.key, sender: sender, intent: .steer,
+            message: SZChatMessage(role: .director, text: text))
         mailbox.enqueue(envelope)
-        store.appendChatMessage(
-            SZChatMessage(role: .director, text: "(from a coding agent) \(message)"), to: .director)
-        if SZChatScope.directorKey != activeChatScope.key {
-            unreadScopes.insert(SZChatScope.directorKey)
-        }
-        flushTranscript(.director)
+        store.appendChatMessage(SZChatMessage(role: .director, text: bubbleText), to: scope)
+        if scope.key != activeChatScope.key { unreadScopes.insert(scope.key) }
+        flushTranscript(scope)
         return envelope.id
     }
 
