@@ -37,6 +37,16 @@ extension SZHost {
         return messages
     }
 
+    /// Flush the undelivered message queue to `.staging/message-queue.json` — wired to
+    /// `mailbox.onChange`, so every enqueue/state change lands on disk (KB-scale, same no-dirty-
+    /// tracking stance as transcripts). `SZMessageQueueIO` filters to what redelivery needs.
+    /// NOTE: `mailbox.reset()` deliberately does NOT fire onChange — project teardown must never
+    /// write an empty queue over the OLD project's file (see clearPerProjectState).
+    func flushMessageQueue() {
+        guard let url = loadedProjectURL else { return }
+        try? SZMessageQueueIO.save(mailbox.envelopes, projectURL: url)
+    }
+
     /// Flush every scope with messages (run end, quit, project save).
     func flushAllTranscripts() {
         for key in store.chat.keys {
@@ -69,6 +79,51 @@ extension SZHost {
         // header + the self-heal in `sendChat`. Snapshot by VALUE: a session re-minted this process
         // won't match the snapshot, so it can never be dropped as stale.
         restoredSessions = agentSessions
+        restoreMessageQueue(live: live)
+    }
+
+    /// Restore the undelivered message queue from `.staging/message-queue.json` — the redelivery
+    /// half of restore. Guards, in order: live scopes only; `.chat` only (a stray persisted steer
+    /// must never leak into a fresh run); attachment urls re-derived from bundle paths; and the
+    /// NO-DOUBLE-EXECUTE check — an envelope whose bubble is already followed by a completed
+    /// assistant reply finished its turn (the crash hit between the turn-end transcript flush and
+    /// the queue flush), so redelivering would re-run a completed turn: token spend, second reply.
+    /// `sanitized` guarantees a surviving assistant message means the turn really completed (empty
+    /// husks are dropped). Also surfaces ORPHANS: a trailing user bubble with no envelope and no
+    /// reply (queue file lost/older) gets a transient note instead of silently looking sent.
+    /// Delivery starts when the switch's deferred pump resumes.
+    private func restoreMessageQueue(live: Set<String>) {
+        guard let url = loadedProjectURL else { return }
+        var restoredIDs = Set<UUID>()
+        for envelope in SZMessageQueueIO.load(projectURL: url) {
+            guard envelope.intent == .chat, live.contains(envelope.recipient),
+                  let scope = SZChatScope(key: envelope.recipient) else { continue }
+            var restored = envelope
+            restored.message.attachments = restored.message.attachments.map { attachment in
+                var a = attachment
+                if let path = a.bundlePath { a.url = url.appending(path: path) }
+                return a
+            }
+            if let bubbleID = restored.transcriptMessageID {
+                let messages = store.messages(for: scope)
+                if let i = messages.firstIndex(where: { $0.id == bubbleID }),
+                   messages[(i + 1)...].contains(where: { $0.role == .assistant && !$0.transient && !$0.text.isEmpty }) {
+                    continue   // already answered — the queue flush just never caught up
+                }
+                restoredIDs.insert(bubbleID)
+            }
+            mailbox.enqueue(restored)
+        }
+        // Orphan sweep: a scope whose LAST persistable message is an unanswered user bubble with no
+        // envelope will never get a reply — say so instead of letting it read as sent.
+        for key in store.chat.keys {
+            guard let scope = SZChatScope(key: key),
+                  let last = store.messages(for: scope).last(where: { !$0.transient }),
+                  last.role == .user, !restoredIDs.contains(last.id) else { continue }
+            store.appendChatMessage(SZChatMessage(
+                role: .assistant, text: "(this message was never delivered — send it again if it still matters)",
+                transient: true), to: scope)
+        }
     }
 
     /// Delete a node through the host — THE delete path for both the editor panel (`onDeleteNodes`)

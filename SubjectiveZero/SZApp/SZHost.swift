@@ -392,6 +392,9 @@ final class SZHost {
         // The pump's wake signal: every ledger release (turn end, run end, cancel) retries queued
         // deliveries. Event-driven — the only other pump entries are enqueue and restore.
         ledger.onAvailabilityChanged = { [weak self] in self?.pumpMailboxes() }
+        // Queue durability: every enqueue/state change flushes the sidecar (queue-before-transcript
+        // at enqueue is what makes the crash direction tolerable — see sendChat).
+        mailbox.onChange = { [weak self] in self?.flushMessageQueue() }
         // Geometry gate follows the restored pref BEFORE anything can render a card (project loads
         // below) — and before the Metal-unavailable early return, which must not strand the gate at
         // its compile-time default while the pref says otherwise.

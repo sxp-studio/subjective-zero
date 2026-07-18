@@ -277,11 +277,16 @@ extension SZHost {
     /// message cold-starts with the transcript recap instead of failing forever against a dead
     /// provider thread. Compared by VALUE: a session minted this process never matches the disk
     /// snapshot, so a transient failure can never cost live conversation context.
-    func dropSessionIfStale(_ scope: SZChatScope) {
+    /// Returns whether a session was actually dropped — the probation-retry signal: a delivery
+    /// that failed AND healed a stale session deserves one cold-start redelivery (the retry needs
+    /// no counter — with the session gone, a second failure can't drop anything, so it terminates).
+    @discardableResult
+    func dropSessionIfStale(_ scope: SZChatScope) -> Bool {
         guard let restored = restoredSessions.removeValue(forKey: scope.key),
-              agentSessions[scope.key] == restored else { return }
+              agentSessions[scope.key] == restored else { return false }
         agentSessions[scope.key] = nil
         persistAgentSessions()
+        return true
     }
 
     /// Copy the picked/dropped/pasted files into `<workingDirectory>/attachments/` and return the staged

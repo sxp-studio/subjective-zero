@@ -202,9 +202,16 @@ public final class SZMessageQueue {
         }
     }
 
-    /// Requeue a terminal envelope for one more delivery attempt (the probation-retry path).
-    /// No-op unless the id is a tombstone.
+    /// Requeue an envelope for another delivery attempt (the probation-retry path). A live
+    /// `.delivering` envelope resets in place (no terminal transition — ack waiters stay parked
+    /// through the retry); a tombstone is revived to the FIFO tail. No-op for unknown ids.
     public func requeue(_ id: UUID) {
+        if let i = envelopes.firstIndex(where: { $0.id == id }) {
+            envelopes[i].state = .queued
+            envelopes[i].failureReason = nil
+            onChange?()
+            return
+        }
         guard let i = tombstones.firstIndex(where: { $0.id == id }) else { return }
         var envelope = tombstones.remove(at: i)
         envelope.state = .queued

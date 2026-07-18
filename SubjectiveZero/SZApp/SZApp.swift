@@ -89,6 +89,7 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     /// SIGKILL/crash skips this and loses only messages since the last completion flush (bounded).
     func applicationWillTerminate(_ notification: Notification) {
         host?.flushAllTranscripts()
+        host?.flushMessageQueue()   // a queued-not-delivered message redelivers next launch
         host?.persistAgentSessions()
         host?.releaseProjectLock()
     }

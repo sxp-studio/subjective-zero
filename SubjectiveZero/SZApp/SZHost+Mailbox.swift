@@ -96,6 +96,15 @@ extension SZHost {
             return fail("(\(providerID) is not ready — open Agent Providers)")
         }
 
+        // Redelivery after a restart whose transcript lost the bubble (queue survived, sidecar
+        // older): re-append it so the conversation shows what is being delivered. The common case —
+        // bubble restored with the transcript — appends nothing (`transcriptMessageID` matches).
+        if let bubbleID = envelope.transcriptMessageID,
+           !store.messages(for: scope).contains(where: { $0.id == bubbleID }) {
+            store.appendChatMessage(envelope.message, to: scope)
+            flushTranscript(scope)
+        }
+
         // Catch-up recap for a session-less delivery — computed now, excluding this envelope's own
         // bubble and every still-queued bubble behind it (they are NOT prior conversation).
         var recapExclusions = Set(mailbox.pending(for: scope.key).compactMap(\.transcriptMessageID))
@@ -147,7 +156,16 @@ extension SZHost {
                 mailbox.markProcessed(envelopeID)
                 return
             }
-            if result.outcome.failed { dropSessionIfStale(scope) }
+            if result.outcome.failed, dropSessionIfStale(scope) {
+                // The probation self-heal just fired: the failure was (very likely) the stale
+                // disk-restored session, and the machinery healed at the exact moment this message
+                // died. ONE cold-start redelivery — bounded structurally: with the session gone, a
+                // second failure can't drop anything, so it lands in markFailed below.
+                reply("(session expired — retrying with a fresh session)")
+                status = "chat turn failed — retrying with a fresh session"
+                mailbox.requeue(envelopeID)
+                return   // the defer's release re-fires the pump → redelivery
+            }
             status = result.outcome.failed ? "chat turn failed" : "chat reply ready"
             let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
             if let detail = await providerFailureDetail(result: result, provider: provider) {
@@ -161,7 +179,12 @@ extension SZHost {
                 mailbox.markProcessed(envelopeID)
             }
         } catch {
-            dropSessionIfStale(scope)
+            if dropSessionIfStale(scope) {
+                reply("(session expired — retrying with a fresh session)")
+                status = "chat turn failed — retrying with a fresh session"
+                mailbox.requeue(envelopeID)
+                return
+            }
             reply("(chat failed: \(error))")
             status = "chat failed"
             mailbox.markFailed(envelopeID, reason: "\(error)")
