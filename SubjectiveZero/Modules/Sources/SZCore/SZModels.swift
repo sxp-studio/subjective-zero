@@ -90,6 +90,36 @@ public enum SZRebuildReason: String, Codable, Sendable {
     /// node silently falls back to its hardcoded defaults. A real fault: `agent_compile_node` refuses to
     /// promote source in this state (`SZPortBindingAudit` calls it an error, not a warning).
     case sourceMismatch
+
+    /// What a successful promote leaves behind — the rule `SZHost.promoteStagedNode` applies.
+    ///
+    /// A promote proves ONE thing: this source compiled against this contract. So it discharges
+    /// `.contractChanged` — the surface it built against. It proves NOTHING about the prompt, so an
+    /// `.intentChanged` whose edit landed after the agent was dispatched must survive: the code implements
+    /// what the prompt used to say, and only a rebuild fixes that.
+    ///
+    /// `.sourceMismatch` is never discharged and never overwritten. It is the stronger claim (code reads ports
+    /// the contract doesn't declare — nil every frame), and `SZStore.updateNode`/`editPorts` both refuse to
+    /// downgrade it, so this must too. It CAN reach a promote: `agent_compile_node` only runs the port audit
+    /// when a staged contract exists (`SZMCP+Agent.swift`), and staging source with no contract is a supported
+    /// path — so an audit-free promote is reachable and must not silently soften the fault to `.intentChanged`.
+    ///
+    /// Keyed on the prompt TEXT rather than the flag, because the flag is not reliable evidence. On a rebuild
+    /// run the node already carries `.contractChanged`, so `SZStore.updateNode`'s "never downgrade a reason
+    /// already raised" guard suppresses the `.intentChanged` raise entirely — comparing flags would miss it and
+    /// the re-brief would vanish without trace.
+    ///
+    /// `dispatchedPrompt == nil` means "no dispatch record" (promoted outside a run — a node-scoped chat turn,
+    /// a library instantiate). Then there is nothing to compare and the pre-existing behaviour stands: clear.
+    public static func afterPromote(
+        existing: SZRebuildReason?,
+        dispatchedPrompt: String??,
+        currentPrompt: String?
+    ) -> SZRebuildReason? {
+        if existing == .sourceMismatch { return .sourceMismatch }     // the stronger claim — never downgraded
+        guard let dispatched = dispatchedPrompt else { return nil }   // not dispatched by a run → clear, as before
+        return dispatched == currentPrompt ? nil : .intentChanged     // intent moved under the agent → keep it dirty
+    }
 }
 
 /// What a generated node card renders between its header and its port rows. `nil` (the absent field on
@@ -198,8 +228,8 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// Raised by the port-delta store edit, which is the only place that can *know* a surface moved: after the
     /// fact, a declared-but-unread port is indistinguishable from a port whose name the code builds by
     /// interpolation (`SZPortBindingAudit` is a string-literal scan; `NodeLibrary/audio-bands` does exactly
-    /// this). Cleared only by `promoteStagedNode`. `SZProjectIO.load` re-establishes it for files nothing
-    /// vouches for.
+    /// this). Cleared only by `promoteStagedNode`, and only the reasons its compile honoured
+    /// (`afterPromote`). `SZProjectIO.load` re-establishes it for files nothing vouches for.
     public var rebuildReason: SZRebuildReason?
 
     /// What the card renders between header and rows (preview thumbnail / authored custom card / nothing).
