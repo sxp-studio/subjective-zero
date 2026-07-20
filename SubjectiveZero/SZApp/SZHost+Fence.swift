@@ -3,9 +3,10 @@
 // disabled inputs live in SwiftUI predicates; before this fence, every `ui_*` MCP graph edit (and
 // any host caller that forgot the view-side filter) reached the unconditional store ops and could
 // delete or re-port a node whose agent was mid-chat or mid-split/merge. The fence is the ONE
-// authoritative check, consulted at the host mutation funnels (delete, the connection trio, input
-// defaults, display, node body, split/merge targets) and by the MCP handlers for their refusal
-// messages; SZStore's `fenceBackstop` debug-assert catches future callers that bypass the funnels.
+// authoritative check, consulted at the host mutation funnels (delete, the connection trio, content
+// updates, input defaults, display, node body, split/merge targets) and by the MCP handlers for their
+// refusal messages; SZStore's `fenceBackstop` debug-assert catches future callers that bypass the
+// funnels — but it is origin-blind and therefore weaker; see `installStoreFenceBackstop`.
 //
 // Two mutation classes, per-operation — never a blanket node lock:
 // - FENCED (this file's concern): delete, connect/disconnect/reconnect, port edits, content
@@ -75,6 +76,16 @@ extension SZHost {
     /// that is neither the run's nor the graph-op path's should have been refused at a funnel —
     /// assert-fail in debug so a future bypass is caught in development, never enforced in release
     /// (store ops stay non-throwing). Called once at start.
+    ///
+    /// DELIBERATELY ORIGIN-BLIND, and therefore strictly weaker than `fenceDenial` — do not "tighten"
+    /// it to `userLockDenies`. A store op carries no `SZMutationOrigin`, so the backstop can only
+    /// catch what NO origin would permit; the agent rule is the permissive one, hence the `runClaim`
+    /// skip. Routing it through the user rule would assert-fail on the fleet's own legitimate writes:
+    /// a run holds its work set, and a coding agent's `ui_update_node` lands on a node that is still
+    /// `kind == .prompt` until it compiles and promotes.
+    ///
+    /// The user-origin rule is enforced where it can see origin — at the funnels
+    /// (`updateNodeContent`, `setInputDefault`, `toggleDisplay`, the connection trio, …).
     func installStoreFenceBackstop() {
         store.fenceBackstop = { [weak self] ids in
             guard let self else { return nil }

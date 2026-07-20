@@ -109,6 +109,20 @@ final class SZHost {
     /// node is left unpinned (its agent authors the boundary). Cleared
     /// at run end (and eagerly at commit/rollback for graph ops).
     internal(set) var pinnedContracts: [SZNodeID: SZNodeContract] = [:]
+    /// The prompt each node's coding agent was briefed WITH — what `promoteStagedNode` holds it to.
+    ///
+    /// A promote proves the source matches the CONTRACT; it proves nothing about the prompt. So if the intent
+    /// moved after the agent was dispatched (the Director's mid-run `ui_update_node` re-brief, or a user edit),
+    /// the node must stay dirty — otherwise it reads clean and current while implementing what the prompt used
+    /// to say. See `SZRebuildReason.afterPromote`.
+    ///
+    /// Written in `streamCodingAgent`, NOT alongside `pinnedContracts` at `startRun`: the Director decomposes
+    /// first and each brief is composed from the live graph after that, so a `startRun` snapshot would flag a
+    /// node whose re-brief the agent actually built. The value is `String?` because a contract-first drawn node
+    /// is legitimately briefed with no prompt; a MISSING key means "no coding turn ran for this node", which is
+    /// a different thing and preserves the pre-existing clear-on-promote behaviour for off-run paths (a
+    /// node-scoped chat turn that compiles, a library instantiate).
+    internal(set) var dispatchPrompts: [SZNodeID: String?] = [:]
     /// The id of the assistant message currently STREAMING per scope (set/cleared by `deliver`).
     /// Transcript flushes exclude it, so a sidecar only ever contains completed turns — a crash
     /// mid-stream restores up to the last finished message, never a half-reply.
@@ -623,6 +637,7 @@ final class SZHost {
         hiddenPieces = []
         pendingGraphOp = nil
         pinnedContracts = [:]
+        dispatchPrompts = [:]
         agentSessions = [:]
         restoredSessions = [:]
         inFlightAssistantIDs = [:]
@@ -733,9 +748,15 @@ final class SZHost {
         store.mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
             project.graph.nodes[i].kind = .generated
-            // The one place a rebuild is discharged: this source was just compiled against this contract, so
-            // whatever surface change raised the flag is now honoured. `editPorts` raises it, promote clears it.
-            project.graph.nodes[i].rebuildReason = nil
+            // The one place a rebuild is discharged — but CONDITIONALLY. This source was just compiled against
+            // this contract, so the surface change that raised the flag is honoured. It says nothing about the
+            // PROMPT: if the intent moved after this agent was dispatched (a Director re-brief mid-run, a user
+            // edit), the code implements what the prompt used to say and the node must stay dirty. Comparing
+            // the briefed prompt rather than the flag also catches the case where the raise was suppressed
+            // because a reason was already present. See `SZRebuildReason.afterPromote`.
+            project.graph.nodes[i].rebuildReason = SZRebuildReason.afterPromote(
+                existing: project.graph.nodes[i].rebuildReason,
+                dispatchedPrompt: dispatchPrompts[id], currentPrompt: project.graph.nodes[i].prompt)
             if var contract = stagedContract {
                 // The host OWNS the typed I/O boundary of any dirty node that shipped a contract at
                 // dispatch — re-pin it over whatever the agent authored (the agent is told the boundary
@@ -993,6 +1014,53 @@ final class SZHost {
         guard store.setInputDefault(node: node, port: port, value: value) else { return value }
         if persist { persistProject() }
         return value
+    }
+
+    /// Update a node's presentation / identity — the ONE funnel for the fenced content-update class,
+    /// shared by the editor's inline prompt commit and `ui_update_node`. Before this existed the GUI
+    /// path reached `store.updateNode` directly, so a prompt edit could land on a node another activity
+    /// held: the lock arriving mid-edit flips `.disabled` on a focused field, which resigns first
+    /// responder, and the resulting blur committed the stale text.
+    ///
+    /// A raised `.intentChanged` joins any run in flight, exactly as `ui_edit_ports` does for a raised
+    /// port change — otherwise the Director re-briefs a node no one is scoped to pick up and it keeps
+    /// running its old build. Returns the store's result so callers can echo the truth back; a refused
+    /// mutation reports `found: false`, which reads as "nothing changed".
+    @discardableResult
+    func updateNodeContent(
+        id: SZNodeID,
+        title: String? = nil,
+        sfSymbol: String? = nil,
+        prompt: String? = nil,
+        summary: String? = nil,
+        permissions: [SZEntitlement]? = nil,
+        origin: SZMutationOrigin = .user
+    ) -> SZStore.SZNodeUpdateResult? {
+        if let denial = fenceDenial(nodes: [id], origin: origin) {
+            status = denial
+            return nil          // REFUSED — distinct from "no such node", which is `.some(found: false)`
+        }
+        // A blur fires on every click-away, keystrokes or not, and `found` only means the node exists — so
+        // without this an empty blur would cost a synchronous whole-project save plus a `runtime.loadProject`
+        // (engine lock, scheduler rebuild) and stamp "update node" over the status line. The GUI path did
+        // neither before this funnel existed; a no-op must stay a no-op.
+        guard let node = store.project?.graph.node(id: id) else {
+            return SZStore.SZNodeUpdateResult(found: false, raisedRebuild: false)
+        }
+        let unchanged = (title == nil || title == node.title)
+            && (sfSymbol == nil || sfSymbol == node.sfSymbol)
+            && (prompt == nil || prompt == node.prompt)
+            && (summary == nil || summary == node.contract?.summary)
+            && (permissions == nil || permissions == node.contract?.permissions)
+        if unchanged { return SZStore.SZNodeUpdateResult(found: true, raisedRebuild: false) }
+
+        let result = store.updateNode(
+            id: id, title: title, sfSymbol: sfSymbol, prompt: prompt,
+            summary: summary, permissions: permissions)
+        guard result.found else { return result }
+        if result.raisedRebuild { noteRunCreatedWork([id]) }
+        persistGraphEditAndReload(action: "update node")
+        return result
     }
 
     /// Toggle a texture output as the viewport render endpoint — the node card's monitor icon +

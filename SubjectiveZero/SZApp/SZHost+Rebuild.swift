@@ -16,7 +16,8 @@
 //
 // Either way the node heals the same two ways, and both are guaranteed by construction:
 //   1. any run picks it up — `runWorkSet` is built from `needsImplementation`, and `promoteStagedNode` is the
-//      one place the reason is cleared;
+//      one place the reason is cleared (conditionally: it KEEPS `.intentChanged` when the prompt moved after
+//      the agent was briefed, and never clears `.sourceMismatch` — see `SZRebuildReason.afterPromote`);
 //   2. `stageRebuildFix` composes a message to the node's own Coding Agent (never auto-sent — the V1 ruling
 //      that host-drafted messages COMPOSE), whose cold start seeds it with the current contract + source.
 import Foundation
@@ -31,7 +32,8 @@ extension SZHost {
     /// A node the store already flagged `.contractChanged` is only ever *upgraded* to `.sourceMismatch`, never
     /// cleared: the "contract declares a port the code ignores" half is invisible to a static scan (the audit is
     /// a string-literal scan, and `NodeLibrary/audio-bands` builds port names at runtime), so absence of errors
-    /// does not mean the code is current. Only `promoteStagedNode` clears a reason.
+    /// does not mean the code is current. Only `promoteStagedNode` clears a reason, and only the ones its
+    /// compile actually honoured (`SZRebuildReason.afterPromote`).
     func classifyRebuild(node id: SZNodeID) {
         guard let projectURL = loadedProjectURL,
               let node = store.project?.graph.node(id: id), node.kind == .generated,

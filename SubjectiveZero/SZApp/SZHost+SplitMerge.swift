@@ -81,7 +81,7 @@ extension SZHost {
         }
         graphOpStatus[id] = nil
         hiddenPieces.subtract(pieces)
-        for pid in pieces { pinnedContracts[pid] = nil }
+        for pid in pieces { pinnedContracts[pid] = nil; dispatchPrompts[pid] = nil }
         purgeChatArtifacts(for: [id])   // the original left the graph — drop its transcript (see header)
         narrateDirector("Split of \(title) complete.")
         persistGraphEditAndReload(action: "split \(title) complete")
@@ -143,6 +143,7 @@ extension SZHost {
         for cid in ids { graphOpStatus[cid] = nil }
         hiddenPieces.remove(merged)
         pinnedContracts[merged] = nil
+        dispatchPrompts[merged] = nil
         purgeChatArtifacts(for: ids)   // the constituents left the graph — drop their transcripts (see header)
         narrateDirector("Merge complete.")
         persistGraphEditAndReload(action: "merge complete")
@@ -199,6 +200,7 @@ extension SZHost {
         graphOpStatus = [:]
         hiddenPieces = []
         pinnedContracts = [:]
+        dispatchPrompts = [:]
         purgeChatArtifacts(for: pieces)   // the staged pieces' coding-agent transcripts are orphans now
         narrateDirector(reason.prefix(1).capitalized + reason.dropFirst() + ".")
         persistGraphEditAndReload(action: reason)

@@ -27,6 +27,10 @@ extension SZHost {
     /// authors. Covers a normal node re-implemented by its Coding Agent, split/merge pieces (their
     /// host-drafted boundary), AND contract-first drawn nodes (just drafted by `draftFlowContracts`).
     /// Called at `startRun`; cleared at run end.
+    ///
+    /// The PROMPT is deliberately NOT snapshotted here — see `streamCodingAgent`. `startRun` is too early:
+    /// the Director decomposes first, and each brief is composed from the LIVE graph after that, so a prompt
+    /// recorded here would flag a node the agent went on to build correctly.
     private func pinDirtyContracts() {
         for node in store.project?.graph.nodes ?? [] where node.needsImplementation {
             if let contract = node.contract { pinnedContracts[node.id] = contract }
@@ -139,6 +143,11 @@ extension SZHost {
             recordNodeStatus(node: node, phase: .needsInput, message: blocker)
             throw SZMCPError.message("(debug) forced needsInput: \(blocker)")
         }
+        // THE dispatch moment for this node, and so the prompt `promoteStagedNode` holds the agent to. Recorded
+        // here rather than at `startRun` because the brief is composed from the live graph after the Director
+        // decomposes — snapshotting earlier would flag a node whose re-brief the agent actually picked up.
+        // Each turn re-records, so an agentic run's reconcile rounds are held to their own latest brief.
+        dispatchPrompts[node] = store.project?.graph.node(id: node)?.prompt
         openChatTab(scope)
         // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
         // A cancelled run's zombie dispatch presents its released token; deliver detects that and
@@ -391,10 +400,17 @@ extension SZHost {
                 // sweep here would fail a NEW run's queued steers when the zombie finally exits).
                 if runClaim == claim { sweepUnconsumedSteers() }
                 ledger.releaseAll(of: claim)
-                if runClaim == claim { runClaim = nil }
-                runTask = nil
-                runWorkSet = []            // run over → the work set is cleared (a node chat runs with it empty)
-                pinnedContracts = pinnedContracts.filter { hiddenPieces.contains($0.key) }
+                // The per-run state below belongs to whoever holds the claim NOW. A zombie settling after
+                // an eager `cancelRun` must not wipe a NEWER run's bookkeeping — for `dispatchPrompts`
+                // that would silently resurrect the promote bug this file's records exist to prevent
+                // (cancel, restart, re-brief mid-run → the record is gone → the flag clears).
+                if runClaim == claim {
+                    runClaim = nil
+                    runTask = nil
+                    runWorkSet = []        // run over → the work set is cleared (a node chat runs with it empty)
+                    pinnedContracts = pinnedContracts.filter { hiddenPieces.contains($0.key) }
+                    dispatchPrompts = dispatchPrompts.filter { hiddenPieces.contains($0.key) }
+                }
                 flushAllTranscripts()      // run end = flush point (success, throw, or cancel)
                 persistAgentSessions()
             }
@@ -472,16 +488,37 @@ extension SZHost {
     /// its pill silently falling through to Draft while the run claimed "Run complete."
     /// Any node dirty at run start that's STILL `.prompt` here gets an error pill (an `.error` phase via
     /// `recordNodeStatus`, which also fills the copyable-popover detail) + a Director-tab line. Won't
-    /// clobber a status the agent already reported (error / needsInput). Returns (implemented, failed)
-    /// for the run summary.
+    /// clobber a status the agent already reported (error / needsInput). One node is dirty but NOT failed:
+    /// a `.generated` node carrying `.intentChanged`, whose prompt moved after its agent was briefed —
+    /// it counts as implemented and gets an honest line instead. Returns (implemented, failed) for the
+    /// run summary.
     @discardableResult
     private func surfaceUnresolvedNodes() -> (implemented: Int, failed: Int) {
         var implemented = 0, failed = 0
         for id in runWorkSet {                                                     // this run's captured work (grown)
             guard let node = store.project?.graph.node(id: id) else { continue }   // removed mid-run (merge)
             guard node.needsImplementation else { implemented += 1; continue }      // promoted → built & current
-            failed += 1
             let phase = nodeAgentState[id]?.phase ?? .idle
+            // Built, but its intent moved WHILE the agent was implementing it — `promoteStagedNode` kept the
+            // node dirty on purpose. The agent did its job against the brief it was given, so this is not a
+            // failure: narrate the truth and let the amber Outdated pill carry it, instead of a red pill
+            // claiming the agent never compiled it.
+            //
+            // Gate on the SAME evidence promote used, not on the flag alone. `.intentChanged` is also the
+            // ordinary state of a node whose prompt was edited BEFORE the run — if that node's agent then
+            // errored or never ran, the flag is still set and a flag-only test would count a total failure
+            // as implemented, skip its error pill, and report "run complete". An agent that reported a real
+            // problem always wins.
+            let rebriefed = SZRebuildReason.afterPromote(
+                existing: node.rebuildReason, dispatchedPrompt: dispatchPrompts[id],
+                currentPrompt: node.prompt) == .intentChanged
+            if node.kind == .generated, rebriefed, phase != .error, phase != .needsInput {
+                implemented += 1
+                narrateDirector("\(node.title) was built, but its prompt changed mid-run — "
+                    + "it needs a rebuild against the new intent.")
+                continue
+            }
+            failed += 1
             if phase == .error || phase == .needsInput { continue }                 // agent already explained it
             let reason = "the agent never compiled this node or reported a blocker"
             recordNodeStatus(node: id, phase: .error, message: reason)

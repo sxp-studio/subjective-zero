@@ -71,6 +71,16 @@ extension SZStore {
         public var found: Bool
         /// The prompt (intent) moved on a node that already had a build, so it must be regenerated.
         public var raisedRebuild: Bool
+
+        /// Public so a caller outside SZCore can report an outcome it settled WITHOUT reaching the store —
+        /// the host's `updateNodeContent` funnel answers `found: false` for a missing node and
+        /// `found: true, raisedRebuild: false` for a no-op edit it short-circuits (a blur with no
+        /// keystrokes), so neither costs a persist. A fence refusal is not this shape: the funnel returns
+        /// nil for that, so "refused" can never be misread as "no such node".
+        public init(found: Bool, raisedRebuild: Bool) {
+            self.found = found
+            self.raisedRebuild = raisedRebuild
+        }
     }
 
     /// Update a node's presentation / identity in place (nil = leave that field unchanged).
@@ -226,7 +236,8 @@ extension SZStore {
 
     /// Set (or clear) why a node must be rebuilt. The host owns this classification because deciding between
     /// `.contractChanged` and `.sourceMismatch` means reading the node's `Node.swift` off disk.
-    /// `promoteStagedNode` clears it — the one place a rebuild is discharged.
+    /// `promoteStagedNode` clears it — the one place a rebuild is discharged, and conditionally: it keeps
+    /// `.intentChanged` when the prompt moved after the agent was briefed (`SZRebuildReason.afterPromote`).
     @discardableResult
     public func setRebuildReason(node id: SZNodeID, _ reason: SZRebuildReason?) -> Bool {
         var found = false
