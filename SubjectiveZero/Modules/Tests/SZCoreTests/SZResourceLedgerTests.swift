@@ -12,6 +12,26 @@ private func settle() async {
     for _ in 0..<20 { await Task.yield() }
 }
 
+/// Yield until `condition` holds, or fail with a named diagnostic. A fixed count of `Task.yield()`s is
+/// not a barrier — it yields the PARENT, and says nothing about whether a child task has been scheduled
+/// to its suspension point. Any test that must observe a child's effect before acting has to wait on the
+/// effect itself, or it encodes a race that shows up as an occasional CI failure under load.
+@MainActor
+private func pollUntil(
+    _ what: String, timeout: Duration = .seconds(5),
+    _ condition: () -> Bool
+) async throws {
+    let clock = ContinuousClock()
+    let start = clock.now
+    while !condition() {
+        if clock.now - start > timeout {
+            Issue.record("timed out after \(timeout) waiting for \(what)")
+            return
+        }
+        await Task.yield()
+    }
+}
+
 @MainActor
 @Test func atomicAcquireSuspendsHoldingNothing() async throws {
     let ledger = SZResourceLedger()
@@ -250,17 +270,25 @@ private func settle() async {
 
     #expect(ledger.tryAcquire([r], as: a))
     let granted = Granted()
+    let deadline = Duration.milliseconds(300)
     let waiter = Task { @MainActor in
-        try await ledger.acquire([r], as: b, deadline: .now + .milliseconds(50))
+        try await ledger.acquire([r], as: b, deadline: .now + deadline)
         granted.value = true
     }
-    await settle()
-    ledger.release([r], by: a)   // grant wins the race
-    await settle()
-    #expect(granted.value)
-    // Let the deadline racer fire after the grant — it must find nothing to resume (no crash).
-    try await ContinuousClock().sleep(for: .milliseconds(80))
+    // Wait on OBSERVABLE STATE, not on a fixed number of yields. `settle()` yields the parent 20 times,
+    // which does not guarantee the child ever reached its suspension point — under a loaded parallel
+    // suite it may not be scheduled at all. Releasing before the waiter has parked leaves it waiting on
+    // an already-free resource until its deadline: `granted` false, holder nil. That is the flake logged
+    // 07-18 and again 07-20; raising the deadline (tried at 800ms) only made it fail more slowly, because
+    // the bug was ordering, not budget.
+    try await pollUntil("the waiter parks") { ledger.anyWaiting }
+    ledger.release([r], by: a)   // now genuinely a grant-versus-deadline race, and the grant must win
+    try await pollUntil("the grant lands") { granted.value }
     #expect(ledger.holder(of: r) == b)
+    // Let the deadline racer fire against a waiter that is already gone — it must find nothing to resume.
+    try await ContinuousClock().sleep(for: deadline + .milliseconds(50))
+    #expect(ledger.holder(of: r) == b)
+    #expect(!ledger.anyWaiting)
     waiter.cancel()
 }
 
