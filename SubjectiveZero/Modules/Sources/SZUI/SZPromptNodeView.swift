@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A prompt (pre-gen) node — an editable, auto-growing rounded text field showing
 // the prompt, a flow socket on each side, and a status pill above. Typing commits to the prompt via
-// `onCommit` (→ store.updateNode(prompt:)); `onEditingChanged` lets the panel suppress canvas pan while
-// the field is focused. Flow sockets are pinned to the card's left/right vertical center via alignment,
-// so growth never disturbs them — matching SZNodeLayout's flow position (node center ± width/2).
+// `onCommit` (→ SZHost.updateNodeContent, which fences the write); `onEditingChanged` lets the panel
+// suppress canvas pan while the field is focused. Flow sockets are pinned to the card's left/right
+// vertical center via alignment, so growth never disturbs them — matching SZNodeLayout's flow position
+// (node center ± width/2).
 import SwiftUI
 import SZCore
 
@@ -31,6 +32,16 @@ struct SZPromptNodeView: View, Equatable {
             && lhs.showPill == rhs.showPill
             && lhs.errorDetail == rhs.errorDetail
     }
+
+    /// Whether a blur should write the field's text back.
+    ///
+    /// `.disabled(locked && !editing)` below stops a lock EJECTING you from a live field, so the blur it
+    /// used to induce no longer fires. This decides the remaining case: you were typing, the lock is still
+    /// held, and you deliberately click away. The edit is dropped (and the field reverted — see the blur
+    /// handler) rather than committed, because a write behind the fence is the one thing that must never
+    /// happen. Note this means a locked blur never reaches `updateNodeContent`, so the user-origin refusal
+    /// there is unreachable from this view by design, not by accident.
+    static func shouldCommitOnBlur(locked: Bool) -> Bool { !locked }
 
     @State private var text: String
     @State private var editing = false   // live TextField only while editing (see body) — idle cards are plain Text
@@ -79,7 +90,14 @@ struct SZPromptNodeView: View, Equatable {
         }
             .font(.system(size: 13))
             .foregroundStyle(.white.opacity(locked ? 0.6 : 0.92))
-            .disabled(locked)              // can't edit a node while an agent is implementing it
+            // Can't START editing a node an agent is implementing — but a lock landing on a field you
+            // are ALREADY INSIDE must not disable it. `.disabled` on a focused TextField resigns first
+            // responder, which fires the blur below, which used to commit your half-typed text onto the
+            // very node that just got claimed (reproduced live: the act of locking wrote the edit).
+            // Keeping the field live means the lock costs you nothing when it lifts before you click
+            // away — the ordinary case, since runs end. If it is still held at blur, the edit is dropped
+            // and the field reverts (see the blur handler); it is never committed behind the fence.
+            .disabled(locked && !editing)
             .frame(width: SZNodeLayout.width - 32, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -104,7 +122,13 @@ struct SZPromptNodeView: View, Equatable {
             .onChange(of: focused) { _, isFocused in
                 onEditingChanged(isFocused)
                 if !isFocused {
-                    onCommit(text)                 // commit on blur, then fall back to static Text
+                    // Commit on blur, then fall back to static Text — see `shouldCommitOnBlur`. When the
+                    // commit is DROPPED, revert `text` too: the idle branch renders `text`, not
+                    // `node.prompt`, and `.onChange(of: node.prompt)` can't correct it (the store never
+                    // changed) — so without this the card would sit there displaying an edit that was
+                    // never saved, indefinitely, which is a worse lie than losing the keystrokes.
+                    if Self.shouldCommitOnBlur(locked: locked) { onCommit(text) }
+                    else { text = node.prompt ?? "" }
                     editing = false
                 }
             }

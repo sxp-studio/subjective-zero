@@ -330,21 +330,26 @@ extension SZHostBridge {
                 return e
             }
         }
+        // `requireUnfenced` first only for its richer refusal message (it names the holder and throws);
+        // `updateNodeContent` is the authoritative gate and re-checks. The funnel also carries the
+        // raised-rebuild join and the persist, shared with the editor's inline prompt commit.
         try requireUnfenced([id])
-        let result = host.store.updateNode(
+        let updated = host.updateNodeContent(
             id: id,
             title: arguments.string("title"),
             sfSymbol: arguments.string("sfSymbol"),
             prompt: arguments.string("prompt"),
             summary: arguments.string("summary"),
-            permissions: permissions
+            permissions: permissions,
+            origin: .agent
         )
+        // nil = the fence refused. `requireUnfenced` above applies the identical predicate in the same
+        // MainActor turn, so it always throws the richer message first — but they are kept distinct here
+        // so that deleting the pre-check can never degrade into telling an agent the node doesn't exist.
+        guard let result = updated else {
+            throw SZMCPError.message(host.fenceDenial(nodes: [id], origin: .agent) ?? "node \(id) is locked")
+        }
         guard result.found else { throw SZMCPError.message("no node \(id)") }
-        // A prompt edit on a built node raised `.intentChanged` — join it to any run in flight, exactly as
-        // `ui_edit_ports` does for a raised port change. Otherwise a Director re-briefing a node mid-run
-        // creates work no one is scoped to pick up, and the node keeps running its old build.
-        if result.raisedRebuild { host.noteRunCreatedWork([id]) }
-        host.persistGraphEditAndReload(action: "update node")
         // Report the node's STATE, not what this call changed (same terms as `ui_edit_ports`): a node
         // already awaiting a rebuild is still awaiting one.
         let stillNeedsRebuild = host.store.project?.graph.node(id: id)?.needsRebuild ?? result.raisedRebuild

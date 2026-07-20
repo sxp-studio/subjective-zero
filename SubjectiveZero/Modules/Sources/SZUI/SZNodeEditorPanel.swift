@@ -8,7 +8,8 @@
 // Navigation: trackpad pinch / ⌘+scroll zoom pivoted on the cursor (clamped),
 // two-finger-scroll / mouse-wheel pan (suppressed while a prompt field is focused). Node drag commits
 // through store.moveNode; tap selects; the ＋ button adds a prompt node; editing a prompt commits via
-// store.updateNode; Run calls the host (injected onRun). All edits route through the shared SZStore ops.
+// the injected onCommitPrompt → SZHost.updateNodeContent (fenced — NOT store.updateNode directly, see
+// SZHost+Fence); Run calls the host (injected onRun).
 import AppKit
 import SwiftUI
 import SZCore
@@ -60,6 +61,9 @@ public struct SZNodeEditorPanel: View {
     private let onResetTime: () -> Void              // HUD Reset Time (rewind) → host.resetPlayback()
     private let onSetInputDefault: (SZNodeID, String, SZPortValue, Bool) -> Void  // node input control → host
     private let onToggleDisplay: (SZNodeID, String) -> Void   // texture output monitor icon → ui_toggle_display
+    /// Inline prompt commit → the host's fenced content-update funnel. NOT `store.updateNode` directly:
+    /// the fence must refuse a commit onto a node another activity claimed mid-edit.
+    private let onCommitPrompt: (SZNodeID, String) -> Void
     private let optionsFor: (SZNodeID, String) -> [SZEnumOption]   // effective enum options (dynamic ?? static)
     // The right-click message-suggestion menu (run-UX paradigm): the HOST derives the drafted
     // messages for a target; picking one (or free text) routes back for composer injection.
@@ -135,6 +139,7 @@ public struct SZNodeEditorPanel: View {
                 onResetTime: @escaping () -> Void = {},
                 onSetInputDefault: @escaping (SZNodeID, String, SZPortValue, Bool) -> Void,
                 onToggleDisplay: @escaping (SZNodeID, String) -> Void = { _, _ in },
+                onCommitPrompt: @escaping (SZNodeID, String) -> Void,
                 onTogglePreview: @escaping (SZNodeID, String) -> Void = { _, _ in },
                 optionsFor: @escaping (SZNodeID, String) -> [SZEnumOption] = { _, _ in [] },
                 onDeleteNodes: @escaping ([SZNodeID]) -> Void = { _ in },
@@ -177,6 +182,7 @@ public struct SZNodeEditorPanel: View {
         self.onResetTime = onResetTime
         self.onSetInputDefault = onSetInputDefault
         self.onToggleDisplay = onToggleDisplay
+        self.onCommitPrompt = onCommitPrompt
         self.onTogglePreview = onTogglePreview
         self.optionsFor = optionsFor
         self.onDeleteNodes = onDeleteNodes
@@ -735,7 +741,7 @@ public struct SZNodeEditorPanel: View {
             onToggleDisplay: onToggleDisplay,
             onTogglePreview: onTogglePreview,
             optionsFor: optionsFor,
-            onCommitPrompt: { store.updateNode(id: $0, prompt: $1) },
+            onCommitPrompt: onCommitPrompt,
             onPromptEditingChanged: { id, editing in
                 editingNodeID = editing ? id : nil
                 if editing, autoEditNodeID == id { autoEditNodeID = nil }   // consume the one-shot auto-focus
@@ -1277,27 +1283,5 @@ private struct SZHudMenuButton<Content: View>: View {
         .fixedSize()
         .trackingHover($hover)
         .help(help)
-    }
-}
-
-/// A slow breathing pulse that costs ZERO main-thread frames: a repeatForever animation on OPACITY
-/// (CA-animatable) runs entirely on the render server. The `TimelineView(.animation)` shape this
-/// replaces re-entered SwiftUI on every display frame for the life of the view — a standing
-/// full-window layout flush whose per-flush cost scaled with the canvas zoom (big scaled layers).
-/// Use this for any always-on attention pulse; TimelineView stays the tool for FINITE effects.
-struct SZPulsingOpacity<Content: View>: View {
-    let range: ClosedRange<Double>
-    let halfPeriod: TimeInterval
-    @ViewBuilder let content: () -> Content
-    @State private var bright = false
-
-    var body: some View {
-        content()
-            .opacity(bright ? range.upperBound : range.lowerBound)
-            .onAppear {
-                withAnimation(.easeInOut(duration: halfPeriod).repeatForever(autoreverses: true)) {
-                    bright = true
-                }
-            }
     }
 }
