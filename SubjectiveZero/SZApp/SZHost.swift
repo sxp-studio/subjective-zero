@@ -1016,6 +1016,24 @@ final class SZHost {
         return value
     }
 
+    /// A prompt the user is mid-typing, held live but not yet persisted (the field commits only on blur).
+    /// `startRun` flushes it before it claims the node, so a Build hit while the field is still focused
+    /// runs against the typed text, not the stale model value (a later blur would drop it behind the fence).
+    private var pendingPromptEdit: (id: SZNodeID, text: String)?
+
+    /// Record the live field text (per keystroke). A plain assignment — no persist, no reload.
+    func notePendingPromptEdit(id: SZNodeID, text: String) {
+        pendingPromptEdit = (id, text)
+    }
+
+    /// Commit any pending prompt edit into the model — called at the top of `startRun`, before it claims
+    /// the node, so the fence is clear. `updateNodeContent`'s no-op guard makes an unchanged flush free.
+    func flushPendingPromptEdit() {
+        guard let pending = pendingPromptEdit else { return }
+        pendingPromptEdit = nil
+        updateNodeContent(id: pending.id, prompt: pending.text, origin: .user)
+    }
+
     /// Update a node's presentation / identity — the ONE funnel for the fenced content-update class,
     /// shared by the editor's inline prompt commit and `ui_update_node`. Before this existed the GUI
     /// path reached `store.updateNode` directly, so a prompt edit could land on a node another activity
@@ -1040,6 +1058,11 @@ final class SZHost {
             status = denial
             return nil          // REFUSED — distinct from "no such node", which is `.some(found: false)`
         }
+        // A USER commit (a blur, or the pre-run flush) makes the model authoritative for this node — drop
+        // any pending live text we held for it so a later run can't re-flush a stale keystroke. Only for
+        // `.user`: an agent's `ui_update_node` (e.g. a reconcile retitle) must NOT discard what the user is
+        // mid-typing on that same node.
+        if origin == .user, pendingPromptEdit?.id == id { pendingPromptEdit = nil }
         // A blur fires on every click-away, keystrokes or not, and `found` only means the node exists — so
         // without this an empty blur would cost a synchronous whole-project save plus a `runtime.loadProject`
         // (engine lock, scheduler rebuild) and stamp "update node" over the status line. The GUI path did

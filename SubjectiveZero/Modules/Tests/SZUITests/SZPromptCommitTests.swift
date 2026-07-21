@@ -20,4 +20,20 @@ import Testing
     @Test func lockedBlurDropsTheEdit() {
         #expect(!SZPromptNodeView.shouldCommitOnBlur(locked: true))
     }
+
+    /// The live-report path that closes the lost-edit race: while the user is actively typing into an
+    /// unlocked field, each keystroke is reported to the host so a run started mid-edit can flush it
+    /// before it locks the node. The blur-only commit alone is what dropped "make the input texture glow".
+    @Test func activeUnlockedEditReportsLive() {
+        #expect(SZPromptNodeView.shouldReportLiveEdit(editing: true, focused: true, locked: false))
+    }
+
+    /// It must NOT report otherwise: a locked node (would be a write behind the fence), or a non-active
+    /// field — the programmatic `text =` seed/revert both fire while `focused` is false and must not be
+    /// mistaken for a keystroke.
+    @Test func onlyAnActiveUnlockedEditReportsLive() {
+        #expect(!SZPromptNodeView.shouldReportLiveEdit(editing: true, focused: true, locked: true))
+        #expect(!SZPromptNodeView.shouldReportLiveEdit(editing: true, focused: false, locked: false))
+        #expect(!SZPromptNodeView.shouldReportLiveEdit(editing: false, focused: true, locked: false))
+    }
 }

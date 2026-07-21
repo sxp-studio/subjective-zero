@@ -276,7 +276,17 @@ public enum SZDirectorPrompt {
         func short(_ id: SZNodeID) -> String { String(id.uuidString.prefix(8)) }
         let nodes = graph.nodes.map { n -> String in
             let io = contractIO(n.contract, fallback: "no contract yet")
-            let prompt = (n.prompt?.isEmpty == false) ? " — prompt: \"\(n.prompt!)\"" : ""
+            // A blank prompt node is rendered EXPLICITLY, not as an absent clause: the Director must be
+            // able to tell "the user left this undecided" from "this node never carries a prompt", so it
+            // leaves the node alone (or asks) instead of manufacturing intent from the surrounding layout.
+            let prompt: String
+            if let p = n.prompt, !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                prompt = " — prompt: \"\(p)\""
+            } else if n.kind == .prompt {
+                prompt = " — prompt: (empty — the user has not described this node yet; do not invent its purpose)"
+            } else {
+                prompt = ""
+            }
             // `needsRebuild` is not implied by `kind` — a built node whose contract moved still reads
             // `generated`, and the Director must see that it is nonetheless pending work.
             let rebuild = n.needsRebuild ? " (NEEDS REBUILD — its code predates the current contract)" : ""

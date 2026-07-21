@@ -603,6 +603,7 @@ struct SZApp: App {
                               onSetInputDefault: { host.setInputDefault(node: $0, port: $1, value: $2, persist: $3) },
                               onToggleDisplay: { host.toggleDisplay(node: $0, port: $1) },
                               onCommitPrompt: { host.updateNodeContent(id: $0, prompt: $1) },
+                              onLivePrompt: { host.notePendingPromptEdit(id: $0, text: $1) },
                               onTogglePreview: { host.toggleNodePreview(node: $0, port: $1) },
                               optionsFor: { host.effectiveOptions(node: $0, port: $1) },
                               onDeleteNodes: { host.deleteNodes(ids: $0) },

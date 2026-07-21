@@ -61,7 +61,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
         // value input excluded from == (a one-shot on insertion; see SZPromptNodeView)
         "autoFocus",
         // closures — deliberately excluded from ==
-        "onCommit", "onEditingChanged",
+        "onCommit", "onEditingChanged", "onLiveEdit",
         // view-local state — SwiftUI re-renders on its own changes regardless of ==
         "text", "editing", "focused", "cardHover",
     ])
@@ -86,6 +86,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
         "autoEditNodeID",
         "onOpenNodeMenu", "onOpenNodeChat", "onOpenNodeSource", "onFixNode", "onSetInputDefault",
         "onToggleDisplay", "onTogglePreview", "optionsFor", "onCommitPrompt", "onPromptEditingChanged",
+        "onLivePrompt",
         // the preview-box registry — stable host-owned ref; per-node boxes are observed by the
         // thumb leaves, never compared here
         "previewFrames",

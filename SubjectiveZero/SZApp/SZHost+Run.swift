@@ -333,6 +333,9 @@ extension SZHost {
         // split/merge, a Director turn's queued run). Without this a second UI-driven start would
         // orphan the first `runTask` and let two orchestrators mutate the graph concurrently.
         guard !isRunning else { return }
+        // Land any prompt the user is mid-typing before we read the graph or claim a node — the field
+        // commits only on blur, so a Build hit while it is still focused would otherwise run stale.
+        flushPendingPromptEdit()
         // Was this run STARTED FOR a staged split/merge? Then it narrates at commit and owns the
         // hidden-piece UX. A plain run that a Director later stages an op inside still narrates itself.
         let ownsGraphOp = hasStagedGraphOp
@@ -342,16 +345,33 @@ extension SZHost {
         // This run's WORK SET candidates: the nodes dirty right now (never built, or built against a
         // contract/intent that has since moved). Computed before the run flips live so an empty one can
         // answer without an orchestrator.
-        let dirty = Set((store.project?.graph.nodes ?? []).filter(\.needsImplementation).map(\.id))
+        let nodes = store.project?.graph.nodes ?? []
+        let dirty = Set(nodes.filter(\.needsImplementation).map(\.id))
+        // An undescribed prompt node is NOT handed to the fleet — an empty prompt is "undecided", not
+        // "build something", and an agent handed one invents intent from the layout. Only the coding work
+        // set excludes them; the Director's decompose turn still sees them. (A `needsRebuild` node is
+        // always `.generated` with real intent, so blanks can only be unbuilt `.prompt` nodes.)
+        let isBlank: (SZNode) -> Bool = {
+            $0.kind == .prompt && ($0.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }
+        let blankIDs = Set(nodes.filter { $0.needsImplementation && isBlank($0) }.map(\.id))
+        let implementable = dirty.subtracting(blankIDs)
         // Nothing to implement, nothing asked → skip the strategy entirely: a full run here would still
         // burn a Director decompose turn (latency + tokens) to conclude "no work". A run WITH an
         // `instruction` or a Director-briefed one still goes through — the Director may CREATE work
         // mid-run (contracts, nodes) — and a staged split/merge always runs: its pieces are the work and
         // its commit rides the run task's drain.
-        if dirty.isEmpty, instruction.isEmpty, !directorAlreadyBriefed, !ownsGraphOp {
+        if implementable.isEmpty, instruction.isEmpty, !directorAlreadyBriefed, !ownsGraphOp {
             showChat(.director)
-            narrateDirector("Nothing to implement — every node is built and current.")
-            status = "nothing to implement"
+            if blankIDs.isEmpty {
+                narrateDirector("Nothing to implement — every node is built and current.")
+                status = "nothing to implement"
+            } else {
+                // Blank nodes are the only pending work: ask rather than guess (the whole point of the fix).
+                let n = blankIDs.count
+                narrateDirector("\(n) node\(n == 1 ? " has" : "s have") no prompt yet — describe what \(n == 1 ? "it" : "each one") should do, then build. An empty node is left as-is, never guessed.")
+                status = "describe the empty node\(n == 1 ? "" : "s")"
+            }
             return
         }
         // Pre-flight: a missing/logged-out CLI refuses with the setup sheet + remedy instead of
@@ -365,7 +385,7 @@ extension SZHost {
         // no-op fast-path). It grows as the run's own tooling creates work (`noteRunCreatedWork`),
         // and drives dispatch, the editor lock/pill, and the `ui_connect` guard. A node the user
         // adds mid-run is never noted, so it stays out of the fleet.
-        let workSet = dirty
+        let workSet = implementable
         // Claim ONLY what this run touches — atomically, refuse on contention (today's refuse-a-
         // second-run semantics; an awaited acquire would let a second Build queue behind the first
         // while `isRunning` still reads false). The claim also closes a latent race: previously

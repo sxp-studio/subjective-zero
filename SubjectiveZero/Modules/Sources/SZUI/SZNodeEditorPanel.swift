@@ -64,6 +64,8 @@ public struct SZNodeEditorPanel: View {
     /// Inline prompt commit → the host's fenced content-update funnel. NOT `store.updateNode` directly:
     /// the fence must refuse a commit onto a node another activity claimed mid-edit.
     private let onCommitPrompt: (SZNodeID, String) -> Void
+    /// Live prompt keystrokes → the host's pending-edit holder (not a persist); flushed on the next run.
+    private let onLivePrompt: (SZNodeID, String) -> Void
     private let optionsFor: (SZNodeID, String) -> [SZEnumOption]   // effective enum options (dynamic ?? static)
     // The right-click message-suggestion menu (run-UX paradigm): the HOST derives the drafted
     // messages for a target; picking one (or free text) routes back for composer injection.
@@ -140,6 +142,7 @@ public struct SZNodeEditorPanel: View {
                 onSetInputDefault: @escaping (SZNodeID, String, SZPortValue, Bool) -> Void,
                 onToggleDisplay: @escaping (SZNodeID, String) -> Void = { _, _ in },
                 onCommitPrompt: @escaping (SZNodeID, String) -> Void,
+                onLivePrompt: @escaping (SZNodeID, String) -> Void,
                 onTogglePreview: @escaping (SZNodeID, String) -> Void = { _, _ in },
                 optionsFor: @escaping (SZNodeID, String) -> [SZEnumOption] = { _, _ in [] },
                 onDeleteNodes: @escaping ([SZNodeID]) -> Void = { _ in },
@@ -183,6 +186,7 @@ public struct SZNodeEditorPanel: View {
         self.onSetInputDefault = onSetInputDefault
         self.onToggleDisplay = onToggleDisplay
         self.onCommitPrompt = onCommitPrompt
+        self.onLivePrompt = onLivePrompt
         self.onTogglePreview = onTogglePreview
         self.optionsFor = optionsFor
         self.onDeleteNodes = onDeleteNodes
@@ -745,7 +749,8 @@ public struct SZNodeEditorPanel: View {
             onPromptEditingChanged: { id, editing in
                 editingNodeID = editing ? id : nil
                 if editing, autoEditNodeID == id { autoEditNodeID = nil }   // consume the one-shot auto-focus
-            })
+            },
+            onLivePrompt: onLivePrompt)
             .equatable()
     }
 

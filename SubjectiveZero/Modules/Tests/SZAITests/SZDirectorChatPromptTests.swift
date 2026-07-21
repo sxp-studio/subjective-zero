@@ -58,3 +58,29 @@ private func node(_ title: String, kind: SZNodeKind, rebuildReason: SZRebuildRea
     #expect(!SZDirectorPrompt.renderResumedChat(graph: SZGraph(nodes: [clean]), message: "status?")
         .contains("NEEDS REBUILD"))
 }
+
+/// A prompt node the user never described must be projected as EXPLICITLY empty, not as a node with its
+/// prompt clause simply absent. Otherwise the Director cannot tell "the user left this undecided" from
+/// "this node has no intent" and fills the silence with an invented purpose — the bug where a blank node
+/// became a fabricated Composite. The marker also carries the do-not-guess instruction inline.
+@Test func graphSummaryMarksAnUndescribedPromptNodeAsEmpty() {
+    var blank = node("Untitled", kind: .prompt)
+    blank.prompt = nil
+    let outNil = SZDirectorPrompt.renderResumedChat(graph: SZGraph(nodes: [blank]), message: "?")
+    #expect(outNil.contains("empty"))
+    #expect(outNil.contains("has not described"))
+    #expect(outNil.lowercased().contains("do not invent"))
+
+    // A whitespace-only prompt is undecided too, not a real intent.
+    var whitespace = node("Untitled", kind: .prompt)
+    whitespace.prompt = "   \n  "
+    #expect(SZDirectorPrompt.renderResumedChat(graph: SZGraph(nodes: [whitespace]), message: "?")
+        .contains("empty"))
+
+    // A described node shows its prompt verbatim and never the empty marker.
+    var described = node("Glow", kind: .prompt)
+    described.prompt = "make the input texture glow"
+    let outDesc = SZDirectorPrompt.renderResumedChat(graph: SZGraph(nodes: [described]), message: "?")
+    #expect(outDesc.contains("make the input texture glow"))
+    #expect(!outDesc.contains("has not described"))
+}

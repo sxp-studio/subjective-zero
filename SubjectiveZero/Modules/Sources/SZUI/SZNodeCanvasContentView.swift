@@ -67,6 +67,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     var optionsFor: (SZNodeID, String) -> [SZEnumOption] = { _, _ in [] }
     var onCommitPrompt: (SZNodeID, String) -> Void = { _, _ in }
     var onPromptEditingChanged: (SZNodeID, Bool) -> Void = { _, _ in }
+    var onLivePrompt: (SZNodeID, String) -> Void = { _, _ in }   // live keystrokes → host pending edit (no persist)
 
     nonisolated static func == (lhs: SZNodeCanvasContentView, rhs: SZNodeCanvasContentView) -> Bool {
         lhs.graph == rhs.graph
@@ -160,6 +161,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             optionsFor: { port in optionsFor(node.id, port) },
             onCommitPrompt: { onCommitPrompt(node.id, $0) },
             onPromptEditingChanged: { onPromptEditingChanged(node.id, $0) },
+            onLivePrompt: { onLivePrompt(node.id, $0) },
             // Offered only where there is something to repair, so the pill stays inert elsewhere.
             onFix: node.needsRebuild ? { onFixNode(node.id) } : nil,
             autoFocus: node.id == autoEditNodeID)
@@ -190,6 +192,7 @@ struct SZNodeCanvasContentView: View, Equatable {
         optionsFor: @escaping (String) -> [SZEnumOption] = { _ in [] },
         onCommitPrompt: @escaping (String) -> Void = { _ in },
         onPromptEditingChanged: @escaping (Bool) -> Void = { _ in },
+        onLivePrompt: @escaping (String) -> Void = { _ in },
         onFix: (() -> Void)? = nil,
         autoFocus: Bool = false
     ) -> some View {
@@ -199,7 +202,8 @@ struct SZNodeCanvasContentView: View, Equatable {
                 node: node, status: status, isSelected: isSelected, locked: locked,
                 showPill: showPill(status, isRunning: isRunning), errorDetail: errorDetail,
                 autoFocus: autoFocus,
-                onCommit: onCommitPrompt, onEditingChanged: onPromptEditingChanged)
+                onCommit: onCommitPrompt, onEditingChanged: onPromptEditingChanged,
+                onLiveEdit: onLivePrompt)
                 .equatable()
         case .generated:
             SZNodeView(node: node, status: status, isSelected: isSelected, locked: locked,

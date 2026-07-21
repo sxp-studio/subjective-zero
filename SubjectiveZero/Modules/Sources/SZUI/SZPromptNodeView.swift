@@ -18,6 +18,10 @@ struct SZPromptNodeView: View, Equatable {
     var autoFocus: Bool = false      // freshly added (＋ / double-click) → open editing + grab the field
     let onCommit: (String) -> Void
     let onEditingChanged: (Bool) -> Void
+    /// Reports the live field text per keystroke WITHOUT persisting — the host holds it and flushes it
+    /// on the next run, so a Build hit before this field blurs still runs against the typed text. Blur is
+    /// the only other commit path, and once a run locks the node the blur is dropped (`shouldCommitOnBlur`).
+    let onLiveEdit: (String) -> Void
 
     /// Value-props-only equality (closures excluded; `position` ignored — the panel positions the card
     /// externally via `.position()`). See SZNodeView's `==` for the rationale; a skipped body also
@@ -43,6 +47,13 @@ struct SZPromptNodeView: View, Equatable {
     /// there is unreachable from this view by design, not by accident.
     static func shouldCommitOnBlur(locked: Bool) -> Bool { !locked }
 
+    /// Whether a keystroke should be reported live to the host's pending-edit holder. Only during an
+    /// ACTIVE, unlocked edit: this gate excludes the programmatic `text =` writes (the tap-to-seed and the
+    /// locked-blur revert both fire while not focused) and never reports behind the fence on a locked node.
+    static func shouldReportLiveEdit(editing: Bool, focused: Bool, locked: Bool) -> Bool {
+        editing && focused && !locked
+    }
+
     @State private var text: String
     @State private var editing = false   // live TextField only while editing (see body) — idle cards are plain Text
     @State private var cardHover = false   // card hover lift; view-local (per-card), excluded from ==
@@ -52,7 +63,8 @@ struct SZPromptNodeView: View, Equatable {
 
     init(node: SZNode, status: SZNodeStatus, isSelected: Bool = false, locked: Bool = false,
          showPill: Bool = true, errorDetail: String? = nil, autoFocus: Bool = false,
-         onCommit: @escaping (String) -> Void, onEditingChanged: @escaping (Bool) -> Void) {
+         onCommit: @escaping (String) -> Void, onEditingChanged: @escaping (Bool) -> Void,
+         onLiveEdit: @escaping (String) -> Void = { _ in }) {
         self.node = node
         self.status = status
         self.isSelected = isSelected
@@ -62,6 +74,7 @@ struct SZPromptNodeView: View, Equatable {
         self.autoFocus = autoFocus
         self.onCommit = onCommit
         self.onEditingChanged = onEditingChanged
+        self.onLiveEdit = onLiveEdit
         _text = State(initialValue: node.prompt ?? "")
     }
 
@@ -127,9 +140,23 @@ struct SZPromptNodeView: View, Equatable {
                     // `node.prompt`, and `.onChange(of: node.prompt)` can't correct it (the store never
                     // changed) — so without this the card would sit there displaying an edit that was
                     // never saved, indefinitely, which is a worse lie than losing the keystrokes.
-                    if Self.shouldCommitOnBlur(locked: locked) { onCommit(text) }
-                    else { text = node.prompt ?? "" }
+                    if Self.shouldCommitOnBlur(locked: locked) {
+                        onCommit(text)
+                    } else {
+                        // The edit is dropped behind the fence — revert the field AND report the reverted
+                        // value, so the host's pending edit can't outlive the drop and get resurrected by a
+                        // later run's flush (the report is gated out of the keystroke path by `!focused`).
+                        text = node.prompt ?? ""
+                        onLiveEdit(text)
+                    }
                     editing = false
+                }
+            }
+            .onChange(of: text) { _, newValue in
+                // Report keystrokes live so a run can flush them; the gate excludes the programmatic
+                // `text =` seeds/reverts (they fire while unfocused) and never reports behind the fence.
+                if Self.shouldReportLiveEdit(editing: editing, focused: focused, locked: locked) {
+                    onLiveEdit(newValue)
                 }
             }
             .onChange(of: node.prompt) { _, newValue in
