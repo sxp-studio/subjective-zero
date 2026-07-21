@@ -27,10 +27,15 @@ final class Node: SZNode {
         }
         fragment float4 f_main(VOut in [[stage_in]],
                                texture2d<float> tex [[texture(0)]],
-                               constant float2 &uvScale [[buffer(0)]]) {
+                               constant float2 &uvScale [[buffer(0)]],
+                               constant int    &rot     [[buffer(1)]]) {
             constexpr sampler smp(filter::linear, address::clamp_to_zero);
-            float2 uv = (in.uv - 0.5) * uvScale + 0.5;
-            return tex.sample(smp, uv);
+            float2 c = (in.uv - 0.5) * uvScale;   // fit-scaled, centred (rotated-image space)
+            float2 s = c;                          // rot == 0
+            if      (rot == 1) s = float2( c.y, -c.x);   // 90° CW
+            else if (rot == 2) s = float2(-c.x, -c.y);   // 180°
+            else if (rot == 3) s = float2(-c.y,  c.x);   // 270° CW
+            return tex.sample(smp, s + 0.5);
         }
         """
         guard let library = try? ctx.device.makeLibrary(source: source, options: nil) else { return }
@@ -69,13 +74,29 @@ final class Node: SZNode {
         defer { encoder.endEncoding() }
         guard let image = loaded else { return }  // clears to black when no image is loaded
 
+        // A 90°/270° turn swaps the image's effective width/height, so the aspect fed to `fitScale`
+        // (and thus the letterbox/crop math) must be inverted for those cases.
+        var rot = rotationCode(ctx.inputString("rotation") ?? "0")
+        let aspect = Float(image.width) / Float(max(1, image.height))
+        let rotatedAspect = (rot == 1 || rot == 3) ? 1 / aspect : aspect
         var uvScale = fitScale(mode: ctx.inputString("fit") ?? "fit",
-                               imageAspect: Float(image.width) / Float(max(1, image.height)),
+                               imageAspect: rotatedAspect,
                                outputAspect: Float(out.width) / Float(max(1, out.height)))
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentTexture(image, index: 0)
         encoder.setFragmentBytes(&uvScale, length: MemoryLayout<SIMD2<Float>>.size, index: 0)
+        encoder.setFragmentBytes(&rot, length: MemoryLayout<Int32>.size, index: 1)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+    }
+
+    /// Maps the `rotation` enum ("0"/"90"/"180"/"270", clockwise) to a shader code 0–3.
+    private func rotationCode(_ value: String) -> Int32 {
+        switch value {
+        case "90":  return 1
+        case "180": return 2
+        case "270": return 3
+        default:    return 0
+        }
     }
 
     /// The per-axis uv scale that maps output uv → image uv for the chosen fit mode. `>1` on an axis
