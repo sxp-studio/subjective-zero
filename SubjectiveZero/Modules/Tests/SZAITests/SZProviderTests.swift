@@ -65,17 +65,19 @@ private extension Array where Element == String {
 
 @Test func registryVendsAllProviders() {
     let reg = SZProviderRegistry.shared
-    #expect(reg.providers.map(\.id).sorted() == ["claude", "codex", "grok", "pi"])
+    #expect(reg.providers.map(\.id).sorted() == ["claude", "codex", "grok", "opencode", "pi"])
     #expect(reg.defaultProvider.id == "claude")
     #expect(reg.provider(id: "claude")?.defaultModel == "claude-opus-4-8")
     #expect(reg.provider(id: "codex")?.defaultModel == "gpt-5.6-terra")
-    // grok's and pi's catalogs are runtime-enumerated (grok's backend re-points unversioned ids;
-    // pi is BYOK — the user's pi decides): at rest they serve NOTHING, deliberately — no
-    // hardcoded grok or pi model id exists anywhere in this codebase.
+    // grok's, pi's and opencode's catalogs are runtime-enumerated (grok's backend re-points
+    // unversioned ids; pi and opencode are BYOK — the user's authed providers decide): at rest they
+    // serve NOTHING, deliberately — no hardcoded grok/pi/opencode model id exists anywhere here.
     #expect(reg.provider(id: "grok")?.models.isEmpty == true)
     #expect(reg.provider(id: "grok")?.defaultModel == "")
     #expect(reg.provider(id: "pi")?.models.isEmpty == true)
     #expect(reg.provider(id: "pi")?.defaultModel == "")
+    #expect(reg.provider(id: "opencode")?.models.isEmpty == true)
+    #expect(reg.provider(id: "opencode")?.defaultModel == "")
 }
 
 @Test func claudeLaunchBuildsArgvAndMintsSession() async throws {
@@ -1102,4 +1104,274 @@ func allProvidersHealthReady() async {
     task.cancel()
     let result = try await task.value               // returns (no crash); sentinel/-1 exit code
     #expect(result.timedOut == false)
+}
+
+// MARK: - opencode
+
+// Recorded from opencode 1.18.4. `opencode models --verbose` prints an id line then a pretty JSON
+// object per model; the mapper extracts the balanced objects (string-state-aware) and keeps only the
+// active ones. terra is a reasoning model with a full variants map; big-pickle is a free non-reasoning
+// model; gpt-5.4 is inactive (must be filtered out).
+private let opencodeVerboseModels = """
+openai/gpt-5.6-terra
+{
+  "id": "gpt-5.6-terra",
+  "providerID": "openai",
+  "name": "GPT-5.6 Terra",
+  "status": "active",
+  "capabilities": { "reasoning": true },
+  "variants": { "none": {}, "low": {}, "medium": {}, "high": {}, "xhigh": {}, "max": {} }
+}
+opencode/big-pickle
+{
+  "id": "big-pickle",
+  "providerID": "opencode",
+  "name": "Big Pickle",
+  "status": "active",
+  "capabilities": { "reasoning": false },
+  "variants": {}
+}
+openai/gpt-5.4
+{
+  "id": "gpt-5.4",
+  "providerID": "openai",
+  "name": "GPT-5.4",
+  "status": "inactive",
+  "capabilities": { "reasoning": true },
+  "variants": { "low": {}, "medium": {}, "high": {} }
+}
+"""
+
+// Recorded `opencode run --format json` stream: every event carries opencode's own `sessionID`; a
+// tool round is its own step, so there are TWO step_finish events whose tokens must be summed. opencode's
+// numbers are Anthropic-style: total = input + cache + output + reasoning (input EXCLUDES cache), so the
+// step-1 total is 80+10+15+5 = 110. The `subz_`-prefixed tool name exercises de-namespacing.
+private let opencodeRunStream = """
+{"type":"step_start","sessionID":"ses_TEST123","part":{"type":"step-start"}}
+{"type":"reasoning","sessionID":"ses_TEST123","part":{"type":"reasoning","text":"Let me read the file."}}
+{"type":"tool_use","sessionID":"ses_TEST123","part":{"type":"tool","tool":"subz_agent_read_graph","callID":"call_1","state":{"status":"completed"}}}
+{"type":"step_finish","sessionID":"ses_TEST123","part":{"type":"step-finish","tokens":{"total":110,"input":80,"output":15,"reasoning":5,"cache":{"read":10,"write":0}},"cost":0.002}}
+{"type":"text","sessionID":"ses_TEST123","part":{"type":"text","text":"2","metadata":{"openai":{"phase":"final_answer"}}}}
+{"type":"step_finish","sessionID":"ses_TEST123","part":{"type":"step-finish","tokens":{"total":50,"input":40,"output":8,"reasoning":2,"cache":{"read":0,"write":0}},"cost":0.001}}
+"""
+
+// A second stream exercising the dedup + reply-supersession paths the main fixture doesn't: the SAME
+// tool callID appears twice (running → completed, so `.toolCall` must fire once), and there are TWO
+// `text` events (the first is superseded → narration `.thinking`, the last is the reply).
+private let opencodeRunStreamDupAndSupersede = """
+{"type":"tool_use","sessionID":"ses_X","part":{"type":"tool","tool":"subz_agent_read_graph","callID":"c1","state":{"status":"running"}}}
+{"type":"tool_use","sessionID":"ses_X","part":{"type":"tool","tool":"subz_agent_read_graph","callID":"c1","state":{"status":"completed"}}}
+{"type":"text","sessionID":"ses_X","part":{"type":"text","text":"Reading the graph now."}}
+{"type":"text","sessionID":"ses_X","part":{"type":"text","text":"Final answer.","metadata":{"openai":{"phase":"final_answer"}}}}
+"""
+
+/// opencode: `run --format json --auto`, qualified `-m`, `--variant` effort, prompt trailing, MCP via
+/// an inline `OPENCODE_CONFIG_CONTENT` env config (opencode roots a session at the git repo and drops a
+/// cwd file), and a session id parsed back from the stream (codex-style — opencode mints its own `ses_…`).
+@Test func opencodeLaunchBuildsArgvStagesMCPConfigAndParsesSession() async throws {
+    let opencode = SZOpenCodeProvider()
+    let stub = StubRunner(output: opencodeRunStream)
+    let work = FileManager.default.temporaryDirectory.appending(path: "oc-mcp-\(UUID().uuidString)")
+    var req = request(port: 42123, model: "openai/gpt-5.6-terra", reasoningEffort: "high")
+    req.workingDirectory = work
+    defer { try? FileManager.default.removeItem(at: work) }
+
+    let result = try await opencode.run(req, runner: stub)
+
+    let call = try #require(stub.lastCall)
+    #expect(call.launchPath == "/usr/bin/env")
+    #expect(call.arguments.prefix(4) == ["opencode", "run", "--format", "json"])
+    #expect(call.arguments.contains("--auto"))              // headless permission bypass
+    #expect(call.arguments.value(after: "-m") == "openai/gpt-5.6-terra")
+    #expect(call.arguments.value(after: "--variant") == "high")
+    #expect(call.arguments.last == "make it grayscale")     // prompt is the trailing positional
+    // MCP rides an inline env config (OPENCODE_CONFIG_CONTENT), not a cwd file — opencode roots the
+    // session at the git repo and drops a cwd-staged opencode.json's mcp server.
+    let config = try #require(SZOpenCodeProvider().launch(req, preallocatedSessionID: nil)
+        .environment["OPENCODE_CONFIG_CONTENT"])
+    #expect(config.contains(#"["/usr/bin/nc", "127.0.0.1", "42123"]"#))
+    #expect(config.contains(#""type": "local""#))
+    #expect(!FileManager.default.fileExists(atPath: work.appending(path: "opencode.json").path))
+    // opencode mints its own session id; parse() recovers it from the stream (not host-minted).
+    #expect(result.outcome.sessionID == "ses_TEST123")
+    #expect(result.outcome.failed == false)
+
+    // A portless turn carries no MCP env at all.
+    #expect(SZOpenCodeProvider().launch(request(port: nil), preallocatedSessionID: nil)
+        .environment["OPENCODE_CONFIG_CONTENT"] == nil)
+}
+
+/// A chat turn continues the existing session with `-s <ses_…>` (not `-c`, which means "last session").
+@Test func opencodeResumeContinuesSessionWithFlag() async throws {
+    let opencode = SZOpenCodeProvider()
+    var req = request(port: nil)
+    req.resumeSessionID = "ses_existing"
+
+    let argv = opencode.launch(req, preallocatedSessionID: nil).arguments
+    #expect(argv.value(after: "-s") == "ses_existing")
+    #expect(argv.last == "make it grayscale")
+
+    // Even an empty stream keeps the id: run() falls back to the resume id.
+    let result = try await opencode.run(req, runner: StubRunner(output: "", exitCode: 1))
+    #expect(result.outcome.sessionID == "ses_existing")
+}
+
+/// Empty catalog (runtime-enumerated, before any fetch) → NO `-m`: opencode runs its own configured
+/// default. And a nil effort omits `--variant`.
+@Test func opencodeOmitsModelAndVariantWhenUnset() {
+    let argv = SZOpenCodeProvider().launch(request(port: 42100), preallocatedSessionID: nil).arguments
+    #expect(!argv.contains("-m"))
+    #expect(!argv.contains("--variant"))
+}
+
+/// Session id is parsed off any `--format json` event; success rides the exit code (a failed turn
+/// exits nonzero — verified with a bogus model id).
+@Test func opencodeParseReadsSessionAndExitCode() {
+    let opencode = SZOpenCodeProvider()
+    let ok = opencode.parse(output: opencodeRunStream, exitCode: 0, preallocatedSessionID: nil)
+    #expect(ok.sessionID == "ses_TEST123")
+    #expect(!ok.failed)
+    #expect(opencode.parse(output: opencodeRunStream, exitCode: 1, preallocatedSessionID: nil).failed)
+    #expect(opencode.parse(output: "", exitCode: 0, preallocatedSessionID: nil).sessionID == nil)
+}
+
+/// The catalog mapper: ids qualify as `providerID/id`, inactive models drop out, reasoning efforts come
+/// from each model's `variants` keys (with "none" dropped) and non-reasoning models get no menu, and
+/// the default is the first non-free model (never an "opencode/*" freebie).
+@Test func opencodeCatalogSnapshotMapsVerboseOutput() throws {
+    let snapshot = try #require(SZOpenCodeProvider.catalogSnapshot(fromVerboseOutput: opencodeVerboseModels))
+    #expect(snapshot.models.map(\.id) == ["openai/gpt-5.6-terra", "opencode/big-pickle"])   // inactive filtered
+    #expect(snapshot.models.map(\.displayName) == ["GPT-5.6 Terra", "Big Pickle"])
+    #expect(snapshot.defaultModelID == "openai/gpt-5.6-terra")                               // not the freebie
+    #expect(snapshot.models[0].supportedReasoningEfforts == ["low", "medium", "high", "xhigh", "max"])
+    #expect(snapshot.models[0].defaultReasoningEffort == "medium")
+    #expect(snapshot.models[1].supportedReasoningEfforts == nil)                             // non-reasoning
+}
+
+/// Duplicate display names across providers are disambiguated with a `(provider)` suffix.
+@Test func opencodeCatalogDisambiguatesDuplicateNames() {
+    let verbose = """
+    {"id":"gpt-5.6-terra","providerID":"openai","name":"Terra","status":"active","capabilities":{"reasoning":true},"variants":{"medium":{}}}
+    {"id":"terra","providerID":"azure","name":"Terra","status":"active","capabilities":{"reasoning":false},"variants":{}}
+    {"id":"solo","providerID":"openai","name":"Solo","status":"active","capabilities":{"reasoning":false},"variants":{}}
+    """
+    let snap = try! #require(SZOpenCodeProvider.catalogSnapshot(fromVerboseOutput: verbose))
+    #expect(snap.models.map(\.displayName) == ["Terra (openai)", "Terra (azure)", "Solo"])   // dup → suffixed, unique kept bare
+}
+
+/// `refreshModelCatalog` drives the CLI (`opencode models --verbose`): a clean fetch serves the catalog
+/// and updates `models`/`defaultModel`; a nonzero exit throws; unparseable output throws.
+@Test func opencodeRefreshModelCatalogFetchesAndServesOrThrows() async throws {
+    let provider = SZOpenCodeProvider()
+    #expect(provider.models.isEmpty)                                   // empty at rest
+    let snap = try await provider.refreshModelCatalog(runner: StubRunner(output: opencodeVerboseModels))
+    #expect(snap?.models.map(\.id) == ["openai/gpt-5.6-terra", "opencode/big-pickle"])
+    #expect(provider.models.map(\.id) == ["openai/gpt-5.6-terra", "opencode/big-pickle"])   // now serves them
+    #expect(provider.defaultModel == "openai/gpt-5.6-terra")
+    // A failed fetch (nonzero exit) throws rather than clobbering the catalog.
+    await #expect(throws: SZOpenCodeCatalogError.self) {
+        _ = try await SZOpenCodeProvider().refreshModelCatalog(runner: StubRunner(output: "boom", exitCode: 1))
+    }
+    // Output with no parseable model objects throws.
+    await #expect(throws: SZOpenCodeCatalogError.self) {
+        _ = try await SZOpenCodeProvider().refreshModelCatalog(runner: StubRunner(output: "no json here"))
+    }
+}
+
+/// The `--variant` mapping and the string-state-aware object extractor, in isolation.
+@Test func opencodeReasoningEffortsAndObjectExtraction() {
+    #expect(SZOpenCodeProvider.reasoningEfforts(fromVariants: ["none", "low", "medium", "high", "xhigh", "max"])
+            == ["low", "medium", "high", "xhigh", "max"])
+    // Unknown variant is appended, not dropped; "none" is always dropped.
+    #expect(SZOpenCodeProvider.reasoningEfforts(fromVariants: ["none", "medium", "cosmic"])
+            == ["medium", "cosmic"])
+    // A brace inside a string value must not open/close an object.
+    let objs = SZOpenCodeProvider.topLevelJSONObjects(in: #"pre {"name":"a{b}c","n":1} mid {"x":2} post"#)
+    #expect(objs == [#"{"name":"a{b}c","n":1}"#, #"{"x":2}"#])
+}
+
+/// The stream consumer: reasoning → .thinking, tool_use → .toolCall (once per callID), text held as the
+/// reply, and usage SUMMED across the turn's two step_finish events (output carries reasoning as its
+/// share; cache read+write → cachedInputTokens; cost summed).
+@Test func opencodeStreamConsumerClassifiesEventsAndSumsUsage() {
+    let consumer = SZOpenCodeStreamConsumer()
+    var events: [SZAgentStreamEvent] = []
+    for line in opencodeRunStream.split(whereSeparator: \.isNewline) {
+        events += consumer.consume(String(line))
+    }
+    events += consumer.finish()
+
+    #expect(events.contains(.thinking("Let me read the file.")))
+    #expect(events.contains(.toolCall(name: "agent_read_graph")))   // de-namespaced from subz_agent_read_graph
+    #expect(events.contains(.reply("2")))
+    let usage = events.compactMap { if case let .usage(u) = $0 { u } else { nil } }.first
+    #expect(usage?.inputTokens == 130)                  // (80+10) + 40 — input EXCLUDES cache, so add it back
+    #expect(usage?.outputTokens == 30)                  // (15+5) + (8+2), reasoning folded into output
+    #expect(usage?.reasoningOutputTokens == 7)          // 5 + 2
+    #expect(usage?.cachedInputTokens == 10)             // 10 + 0 (the cached SUBSET of inputTokens)
+    #expect(usage?.costUSD == 0.003)                    // 0.002 + 0.001
+    #expect((usage?.cachedInputTokens ?? 0) <= (usage?.inputTokens ?? 0))   // invariant: cache ⊆ input
+}
+
+/// The dedup + reply-supersession paths: a tool callID seen twice fires `.toolCall` once; the first of
+/// two `text` events is demoted to narration and the last is the reply.
+@Test func opencodeStreamConsumerDedupsToolsAndSupersedesReply() {
+    let consumer = SZOpenCodeStreamConsumer()
+    var events: [SZAgentStreamEvent] = []
+    for line in opencodeRunStreamDupAndSupersede.split(whereSeparator: \.isNewline) {
+        events += consumer.consume(String(line))
+    }
+    events += consumer.finish()
+    #expect(events.filter { $0 == .toolCall(name: "agent_read_graph") }.count == 1)   // callID c1 deduped
+    #expect(events.contains(.thinking("Reading the graph now.")))                     // superseded → narration
+    #expect(events.contains(.reply("Final answer.")))                                 // last text is the reply
+    #expect(!events.contains(.reply("Reading the graph now.")))
+}
+
+/// A top-level error event surfaces as a prefixed note (a bogus-model run emits one before exit 1),
+/// falling back name → bare "error" as the message narrows.
+@Test func opencodeStreamConsumerSurfacesErrorEvents() {
+    let consumer = SZOpenCodeStreamConsumer()
+    let withMessage = #"{"type":"error","sessionID":"ses_x","error":{"name":"UnknownError","data":{"message":"Unexpected server error."}}}"#
+    #expect(consumer.consume(withMessage) == [.thinking("⚠ Unexpected server error.")])
+    let nameOnly = #"{"type":"error","error":{"name":"RateLimited"}}"#
+    #expect(consumer.consume(nameOnly) == [.thinking("⚠ RateLimited")])
+    let bare = #"{"type":"error"}"#
+    #expect(consumer.consume(bare) == [.thinking("⚠ error")])
+}
+
+/// opencode namespaces MCP tools as `subz_<tool>`, so the briefing's bare `agent_*`/`ui_*` tool names
+/// are rewritten to match the model's tool list (when a bridge is attached) — without which a literal
+/// model reports the tools "unavailable". Non-tool text (incl. the contract JSON's `"ui"` key) is left
+/// alone.
+@Test func opencodeNamespacesSubZToolTokens() {
+    let input = "Call `agent_write_node_staged`, then agent_compile_node, then ui_run. " +
+                "Ports carry a \"ui\" key with ui.min/ui.step — do not rename the input port."
+    let out = SZOpenCodeProvider.namespacedSubZTools(in: input)
+    #expect(out.contains("subz_agent_write_node_staged"))
+    #expect(out.contains("subz_agent_compile_node"))
+    #expect(out.contains("subz_ui_run"))
+    #expect(out.contains("\"ui\" key"))          // the JSON key is untouched (no underscore)
+    #expect(out.contains("ui.min/ui.step"))      // dotted fields untouched
+    // Idempotent: a second pass over an already-namespaced prompt is a no-op (the `_` before `agent`
+    // kills the `\b`, so `subz_agent_*` never re-matches) — proven by re-applying, not by absence.
+    #expect(SZOpenCodeProvider.namespacedSubZTools(in: out) == out)
+    // And it only fires with a bridge attached: a portless launch leaves the prompt verbatim.
+    let portless = SZOpenCodeProvider().launch(
+        request(port: nil, model: "openai/gpt-5.5"), preallocatedSessionID: nil).arguments
+    #expect(portless.last == "make it grayscale")
+
+    // With a bridge, a tool-naming prompt is rewritten in the argv.
+    var req = request(port: 42100)
+    req.prompt = "First call agent_read_graph."
+    let withBridge = SZOpenCodeProvider().launch(req, preallocatedSessionID: nil).arguments
+    #expect(withBridge.last == "First call subz_agent_read_graph.")
+}
+
+/// A leading-`-` prompt gets a space prefix so opencode's yargs parser doesn't read it as a flag.
+@Test func opencodePromptPositionalSurvivesFlagLikeLeadingCharacters() {
+    var req = request(port: nil)
+    req.prompt = "-v is not a flag here"
+    let argv = SZOpenCodeProvider().launch(req, preallocatedSessionID: nil).arguments
+    #expect(argv.last == " -v is not a flag here")
 }

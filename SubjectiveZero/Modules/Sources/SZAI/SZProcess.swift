@@ -360,7 +360,9 @@ public enum SZAgentEnvironment {
         processEnvironment["PATH"]?.split(separator: ":", omittingEmptySubsequences: true).forEach { add(String($0)) }
         add(processEnvironment["NVM_BIN"] ?? "")
         let home = homeDirectory.path
-        [".local/bin", ".cargo/bin", ".bun/bin"].forEach { add(URL(fileURLWithPath: home).appending(path: $0).path) }
+        // `.opencode/bin` is where opencode's official installer drops its CLI — the installer only
+        // adds it to the interactive shell profile, so a windowless app launch wouldn't see it.
+        [".local/bin", ".cargo/bin", ".bun/bin", ".opencode/bin"].forEach { add(URL(fileURLWithPath: home).appending(path: $0).path) }
         nodeVersionBinDirectories(homeDirectory: homeDirectory, fileManager: fileManager).forEach { add($0.path) }
         ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"].forEach(add)
         // Codex ships its CLI inside Codex.app — support users who installed the app, not the npm/standalone CLI.

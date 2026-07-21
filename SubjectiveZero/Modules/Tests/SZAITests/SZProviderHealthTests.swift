@@ -86,6 +86,18 @@ private let piProbeLoggedOut = SZProcessResult(
     output: "{\"type\":\"session\",\"version\":3,\"id\":\"019f57ff-1111-7777-8888-999999999999\",\"cwd\":\"/tmp\"}\n" +
             "No API key found for the selected model. Use /login to log into a provider via OAuth, " +
             "or set an API key in your environment.")
+private let opencodeVersionOK = SZProcessResult(exitCode: 0, output: "1.18.4")
+// opencode's `auth list` exits 0 in BOTH auth states (multi-provider — it lists whatever creds exist),
+// so the auth tier's marker path, not the exit code, classifies a credential-less install by the
+// "0 credentials" summary line.
+private let opencodeAuthLoggedIn = SZProcessResult(
+    exitCode: 0,
+    output: "Credentials ~/.local/share/opencode/auth.json\n\nOpenAI  oauth\n\n1 credentials")
+private let opencodeAuthLoggedOut = SZProcessResult(
+    exitCode: 0,
+    output: "Credentials ~/.local/share/opencode/auth.json\n\n0 credentials")
+private let opencodeMissing = SZProcessResult(
+    exitCode: 127, output: "env: opencode: No such file or directory")
 
 @Test func readyWhenVersionAndAuthPass() async {
     let claude = await SZClaudeProvider().healthReport(runner: ScriptedStubRunner([
@@ -118,6 +130,13 @@ private let piProbeLoggedOut = SZProcessResult(
     ]))
     #expect(pi.status == .ready)
     #expect(pi.version == "0.80.6")
+
+    let opencode = await SZOpenCodeProvider().healthReport(runner: ScriptedStubRunner([
+        .init(argvPrefix: ["opencode", "--version"], result: opencodeVersionOK),
+        .init(argvPrefix: ["opencode", "auth", "list"], result: opencodeAuthLoggedIn),
+    ]))
+    #expect(opencode.status == .ready)
+    #expect(opencode.version == "1.18.4")
 }
 
 /// pi's status command reports logged-out in its OUTPUT while exiting 0 (grok-shaped) — the
@@ -351,11 +370,13 @@ private let piProbeLoggedOut = SZProcessResult(
         .init(argvPrefix: ["grok", "models"], result: grokModelsLoggedIn),
         .init(argvPrefix: ["pi", "--version"], result: piVersionOK),
         .init(argvPrefix: ["pi", "--list-models"], result: piListModelsLoggedIn),
+        .init(argvPrefix: ["opencode", "--version"], result: opencodeVersionOK),
+        .init(argvPrefix: ["opencode", "auth", "list"], result: opencodeAuthLoggedIn),
     ])
     let report = await SZProviderVerifier.run(defaultProviderID: "claude", appVersion: "0.2.1",
                                               appBuild: "42", probe: false, runner: runner)
     #expect(report.ok)
-    #expect(report.providers.map(\.status) == [.ready, .missingCLI, .ready, .ready])
+    #expect(report.providers.map(\.status) == [.ready, .missingCLI, .ready, .ready, .ready])
 
     // The printed JSON must round-trip: it's a machine contract (APP_SETUP.md), not a log line.
     let decoder = JSONDecoder()
@@ -363,7 +384,7 @@ private let piProbeLoggedOut = SZProcessResult(
     let decoded = try decoder.decode(SZProviderVerificationReport.self,
                                      from: Data(SZProviderVerifier.json(report).utf8))
     #expect(decoded.ok && decoded.appVersion == "0.2.1" && decoded.defaultProviderID == "claude")
-    #expect(decoded.providers.count == 4)
+    #expect(decoded.providers.count == 5)
     // Failure receipts survive the round-trip (the excerpt is what a setup agent acts on).
     #expect(decoded.providers[1].diagnostics.first?.outputExcerpt?.contains("No such file") == true)
 }
@@ -378,11 +399,13 @@ private let piProbeLoggedOut = SZProcessResult(
         .init(argvPrefix: ["grok", "models"], result: grokModelsLoggedOut),
         .init(argvPrefix: ["pi", "--version"], result: piVersionOK),
         .init(argvPrefix: ["pi", "--list-models"], result: piListModelsLoggedOut),
+        .init(argvPrefix: ["opencode", "--version"], result: opencodeVersionOK),
+        .init(argvPrefix: ["opencode", "auth", "list"], result: opencodeAuthLoggedOut),
     ])
     let report = await SZProviderVerifier.run(defaultProviderID: nil, appVersion: "dev",
                                               appBuild: "dev", probe: false, runner: runner)
     #expect(!report.ok)
-    #expect(report.providers.map(\.status) == [.authNeeded, .missingCLI, .authNeeded, .authNeeded])
+    #expect(report.providers.map(\.status) == [.authNeeded, .missingCLI, .authNeeded, .authNeeded, .authNeeded])
 }
 
 /// --probe upgrades a cheap-ready provider with the real prompt probe, keeping both tiers'
@@ -398,6 +421,7 @@ private let piProbeLoggedOut = SZProcessResult(
               result: SZProcessResult(exitCode: 127, output: "env: grok: No such file or directory")),
         .init(argvPrefix: ["pi", "--version"],
               result: SZProcessResult(exitCode: 127, output: "env: pi: No such file or directory")),
+        .init(argvPrefix: ["opencode", "--version"], result: opencodeMissing),
     ])
     let report = await SZProviderVerifier.run(defaultProviderID: nil, appVersion: "dev",
                                               appBuild: "dev", probe: true, runner: runner)
@@ -407,6 +431,7 @@ private let piProbeLoggedOut = SZProcessResult(
     #expect(report.providers[1].diagnostics.map(\.tier) == [.install])   // missing → never probed
     #expect(report.providers[2].diagnostics.map(\.tier) == [.install])   // missing → never probed
     #expect(report.providers[3].diagnostics.map(\.tier) == [.install])   // missing → never probed
+    #expect(report.providers[4].diagnostics.map(\.tier) == [.install])   // missing → never probed
 }
 
 /// The remedies the setup sheet shows are provider data, not UI prose — every provider must vend

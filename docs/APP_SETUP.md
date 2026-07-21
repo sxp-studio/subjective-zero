@@ -84,9 +84,22 @@ sheet shows the same remedies listed here.
 - Caution: a logged-out `pi -p …` without `--offline` can hang with NO output (it stalls on
   provider auth). Never use a real prompt to test auth; use `pi --list-models --offline`.
 
+### opencode (`opencode`)
+
+- Install (ask first): `curl -fsSL https://opencode.ai/install | bash` (installs to `~/.opencode/bin`).
+- Health: `opencode --version`.
+- Auth status: `opencode auth list` - **exit 0 in both states**; the output tells: a provider line
+  and "1 credentials" (or more) when a backend is authed vs "0 credentials" when none is.
+  (Verified on opencode 1.18.4.)
+- Log in: run `opencode auth login` interactively (pick a provider; browser/OAuth or API key); ask
+  before launching.
+- opencode is a multi-provider harness like pi: which models it serves depends on what the USER
+  authed, so the app enumerates them from the CLI at runtime (`opencode models --verbose`) instead of shipping
+  a fixed list (the model picker is empty until at least one provider is authed).
+
 The app resolves CLIs on its own synthesized search path (inherited PATH + nvm/volta/bun/cargo/
-`~/.local/bin`/Homebrew/`Codex.app` + system dirs), so a CLI visible in the user's shell is
-normally visible to the app even when launched from Finder.
+`~/.local/bin`/`~/.opencode/bin`/Homebrew/`Codex.app` + system dirs), so a CLI visible in the user's
+shell is normally visible to the app even when launched from Finder.
 
 ## App-level verification
 
