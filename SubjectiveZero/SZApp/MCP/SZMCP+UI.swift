@@ -350,6 +350,17 @@ extension SZHostBridge {
             throw SZMCPError.message(host.fenceDenial(nodes: [id], origin: .agent) ?? "node \(id) is locked")
         }
         guard result.found else { throw SZMCPError.message("no node \(id)") }
+        // A blank prompt node that `startRun` kept OUT of the work set becomes real work the instant the
+        // Director gives it a prompt — join it to the run so the fleet builds it this pass, exactly as
+        // `ui_edit_ports` and `ui_add_prompt_node` do. `result.raisedRebuild` covers only `.generated`
+        // nodes, so without this a Director authoring a previously-excluded blank node during a run leaves
+        // it authored-but-undispatched. Skip if already in the set — `noteRunCreatedWork` asserts a fresh,
+        // uncontended claim.
+        if !host.runWorkSet.contains(id),
+           let node = host.store.project?.graph.node(id: id), node.kind == .prompt,
+           node.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            host.noteRunCreatedWork([id])
+        }
         // Report the node's STATE, not what this call changed (same terms as `ui_edit_ports`): a node
         // already awaiting a rebuild is still awaiting one.
         let stillNeedsRebuild = host.store.project?.graph.node(id: id)?.needsRebuild ?? result.raisedRebuild
