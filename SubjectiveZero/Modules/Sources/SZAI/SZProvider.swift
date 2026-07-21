@@ -37,6 +37,11 @@ public struct SZAgentRunRequest: Sendable {
     public var packageDirectory: URL      // the .subz project dir (granted readable)
     public var cacheDirectory: URL        // swift/clang module caches
     public var mcpServerPort: UInt16?     // nil → no MCP attached
+    /// The bare MCP tool names (no `mcp__subz__` prefix) this agent is permitted to call — the app's
+    /// `SZHostBridge.agentCallableToolNames`, the single source of truth. A provider that enforces a
+    /// per-tool allowlist (claude's `--allowedTools`) mirrors this; the others ignore it and reach
+    /// whatever the bus advertises. Empty when no MCP is attached.
+    public var allowedMCPTools: [String]
     public var resumeSessionID: String?   // non-nil → continue an existing session (chat), not a fresh spawn
     public var model: String?
     public var reasoningEffort: String?
@@ -54,6 +59,7 @@ public struct SZAgentRunRequest: Sendable {
         packageDirectory: URL? = nil,
         cacheDirectory: URL,
         mcpServerPort: UInt16? = nil,
+        allowedMCPTools: [String] = [],
         resumeSessionID: String? = nil,
         model: String? = nil,
         reasoningEffort: String? = nil,
@@ -67,6 +73,7 @@ public struct SZAgentRunRequest: Sendable {
         self.packageDirectory = packageDirectory ?? workingDirectory
         self.cacheDirectory = cacheDirectory
         self.mcpServerPort = mcpServerPort
+        self.allowedMCPTools = allowedMCPTools
         self.resumeSessionID = resumeSessionID
         self.model = model
         self.reasoningEffort = reasoningEffort

@@ -207,6 +207,7 @@ extension SZHost {
         let request = SZAgentRunRequest(
             prompt: prompt, workingDirectory: workingDirectory, packageDirectory: projectURL,
             cacheDirectory: cacheDirectory, mcpServerPort: mcpPort,
+            allowedMCPTools: SZHostBridge.agentCallableToolNames,
             model: generation.model, reasoningEffort: generation.reasoningEffort,
             fastMode: generation.fastMode ?? false, timeout: 300)
         let result = try await deliver(scope: scope, request: request, provider: provider,
@@ -274,6 +275,7 @@ extension SZHost {
             // (the Director turn resolves its own inside runDirectorTurn).
             generationSettings: resolvedGenerationSettings(for: providerID),
             store: store, mcpPort: mcpPort,
+            allowedMCPTools: SZHostBridge.agentCallableToolNames,   // mirror the .agent bus into each agent's allowlist
             projectURL: projectURL, cacheDirectory: cacheDirectory,
             // Stream each coding agent's output into its node's Coding Agent tab, under THIS run's
             // claim (captured, not read live: after a cancel, a zombie dispatch must present its

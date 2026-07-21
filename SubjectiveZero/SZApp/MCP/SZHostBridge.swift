@@ -56,9 +56,57 @@ final class SZHostBridge {
     /// naming convention: rename one tool and it silently becomes agent-callable, with nothing to fail.
     nonisolated static let debugToolNames = Set(debugToolDefinitions.compactMap { $0["name"] as? String })
 
+    /// Production tools (agent + ui) deliberately withheld from the agent surface — each declared
+    /// `agentCallable: false` at its definition. Derived, like `debugToolNames`, so the definition is
+    /// the single source of truth: mark one and it drops off every agent bus and out of the mirror below.
+    nonisolated static let agentWithheldToolNames = Set(
+        (agentToolDefinitions + uiToolDefinitions)
+            .filter { ($0["agentCallable"] as? Bool) == false }
+            .compactMap { $0["name"] as? String })
+
+    /// The production tool names a spawned agent MAY call — the `.agent` surface minus the withheld
+    /// set (never `debug_*`). Definition order preserved for a stable allowlist string. This is what
+    /// the Claude provider's `--allowedTools` mirrors (plumbed via `SZAgentRunRequest.allowedMCPTools`),
+    /// so a NEW tool is reachable by construction and the allowlist can never go stale.
+    nonisolated static let agentCallableToolNames: [String] =
+        (agentToolDefinitions + uiToolDefinitions)
+            .filter { ($0["agentCallable"] as? Bool) != false }
+            .compactMap { $0["name"] as? String }
+
+#if DEBUG
+    /// Invariants the agent bus depends on, asserted once at startup. SZApp is an app target with no
+    /// unit-test target that can import these definitions, so this stands in for the guard test: a future
+    /// edit that reclassifies a tool (or leaks the policy key to the wire) trips here in every DEBUG run
+    /// and in the MCP integration harness. All checks read env-independent derived sets, so
+    /// `SZ_AGENT_DEBUG_TOOLS=1` (which legitimately adds `debug_*` to the live `.agent` tools/list) does
+    /// not confuse them.
+    nonisolated static func assertAgentSurfaceInvariants() {
+        let callable = Set(agentCallableToolNames)
+        assert(callable.isDisjoint(with: debugToolNames),
+               "the agent allowlist mirror must never include a debug_* tool")
+        assert(callable.isDisjoint(with: agentWithheldToolNames),
+               "a tool cannot be both agent-callable and withheld")
+        assert(callable.contains("agent_view_frame"),
+               "agent_view_frame must be agent-callable (the bug this guards against)")
+        assert(agentCallableToolNames.count == callable.count,
+               "duplicate tool name across the agent + ui definitions")
+        assert(toolDefinitions(for: .full).allSatisfy { $0["agentCallable"] == nil },
+               "the agentCallable policy key must be stripped from every served definition")
+    }
+#endif
+
     /// MCP `tools/list` payload for one surface. Pure → `nonisolated` so the server needn't hop.
+    /// The `.full` test bus keeps everything; the `.agent` bus drops both `debug_*` (via
+    /// `exposesDebugTools`) and any `agentCallable: false` tool. The `agentCallable` key is host-side
+    /// policy, not wire schema, so it is stripped from every returned definition.
     nonisolated static func toolDefinitions(for surface: Surface = .full) -> [[String: Any]] {
-        (surface.exposesDebugTools ? debugToolDefinitions : []) + agentToolDefinitions + uiToolDefinitions
+        let debug = surface.exposesDebugTools ? debugToolDefinitions : []
+        let agentAndUI = (agentToolDefinitions + uiToolDefinitions).filter {
+            surface == .full || ($0["agentCallable"] as? Bool) != false
+        }
+        return (debug + agentAndUI).map { def in
+            var def = def; def["agentCallable"] = nil; return def
+        }
     }
 
     /// Dispatch one `tools/call`, trying each surface in turn. Image tools (which return an inline image,
@@ -66,6 +114,10 @@ final class SZHostBridge {
     func callTool(name: String, arguments: [String: Any], surface: Surface = .full) throws -> SZMCPToolResult {
         // Withheld, not merely unlisted: knowing the name from somewhere else must not be enough.
         guard !Self.debugToolNames.contains(name) || surface.exposesDebugTools else {
+            throw SZMCPError.message("\(name) is not available to agents")
+        }
+        // Same rule for production tools flagged `agentCallable: false` — the `.full` test bus alone reaches them.
+        guard !Self.agentWithheldToolNames.contains(name) || surface == .full else {
             throw SZMCPError.message("\(name) is not available to agents")
         }
         if let result = try handleImageTool(name: name, arguments: arguments) { return result }
@@ -76,9 +128,16 @@ final class SZHostBridge {
     }
 
     /// Shared helper for a tool definition; `properties` is the JSON-Schema arg map (empty = no args).
-    nonisolated static func tool(_ name: String, _ description: String, properties: [String: Any] = [:]) -> [String: Any] {
+    /// `agentCallable` is host-side policy, NOT part of the MCP wire schema — `toolDefinitions(for:)`
+    /// strips it before serving. A tool is agent-callable by default; declare `false` here (at the
+    /// definition, the one source of truth) to withhold it from the agent surface for EVERY provider,
+    /// the same way `debug_*` is withheld. That is why the Claude allowlist can be a derived mirror
+    /// (`agentCallableToolNames`) rather than a hand-kept second list that drifts.
+    nonisolated static func tool(_ name: String, _ description: String,
+                                 properties: [String: Any] = [:], agentCallable: Bool = true) -> [String: Any] {
         ["name": name, "description": description,
-         "inputSchema": ["type": "object", "properties": properties]]
+         "inputSchema": ["type": "object", "properties": properties],
+         "agentCallable": agentCallable]
     }
 
     /// Parse a tool's `scope` argument into a chat scope — absent defaults to the Director; anything

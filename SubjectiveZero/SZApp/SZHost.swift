@@ -698,6 +698,9 @@ final class SZHost {
     private func startMCPServer() {
         // Both buses, or retry: a session whose agent bus failed once must not run agentless forever.
         guard mcpServer == nil || agentMCPServer == nil else { return }
+        #if DEBUG
+        SZHostBridge.assertAgentSurfaceInvariants()   // no app test target — see the function's note
+        #endif
         let bridge = SZHostBridge(host: self)
         do {
             let server = try mcpServer ?? SZMCPServer.start(bridge: bridge, surface: .full)

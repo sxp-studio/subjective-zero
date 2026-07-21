@@ -51,6 +51,11 @@ public struct SZOrchestrationContext {
     public let generationSettings: SZProviderGenerationSettings
     public let store: SZStore
     public let mcpPort: UInt16
+    /// The bare MCP tool names this run's coding agents may call — the app's
+    /// `SZHostBridge.agentCallableToolNames` (the single source of truth), forwarded onto each
+    /// coding-agent request so a per-tool-allowlist provider (claude) mirrors the bus. Empty default:
+    /// a strategy run with no host attached (tests) needs no allowlist.
+    public let allowedMCPTools: [String]
     public let projectURL: URL
     public let cacheDirectory: URL
     public let runner: any SZProcessRunning
@@ -113,6 +118,7 @@ public struct SZOrchestrationContext {
         generationSettings: SZProviderGenerationSettings = SZProviderGenerationSettings(),
         store: SZStore,
         mcpPort: UInt16,
+        allowedMCPTools: [String] = [],
         projectURL: URL,
         cacheDirectory: URL,
         runner: any SZProcessRunning = SZSystemProcessRunner(),
@@ -133,6 +139,7 @@ public struct SZOrchestrationContext {
         self.generationSettings = generationSettings
         self.store = store
         self.mcpPort = mcpPort
+        self.allowedMCPTools = allowedMCPTools
         self.projectURL = projectURL
         self.cacheDirectory = cacheDirectory
         self.runner = runner

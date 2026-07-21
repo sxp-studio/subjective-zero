@@ -118,6 +118,7 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
                 let reconcile = reconcile[plan.node] ?? CodingReconcile()
                 group.addTask {
                     await Self.code(plan, provider: provider, mcpPort: context.mcpPort,
+                                    allowedMCPTools: context.allowedMCPTools,
                                     projectURL: context.projectURL, cacheDirectory: context.cacheDirectory,
                                     runner: context.runner, turnRunner: context.turnRunner,
                                     generationSettings: context.generationSettings,
@@ -178,6 +179,7 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
     /// conversation rather than starting cold.
     private static func code(
         _ plan: CodingPlan, provider: any SZProvider, mcpPort: UInt16,
+        allowedMCPTools: [String] = [],
         projectURL: URL, cacheDirectory: URL, runner: any SZProcessRunning,
         turnRunner: SZCodingTurnRunner?,
         generationSettings: SZProviderGenerationSettings = SZProviderGenerationSettings(),
@@ -208,6 +210,7 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
             packageDirectory: projectURL,
             cacheDirectory: cacheDirectory,
             mcpServerPort: mcpPort,
+            allowedMCPTools: allowedMCPTools,
             resumeSessionID: reconcile.resumeSession,
             model: generationSettings.model,
             reasoningEffort: generationSettings.reasoningEffort,

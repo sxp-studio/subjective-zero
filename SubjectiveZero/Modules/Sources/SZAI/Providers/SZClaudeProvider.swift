@@ -64,35 +64,17 @@ public struct SZClaudeProvider: SZProvider {
     public let loginCommand = "claude auth login"
     public let usesPreallocatedSessionID = true   // we mint the UUID and pass --session-id
 
-    /// MCP tools an agent may call (plus its native file tools). These must be pre-approved here — in
-    /// non-interactive `-p` mode a tool not on this list is denied (it can't prompt). One shared superset
-    /// for both roles: a Coding Agent only ever calls the `agent_*` set (its prompt scopes it there), and
-    /// the Director Agent shapes the graph through `ui_*` and, during a reconcile turn, directs a
-    /// node's Coding Agent via `ui_send_chat` (recorded, not a recursive run).
-    ///
-    /// `ui_run` IS allowed. A chat turn is how a user asks for a build ("...then build it"), and
-    /// director/chat.md tells the Director to call it — but an unlisted tool is denied outright in
-    /// non-interactive `-p` mode, so the Director could only stop and ask the user to grant it. Recursion
-    /// needs no help from the allowlist: `uiRun` refuses while `isRunning`, and a call from the Director's
-    /// own streaming turn is queued to fire at turn end.
-    private static let allowedTools = [
-        "Read", "Write", "Edit",
-        // Coding Agent — implement one node.
-        "mcp__subz__agent_read_graph", "mcp__subz__agent_read_node",
-        "mcp__subz__agent_library_index",
-        "mcp__subz__agent_library_card", "mcp__subz__agent_library_source",
-        "mcp__subz__agent_write_node_staged", "mcp__subz__agent_compile_node", "mcp__subz__agent_report_status",
-        "mcp__subz__agent_docs_index", "mcp__subz__agent_docs_read",   // fetch the canonical schema/ABI instead of guessing
-        // Director Agent — establish contracts + wiring + direct coding agents on reconcile.
-        "mcp__subz__ui_add_prompt_node", "mcp__subz__ui_add_source_node",
-        "mcp__subz__ui_update_node", "mcp__subz__ui_edit_ports", "mcp__subz__ui_connect",
-        "mcp__subz__ui_disconnect", "mcp__subz__ui_move_node", "mcp__subz__ui_remove_node",
-        "mcp__subz__ui_split_node", "mcp__subz__ui_merge_nodes", "mcp__subz__ui_toggle_display",
-        "mcp__subz__ui_send_chat", "mcp__subz__ui_run",
-        // No `debug_*`: the agent bus doesn't serve them (SZHostBridge.Surface). The Director reads the
-        // graph with `agent_read_graph` — reaching for `debug_snapshot_state` made a run behave unlike
-        // the one a user gets, and cost it a tool-search round trip before its first move.
-    ].joined(separator: ",")
+    /// The `--allowedTools` value. Claude is the ONLY provider that gates per-tool: in non-interactive
+    /// `-p` mode a tool NOT on this list is denied and the model can't prompt, so it silently reports it
+    /// can't. The MCP set is therefore NOT owned here — it MIRRORS the app's single source of truth
+    /// (`SZHostBridge.agentCallableToolNames`, the tools the `.agent` bus actually serves), plumbed in
+    /// via `request.allowedMCPTools`. So a new MCP tool is reachable by construction and there is no
+    /// second list to drift (that gap is exactly what once hid `agent_view_frame` from the agent).
+    /// The native file tools (`Read/Write/Edit`) stay here — they are claude's own, not MCP surface.
+    /// Empty `mcpTools` (no MCP attached, e.g. the health probe) → native tools only.
+    private static func allowedTools(_ mcpTools: [String]) -> String {
+        (["Read", "Write", "Edit"] + mcpTools.map { "mcp__subz__\($0)" }).joined(separator: ",")
+    }
 
     public func launch(_ request: SZAgentRunRequest, preallocatedSessionID: String?) -> SZLaunch {
         var args = ["claude", "-p", request.prompt,
@@ -107,7 +89,7 @@ public struct SZClaudeProvider: SZProvider {
         if request.fastMode { args += ["--settings", #"{"fastMode":true}"#] }
         args += [
             "--add-dir", request.packageDirectory.path,
-            "--allowedTools", Self.allowedTools,
+            "--allowedTools", Self.allowedTools(request.allowedMCPTools),
             "--permission-mode", "acceptEdits",
             "--output-format", "stream-json", "--verbose",
         ]

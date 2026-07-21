@@ -152,6 +152,7 @@ extension SZHost {
             packageDirectory: projectURL,
             cacheDirectory: cacheDirectory,
             mcpServerPort: scope == .debug ? nil : mcpPort,   // the debug chat agent is tool-free
+            allowedMCPTools: scope == .debug ? [] : SZHostBridge.agentCallableToolNames,
             resumeSessionID: existing?.sessionID,
             model: generation.model,
             reasoningEffort: generation.reasoningEffort,

@@ -39,7 +39,8 @@ private final class StubRunner: SZProcessRunning {
 }
 
 private func request(
-    port: UInt16?, model: String? = nil, reasoningEffort: String? = nil, fastMode: Bool = false
+    port: UInt16?, allowedMCPTools: [String] = [],
+    model: String? = nil, reasoningEffort: String? = nil, fastMode: Bool = false
 ) -> SZAgentRunRequest {
     let tmp = FileManager.default.temporaryDirectory
     return SZAgentRunRequest(
@@ -48,6 +49,7 @@ private func request(
         packageDirectory: tmp.appending(path: "proj.subz"),
         cacheDirectory: tmp.appending(path: "cache"),
         mcpServerPort: port,
+        allowedMCPTools: allowedMCPTools,
         model: model,
         reasoningEffort: reasoningEffort,
         fastMode: fastMode
@@ -1045,23 +1047,33 @@ private let piRPCCatalogLoggedOut = """
     }
 }
 
-/// claude must be allowed to call the library tools (denied otherwise in non-interactive -p).
-@Test func claudeAllowsLibraryCardAndSource() {
-    let argv = SZClaudeProvider().launch(request(port: 42100), preallocatedSessionID: "x").arguments
+/// claude is the only provider that gates per-tool, so it must MIRROR `request.allowedMCPTools`
+/// (the app's `SZHostBridge.agentCallableToolNames`) into `--allowedTools`, prefixed — a tool it
+/// isn't handed is denied in non-interactive -p mode. The app-side test target owns the guard that the
+/// mirrored set is exactly the agent surface (incl. `agent_view_frame`) minus the withheld/debug tools;
+/// here we only prove the provider forwards whatever it's given and adds its native file tools.
+@Test func claudeMirrorsAllowedMCPToolsIntoAllowlist() {
+    let mcp = ["agent_library_index", "agent_library_card", "agent_library_source",
+               "agent_view_frame", "ui_run"]
+    let argv = SZClaudeProvider().launch(request(port: 42100, allowedMCPTools: mcp),
+                                         preallocatedSessionID: "x").arguments
     let allowed = try! #require(argv.value(after: "--allowedTools"))
-    for tool in ["mcp__subz__agent_library_index", "mcp__subz__agent_library_card",
-                 "mcp__subz__agent_library_source"] {
-        #expect(allowed.contains(tool), "claude allowedTools should include \(tool)")
+    for tool in mcp {
+        #expect(allowed.contains("mcp__subz__\(tool)"), "claude allowedTools should mirror \(tool)")
     }
-    // The Director's chat prompt tells it to call ui_run when the user asks for a build; an unlisted tool
-    // is denied outright in -p mode, so it could only stop and ask the user to grant it. uiRun guards its
-    // own recursion (refused while isRunning, queued from the Director's own turn).
-    #expect(allowed.contains("mcp__subz__ui_run"), "the Director must be able to start the run it is told to start")
-
-    // An agent must never be handed the debug surface: it can freeze the clock and force node failures,
-    // and a run holding those is not the run a user gets. Absence needs an assertion, or nothing catches
-    // a re-added tool.
+    // Native file tools are claude's own, added regardless of the MCP set.
+    for native in ["Read", "Write", "Edit"] { #expect(allowed.contains(native)) }
+    // A tool NOT handed to the provider must not appear — the provider adds nothing on its own, so a
+    // withheld tool (or a debug tool) can only reach the allowlist by being in `allowedMCPTools`.
+    #expect(!allowed.contains("ui_stop"), "provider must not inject tools it wasn't given")
     #expect(!allowed.contains("debug_"), "claude allowedTools must not include any debug_* tool")
+}
+
+/// With no MCP attached (e.g. the health probe), the allowlist is native file tools only.
+@Test func claudeAllowlistIsNativeOnlyWithoutMCP() {
+    let argv = SZClaudeProvider().launch(request(port: nil), preallocatedSessionID: "x").arguments
+    let allowed = try! #require(argv.value(after: "--allowedTools"))
+    #expect(allowed == "Read,Write,Edit")
 }
 
 /// The box's acceptance criterion: health check passes. LIVE — it shells out to the real CLIs, so it

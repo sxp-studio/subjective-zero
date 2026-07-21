@@ -76,13 +76,13 @@ extension SZHostBridge {
                     "model": ["type": "string", "description": "one of the provider's models (omit = keep/default)"],
                     "reasoning_effort": ["type": "string", "description": "one of the provider's supported efforts (omit = keep/default; unsupported on claude)"],
                     "fast_mode": ["type": "boolean", "description": "toggle the provider's fast tier (omit = keep/default)"],
-                 ]),
+                 ], agentCallable: false),   // user-level setting; resets all sessions — not an agent action
             tool("ui_run", "Start the implementation run over the current graph — a Coding Agent per pending node, with the active provider. `instruction` (optional) steers the run. Called from your own chat turn, the run is QUEUED and starts when your turn ends (finish your reply; do not wait for it). Refused while a run is already in flight.",
                  properties: [
                     "instruction": ["type": "string", "description": "optional free-text steer for the run"],
                  ]),
             tool("ui_stop", "Stop the in-flight run (mirrors the HUD Stop button) — cancels the Director and every coding agent. Returns {status: \"stopped\"} if a run was cancelled, or {status: \"not_running\"} if nothing was in flight.",
-                 properties: [:]),
+                 properties: [:], agentCallable: false),   // a Director calling it would cancel its own run
             tool("ui_send_chat", "Send a chat message to an agent. `scope` is a node id (chat that node's Coding Agent) or \"director\" (the Director Agent). Every accepted message returns a `message_id`; `status` is \"queued\" (enqueued — delivers as a real turn when the recipient is free; poll ui_message_status if you need the outcome), \"recorded\" (a mid-run steer, folded into the recipient's next prompt), or \"rejected\" (pre-flight refusal — the message will NOT deliver; `detail` says why). A fresh Director Agent chat uses the active provider; resuming continues on the session's own CLI.",
                  properties: [
                     "scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"],
@@ -103,25 +103,28 @@ extension SZHostBridge {
                     "mode": ["type": "string", "enum": ["none", "preview"]],
                     "port": ["type": "string", "description": "preview only: which texture output to show"],
                  ]),
+            // The chat-tab and panel tools below are view/window navigation — no graph or render
+            // effect — so they are withheld from agents (`agentCallable: false`); only the human
+            // (and the `.full` test bus) drives the workspace layout.
             tool("ui_select_chat", "Open/select a chat tab (mirrors clicking a tab or a node's chat bubble) and show the panel. `scope` = a node uuid (opens that node's Coding Agent chat) or \"director\".",
-                 properties: ["scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"]]),
+                 properties: ["scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"]], agentCallable: false),
             tool("ui_close_chat_tab", "Close a node's (or the Debug) chat tab, mirroring its ✕ — `scope` is required. Returns {closed:true, scope}. The Director tab has no ✕ and can't be closed: that returns {closed:false, reason}.",
-                 properties: ["scope": ["type": "string", "description": "a node uuid, or \"debug\""]]),
+                 properties: ["scope": ["type": "string", "description": "a node uuid, or \"debug\""]], agentCallable: false),
             tool("ui_reorder_chat_tab", "Reorder chat tabs (mirrors dragging a tab): move the `scope` tab in front of the `before` tab. Each is a node uuid or \"director\" (any tab can move, including the Director).",
                  properties: [
                     "scope": ["type": "string", "description": "the tab to move: a node uuid or \"director\""],
                     "before": ["type": "string", "description": "move it in front of this tab: a node uuid or \"director\""],
-                 ]),
+                 ], agentCallable: false),
             tool("ui_show_panel", "Show a top-level panel (mirrors its View-menu toggle) — reopens at its remembered spot. Returns the resulting layout tree.",
-                 properties: ["panel": Self.panelProperty]),
+                 properties: ["panel": Self.panelProperty], agentCallable: false),
             tool("ui_close_panel", "Close a top-level panel (mirrors its header ✕) — its split collapses and its spot is remembered. Returns {closed:true, layout}. The last panel can't be closed, and a panel that isn't open can't either: both return {closed:false, reason, layout}.",
-                 properties: ["panel": Self.panelProperty]),
+                 properties: ["panel": Self.panelProperty], agentCallable: false),
             tool("ui_move_panel", "Move a panel (mirrors dragging its header onto another panel): an edge `zone` splits `onto` with `panel` on that side; \"center\" swaps the two. Returns the resulting layout tree.",
                  properties: [
                     "panel": Self.panelProperty,
                     "onto": Self.panelProperty,
                     "zone": ["type": "string", "enum": ["left", "right", "top", "bottom", "center"]],
-                 ]),
+                 ], agentCallable: false),
         ]
     }
 
