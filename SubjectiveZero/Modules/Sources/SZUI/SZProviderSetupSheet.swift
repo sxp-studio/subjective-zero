@@ -33,6 +33,12 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
     public var detail: String?          // failure receipts (attempted command, exit, output tail)
     public var cliPath: String?         // the monospaced path line; nil = not found
     public var installCommand: String?  // the needsInstall remedy
+    /// The provider's model catalog (menu order). The card shows a Model picker when this has ≥2
+    /// entries — the only in-app way to change a FAILING provider's model, since a failing provider
+    /// can't be made active and reach the composer's picker. Empty for a one-model or un-fetched
+    /// provider → no picker.
+    public var models: [SZProviderGenerationPickerModelItem]
+    public var selectedModel: String    // resolved model id, checkmarked in the picker
     public var isTesting: Bool          // probe in flight → Test button spins
     public var isSelectable: Bool
     public var isConfirmable: Bool      // Confirm gates on the SELECTED card's readiness
@@ -45,7 +51,9 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
 
     public init(id: String, displayName: String, statusLabel: String, message: String,
                 readiness: Readiness, detail: String? = nil, cliPath: String? = nil,
-                installCommand: String? = nil, isTesting: Bool = false,
+                installCommand: String? = nil,
+                models: [SZProviderGenerationPickerModelItem] = [], selectedModel: String = "",
+                isTesting: Bool = false,
                 isSelectable: Bool = true, isConfirmable: Bool = false,
                 fallbackName: String? = nil, canDisable: Bool = false) {
         self.id = id
@@ -56,6 +64,8 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
         self.detail = detail
         self.cliPath = cliPath
         self.installCommand = installCommand
+        self.models = models
+        self.selectedModel = selectedModel
         self.isTesting = isTesting
         self.isSelectable = isSelectable
         self.isConfirmable = isConfirmable
@@ -70,6 +80,7 @@ public struct SZProviderSetupSheet: View {
     private let onSelect: (String) -> Void
     private let onRefresh: () -> Void
     private let onTest: (String) -> Void
+    private let onSetModel: (String, String) -> Void   // (providerID, modelID)
     private let onOpenLogin: (String) -> Void
     private let onUseFallback: (String) -> Void
     private let onSetEnabled: (String, Bool) -> Void
@@ -80,7 +91,9 @@ public struct SZProviderSetupSheet: View {
 
     public init(cards: [SZProviderSetupCard], selectedID: String?,
                 onSelect: @escaping (String) -> Void, onRefresh: @escaping () -> Void,
-                onTest: @escaping (String) -> Void, onOpenLogin: @escaping (String) -> Void,
+                onTest: @escaping (String) -> Void,
+                onSetModel: @escaping (String, String) -> Void,
+                onOpenLogin: @escaping (String) -> Void,
                 onUseFallback: @escaping (String) -> Void,
                 onSetEnabled: @escaping (String, Bool) -> Void,
                 onConfirm: @escaping () -> Void, onSkip: @escaping () -> Void,
@@ -91,6 +104,7 @@ public struct SZProviderSetupSheet: View {
         self.onSelect = onSelect
         self.onRefresh = onRefresh
         self.onTest = onTest
+        self.onSetModel = onSetModel
         self.onOpenLogin = onOpenLogin
         self.onUseFallback = onUseFallback
         self.onSetEnabled = onSetEnabled
@@ -157,6 +171,7 @@ public struct SZProviderSetupSheet: View {
                     Text(card.displayName).font(.system(size: 13, weight: .semibold))
                     statusBadge(card)
                     Spacer()
+                    modelMenu(card)
                     testButton(card)
                 }
 
@@ -212,6 +227,48 @@ public struct SZProviderSetupSheet: View {
         case .needsInstall, .needsLogin: .orange
         case .failed: .red
         case .checking, .unavailable, .disabled: .secondary
+        }
+    }
+
+    /// The per-card model picker — the reachable model control for a FAILING provider, whose composer
+    /// picker is gated behind being active. Shown only when the provider lists ≥2 models and only for
+    /// the SAME readiness set as the Test button (below): a model choice is meaningless where there's
+    /// nothing to install/log-into or nothing yet to test, and its help promises a Test that must
+    /// actually be present. A one-model or un-fetched provider shows nothing.
+    @ViewBuilder
+    private func modelMenu(_ card: SZProviderSetupCard) -> some View {
+        switch card.readiness {
+        case .needsInstall, .unavailable, .checking, .disabled:
+            EmptyView()
+        default:
+            if card.models.count > 1 {
+                let selectedLabel = card.models.first { $0.id == card.selectedModel }?.label
+                    ?? card.selectedModel
+                Menu {
+                    ForEach(card.models) { model in
+                        Button {
+                            onSetModel(card.id, model.id)
+                        } label: {
+                            if model.id == card.selectedModel {
+                                Label(model.label, systemImage: "checkmark")
+                            } else {
+                                Text(model.label)
+                            }
+                        }
+                    }
+                } label: {
+                    // Cap the width and truncate — a long qualified id (the raw-id fallback path)
+                    // must never expand the row and shove Test off the fixed-width card. `.fixedSize`
+                    // would do exactly that (it sizes to the label's full ideal width), so it's out.
+                    Text(selectedLabel.isEmpty ? "Model" : "Model: \(selectedLabel)")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 190)
+                }
+                .menuStyle(.button)
+                .controlSize(.small)
+                .help("Pick the model this provider runs — applies immediately and re-tests it here")
+            }
         }
     }
 

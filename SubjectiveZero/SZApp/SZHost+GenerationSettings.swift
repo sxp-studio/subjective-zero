@@ -51,22 +51,36 @@ extension SZHost {
         return provider.resolvedGenerationSettings(from: providerGenerationSettings[providerID])
     }
 
-    /// Pick the active provider's model (the composer picker / `ui_set_provider`). Returns false
-    /// for a model the provider doesn't list (left unchanged). A real change also resets that
-    /// provider's agent sessions — a thread belongs to the model that opened it (see
-    /// `resetAgentSessions`). Effort and fast mode deliberately do NOT reset: they're per-turn argv
-    /// the CLI re-sends on every resume, so they retune the SAME thread.
+    /// Pick the ACTIVE provider's model (the composer picker / `ui_set_provider`). Thin wrapper over
+    /// `setModel(_:for:)` — the setup sheet's per-card picker sets ANY provider's model, including one
+    /// that isn't active (and can't be made active while it's failing).
     @discardableResult
     func setActiveModel(_ model: String) -> Bool {
-        guard let provider = SZProviderRegistry.shared.provider(id: activeProviderID),
+        setModel(model, for: activeProviderID)
+    }
+
+    /// Pick a model for `providerID` (need not be the active provider). Returns false for a model the
+    /// provider doesn't list (left unchanged). A real change resets that provider's agent sessions —
+    /// a thread belongs to the model that opened it (see `resetAgentSessions`) — and drops any held
+    /// probe verdict, since a `Verified` badge earned by the previous model doesn't carry to this one
+    /// (the same rule a cheap-status transition applies in `refreshProviderHealthOnce`). Effort and
+    /// fast mode deliberately do NOT reset: they're per-turn argv the CLI re-sends on every resume, so
+    /// they retune the SAME thread.
+    @discardableResult
+    func setModel(_ model: String, for providerID: String) -> Bool {
+        guard let provider = SZProviderRegistry.shared.provider(id: providerID),
               provider.models.contains(where: { $0.id == model }) else { return false }
         // Compare against the RESOLVED model, so re-picking the current one is a no-op reset — but
         // still persist it, pinning a choice that today only matches the default by coincidence.
-        let changed = model != resolvedGenerationSettings(for: activeProviderID).model
-        providerGenerationSettings[activeProviderID, default: SZProviderGenerationSettings()].model = model
+        let changed = model != resolvedGenerationSettings(for: providerID).model
+        providerGenerationSettings[providerID, default: SZProviderGenerationSettings()].model = model
         persistAppState()
-        if changed { resetAgentSessions(ownedBy: activeProviderID) }
-        trackProviderDefaultTelemetry()
+        if changed {
+            resetAgentSessions(ownedBy: providerID)
+            providerProbes[providerID] = nil   // the old model's verdict no longer describes this one
+        }
+        // Telemetry reads the ACTIVE provider's context, so only fire when this IS that provider.
+        if providerID == activeProviderID { trackProviderDefaultTelemetry() }
         return true
     }
 

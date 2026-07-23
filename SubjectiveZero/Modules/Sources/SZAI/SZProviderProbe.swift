@@ -7,10 +7,13 @@
 import Foundation
 
 public extension SZProvider {
-    /// One tiny prompt ("Reply with exactly: OK"), default model, no MCP, fresh temp cwd/cache.
+    /// One tiny prompt ("Reply with exactly: OK"), no MCP, fresh temp cwd/cache. `model` /
+    /// `reasoningEffort` default to nil → the provider default (a bare version check); a caller that
+    /// knows the user's resolved selection passes it so Test verifies the model a real run will use.
     /// Mirrors `run()`'s spawn (mint → launch → run → parse) inline so the diagnostic can carry
     /// the exact argv that ran.
-    func healthProbe(runner: any SZProcessRunning = SZSystemProcessRunner()) async -> SZProviderHealthReport {
+    func healthProbe(model: String? = nil, reasoningEffort: String? = nil,
+                     runner: any SZProcessRunning = SZSystemProcessRunner()) async -> SZProviderHealthReport {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appending(path: "sz-provider-probe-\(id)-\(UUID().uuidString)")
         let work = root.appending(path: "work")
@@ -19,9 +22,10 @@ public extension SZProvider {
         try? fileManager.createDirectory(at: cache, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: root) }
 
-        // mcpServerPort nil → both providers omit their MCP wiring; model nil → provider default.
+        // mcpServerPort nil → both providers omit their MCP wiring; model/effort nil → provider default.
         let request = SZAgentRunRequest(prompt: "Reply with exactly: OK",
                                         workingDirectory: work, cacheDirectory: cache,
+                                        model: model, reasoningEffort: reasoningEffort,
                                         timeout: 90)
         let preallocated = usesPreallocatedSessionID ? UUID().uuidString : nil
         let cliPath = SZAgentEnvironment.resolveExecutable(healthArgs.first ?? "")

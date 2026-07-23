@@ -1278,6 +1278,146 @@ private let opencodeRunStreamDupAndSupersede = """
     }
 }
 
+// A catalog with BOTH of opencode's hosted "zen" tiers present alongside a real authed provider.
+// `opencode/*` verified on 1.18.4; the `opencode-go/*` namespace is recorded from a user report
+// (2026-07-23) — a user whose default landed on `opencode-go/deepseek-v4-flash` (quota-exhausted).
+// Order matters: the zen tiers lead, so a naive "first model" default would pick the freebie.
+private let opencodeVerboseZenTiers = """
+opencode-go/deepseek-v4-flash
+{
+  "id": "deepseek-v4-flash",
+  "providerID": "opencode-go",
+  "name": "DeepSeek V4 Flash",
+  "status": "active",
+  "capabilities": { "reasoning": false },
+  "variants": {}
+}
+opencode/big-pickle
+{
+  "id": "big-pickle",
+  "providerID": "opencode",
+  "name": "Big Pickle",
+  "status": "active",
+  "capabilities": { "reasoning": false },
+  "variants": {}
+}
+openai/gpt-5.6-terra
+{
+  "id": "gpt-5.6-terra",
+  "providerID": "openai",
+  "name": "GPT-5.6 Terra",
+  "status": "active",
+  "capabilities": { "reasoning": true },
+  "variants": { "low": {}, "medium": {}, "high": {} }
+}
+"""
+
+// The same catalog with NO real authed provider — only opencode's hosted freebies (the logged-out /
+// zen-only reporter case). Every model is opencode-hosted, so the default must be the first LISTED.
+private let opencodeVerboseZenOnly = """
+opencode-go/deepseek-v4-flash
+{ "id": "deepseek-v4-flash", "providerID": "opencode-go", "name": "DeepSeek V4 Flash", "status": "active", "capabilities": { "reasoning": false }, "variants": {} }
+opencode/big-pickle
+{ "id": "big-pickle", "providerID": "opencode", "name": "Big Pickle", "status": "active", "capabilities": { "reasoning": false }, "variants": {} }
+"""
+
+/// The default-model heuristic skips opencode's OWN hosted zen tiers (providerID `opencode` /
+/// `opencode-go` — free, quota-limited) so a real authed provider leads. This is the reporter's bug:
+/// a naive "first non-`opencode/*`" test let `opencode-go/deepseek-v4-flash` become the default.
+@Test func opencodeDefaultSkipsHostedZenTiers() throws {
+    let snap = try #require(SZOpenCodeProvider.catalogSnapshot(fromVerboseOutput: opencodeVerboseZenTiers))
+    #expect(snap.models.map(\.id) == ["opencode-go/deepseek-v4-flash", "opencode/big-pickle", "openai/gpt-5.6-terra"])
+    #expect(snap.defaultModelID == "openai/gpt-5.6-terra")   // the authed provider, NOT the freebie
+}
+
+/// A zen-only install (no authed provider) defaults to the FIRST listed model — a working freebie
+/// beats no default at all, and it's exactly the model the CLI would pick itself.
+@Test func opencodeDefaultFallsToFirstWhenAllHosted() throws {
+    let snap = try #require(SZOpenCodeProvider.catalogSnapshot(fromVerboseOutput: opencodeVerboseZenOnly))
+    #expect(snap.defaultModelID == "opencode-go/deepseek-v4-flash")   // first listed, all are hosted
+}
+
+/// The user's OWN configured default (opencode.json `model`) wins the pre-selection — even over the
+/// zen-skip heuristic — but only when opencode currently serves it.
+@Test func opencodeDefaultHonorsConfiguredModelWhenServed() throws {
+    // A configured zen model the user deliberately chose still wins over the heuristic's authed pick.
+    let honored = try #require(SZOpenCodeProvider.catalogSnapshot(
+        fromVerboseOutput: opencodeVerboseZenTiers,
+        configuredDefaultModel: "opencode/big-pickle"))
+    #expect(honored.defaultModelID == "opencode/big-pickle")
+
+    // An unserved / stale configured id is ignored — it must never pin a model no run could use;
+    // resolution falls through to the heuristic.
+    let ignored = try #require(SZOpenCodeProvider.catalogSnapshot(
+        fromVerboseOutput: opencodeVerboseZenTiers,
+        configuredDefaultModel: "openai/gpt-9-ghost"))
+    #expect(ignored.defaultModelID == "openai/gpt-5.6-terra")
+}
+
+/// `isOpenCodeHostedID` classifies the qualified `providerID/bare` id by its leading segment: the
+/// exact `opencode` provider and the `opencode-` namespace are hosted; an authed provider (even one
+/// whose name merely starts with the letters) is not.
+@Test func opencodeHostedIDClassification() {
+    #expect(SZOpenCodeProvider.isOpenCodeHostedID("opencode/big-pickle"))
+    #expect(SZOpenCodeProvider.isOpenCodeHostedID("opencode-go/deepseek-v4-flash"))
+    #expect(!SZOpenCodeProvider.isOpenCodeHostedID("openai/gpt-5.6-terra"))
+    #expect(!SZOpenCodeProvider.isOpenCodeHostedID("opencodex/some-model"))   // not the hosted namespace
+}
+
+/// `configuredDefaultModel` reads the top-level `model` from `opencode debug config`'s JSON, tolerating
+/// a leading banner line; a key-less or nonzero-exit result is nil (falls through to the heuristic).
+@Test func opencodeConfiguredDefaultModelParsesDebugConfig() async {
+    let withModel = """
+    starting up…
+    { "$schema": "https://opencode.ai/config.json", "model": "openai/gpt-5.6-terra", "username": "clem" }
+    """
+    #expect(await SZOpenCodeProvider.configuredDefaultModel(runner: StubRunner(output: withModel))
+            == "openai/gpt-5.6-terra")
+    // No `model` key → nil.
+    #expect(await SZOpenCodeProvider.configuredDefaultModel(
+        runner: StubRunner(output: #"{ "$schema": "x", "username": "clem" }"#)) == nil)
+    // Nonzero exit → nil (best-effort, never throws).
+    #expect(await SZOpenCodeProvider.configuredDefaultModel(
+        runner: StubRunner(output: withModel, exitCode: 1)) == nil)
+}
+
+/// A runner that answers the two opencode refresh spawns distinctly (keyed on the `debug`
+/// subcommand), so the end-to-end `refreshModelCatalog` wiring — not just the pure resolver — is
+/// exercised. `StubRunner` returns identical output for every call and so can't distinguish them.
+private final class OpenCodeSplitRunner: SZProcessRunning {
+    let modelsOutput: String
+    let configOutput: String
+    init(modelsOutput: String, configOutput: String) {
+        self.modelsOutput = modelsOutput
+        self.configOutput = configOutput
+    }
+    func run(
+        _ launchPath: String, _ arguments: [String],
+        environment: [String: String], currentDirectoryURL: URL?,
+        input: Data?, timeout: TimeInterval?, inactivityTimeout: TimeInterval?, onOutput: (@Sendable (String) -> Void)?
+    ) async throws -> SZProcessResult {
+        SZProcessResult(exitCode: 0, output: arguments.contains("debug") ? configOutput : modelsOutput)
+    }
+}
+
+/// End-to-end: `refreshModelCatalog` actually spawns `opencode debug config`, threads its `model` into
+/// the snapshot, and lets a served configured id win over the authed-provider heuristic — with no
+/// `model` key, the heuristic drives instead. (The `catalogSnapshot`/`configuredDefaultModel` unit
+/// tests cover the pieces; this proves the two-spawn wiring so a reordering/mis-wiring regresses.)
+@Test func opencodeRefreshThreadsConfiguredModelEndToEnd() async throws {
+    let configured = OpenCodeSplitRunner(
+        modelsOutput: opencodeVerboseZenTiers,
+        configOutput: #"{ "$schema": "x", "model": "opencode/big-pickle", "username": "clem" }"#)
+    let snap = try #require(try await SZOpenCodeProvider().refreshModelCatalog(runner: configured))
+    #expect(snap.defaultModelID == "opencode/big-pickle")   // configured wins over openai/gpt-5.6-terra
+
+    let noModelKey = OpenCodeSplitRunner(
+        modelsOutput: opencodeVerboseZenTiers,
+        configOutput: #"{ "$schema": "x", "username": "clem" }"#)
+    let snap2 = try #require(try await SZOpenCodeProvider().refreshModelCatalog(runner: noModelKey))
+    #expect(snap2.defaultModelID == "openai/gpt-5.6-terra")   // heuristic: first authed, skips zen tiers
+}
+
 /// The `--variant` mapping and the string-state-aware object extractor, in isolation.
 @Test func opencodeReasoningEffortsAndObjectExtraction() {
     #expect(SZOpenCodeProvider.reasoningEfforts(fromVariants: ["none", "low", "medium", "high", "xhigh", "max"])

@@ -269,13 +269,33 @@ extension SZHost {
     /// One real one-shot prompt through the provider's launch path (the per-card Test button and
     /// the first-run auto-probe above). Disabled providers refuse — their card hides Test, this
     /// guard covers any other route in.
+    /// The setup sheet's per-card model pick: apply the choice, then immediately re-verify it right
+    /// here. `setModel` drops the previous model's probe verdict, so without this a FAILING card would
+    /// snap to an optimistic cheap-`Ready` (green, Confirmable, the "try another model" hint gone)
+    /// before the NEW model is known to work — a user could pick an equally-broken model and Confirm
+    /// green. Re-probing on the pick keeps the card honest (Testing… → the real verdict). Bounded by
+    /// the explicit pick (one probe, same token cost as the Test button) and only when the provider is
+    /// otherwise runnable — a needs-login / needs-install card can't be probed and isn't. The
+    /// composer's picker and `ui_set_provider` deliberately do NOT auto-probe (not a setup context).
+    func pickSetupModel(_ model: String, for providerID: String) {
+        let changed = model != resolvedGenerationSettings(for: providerID).model
+        guard setModel(model, for: providerID), changed else { return }
+        if isProviderReadyForNewWork(providerID) { runProviderProbe(providerID) }
+    }
+
     func runProviderProbe(_ id: String) {
         guard let provider = SZProviderRegistry.shared.provider(id: id),
               !disabledProviderIDs.contains(id),
               !probingProviders.contains(id) else { return }
         probingProviders.insert(id)
+        // Probe the user's RESOLVED selection, so Test verifies the model a real run will use — not
+        // the provider default (the very mismatch that let a quota-limited default read as "Failing").
+        // An empty resolved model (a runtime-catalog provider before its first fetch) → nil, so argv
+        // carries no model and the CLI's own default runs, exactly as a bare probe did.
+        let resolved = resolvedGenerationSettings(for: id)
+        let model = resolved.model.flatMap { $0.isEmpty ? nil : $0 }
         Task { @MainActor in
-            let report = await provider.healthProbe()
+            let report = await provider.healthProbe(model: model, reasoningEffort: resolved.reasoningEffort)
             probingProviders.remove(id)
             providerProbes[id] = report
         }
@@ -401,16 +421,29 @@ extension SZHost {
             }
             let report = displayedProviderHealth(provider.id)
             let readiness = Self.cardReadiness(report)
+            let models = provider.models.map {
+                SZProviderGenerationPickerModelItem(id: $0.id, label: $0.displayName)
+            }
+            var message = report.map { r in r.version.map { "\(r.message)  ·  \($0)" } ?? r.message }
+                ?? "Checking…"
+            // A failing card with a real choice: point at the picker below, so the remedy for a bad
+            // model (or an exhausted quota) is visible right where the user is stuck — picking one
+            // re-tests it automatically (pickSetupModel). Kept in the host mapping — the SZAI health
+            // message stays provider-neutral.
+            if readiness == .failed, models.count > 1 {
+                message += "  ·  Try a different model below."
+            }
             return SZProviderSetupCard(
                 id: provider.id,
                 displayName: provider.displayName,
                 statusLabel: Self.cardStatusLabel(readiness),
-                message: report.map { r in r.version.map { "\(r.message)  ·  \($0)" } ?? r.message }
-                    ?? "Checking…",
+                message: message,
                 readiness: readiness,
                 detail: report.flatMap(Self.diagnosticsDetail),
                 cliPath: report?.cliPath,
                 installCommand: provider.installCommand,
+                models: models,
+                selectedModel: resolvedGenerationSettings(for: provider.id).model ?? "",
                 isTesting: probingProviders.contains(provider.id),
                 isSelectable: readiness != .unavailable,
                 isConfirmable: readiness == .ready || readiness == .verified,

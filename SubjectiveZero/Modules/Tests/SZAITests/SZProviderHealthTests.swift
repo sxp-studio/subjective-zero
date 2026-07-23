@@ -312,6 +312,26 @@ private let opencodeMissing = SZProcessResult(
     #expect(hang.diagnostics[0].timedOut)
 }
 
+/// A probe can be aimed at a SPECIFIC model + effort (the setup sheet's per-card picker → Test):
+/// the passed selection reaches argv, so Test verifies the model a real run will use — not the
+/// provider default. Omitting them (nil) falls back to the default, the bare-probe behavior.
+@Test func probeArgvCarriesPassedModelAndEffort() async {
+    let picked = ScriptedStubRunner([
+        .init(argvPrefix: ["codex"], result: SZProcessResult(exitCode: 0, output: "")),
+    ])
+    _ = await SZCodexProvider().healthProbe(model: "gpt-5.6-sol", reasoningEffort: "high", runner: picked)
+    let argv = try! #require(picked.recordedCalls.first)
+    #expect(argv[argv.firstIndex(of: "-m")! + 1] == "gpt-5.6-sol")   // the picked model, not the default
+    #expect(argv.contains(#"model_reasoning_effort="high""#))
+
+    let bare = ScriptedStubRunner([
+        .init(argvPrefix: ["codex"], result: SZProcessResult(exitCode: 0, output: "")),
+    ])
+    _ = await SZCodexProvider().healthProbe(runner: bare)
+    let bareArgv = try! #require(bare.recordedCalls.first)
+    #expect(bareArgv[bareArgv.firstIndex(of: "-m")! + 1] == SZCodexProvider().defaultModel)
+}
+
 /// The probe must stay tiny and self-contained: no MCP wiring, the provider's default model, and
 /// the probe prompt — for both providers' distinct argv grammars.
 @Test func probeArgvOmitsMCPAndUsesDefaultModel() async {

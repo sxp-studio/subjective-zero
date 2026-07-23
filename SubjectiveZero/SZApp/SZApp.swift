@@ -305,6 +305,7 @@ struct SZApp: App {
                                      onSelect: { host.selectSetupProvider($0) },
                                      onRefresh: { Task { await host.refreshProviderHealthOnce() } },
                                      onTest: { host.runProviderProbe($0) },
+                                     onSetModel: { host.pickSetupModel($1, for: $0) },
                                      onOpenLogin: { host.openProviderLoginTerminal($0) },
                                      onUseFallback: { host.adoptFallbackProvider(insteadOf: $0) },
                                      onSetEnabled: { host.setProviderEnabled($0, $1) },

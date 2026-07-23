@@ -42,6 +42,13 @@ protocol SZProvider {
   multi-provider harness (like pi) with a RUNTIME-enumerated catalog — the user authes their own
   backends (`opencode auth login`) and opencode routes to them; subz drives the harness. Distinct
   from pi in sessions: opencode mints its own `ses_…` id, parsed back from the stream (codex-style).
+  Catalog default precedence (`SZOpenCodeProvider.catalogSnapshot`): the user's own configured `model`
+  (read token-free from `opencode debug config`) when opencode still serves it → else the first model
+  NOT on an opencode-hosted "zen" tier (providerID `opencode`/`opencode-go` — the free, quota-limited
+  freebies, which must never be the silent default when a real authed provider exists) → else the first
+  listed model (a zen-only install still gets a working default). A failing provider's model is
+  re-pickable from its Agent Providers card, and Test probes the *resolved* model, not the provider
+  default.
 
 For each, we wrap and surface to the UI:
 

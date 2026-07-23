@@ -100,19 +100,48 @@ public struct SZOpenCodeProvider: SZProvider {
         guard result.exitCode == 0, !result.timedOut else {
             throw SZOpenCodeCatalogError.fetchFailed(exitCode: result.exitCode, timedOut: result.timedOut)
         }
-        guard let snapshot = Self.catalogSnapshot(fromVerboseOutput: result.output) else {
+        // The user's OWN configured default (opencode's merged config `model`) wins the pre-selection —
+        // best-effort and token-free: any failure leaves it nil and the heuristic below picks. Read
+        // AFTER the catalog fetch guard so a broken CLI never triggers a second spawn.
+        let configured = await Self.configuredDefaultModel(runner: runner)
+        guard let snapshot = Self.catalogSnapshot(fromVerboseOutput: result.output,
+                                                  configuredDefaultModel: configured) else {
             throw SZOpenCodeCatalogError.unparseableResponse
         }
         catalog.snapshot.withLock { $0 = snapshot }
         return snapshot
     }
 
+    /// The model the user EXPLICITLY configured — read from opencode's merged config via `opencode
+    /// debug config` (token-free JSON). Verified opencode 1.18.4: the top-level `model` key is present
+    /// ONLY when the user set one — an authed install with no `model` configured (13 openai models
+    /// served) emitted NO `model` key, so this never surfaces opencode's own auto-selected default and
+    /// can't smuggle a zen tier past the heuristic. Best-effort: a nonzero exit, timeout, or missing
+    /// key returns nil, so catalog resolution falls through to the heuristic. The output is scanned
+    /// string-state-aware (same extractor as the catalog) so a leading banner/log line can't defeat
+    /// the parse.
+    static func configuredDefaultModel(runner: any SZProcessRunning) async -> String? {
+        guard let result = try? await runner.run(
+            "/usr/bin/env", ["opencode", "debug", "config"],
+            environment: SZAgentEnvironment.base(), currentDirectoryURL: nil, timeout: 20, onOutput: nil),
+            result.exitCode == 0, !result.timedOut else { return nil }
+        for object in topLevelJSONObjects(in: result.output) {
+            guard let data = object.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            if let model = obj["model"] as? String, !model.isEmpty { return model }
+        }
+        return nil
+    }
+
     /// Map `opencode models --verbose` output into a snapshot. Internal for the recorded-fixture tests.
     /// Each top-level `{ … }` is one model object; `Self.topLevelJSONObjects` extracts them
     /// string-state-aware (robust to the pretty formatting). Only `status == "active"` models are
-    /// kept. The default is the first non-free model (a real authed provider) so a free "opencode/*"
-    /// model is never the picker's default; falls back to the first model overall.
-    static func catalogSnapshot(fromVerboseOutput output: String) -> SZProviderModelCatalog? {
+    /// kept. Default precedence: the user's `configuredDefaultModel` when opencode currently serves it
+    /// (their explicit choice) → else the first model NOT on an opencode-hosted "zen" tier (a real
+    /// authed provider, so a free/quota-limited freebie is never the default) → else the first model
+    /// overall (a zen-only install gets exactly the first model opencode lists).
+    static func catalogSnapshot(fromVerboseOutput output: String,
+                                configuredDefaultModel: String? = nil) -> SZProviderModelCatalog? {
         var raw: [[String: Any]] = []
         for object in topLevelJSONObjects(in: output) {
             guard let data = object.data(using: .utf8),
@@ -125,8 +154,27 @@ public struct SZOpenCodeProvider: SZProvider {
         let duplicated = Set(names.filter { name in names.filter { $0 == name }.count > 1 })
         let models = raw.compactMap { model(fromVerbose: $0, duplicatedNames: duplicated) }
         guard !models.isEmpty else { return nil }
-        let defaultID = models.first { !$0.id.hasPrefix("opencode/") }?.id ?? models.first?.id
+        let modelIDs = Set(models.map(\.id))
+        // A configured default only wins if opencode still serves it — a stale/inactive id in the
+        // user's config must not pin a model no run could actually use.
+        let configured = configuredDefaultModel.flatMap { modelIDs.contains($0) ? $0 : nil }
+        let firstAuthed = models.first { !isOpenCodeHostedID($0.id) }?.id
+        let defaultID = configured ?? firstAuthed ?? models.first?.id
         return SZProviderModelCatalog(models: models, defaultModelID: defaultID)
+    }
+
+    /// True for opencode's own hosted "zen" tiers (providerID `opencode` or `opencode-<x>` such as
+    /// `opencode-go` — the free, quota-limited models). A qualified id is `providerID/bare`, so we
+    /// test the leading segment: exact `opencode`, or the `opencode-` namespace, without matching an
+    /// unrelated provider that merely starts with the letters (e.g. a hypothetical `opencodex`).
+    /// `opencode/*` verified on 1.18.4. Only the single `opencode-go` token was actually observed (a
+    /// user report, 2026-07-23) — matching the whole `opencode-` namespace is a DELIBERATE
+    /// extrapolation: opencode's own hosted tiers share that vendor prefix, and treating the family as
+    /// hosted is the safe default (worst case a real authed `opencode-<x>` provider loses only its
+    /// silent-default preference — the user can still pick it), pending measurement of other tokens.
+    static func isOpenCodeHostedID(_ id: String) -> Bool {
+        let provider = id.prefix { $0 != "/" }
+        return provider == "opencode" || provider.hasPrefix("opencode-")
     }
 
     private static func model(fromVerbose obj: [String: Any], duplicatedNames: Set<String>) -> SZProviderModel? {
