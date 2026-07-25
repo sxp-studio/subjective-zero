@@ -14,23 +14,26 @@ public struct SZClaudeProvider: SZProvider {
 
     public let id = Self.providerID
     public let displayName = "Claude Code"
-    /// Pinned version ids, not the CLI's floating aliases — "Opus 4.8" in the menu must mean
-    /// Opus 4.8 (a version-labeled alias would lie the day the alias re-points). `claude --help`
-    /// names exactly that hazard: `--model` takes "an alias for the LATEST model (e.g. 'fable',
-    /// 'opus', or 'sonnet') or a model's full name". We pass the full name. New models arrive with
-    /// app updates (Sparkle).
+    /// Pinned version ids, not the CLI's floating aliases — "Opus 5" in the menu must mean Opus 5
+    /// (a version-labeled alias would lie the day the alias re-points). `claude --help` names
+    /// exactly that hazard: `--model` takes "an alias for the latest model (e.g. 'fable', 'opus',
+    /// or 'sonnet') or a model's full name". We pass the full name. New models arrive with app
+    /// updates (Sparkle); the older generations stay listed so a run can be pinned to the one it
+    /// was tuned against.
     ///
-    /// Listed in the order that same help text prints its aliases — fable, opus, sonnet — which is
-    /// the CLI's own frontier-first ordering. Every id is live-verified against claude 2.1.206
+    /// Grouped in the order that same help text prints its aliases — fable, opus, sonnet — newest
+    /// first within each family, haiku last. Every id is live-verified against claude 2.1.220
     /// (`claude -p --model <id>`), never inferred: an id the backend won't serve fails the run, not
-    /// the build, so no in-process test can catch it. All three share the provider's effort list and
-    /// its `high` default, so none overrides effort.
+    /// the build, so no in-process test can catch it. All seven serve, and all seven complete a turn
+    /// at every level up to `max`, so none overrides the provider's effort list or its `high` default.
     ///
-    /// Fast mode is the one place they diverge: the CLI will only ENABLE it for Opus 4.8. It accepts
-    /// `--settings {"fastMode":true}` for all three — it swallows any settings key without so much as
-    /// a warning, so acceptance proves nothing — but its own `result.fast_mode_state` reads `on` for
-    /// Opus 4.8 and `off` for Fable 5 and Sonnet 5. That gate is what the toggle mirrors, so the two
-    /// the CLI won't enable it for declare it and the picker stops offering an inert switch.
+    /// Fast mode is the one place they diverge, and the CLI's own `result.fast_mode_state` is the
+    /// gate: it reads `on` only for Opus 5 and Opus 4.8. Requesting it proves nothing by itself —
+    /// the CLI swallows any `--settings` key without so much as a warning — and on Opus 4.7 an
+    /// offered toggle would be worse than inert: there the CLI reports `on` and the API then rejects
+    /// the turn outright ("400 'claude-opus-4-7' does not support the `speed` parameter"), so the
+    /// switch would BREAK runs rather than fail to speed them up. Every model the CLI won't truly
+    /// enable declares it, and the picker stops offering the switch at all.
     ///
     /// Whether an enabled turn is then actually SERVED fast is a separate, per-account question, and
     /// nothing here can answer it: the result event reports it per turn as `usage.speed`. Read that
@@ -38,18 +41,23 @@ public struct SZClaudeProvider: SZProvider {
     /// requested or not. It reads `standard` on this org, whose fast-mode spend is disabled, so
     /// requested, enabled, and served are three different things and the stream consumer says which.
     ///
-    /// Opus 4.8 is the default, not Fable 5. Fable is the frontier model and prices like one; Opus
-    /// 4.8 is the balanced everyday one, and a Director run wants the latter. Same call codex makes
-    /// with Sol and Terra.
+    /// Opus 5 is the default, not Fable 5. Fable is the frontier model and prices like one; Opus 5
+    /// is the balanced everyday one, and a Director run wants the latter. Same call codex makes with
+    /// Sol and Terra.
     public let models = [
         SZProviderModel(id: "claude-fable-5", displayName: "Fable 5", supportsFastMode: false),
-        SZProviderModel(id: "claude-opus-4-8", displayName: "Opus 4.8"),   // inherits the provider's true
+        SZProviderModel(id: "claude-opus-5", displayName: "Opus 5"),       // inherits the provider's true
+        SZProviderModel(id: "claude-opus-4-8", displayName: "Opus 4.8"),   // ditto
+        SZProviderModel(id: "claude-opus-4-7", displayName: "Opus 4.7", supportsFastMode: false),
         SZProviderModel(id: "claude-sonnet-5", displayName: "Sonnet 5", supportsFastMode: false),
+        SZProviderModel(id: "claude-sonnet-4-6", displayName: "Sonnet 4.6", supportsFastMode: false),
+        SZProviderModel(id: "claude-haiku-4-5", displayName: "Haiku 4.5", supportsFastMode: false),
     ]
-    public let defaultModel = "claude-opus-4-8"
+    public let defaultModel = "claude-opus-5"
     /// `--effort` levels, recorded from claude 2.1.206's own complaint on an unknown value ("Valid
-    /// values: low, medium, high, xhigh, max"), and re-confirmed against Fable 5: the list is
-    /// provider-wide, not per-model. Note the CLI only WARNS and falls back to its own default —
+    /// values: low, medium, high, xhigh, max"), matching what 2.1.220's `--help` prints, and
+    /// re-confirmed by a `max` turn on each of the seven models: the list is provider-wide, not
+    /// per-model. Note the CLI only WARNS and falls back to its own default —
     /// it does not exit — so an effort token that drifts off this list degrades silently. That is
     /// what `resolvedGenerationSettings` clamping is for.
     public let defaultReasoningEffort = "high"

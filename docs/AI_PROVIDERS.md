@@ -63,15 +63,18 @@ For each, we wrap and surface to the UI:
 > floating aliases, so a version label can't silently re-point; new models ship via app updates, and a
 > type-any-model manual override stays deferred) / `defaultModel` /
 > `supportedReasoningEfforts` (`[]` = the CLI has no effort concept; claude `--effort`
-> low/medium/high/xhigh/max, uniform across its three models - recorded from claude 2.1.206; codex provider default
+> low/medium/high/xhigh/max, uniform across its seven models - recorded from claude 2.1.206 and
+> re-confirmed by a `max` turn on each model at 2.1.220; codex provider default
 > low/medium/high/xhigh - recorded from codex-cli 0.144.1's `models_cache.json`, with per-model
 > overrides where a model diverges: GPT-5.6 Sol and Terra add max/ultra, GPT-5.6 Luna adds max, and
 > Sol alone defaults to `low` instead of `medium`) / `supportsFastMode` (per-model too: the
 > provider-level flag says the CLI *can* express fast mode in argv, and
 > `supportsFastMode(for: model)` says whether the CLI will *enable* it for that model. claude accepts
-> the settings blob for all three models — it swallows any unknown settings key silently — but its own
-> `result.fast_mode_state` reads `on` only for Opus 4.8, so Fable 5 and Sonnet 5 declare
-> `supportsFastMode: false` and the composer hides the toggle. Note "enabled" ≠ "served fast": whether
+> the settings blob for all seven models — it swallows any unknown settings key silently — but its own
+> `result.fast_mode_state` reads `on` only for Opus 5 and Opus 4.8, so the other five declare
+> `supportsFastMode: false` and the composer hides the toggle. On Opus 4.7 that gate is load-bearing
+> rather than cosmetic: the CLI reports `on` there and the API then fails the turn with a 400 naming
+> the unsupported `speed` parameter, so an offered toggle would break runs. Note "enabled" ≠ "served fast": whether
 > a turn actually runs fast is an account entitlement the response reports per turn as `usage.speed`,
 > which reads `standard` while an org's fast-mode spend is disabled — not a model property, and not
 > modeled here. codex's five models are unmeasured on this axis, so none overrides and all inherit
