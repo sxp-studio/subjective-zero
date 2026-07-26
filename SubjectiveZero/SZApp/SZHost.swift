@@ -2,7 +2,8 @@
 // The host coordinator — composition root + router + run-lifecycle owner (ARCHITECTURE.md). It owns
 // the SZRuntime, the SZStore, and the MCP server; loads the project from disk; watches node sources
 // for hot reload; and vends the device + per-frame viewport render closure to the UI. It also owns the procedures
-// that span the packages: staging→promote (typed-boundary contract pinning), run + per-node agent
+// that span the packages: staging→promote (merging the authored contract into the live typed boundary),
+// run + per-node agent
 // state (SZNodeAgentState), and — in the sibling SZHost+*.swift extensions — the Director-run
 // orchestration surface, chat/session bookkeeping, and the split/merge deferred-commit.
 // Model semantics stay in SZCore; GPU/compile in SZRuntime; agent reasoning/prompts in SZAI.
@@ -100,15 +101,6 @@ final class SZHost {
     /// and `rollbackGraphOp` clears the shared `hiddenPieces` bag wholesale, so a second concurrent op
     /// would take the first one's pieces down with it. `splitNode`/`mergeNodes` refuse while one is staged.
     internal(set) var pendingGraphOp: SZPendingGraphOp?
-    /// The host-pinned typed boundary contract for each dirty node in flight during a run. The agent owns
-    /// its source + title/summary/symbol, but the host OWNS the typed I/O boundary — `promoteStagedNode`
-    /// re-pins these `inputs`/`outputs`/`permissions` over the agent's authored contract, so a node can't
-    /// lose a port's real type/ui/default/permission by the agent guessing `texture`. Snapshotted at
-    /// `startRun` from every dirty node that already SHIPS a contract — split/merge pieces (their drafted
-    /// boundary) AND a normal node re-implemented by its Coding Agent. A contract-less drawn prompt
-    /// node is left unpinned (its agent authors the boundary). Cleared
-    /// at run end (and eagerly at commit/rollback for graph ops).
-    internal(set) var pinnedContracts: [SZNodeID: SZNodeContract] = [:]
     /// The prompt each node's coding agent was briefed WITH — what `promoteStagedNode` holds it to.
     ///
     /// A promote proves the source matches the CONTRACT; it proves nothing about the prompt. So if the intent
@@ -116,8 +108,8 @@ final class SZHost {
     /// the node must stay dirty — otherwise it reads clean and current while implementing what the prompt used
     /// to say. See `SZRebuildReason.afterPromote`.
     ///
-    /// Written in `streamCodingAgent`, NOT alongside `pinnedContracts` at `startRun`: the Director decomposes
-    /// first and each brief is composed from the live graph after that, so a `startRun` snapshot would flag a
+    /// Written in `streamCodingAgent`, NOT snapshotted at `startRun`: the Director decomposes first and each
+    /// brief is composed from the live graph after that, so a `startRun` snapshot would flag a
     /// node whose re-brief the agent actually built. The value is `String?` because a contract-first drawn node
     /// is legitimately briefed with no prompt; a MISSING key means "no coding turn ran for this node", which is
     /// a different thing and preserves the pre-existing clear-on-promote behaviour for off-run paths (a
@@ -636,7 +628,6 @@ final class SZHost {
         graphOpStatus = [:]
         hiddenPieces = []
         pendingGraphOp = nil
-        pinnedContracts = [:]
         dispatchPrompts = [:]
         agentSessions = [:]
         restoredSessions = [:]
@@ -724,7 +715,7 @@ final class SZHost {
     // MARK: - Staging → promote
 
     /// Promote a successfully compile-checked staged node into the live project (STATE.md):
-    /// copy `.staging/nodes/<id>/Node.swift` → live, fold the staged contract into the store
+    /// copy `.staging/nodes/<id>/Node.swift` → live, merge the staged contract into the node's live one
     /// (kind → generated), persist `project.json` + contracts, then reload the runtime so the new
     /// module renders. Called by `agent_compile_node` ONLY after `compileNodeSource` returns `.ok`,
     /// so a broken source can never reach here — live state stays intact on failure.
@@ -760,18 +751,19 @@ final class SZHost {
             project.graph.nodes[i].rebuildReason = SZRebuildReason.afterPromote(
                 existing: project.graph.nodes[i].rebuildReason,
                 dispatchedPrompt: dispatchPrompts[id], currentPrompt: project.graph.nodes[i].prompt)
-            if var contract = stagedContract {
-                // The host OWNS the typed I/O boundary of any dirty node that shipped a contract at
-                // dispatch — re-pin it over whatever the agent authored (the agent is told the boundary
-                // but only the host guarantees it, so a port keeps its real type/ui/default). Permissions
-                // pin ONLY when the host actually declared some (split/merge pieces): a contract-first
-                // drawn node's drafted boundary carries none — the host can't infer them from flow — so
-                // there the agent's authored permissions stand (e.g. the camera node keeps `.camera`).
-                if let pinned = pinnedContracts[id] {
-                    contract.inputs = pinned.inputs
-                    contract.outputs = pinned.outputs
-                    if !pinned.requiredPermissions.isEmpty { contract.permissions = pinned.permissions }
-                }
+            if let stagedContract {
+                // MERGE the authored contract into the node's LIVE boundary rather than letting either side
+                // replace the other (`SZNodeContract.mergingAuthored`): the live contract carries the typed
+                // boundary the graph is wired against AND the user's current input values, while the agent
+                // just authored the control ports its new source reads. Taking the live one deletes those
+                // ports (the source then reads what the contract never declares); taking the authored one
+                // resets every slider and can retype a wired port. The live contract at THIS moment is the
+                // boundary — not a dispatch-time snapshot — so a mid-run `ui_edit_ports`, a slider drag, and
+                // an off-run chat rebuild are all honoured. A node with no live contract yet (a drawn prompt
+                // node whose agent authors the whole boundary) takes the authored one wholesale.
+                let contract = project.graph.nodes[i].contract.map {
+                    SZNodeContract.mergingAuthored(stagedContract, intoBoundary: $0).contract
+                } ?? stagedContract
                 project.graph.nodes[i].contract = contract
                 project.graph.nodes[i].title = contract.title
                 project.graph.nodes[i].sfSymbol = contract.sfSymbol

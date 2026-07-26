@@ -11,7 +11,7 @@
 //  - SZProceduralDirectorStrategy — directs WITHOUT an LLM: deterministic / offline / token-free; the
 //    baseline + CI path. Contract-first via a texture-pipeline ASSUMPTION (see SZGraph+ContractDraft).
 //  - SZAgenticDirectorStrategy — directs via an autonomous LLM Director Agent that reads the live graph,
-//    establishes + pins REAL typed contracts, dispatches, adds nodes only when intent is under-specified.
+//    establishes REAL typed contracts, dispatches, adds nodes only when intent is under-specified.
 //
 // NOTE (transitional): the procedural strategy is expected to be RETIRED once the agentic Director is
 // solid (it exists mainly as the token-free CI/offline baseline + a fallback). When it goes, this seam
@@ -67,19 +67,16 @@ public struct SZOrchestrationContext {
     /// True when the run was requested by the Director Agent's OWN chat turn (`ui_run` mid-turn,
     /// started at turn end): that turn had the full `ui_*` toolbelt and the same contract-shaping
     /// framing, so it WAS the decompose turn — the agentic strategy skips its own and goes straight
-    /// to pin + dispatch (the reconcile loop still catches an under-shaped graph).
+    /// to dispatch (the reconcile loop still catches an under-shaped graph).
     public let directorAlreadyBriefed: Bool
 
     // Host capabilities the strategies SEQUENCE (the host owns each; the strategy decides when to call it).
     // Default no-ops/nil so unit tests can run a strategy with no host attached.
 
-    /// Draft + pin texture contracts for contract-less drawn nodes from their flow edges (procedural,
+    /// Draft texture contracts for contract-less drawn nodes from their flow edges (procedural,
     /// contract-first; host `draftFlowContracts`). The agentic strategy skips this — its Director declares
     /// real contracts instead.
     public let draftContracts: @MainActor @Sendable () -> Void
-    /// Snapshot every dirty node's declared contract into the host's pin set (host `pinDirtyContracts`),
-    /// so `promoteStagedNode` holds each node's typed boundary. Both strategies call this before dispatch.
-    public let pinContracts: @MainActor @Sendable () -> Void
     /// Grant every entitlement declared by the live graph's node contracts (host
     /// `requestDeclaredPermissions(for:)`), prompting once per still-undetermined one. Both strategies call
     /// this at dispatch: a node's permission is only known once the Director declares its contract — AFTER
@@ -126,7 +123,6 @@ public struct SZOrchestrationContext {
         instruction: String = "",
         directorAlreadyBriefed: Bool = false,
         draftContracts: @escaping @MainActor @Sendable () -> Void = {},
-        pinContracts: @escaping @MainActor @Sendable () -> Void = {},
         grantPermissions: @escaping @MainActor @Sendable () async -> Void = {},
         directorTurn: (@MainActor @Sendable (String) async throws -> SZAgentRunResult)? = nil,
         nodeStatus: @escaping @MainActor @Sendable () -> [SZNodeID: String] = { [:] },
@@ -147,7 +143,6 @@ public struct SZOrchestrationContext {
         self.instruction = instruction
         self.directorAlreadyBriefed = directorAlreadyBriefed
         self.draftContracts = draftContracts
-        self.pinContracts = pinContracts
         self.grantPermissions = grantPermissions
         self.directorTurn = directorTurn
         self.nodeStatus = nodeStatus

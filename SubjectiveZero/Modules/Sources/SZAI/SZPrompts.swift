@@ -131,8 +131,8 @@ public enum SZGraphPrompts {
 /// Shared renderer for a node's typed boundary in agent prompts — each port's type, ui/default, and the
 /// EXACT live-read call in `update()`. ONE renderer used by the coding prompt (node-compile) AND the
 /// split/merge seed prompts, so every agent both PRESERVES the typed contract and READS its scalar inputs
-/// (never hardcodes them → no dead controls). The host pins the boundary at promote; this makes
-/// the agent's SOURCE honor it.
+/// (never hardcodes them → no dead controls). The promote merge holds the live boundary's types; this
+/// makes the agent's SOURCE honor it.
 enum SZBoundaryPrompt {
     /// Describe a contract's whole declared boundary (inputs + outputs + permissions).
     static func render(_ contract: SZNodeContract) -> String {

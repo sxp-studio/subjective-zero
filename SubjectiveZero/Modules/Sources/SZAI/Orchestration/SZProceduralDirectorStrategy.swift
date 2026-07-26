@@ -72,11 +72,10 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
         guard let provider = registry.provider(id: context.providerID) else {
             throw SZOrchestratorError.unknownProvider(context.providerID)
         }
-        // Contract-first: draft texture contracts + wiring from flow for any contract-less drawn node, then
-        // pin every dirty node's boundary — so the cards show their I/O before dispatch (the host no-ops
-        // both when there's nothing to do). Read the graph AFTER, so plans see the freshly-drafted contracts.
+        // Contract-first: draft texture contracts + wiring from flow for any contract-less drawn node, so
+        // the cards show their I/O before dispatch (the host no-ops it when there's nothing to do). Read the
+        // graph AFTER, so plans see the freshly-drafted contracts.
         context.draftContracts()
-        context.pinContracts()
         guard let project = context.store.project else { throw SZOrchestratorError.noProject }
 
         let plans = Self.plans(for: project.graph, workSet: context.workSet(),
@@ -86,7 +85,7 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
 
     /// Dispatch one coding agent per plan (shared with the agentic strategy, which decomposes first then
     /// delegates here). Off-main spawns; returns each node's session id. **All-parallel by design** (one
-    /// TaskGroup, max speed): once contracts are pinned upfront (contract-first), each agent writes
+    /// TaskGroup, max speed): once contracts are declared upfront (contract-first), each agent writes
     /// its node in isolation against its own typed boundary — it does NOT need upstream nodes implemented
     /// first, so flow imposes no execution order here. Flow is consumed by contract-first DRAFTING +
     /// wiring (the host), not by gating the fleet.
@@ -134,7 +133,7 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
     }
 
     /// contract-plan, dirty-first: one assignment per unimplemented (prompt) node. A node that already
-    /// carries a drafted contract (a split/merge piece, or a host-pinned contract-first node)
+    /// carries a drafted contract (a split/merge piece, or a host-drafted contract-first node)
     /// uses ITS declared ports; a contract-less drawn prompt node derives texture ports from its wiring.
     /// The cold-start coding turn's prompt. The `{{reference}}` section is chosen HERE, not argued for inside
     /// the node's seed prompt: `{{prompt}}` sits near the top of `node-compile`, and the library section

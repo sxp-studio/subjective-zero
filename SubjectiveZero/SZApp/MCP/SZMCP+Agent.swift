@@ -240,13 +240,21 @@ extension SZHostBridge {
             let stagedContract = projectURL.appending(path: ".staging/nodes/\(id.uuidString)/node-contract.json")
             var warnings: [String] = []
             if let data = try? Data(contentsOf: stagedContract), !data.isEmpty {
-                let contract: SZNodeContract
-                do { contract = try JSONDecoder().decode(SZNodeContract.self, from: data) }
+                let authored: SZNodeContract
+                do { authored = try JSONDecoder().decode(SZNodeContract.self, from: data) }
                 catch {
                     let msg = Self.contractSchemaError(error)
                     host.recordBuildErrors(msg)
                     return SZJSONRPC.encode(["ok": false, "errors": msg])
                 }
+                // Audit against what the promote will actually PUT LIVE, not the authored contract alone —
+                // the promote merges this into the node's live boundary (`SZNodeContract.mergingAuthored`),
+                // so auditing the authored one would clear a source the merge then contradicts. Conflicts
+                // (an authored retype the boundary refused) ride back as warnings so the agent learns of it.
+                let merge = host.store.project?.graph.node(id: id)?.contract
+                    .map { SZNodeContract.mergingAuthored(authored, intoBoundary: $0) }
+                let contract = merge?.contract ?? authored
+                warnings = merge?.conflicts ?? []
                 // Contract + source must agree on port names: a port the code reads/writes that the contract
                 // never declares is a hard error (the source is NOT promoted); a declared-but-unused port is a
                 // non-fatal warning (likely a dead control). See SZPortBindingAudit.
@@ -257,7 +265,7 @@ extension SZHostBridge {
                         host.recordBuildErrors(msg)
                         return SZJSONRPC.encode(["ok": false, "errors": msg])
                     }
-                    warnings = audit.warnings
+                    warnings += audit.warnings
                 }
             }
             host.recordBuildErrors(nil)

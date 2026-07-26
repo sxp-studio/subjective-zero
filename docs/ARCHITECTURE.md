@@ -39,14 +39,14 @@ other directly - they coordinate through `SZCore` (the shared **state model + se
 through the **host** (in `SZApp`), which is the only place that knows every concrete type. The host
 is the composition root + router **and the run-lifecycle owner**: it wires the pieces, routes
 intents into `SZCore` store ops or service calls, and owns the cross-package *procedures* no single
-package can - staging→promote (incl. re-pinning each dirty node's typed boundary contract), the
+package can - staging→promote (incl. merging each agent's contract into the node's live typed boundary), the
 split/merge deferred-commit, run state + post-run surfacing, and chat/agent-session bookkeeping
 (see [Host seam](#the-host-seam) below). What it must NOT own: model semantics (SZCore), GPU/compile
 (SZRuntime), agent reasoning/prompt content (SZAI), or rendering of state (SZUI).
 
 | Package | Responsibility | Key contents |
 |---|---|---|
-| **SZApp** | The app bundle and the **host**: composition root that instantiates and injects the others, owns the window/run loop, implements `HostBridge`, and **hosts the MCP server** (the app's command bus). Also the **run-lifecycle owner**: staging→promote (contract pinning), split/merge deferred-commit, run + chat/agent-session state. | `App`, host coordinator (`SZHost` + `SZHost+*.swift` extensions), `MCPServer` + `MCP+*.swift`, window/scene setup, notarization/packaging config |
+| **SZApp** | The app bundle and the **host**: composition root that instantiates and injects the others, owns the window/run loop, implements `HostBridge`, and **hosts the MCP server** (the app's command bus). Also the **run-lifecycle owner**: staging→promote (the contract boundary merge), split/merge deferred-commit, run + chat/agent-session state. | `App`, host coordinator (`SZHost` + `SZHost+*.swift` extensions), `MCPServer` + `MCP+*.swift`, window/scene setup, notarization/packaging config |
 | **SZCore** | The canonical, portable model + its JSON serialization, **and the seam protocols** every cross-package interaction goes through. No macOS/Metal types. | `App`/`Project`/`Graph`/`Node` models, `node-contract.json` schema, observable `Store` + named edit ops, `SZNodeAgentState`, checkpoint undo (M8) |
 | **SZAI** | Provider wrapping, agent runtime, orchestration, sessions, failure recovery. Implements `Orchestrator`; **does not** own the MCP server. | `DirectorAgent`, `CodingAgent`, `Orchestrator` impl (hardcoded Swift in V1, behavior-tree engine later), provider adapters (claude code, codex) |
 | **SZRuntime** | Lightweight rendering engine. Owns Metal device/queue/resources, viewport context, permissions. Implements `NodeCompiler`/`Renderer`; compiles, schedules, executes the graph; hot reload. | `MTLDevice` ownership, resource/asset manager, DAG scheduler, swiftc build pipeline, node module loader |
@@ -103,7 +103,7 @@ is *forced* by the dependency rule: since `SZUI`/`SZAI`/`SZRuntime` may not impo
 providers), injects them, owns the run loop, and **hosts the MCP server**. It implements
 `HostBridge`: every `ui_`/`agent_` MCP command and every UI intent lands here and becomes either a
 `Store` edit op or a service call. Beyond routing, the host owns the procedures that *span* the
-packages - promote a staged node (re-pinning its typed boundary), commit/rollback a split/merge,
+packages - promote a staged node (merging its authored contract into the live boundary), commit/rollback a split/merge,
 drive a run end-to-end (`startRun` → orchestration context → post-run surfacing), and track
 per-node agent state (`SZNodeAgentState`) + chat sessions/tabs. That state is transient and
 observable, never model truth - the model stays in `SZCore`.

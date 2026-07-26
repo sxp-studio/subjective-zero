@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Director-run orchestration — the `ui_run` entry point and the host capabilities a strategy
-// sequences: contract drafting/pinning, the shared agent-turn substrate (`deliver`), per-node coding
+// sequences: contract drafting, the shared agent-turn substrate (`deliver`), per-node coding
 // turns + the Director turn streamed into their tabs, the orchestration context that bundles them, and
 // the post-run reconcile/surfacing.
 import Foundation
@@ -11,30 +11,16 @@ extension SZHost {
     /// Contract-first authorship: before a run, give every contract-less DRAWN prompt node a texture
     /// contract derived from its flow edges + lay the companion data wiring (`SZGraph.draftContractsFromFlow`),
     /// so the cards show their typed I/O UPFRONT and the textures bind as the fleet implements — the graph
-    /// "comes to life". Persists + reloads so the new boundary is live; `pinDirtyContracts` (called next)
-    /// then pins these freshly-drafted contracts. No-op when nothing needs drafting (every dirty node already
-    /// ships a contract — a re-run, split/merge pieces), so it adds no cost to those paths.
+    /// "comes to life". Persists + reloads so the new boundary is live, which is also what makes it the
+    /// boundary `promoteStagedNode` merges each agent's authored contract into. No-op when nothing needs
+    /// drafting (every dirty node already ships a contract — a re-run, split/merge pieces), so it adds no
+    /// cost to those paths.
     private func draftFlowContracts() {
         guard let graph = store.project?.graph else { return }
         let (drafted, ids) = graph.draftContractsFromFlow()
         guard !ids.isEmpty else { return }
         store.mutate { $0.graph = drafted }
         persistGraphEditAndReload(action: "drafted \(ids.count) node contract\(ids.count == 1 ? "" : "s") from flow")
-    }
-
-    /// Snapshot the declared typed boundary of every dirty node that already SHIPS a contract, so
-    /// `promoteStagedNode` re-pins its ports' type/ui/default + permissions over whatever the agent
-    /// authors. Covers a normal node re-implemented by its Coding Agent, split/merge pieces (their
-    /// host-drafted boundary), AND contract-first drawn nodes (just drafted by `draftFlowContracts`).
-    /// Called at `startRun`; cleared at run end.
-    ///
-    /// The PROMPT is deliberately NOT snapshotted here — see `streamCodingAgent`. `startRun` is too early:
-    /// the Director decomposes first, and each brief is composed from the LIVE graph after that, so a prompt
-    /// recorded here would flag a node the agent went on to build correctly.
-    private func pinDirtyContracts() {
-        for node in store.project?.graph.nodes ?? [] where node.needsImplementation {
-            if let contract = node.contract { pinnedContracts[node.id] = contract }
-        }
     }
 
     /// The shared agent-turn substrate. Every agent turn — a coding dispatch, a Director turn,
@@ -262,7 +248,7 @@ extension SZHost {
     }
 
     /// Build the orchestration context for a run — bundles the host capabilities a strategy sequences:
-    /// stream each coding turn into its node's tab, draft/pin contracts, run a Director turn (agentic),
+    /// stream each coding turn into its node's tab, draft contracts, run a Director turn (agentic),
     /// read node status + drain Director messages (reconcile). Each is captured weakly so a torn-down
     /// host degrades gracefully. Kept separate from `startRun` so its run body reads as build-context → run.
     private func makeOrchestrationContext(
@@ -288,10 +274,9 @@ extension SZHost {
             // A chat-triggered run carries the user's words into the decompose prompt — unless the
             // Director's own chat turn requested it, in which case that turn WAS the decompose.
             instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed,
-            // Host capabilities the strategy sequences: contract-first drafting (procedural),
-            // pinning (both), and one Director Agent turn (agentic), each streamed/persisted by the host.
+            // Host capabilities the strategy sequences: contract-first drafting (procedural) and one
+            // Director Agent turn (agentic), each streamed/persisted by the host.
             draftContracts: { [weak self] in self?.draftFlowContracts() },
-            pinContracts: { [weak self] in self?.pinDirtyContracts() },
             // Grant any entitlement the live graph now declares before the fleet runs — covers a
             // permission the Director introduced mid-run (only those at initial load were pre-granted in
             // `start`), so a node's `setup()` sees it authorized on the promote-reload (e.g. microphone).
@@ -413,8 +398,8 @@ extension SZHost {
             ? "Run started (\(providerID)) — no nodes need implementing."
             : "Run started (\(providerID)) — implementing \(dirtyCount) node\(dirtyCount == 1 ? "" : "s")…")
         runTask = Task { @MainActor in
-            // pins last one run (promotes already consumed them by here) — anything still owned by
-            // an in-flight graph op is cleared by its commit/rollback.
+            // The run's per-node bookkeeping lasts one run — anything still owned by an in-flight
+            // graph op is cleared by its commit/rollback.
             defer {
                 // Release the CAPTURED claim, not `runClaim` — after an eager `cancelRun` this is
                 // the zombie task's idempotent second settle, and `runClaim` may already belong to
@@ -430,7 +415,6 @@ extension SZHost {
                     runClaim = nil
                     runTask = nil
                     runWorkSet = []        // run over → the work set is cleared (a node chat runs with it empty)
-                    pinnedContracts = pinnedContracts.filter { hiddenPieces.contains($0.key) }
                     dispatchPrompts = dispatchPrompts.filter { hiddenPieces.contains($0.key) }
                 }
                 flushAllTranscripts()      // run end = flush point (success, throw, or cancel)
@@ -471,7 +455,7 @@ extension SZHost {
             // Settle a staged split/merge — the one this run was started for, or one the Director staged
             // mid-run. Runs on success, throw AND cancel (Stop cancels cooperatively, so the task still
             // arrives here via the `catch`), which is what makes a cancelled op roll back instead of leak.
-            // Before the `defer`, which drops `pinnedContracts` for anything no longer in `hiddenPieces`.
+            // Before the `defer`, which drops `dispatchPrompts` for anything no longer in `hiddenPieces`.
             drainPendingGraphOp()
         }
     }

@@ -5,7 +5,7 @@
 // every contract-less prompt node a texture contract derived from its flow edges and lays the companion
 // data wiring, so the cards show their I/O immediately and the textures bind as the coding fleet fills
 // in `Node.swift` — the graph visibly "comes to life" before any code exists. Sibling to the split/merge
-// transforms (SZGraph+SplitMerge); the host pins the drafted boundary (reusing `pinnedContracts`).
+// transforms (SZGraph+SplitMerge); the drafted boundary is what a promote merges the agent's contract into.
 //
 // Texture-output by ASSUMPTION — a deliberate shortcut for this path. Flow edges are type-agnostic
 // ("A feeds B" says nothing about WHAT flows), and the procedural strategy has no oracle to infer types,
@@ -14,8 +14,8 @@
 // baseline, expected to be retired in favour of the agentic Director — which, being an LLM, declares each
 // node's REAL typed I/O (texture / float / event / none) upfront with no guess. The assumption is
 // contained here: it does NOT touch the contract model (textures stay optional — a node may have none)
-// nor the Director path. Control knobs + permissions stay the coding agent's to author (the host doesn't
-// pin an empty permission set; see SZHost.promoteStagedNode). Contract *renegotiation* happens later,
+// nor the Director path. Control knobs + permissions stay the coding agent's to author (the promote merge
+// keeps both; see SZContract+PromoteMerge). Contract *renegotiation* happens later,
 // in the Director's reconcile loop.
 import Foundation
 
@@ -26,7 +26,7 @@ extension SZGraph {
     /// point it at a terminal drafted node so a freshly drawn pipeline renders without a manual display
     /// toggle. Nodes that already ship a contract (generated, library, split/merge pieces, a re-run node)
     /// are left untouched, so this is idempotent across repeated runs. Returns the reconciled graph + the
-    /// ids newly given a contract (the host pins exactly those).
+    /// ids newly given a contract.
     public func draftContractsFromFlow() -> (graph: SZGraph, drafted: [SZNodeID]) {
         let order = Dictionary(uniqueKeysWithValues: nodes.map(\.id).enumerated().map { ($1, $0) })
         var g = self

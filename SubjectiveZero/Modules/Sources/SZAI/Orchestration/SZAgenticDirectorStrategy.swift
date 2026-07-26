@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The AGENTIC Director strategy — directs via an autonomous LLM Director Agent. "Director"
 // is the orchestration role both strategies fill; this one fills it with an actual MCP agent (claude /
-// codex) that reads the live graph and COORDINATES: it establishes + pins each node's typed contract
+// codex) that reads the live graph and COORDINATES: it establishes each node's typed contract
 // upfront and dispatches the coding fleet, adding nodes only when intent is under-specified (e.g. one
 // "make the camera grayscale" node → Camera→Grayscale). Plain Swift + LLM calls. (TODO: if a
 // declarative behavior-tree engine ever earns its place, it would replace this hardcoded flow.)
-// It composes its sibling `SZProceduralDirectorStrategy`'s dispatch: decompose/pin/wire, then hand
+// It composes its sibling `SZProceduralDirectorStrategy`'s dispatch: decompose/wire, then hand
 // the flow-drafted graph to the shared flow-ordered coding dispatch. See docs/AGENT_ORCHESTRATION.md.
 //
 // Flow: (1) DECOMPOSE/COORDINATE — one Director Agent turn, streamed live into the Director tab,
 // that reads the graph and establishes each node's typed contract + wiring via `ui_*` (adding nodes only
-// when intent is under-specified); (2) PIN + DISPATCH — pin the now-declared contracts and hand the
-// graph to the SHARED parallel coding dispatch (composed from the procedural strategy); then
+// when intent is under-specified); (2) DISPATCH — hand the now-contracted graph to the SHARED
+// parallel coding dispatch (composed from the procedural strategy); then
 // (3) RECONCILE — the Director↔Coding messaging loop below.
 import Foundation
 import SZCore
@@ -51,9 +51,8 @@ public struct SZAgenticDirectorStrategy: SZOrchestrating {
             }
         }
 
-        // (2) Pin + dispatch — pin the Director-declared contracts, then fan out the coding fleet. Read the
+        // (2) Dispatch — fan out the coding fleet over the Director-declared contracts. Read the
         // graph AFTER the Director turn so plans reflect any nodes it added/contracted.
-        context.pinContracts()
         guard let project = context.store.project else { throw SZOrchestratorError.noProject }
         var sessions = try await procedural.dispatch(
             SZProceduralDirectorStrategy.plans(for: project.graph, workSet: context.workSet(),
@@ -83,7 +82,6 @@ public struct SZAgenticDirectorStrategy: SZOrchestrating {
                     print("[SZAgenticDirectorStrategy] reconcile turn \(round) failed: \(error) — retrying nodes as-is")
                 }
             }
-            context.pinContracts()   // re-pin any contract the Director changed
             // Drain any messages the Director authored this round (its `ui_send_chat`-to-a-node calls).
             let directorMessages = context.takeDirectorMessages()
 

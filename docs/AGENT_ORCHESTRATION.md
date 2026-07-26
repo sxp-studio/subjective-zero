@@ -16,9 +16,9 @@ host's MCP server ([MCP.md](MCP.md)).
 > `SZAI/Orchestration/`), **toggled by a debug setting**. V1 ships **two** editable strategies: a
 > **procedural, flow-aware** one (deterministic / offline - the baseline + CI path) and an **LLM
 > Director** one (plain Swift + LLM calls, fed the flow-drafted graph as context). Both are
-> **contract-first** - the Director/host declares + pins each node's typed I/O upfront (reusing the
-> M6/M7b `pinnedContracts` machinery) so the graph "comes to life" with visible I/O before the
-> coding agents fill the source. The Director may split/merge but it's **gated in Swift** (the
+> **contract-first** - the Director/host declares each node's typed I/O upfront (and a promote MERGES the
+> agent's authored contract into that live boundary rather than replacing either side) so the graph
+> "comes to life" with visible I/O before the coding agents fill the source. The Director may split/merge but it's **gated in Swift** (the
 > BT-as-files engine that would make this authorable stays deferred).
 
 ## Roles
