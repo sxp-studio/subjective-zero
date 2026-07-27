@@ -4,10 +4,14 @@
 //    (`uncaughtSignal` — the mid-turn provider-death surface keys off it);
 //  - stopping/timing out a run kills the CLI's whole descendant tree, not just the wrapper
 //    (codex's Node wrapper spawns the vendor binary as a grandchild — killing only the direct
-//    child would orphan the process actually talking to the model).
+//    child would orphan the process actually talking to the model);
+//  - live output is handed out as raw bytes, so a codepoint split across two pipe reads still
+//    reaches the transcript intact.
 // Real /bin/sh processes, no stubs: the substrate IS the thing under test.
 import Foundation
+import Synchronization
 import Testing
+import SZCore
 @testable import SZAI
 
 struct SZProcessTests {
@@ -80,6 +84,37 @@ struct SZProcessTests {
             timeout: 1, inactivityTimeout: 10)
         #expect(result.timedOut)
         #expect(ContinuousClock.now - started < .seconds(10), "wall-clock cap did not fire")
+    }
+
+    /// The live-transcript path end to end — pipe chunks → `SZLineBuffer` → a provider's stream
+    /// consumer — over a 4-byte codepoint the child writes in two halves, so it straddles a pipe-read
+    /// boundary. `onOutput` must hand out the raw bytes: decoding each read on its own replaces both
+    /// halves with U+FFFD permanently, and a mangled byte inside a JSONL line can cost the whole
+    /// assistant message (the parse just fails). Only the live stream is affected — the accumulated
+    /// `SZProcessResult.output` is decoded once, at the end — so nothing downstream of `parse()` shows it.
+    @Test func aCodepointSplitAcrossPipeReadsSurvivesTheLiveStream() async throws {
+        let chunks = Mutex<[Data]>([])
+        // One claude stream-json line carrying "done 🎉", written as two printf calls 0.3s apart that
+        // cut the emoji (f0 9f | 8e 89) down the middle — two reads, guaranteed.
+        let head = ##"{"type":"assistant","message":{"content":[{"type":"text","text":"done \360\237"##
+        let tail = ##"\216\211"}]}}\n"##
+        let result = try await runner.run(
+            "/bin/sh", ["-c", "/usr/bin/printf '\(head)'; sleep 0.3; /usr/bin/printf '\(tail)'"],
+            onOutput: { chunk in chunks.withLock { $0.append(chunk) } })
+        #expect(result.exitCode == 0)
+        #expect(chunks.withLock { $0.count } >= 2, "the writes coalesced — nothing was split")
+
+        // Exactly what SZHost's agent streaming does with the chunks.
+        let lineBuffer = SZLineBuffer()
+        let consumer = SZClaudeStreamConsumer()
+        var events: [SZAgentStreamEvent] = []
+        for chunk in chunks.withLock({ $0 }) {
+            for line in lineBuffer.appendAndExtractLines(chunk) {
+                events.append(contentsOf: consumer.consume(line))
+            }
+        }
+        events.append(contentsOf: consumer.finish())
+        #expect(events == [.reply("done 🎉")])
     }
 
     @Test func normalExitDoesNotBlockOnAnOrphanHoldingThePipe() async throws {

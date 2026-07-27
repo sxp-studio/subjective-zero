@@ -51,7 +51,10 @@ public struct SZAgentRunRequest: Sendable {
     /// clock. nil = no silence bound. Rides alongside `timeout`, which stays the wall-clock hard cap —
     /// a CLI that is still streaming is alive, but one can also wedge (or loop) while emitting forever.
     public var inactivityTimeout: TimeInterval?
-    public var onOutput: (@Sendable (String) -> Void)?
+    /// Live output, as raw bytes exactly as they came off the pipe — a chunk is a pipe read, not a
+    /// unit of text, so it can end mid-codepoint (see `SZProcessRunning`). Decode only at a
+    /// boundary you own.
+    public var onOutput: (@Sendable (Data) -> Void)?
 
     public init(
         prompt: String,
@@ -66,7 +69,7 @@ public struct SZAgentRunRequest: Sendable {
         fastMode: Bool = false,
         timeout: TimeInterval? = nil,
         inactivityTimeout: TimeInterval? = nil,
-        onOutput: (@Sendable (String) -> Void)? = nil
+        onOutput: (@Sendable (Data) -> Void)? = nil
     ) {
         self.prompt = prompt
         self.workingDirectory = workingDirectory

@@ -41,6 +41,10 @@ public struct SZProcessResult: Sendable {
 /// Either way the child sees EOF — never the app's inherited stdin, which may stay open forever
 /// (a CLI that reads piped stdin to EOF, like `pi -p`, would block with zero output; verified
 /// pi 0.80.6, 2026-07-12).
+/// `onOutput` carries RAW BYTES, never text: a pipe read ends wherever the kernel says it does, so
+/// decoding one on its own would replace any multi-byte codepoint straddling that boundary with
+/// U+FFFD — permanently, and inside a JSONL line that makes the whole event unparseable. Consumers
+/// accumulate the bytes and decode at a boundary they own (a complete line).
 public protocol SZProcessRunning: Sendable {
     func run(
         _ launchPath: String,
@@ -50,7 +54,7 @@ public protocol SZProcessRunning: Sendable {
         input: Data?,
         timeout: TimeInterval?,
         inactivityTimeout: TimeInterval?,
-        onOutput: (@Sendable (String) -> Void)?
+        onOutput: (@Sendable (Data) -> Void)?
     ) async throws -> SZProcessResult
 }
 
@@ -63,7 +67,7 @@ public extension SZProcessRunning {
         currentDirectoryURL: URL?,
         input: Data?,
         timeout: TimeInterval?,
-        onOutput: (@Sendable (String) -> Void)?
+        onOutput: (@Sendable (Data) -> Void)?
     ) async throws -> SZProcessResult {
         try await run(launchPath, arguments, environment: environment,
                       currentDirectoryURL: currentDirectoryURL, input: input,
@@ -77,7 +81,7 @@ public extension SZProcessRunning {
         environment: [String: String],
         currentDirectoryURL: URL?,
         timeout: TimeInterval?,
-        onOutput: (@Sendable (String) -> Void)?
+        onOutput: (@Sendable (Data) -> Void)?
     ) async throws -> SZProcessResult {
         try await run(launchPath, arguments, environment: environment,
                       currentDirectoryURL: currentDirectoryURL, input: nil,
@@ -97,7 +101,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         input: Data? = nil,
         timeout: TimeInterval? = nil,
         inactivityTimeout: TimeInterval? = nil,
-        onOutput: (@Sendable (String) -> Void)? = nil
+        onOutput: (@Sendable (Data) -> Void)? = nil
     ) async throws -> SZProcessResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
@@ -151,7 +155,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         // streams) forever. The drain task sees every chunk, so it stamps the clock; the watchdog in
         // `awaitExit` sleeps to the stamped deadline.
         let activity: SZActivityClock? = inactivityTimeout != nil ? SZActivityClock() : nil
-        let observedOutput: (@Sendable (String) -> Void)?
+        let observedOutput: (@Sendable (Data) -> Void)?
         if let activity {
             observedOutput = { chunk in activity.touch(); onOutput?(chunk) }
         } else {
@@ -224,7 +228,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
     /// Read the handle to EOF via `readabilityHandler` → `AsyncStream`, accumulating locally. Finishes on
     /// cancellation too (force-closing the stream), so a caller can bound the drain when the pipe may never
     /// reach EOF — an orphaned descendant that outlived the kill can hold the write end open forever.
-    private static func collect(_ handle: FileHandle, onOutput: (@Sendable (String) -> Void)?) async -> Data {
+    private static func collect(_ handle: FileHandle, onOutput: (@Sendable (Data) -> Void)?) async -> Data {
         nonisolated(unsafe) var continuationRef: AsyncStream<Data>.Continuation?
         let chunks = AsyncStream<Data> { continuation in
             continuationRef = continuation   // set synchronously in the builder, before any await/cancel
@@ -242,7 +246,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         await withTaskCancellationHandler {
             for await chunk in chunks {
                 accumulated.append(chunk)
-                onOutput?(String(decoding: chunk, as: UTF8.self))
+                onOutput?(chunk)
             }
         } onCancel: {
             handle.readabilityHandler = nil

@@ -7,6 +7,9 @@
 // line-buffered → the provider's own stream consumer (claude stream-json vs codex jsonl) → classified
 // `SZAgentStreamEvent`s → appended to the scope's transcript message on the MainActor. The provider owns
 // the parsing; the host stays provider-agnostic (just routes the classified events).
+//
+// It stays BYTES until a line is complete: a chunk is one pipe read, which can end mid-codepoint, so
+// the line buffer is where the UTF-8 decode belongs.
 import Foundation
 import SZAI
 import SZCore
@@ -29,7 +32,7 @@ extension SZHost {
         // Text appends ride a coalescer (~15 Hz + trailing flush) instead of landing per chunk: every
         // store append reassigns the scope's whole message array and fires @Observable, so chunk-rate
         // appends re-evaluated the chat panel at chunk rate for the life of the turn.
-        let (chunks, chunksContinuation) = AsyncStream<String>.makeStream()
+        let (chunks, chunksContinuation) = AsyncStream<Data>.makeStream()
         let streamConsumer = provider.makeStreamConsumer()
         let coalescer = SZChatStreamCoalescer(
             onReply: { [store] in store.appendChatText($0, to: assistantID, in: scope) },
@@ -59,7 +62,7 @@ extension SZHost {
                     sawFirstOutput = true
                     firstOutput.end()
                 }
-                for line in lineBuffer.appendAndExtractLines(Data(chunk.utf8)) {
+                for line in lineBuffer.appendAndExtractLines(chunk) {
                     route(streamConsumer.consume(line))
                 }
             }
