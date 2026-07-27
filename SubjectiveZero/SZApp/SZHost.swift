@@ -1301,7 +1301,7 @@ final class SZHost {
 
     /// The first swiftc `error:` line in a build log (the concise pill message); the full log goes to the
     /// copyable popover via `nodeErrors`. Falls back to a bounded prefix when no `error:` line is present.
-    private static func firstErrorLine(in log: String) -> String {
+    static func firstErrorLine(in log: String) -> String {
         let line = log.split(whereSeparator: \.isNewline).first { $0.contains(" error:") }
             .map(String.init) ?? String(log.prefix(160))
         return line.trimmingCharacters(in: .whitespaces)

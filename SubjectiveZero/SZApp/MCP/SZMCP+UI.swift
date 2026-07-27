@@ -685,7 +685,7 @@ extension SZHostBridge {
     }
 
     /// Coerce a JSON `value` to the port's declared type.
-    private static func portValue(_ type: SZPortType, from raw: Any?) throws -> SZPortValue {
+    static func portValue(_ type: SZPortType, from raw: Any?) throws -> SZPortValue {
         func number() throws -> Double {
             guard let n = raw as? NSNumber else { throw SZMCPError.message("value must be a number") }
             return n.doubleValue
