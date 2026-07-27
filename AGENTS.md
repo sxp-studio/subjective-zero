@@ -32,6 +32,18 @@ especially `docs/ARCHITECTURE.md` (incl. the host seam) and `docs/BUILD_SPEC.md`
 5. **Build + verify, small commits.** Every change must `swift build` clean; render-affecting changes
    must be visually or closed-loop checkable. Commit in small, reviewable steps with clear messages.
 
+   The suites are two, and a full verify runs both:
+
+   ```sh
+   cd SubjectiveZero/Modules && swift build && swift test    # SZCore · SZAI · SZRuntime · SZUI
+   cd SubjectiveZero && xcodebuild -project SZApp.xcodeproj \
+     -scheme SubjectiveZero -configuration Debug test        # SZAppTests — the host + MCP surface
+   ```
+
+   `SZAppTests` is a unit-test bundle hosted by the app, so it can `@testable import SubjectiveZero`
+   and pin what lives inside the app target (the MCP tool surface, argument coercions, host helpers).
+   It is test-only: nothing depends on it, so a `build` — Release included — never produces it.
+
 6. Do not be lazy, do not punt things to a 'v2' unless explicitly agreed upon.
 
 ## Definition of done

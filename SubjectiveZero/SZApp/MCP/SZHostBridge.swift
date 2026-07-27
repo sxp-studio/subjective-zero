@@ -73,28 +73,6 @@ final class SZHostBridge {
             .filter { ($0["agentCallable"] as? Bool) != false }
             .compactMap { $0["name"] as? String }
 
-#if DEBUG
-    /// Invariants the agent bus depends on, asserted once at startup. SZApp is an app target with no
-    /// unit-test target that can import these definitions, so this stands in for the guard test: a future
-    /// edit that reclassifies a tool (or leaks the policy key to the wire) trips here in every DEBUG run
-    /// and in the MCP integration harness. All checks read env-independent derived sets, so
-    /// `SZ_AGENT_DEBUG_TOOLS=1` (which legitimately adds `debug_*` to the live `.agent` tools/list) does
-    /// not confuse them.
-    nonisolated static func assertAgentSurfaceInvariants() {
-        let callable = Set(agentCallableToolNames)
-        assert(callable.isDisjoint(with: debugToolNames),
-               "the agent allowlist mirror must never include a debug_* tool")
-        assert(callable.isDisjoint(with: agentWithheldToolNames),
-               "a tool cannot be both agent-callable and withheld")
-        assert(callable.contains("agent_view_frame"),
-               "agent_view_frame must be agent-callable (the bug this guards against)")
-        assert(agentCallableToolNames.count == callable.count,
-               "duplicate tool name across the agent + ui definitions")
-        assert(toolDefinitions(for: .full).allSatisfy { $0["agentCallable"] == nil },
-               "the agentCallable policy key must be stripped from every served definition")
-    }
-#endif
-
     /// MCP `tools/list` payload for one surface. Pure → `nonisolated` so the server needn't hop.
     /// The `.full` test bus keeps everything; the `.agent` bus drops both `debug_*` (via
     /// `exposesDebugTools`) and any `agentCallable: false` tool. The `agentCallable` key is host-side

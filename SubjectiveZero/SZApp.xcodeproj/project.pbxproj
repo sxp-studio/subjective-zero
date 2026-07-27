@@ -20,12 +20,18 @@
 		21C0FFEE21C0FFEE21C0FFEE /* grayscale-camera.subz */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "grayscale-camera.subz"; path = "Samples/grayscale-camera.subz"; sourceTree = "<group>"; };
 		21C0FFEE21C0FFEE21C0FFEA /* NodeLibrary */ = {isa = PBXFileReference; lastKnownFileType = folder; path = NodeLibrary; sourceTree = "<group>"; };
 		C384F2845895498AA9275FF0 /* SubjectiveZero.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SubjectiveZero.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7E57C0DE7E57C0DE7E57C0D5 /* SZAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SZAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		2D36AF151DF34CED840AABF5 /* SZApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = SZApp;
+			sourceTree = "<group>";
+		};
+		7E57C0DE7E57C0DE7E57C0D4 /* SZAppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SZAppTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -43,6 +49,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7E57C0DE7E57C0DE7E57C0D3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -50,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				2D36AF151DF34CED840AABF5 /* SZApp */,
+				7E57C0DE7E57C0DE7E57C0D4 /* SZAppTests */,
 				21C0FFEE21C0FFEE21C0FFEE /* grayscale-camera.subz */,
 				21C0FFEE21C0FFEE21C0FFEA /* NodeLibrary */,
 				53932F471DA94D9AA055C205 /* Products */,
@@ -60,6 +74,7 @@
 			isa = PBXGroup;
 			children = (
 				C384F2845895498AA9275FF0 /* SubjectiveZero.app */,
+				7E57C0DE7E57C0DE7E57C0D5 /* SZAppTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -94,7 +109,47 @@
 			productReference = C384F2845895498AA9275FF0 /* SubjectiveZero.app */;
 			productType = "com.apple.product-type.application";
 		};
+		7E57C0DE7E57C0DE7E57C0D1 /* SZAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7E57C0DE7E57C0DE7E57C0D8 /* Build configuration list for PBXNativeTarget "SZAppTests" */;
+			buildPhases = (
+				7E57C0DE7E57C0DE7E57C0D2 /* Sources */,
+				7E57C0DE7E57C0DE7E57C0D3 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7E57C0DE7E57C0DE7E57C0D6 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				7E57C0DE7E57C0DE7E57C0D4 /* SZAppTests */,
+			);
+			name = SZAppTests;
+			packageProductDependencies = (
+			);
+			productName = SZAppTests;
+			productReference = 7E57C0DE7E57C0DE7E57C0D5 /* SZAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXContainerItemProxy section */
+		7E57C0DE7E57C0DE7E57C0D7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1AE15DBF91D444E4B709CB38 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B0DC1D73CC2647D9AF5A7682;
+			remoteInfo = SubjectiveZero;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		7E57C0DE7E57C0DE7E57C0D6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B0DC1D73CC2647D9AF5A7682 /* SubjectiveZero */;
+			targetProxy = 7E57C0DE7E57C0DE7E57C0D7 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		1AE15DBF91D444E4B709CB38 /* Project object */ = {
@@ -106,6 +161,10 @@
 				TargetAttributes = {
 					B0DC1D73CC2647D9AF5A7682 = {
 						CreatedOnToolsVersion = 26.3;
+					};
+					7E57C0DE7E57C0DE7E57C0D1 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = B0DC1D73CC2647D9AF5A7682;
 					};
 				};
 			};
@@ -128,6 +187,7 @@
 			projectRoot = "";
 			targets = (
 				B0DC1D73CC2647D9AF5A7682 /* SubjectiveZero */,
+				7E57C0DE7E57C0DE7E57C0D1 /* SZAppTests */,
 			);
 		};
 /* End PBXProject section */
@@ -146,6 +206,13 @@
 
 /* Begin PBXSourcesBuildPhase section */
 		5A6F0C5E145A4702A9D1A5F2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7E57C0DE7E57C0DE7E57C0D2 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -250,6 +317,40 @@
 			};
 			name = Release;
 		};
+		7E57C0DE7E57C0DE7E57C0D9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 68;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.sxp.subjectivezero.SZAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SubjectiveZero.app/Contents/MacOS/SubjectiveZero";
+			};
+			name = Debug;
+		};
+		7E57C0DE7E57C0DE7E57C0DA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 68;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.sxp.subjectivezero.SZAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SubjectiveZero.app/Contents/MacOS/SubjectiveZero";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -267,6 +368,15 @@
 			buildConfigurations = (
 				7C5592A792E3426EA3BA1E6C /* Debug */,
 				9F1A19892F0C4980ACF5417E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7E57C0DE7E57C0DE7E57C0D8 /* Build configuration list for PBXNativeTarget "SZAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7E57C0DE7E57C0DE7E57C0D9 /* Debug */,
+				7E57C0DE7E57C0DE7E57C0DA /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
