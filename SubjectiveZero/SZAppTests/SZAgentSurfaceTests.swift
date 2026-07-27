@@ -2,9 +2,10 @@
 // The agent bus's tool-surface policy (SZHostBridge): which tools a spawned agent may see and call, and
 // what the wire is allowed to carry. Every check reads the derived sets, so a future edit that
 // reclassifies a tool — renames a `debug_*`, flips an `agentCallable`, leaks the policy key into a served
-// definition — fails here rather than at an agent's first bad move. All derived sets are
-// environment-independent, so `SZ_AGENT_DEBUG_TOOLS=1` (which legitimately adds `debug_*` to the live
-// `.agent` tools/list) does not confuse them.
+// definition — fails here rather than at an agent's first bad move. The derived name sets are
+// environment-independent, so `SZ_AGENT_DEBUG_TOOLS=1` does not confuse them; the two tests that read a
+// served `.agent` payload do depend on it (the setting legitimately adds `debug_*` to that list) and skip
+// when it is set.
 import Testing
 @testable import SubjectiveZero
 
@@ -86,15 +87,17 @@ import Testing
 
 // MARK: - what each surface serves
 
-@Test @MainActor func theAgentSurfaceServesExactlyTheAgentCallableTools() throws {
-    // Only meaningful when the surface is NOT holding the debug tools open for this process.
-    try #require(!SZHostBridge.Surface.agent.exposesDebugTools)
+@Test @MainActor func theAgentSurfaceServesExactlyTheAgentCallableTools() {
+    // Only meaningful when the surface is NOT holding the debug tools open for this process, so under
+    // `SZ_AGENT_DEBUG_TOOLS=1` this skips rather than fails — the setting is legitimate, not a defect.
+    guard !SZHostBridge.Surface.agent.exposesDebugTools else { return }
     let served = SZHostBridge.toolDefinitions(for: .agent).compactMap { $0["name"] as? String }
     #expect(served == callableNames)
 }
 
-@Test @MainActor func theFullSurfaceServesTheDebugToolsTheAgentSurfaceWithholds() throws {
-    try #require(!SZHostBridge.Surface.agent.exposesDebugTools)
+@Test @MainActor func theFullSurfaceServesTheDebugToolsTheAgentSurfaceWithholds() {
+    // Skipped, not failed, when `SZ_AGENT_DEBUG_TOOLS=1` opens the debug tools on the agent surface.
+    guard !SZHostBridge.Surface.agent.exposesDebugTools else { return }
     let full = Set(SZHostBridge.toolDefinitions(for: .full).compactMap { $0["name"] as? String })
     let agent = Set(SZHostBridge.toolDefinitions(for: .agent).compactMap { $0["name"] as? String })
     #expect(SZHostBridge.debugToolNames.isSubset(of: full))
