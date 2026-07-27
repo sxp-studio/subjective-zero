@@ -470,7 +470,9 @@ final class SZHost {
         // App-level services — deliberately outside the project chain: a project that failed to
         // load must not take the MCP bus down with it.
         startMCPServer()
+        #if DEBUG
         verifyGrayscale()
+        #endif
         // Independent of project load (a dead project must not hide a dead provider):
         // one cheap health pass, then first-run auto-present (SZHost+ProviderHealth.swift).
         checkProviderSetupOnLaunch()
@@ -1308,9 +1310,12 @@ final class SZHost {
         return line.trimmingCharacters(in: .whitespaces)
     }
 
+    #if DEBUG
     /// In-app frame-capture self-check (the readback behind `agent_view_frame`): after the camera warms up, read back a frame and confirm
     /// it's a plausible grayscale (R≈G≈B per pixel) and not uniform (the live camera produced content).
     /// Logs the result so a run with camera access confirms the end-to-end path; harmless without it.
+    /// Debug-only, and log-only: it must never write `status`, which belongs to the user's own graph —
+    /// it assumes the grayscale sample is loaded, so its verdict is meaningless for any other project.
     private func verifyGrayscale() {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))   // camera warmup
@@ -1324,7 +1329,7 @@ final class SZHost {
             }
             let varied = Set(values).count > 1
             print("[SZHost] frame self-check — grayscale: \(grayscale), live(non-uniform): \(varied), samples: \(values)")
-            status = grayscale ? "grayscale camera live ✓" : "loaded (grant camera to see grayscale)"
         }
     }
+    #endif
 }
