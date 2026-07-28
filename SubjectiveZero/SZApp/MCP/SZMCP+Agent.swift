@@ -142,8 +142,8 @@ extension SZHostBridge {
     /// where the old typed-JSON dump cost ~4.4k, so reading it whole is cheaper than a shortlist was.
     /// The tool's payload: the categories block wrapped in the tool-response framing (how to spend
     /// the deeper tiers). The framing stays OUT of the brief embed below — a brief carries its own
-    /// framing (`reference-inline`), and shipping both contradicted it (the tool tail says "card,
-    /// THEN source"; the brief says both in one round).
+    /// framing (`reference-inline`), and the two must not ship together (they disagree on how to
+    /// spend the deeper tiers).
     nonisolated static func libraryIndexText() -> String {
         SZAgentLibraryText.index(categories: libraryCategoriesBlock() ?? "(the library is empty)")
     }

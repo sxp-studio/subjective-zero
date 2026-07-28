@@ -111,9 +111,10 @@ public struct SZOrchestrationContext {
     public let stagedPieces: @MainActor @Sendable () -> Set<SZNodeID>
     /// The assembled node-library index (the `agent_library_index` payload) to inline into each
     /// COLD-START coding brief, so a first dispatch reads it in-prompt instead of spending its first
-    /// tool round fetching it (each round replays the CLI's whole context). Also flips the brief's
-    /// contract-schema section to its inlined variant — this nil-check is the prefetch experiment's
-    /// single switch. nil (default: tests / experiment off) keeps the call-the-tool framing.
+    /// tool round fetching it (each round replays the agent's whole context). Also flips the brief's
+    /// contract-schema section to its inlined variant — this nil-check is the single switch for
+    /// both payloads. nil (the default; tests, or the host's env override) keeps the
+    /// call-the-tool framing.
     public let libraryIndexText: String?
 
     public init(

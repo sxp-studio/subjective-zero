@@ -31,8 +31,7 @@ public enum SZAgentDocs {
     }()
 
     /// The node-contract doc body — ALSO embedded into cold-start coding briefs when the library
-    /// index is inlined (the prefetch experiment), so the schema prose lives in exactly one file,
-    /// same as `abiReference`.
+    /// index is inlined, so the schema prose lives in exactly one file, same as `abiReference`.
     public static let contractReference: String = {
         guard let doc = read("node-contract") else { fatalError("SZAI: missing bundled doc node-contract.md") }
         return doc

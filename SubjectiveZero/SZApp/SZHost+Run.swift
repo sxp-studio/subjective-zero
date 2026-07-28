@@ -348,9 +348,9 @@ extension SZHost {
             // be told to preserve the original's behavior rather than browse the library.
             stagedPieces: { [weak self] in self?.hiddenPieces ?? [] },
             // Prefetch: cold-start coding briefs embed the library categories (+ contract doc) so a
-            // first dispatch spends no tool rounds fetching them. Measured on claude (−20%) and
-            // codex (−12.5%) reported-in; `SZ_BRIEF_PREFETCH=0` reverts to the call-the-tool
-            // framing without a build (e.g. if an unmeasured provider regresses).
+            // first dispatch spends no tool rounds fetching them — a tool round replays the agent's
+            // whole context, which costs more than the payload. `SZ_BRIEF_PREFETCH=0` reverts to
+            // the call-the-tool framing without a build.
             libraryIndexText: ProcessInfo.processInfo.environment["SZ_BRIEF_PREFETCH"] == "0"
                 ? nil : SZHostBridge.libraryCategoriesBlock())
     }

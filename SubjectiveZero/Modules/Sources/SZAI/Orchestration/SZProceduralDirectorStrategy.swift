@@ -143,9 +143,9 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
     /// reference is the original's source, which its seed already quotes.
     nonisolated static func compilePrompt(_ plan: CodingPlan, boundary: String,
                                           libraryIndexText: String? = nil) -> String {
-        // The prefetch experiment's single switch: a brief handed the index inlines BOTH payloads
-        // agents otherwise fetch every cold start (the library index + the contract doc), and the
-        // framing flips from "call the tool" to "you are holding it". Preserve-behavior pieces
+        // A brief handed the index inlines BOTH payloads agents otherwise fetch every cold start
+        // (the library index + the contract doc), and the framing flips from "call the tool" to
+        // "you are holding it". Preserve-behavior pieces
         // never inline — their reference is the original's source, and their framing forbids
         // library shopping outright. Values are pre-rendered and `{{`-defused before entering the
         // outer render: SZPromptTemplate walks an unordered dictionary, so a live token inside a

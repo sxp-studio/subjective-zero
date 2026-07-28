@@ -21,9 +21,9 @@ enum SZPrompts {
     /// `agent_library_index` and returns a reinterpretation instead of the same node, in pieces.
     static let referencePreserve = load("coding/reference-preserve.md.mustache")
 
-    /// `{{reference}}` when the host hands the brief the library index up front (the prefetch
-    /// experiment): same tiering as `referenceLibrary`, but tier 1 is embedded (`{{library_index}}`)
-    /// and the agent is told not to spend a round fetching it.
+    /// `{{reference}}` when the host hands the brief the library index up front: same tiering as
+    /// `referenceLibrary`, but tier 1 is embedded (`{{library_index}}`) and the agent is told not
+    /// to spend a round fetching it.
     static let referenceInline = load("coding/reference-inline.md.mustache")
 
     /// `{{schema}}` for `nodeCompile`: the fetch framing (call `agent_docs_read`) when the brief
