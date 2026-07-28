@@ -208,7 +208,13 @@ extension SZHost {
                 // The remainder EXPLAINED, not hand-waved: a turn with tool calls is several
                 // model calls, and the CLI re-sends its whole context (system prompt + session
                 // history) on each — that replay × call count is where the big number comes from.
+                // Structural field first; transcripts written before it exist carry the count only
+                // in the report row's detail prose ("6 turns · …"), so fall back to parsing that
+                // rather than losing the explanation on historical turns.
                 let calls = SZTurnBreakdown.reportedCalls(in: message.breakdown ?? [])
+                    ?? (message.breakdown ?? [])
+                        .first { $0.stage == SZTurnStage.providerReport }?.detail
+                        .flatMap { Int($0.components(separatedBy: " turn").first ?? "") }
                 if let calls, calls > 0 {
                     lines.append("  the remainder is the CLI's context (its system prompt + the session's"
                                  + " full history), re-sent on each of the turn's \(calls) model call\(calls == 1 ? "" : "s")"

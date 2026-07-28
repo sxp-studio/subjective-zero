@@ -12,4 +12,13 @@ enum SZPromptTemplate {
         }
         return out
     }
+
+    /// Defuse `{{` in a NON-LITERAL value (user prose, fetched docs, assembled indexes) before it
+    /// enters `render`: the loop above walks an unordered dictionary, so a live token inside a
+    /// substituted value would be expanded — or left literal — depending on the process's hash
+    /// seed, rendering two different prompts on two runs. Template-authored values skip this;
+    /// everything else goes through it.
+    static func defused(_ value: String) -> String {
+        value.replacingOccurrences(of: "{{", with: "{ {")
+    }
 }

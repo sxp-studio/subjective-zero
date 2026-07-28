@@ -1,5 +1,6 @@
 The full per-type schema (every `type`, the `ui` kinds, the `default`/`options` shapes) is below — do
-NOT fetch `agent_docs_read { "topic": "node-contract" }`; you are holding that doc. Don't guess beyond
+NOT fetch `agent_docs_read { "topic": "node-contract" }`; you are holding that doc. If it points you at
+fetching the runtime ABI, ignore that too — the ABI is also already in this brief. Don't guess beyond
 it: a contract that doesn't match is rejected at compile (`{ok:false, errors}`).
 
 {{contract_doc}}

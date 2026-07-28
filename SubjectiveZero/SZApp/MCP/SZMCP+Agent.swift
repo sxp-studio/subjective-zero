@@ -140,14 +140,26 @@ extension SZHostBridge {
     /// guess earlier and hid its working: it withheld what it scored low and lent authority to what it
     /// scored high, on token overlap. Hand over the evidence and let the reader judge. This costs ~1k tokens
     /// where the old typed-JSON dump cost ~4.4k, so reading it whole is cheaper than a shortlist was.
-    /// Served over MCP (`agent_library_index`) AND inlined into cold-start coding briefs (the
-    /// prefetch experiment, `SZHost+Run.makeOrchestrationContext`) — one assembly for both, so
-    /// what a brief embeds is exactly what the tool would have returned.
+    /// The tool's payload: the categories block wrapped in the tool-response framing (how to spend
+    /// the deeper tiers). The framing stays OUT of the brief embed below — a brief carries its own
+    /// framing (`reference-inline`), and shipping both contradicted it (the tool tail says "card,
+    /// THEN source"; the brief says both in one round).
     nonisolated static func libraryIndexText() -> String {
+        SZAgentLibraryText.index(categories: libraryCategoriesBlock() ?? "(the library is empty)")
+    }
+
+    /// The categories block for inlining into cold-start coding briefs
+    /// (`SZHost+Run.makeOrchestrationContext`) — the shared assembly under both surfaces, so the
+    /// brief and the tool cannot drift on content. nil when the catalog is empty (a packaging
+    /// regression): the brief then falls back to the call-the-tool framing rather than asserting
+    /// "the full catalog is right here" around nothing while forbidding the tool that would show
+    /// the live state.
+    nonisolated static func libraryCategoriesBlock() -> String? {
         func ports(_ list: [SZLibraryIndexEntry.Port]) -> String {
             list.isEmpty ? "none" : list.map { "\($0.name):\($0.type.rawValue)" }.joined(separator: ",")
         }
         let byCategory = Dictionary(grouping: libraryCatalog(), by: Self.libraryCategory)
+        guard !byCategory.isEmpty else { return nil }
         let categories = byCategory.keys.sorted().map { category -> String in
             let lines = (byCategory[category] ?? []).map { entry in
                 let permissions = (entry.permissions?.map(\.rawValue) ?? []).joined(separator: ",")
@@ -160,7 +172,7 @@ extension SZHostBridge {
             }
             return "\(category):\n\(lines.joined(separator: "\n"))"
         }
-        return SZAgentLibraryText.index(categories: categories.joined(separator: "\n"))
+        return categories.joined(separator: "\n")
     }
 
     /// Tier-2: the node's CARD.md (reuse guidance + gotchas) — cheap confirmation before fetching source.

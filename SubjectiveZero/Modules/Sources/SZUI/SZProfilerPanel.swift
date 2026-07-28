@@ -365,7 +365,7 @@ struct SZRunDetailView: View {
         HStack(spacing: 4) {
             Text(label.uppercased()).font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.tertiary)
-            Text(value).foregroundStyle(.secondary)
+            Text(value).foregroundStyle(.secondary).lineLimit(1)
         }
     }
 }
@@ -712,6 +712,7 @@ private struct SZTurnDetailSection: View {
                     Text(calls)
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
                 if let viewTurnPrompt, let turnID = turn.turnID,
                    heldPromptTurnIDs.contains(turnID) {   // never render a button into nothing

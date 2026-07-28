@@ -156,18 +156,18 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
             reference = SZPrompts.referencePreserve
         } else if let index = libraryIndexText {
             reference = SZPromptTemplate.render(SZPrompts.referenceInline,
-                ["library_index": index.replacingOccurrences(of: "{{", with: "{ {")])
+                ["library_index": SZPromptTemplate.defused(index)])
             schema = SZPromptTemplate.render(SZPrompts.schemaInline,
-                ["contract_doc": SZAgentDocs.contractReference.replacingOccurrences(of: "{{", with: "{ {")])
+                ["contract_doc": SZPromptTemplate.defused(SZAgentDocs.contractReference)])
         } else {
             reference = SZPrompts.referenceLibrary
         }
         return SZPromptTemplate.render(SZPrompts.nodeCompile, [
             "node": plan.node.uuidString,
-            "prompt": plan.prompt,
+            "prompt": SZPromptTemplate.defused(plan.prompt),
             "inputs": plan.inputs.map(\.name).joined(separator: ", "),
             "outputs": plan.outputs.map(\.name).joined(separator: ", "),
-            "boundary": boundary,
+            "boundary": SZPromptTemplate.defused(boundary),
             "abi": SZAgentDocs.abiReference,   // the node-abi doc, embedded — one ABI prose source
             "reference": reference,
             "schema": schema,
@@ -212,13 +212,14 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
         if let reconcileBlocker = reconcile.blocker {
             // A Director-authored message (its `ui_send_chat` words) is the primary steer when present; the
             // blocker is the agent's own prior report. Render the message as its own section, else "".
-            let directorSection = reconcile.directorMessage.map { "\n## A message from the Director — follow this\n\($0)\n" } ?? ""
+            let directorSection = reconcile.directorMessage
+                .map { "\n## A message from the Director — follow this\n\(SZPromptTemplate.defused($0))\n" } ?? ""
             prompt = SZPromptTemplate.render(SZPrompts.nodeReconcile, [
                 "node": plan.node.uuidString,
-                "prompt": plan.prompt,
-                "blocker": reconcileBlocker,
+                "prompt": SZPromptTemplate.defused(plan.prompt),
+                "blocker": SZPromptTemplate.defused(reconcileBlocker),
                 "director_message": directorSection,
-                "boundary": boundary,
+                "boundary": SZPromptTemplate.defused(boundary),
             ])
         } else {
             prompt = compilePrompt(plan, boundary: boundary, libraryIndexText: libraryIndexText)

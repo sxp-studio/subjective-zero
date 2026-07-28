@@ -80,6 +80,11 @@ import Testing
     let uncounted = makeTurn(scope: "n", label: "N", startOffset: 0, duration: 5,
                              usage: SZTokenUsage(inputTokens: 100, outputTokens: 1))
     #expect(SZTurnBreakdown.callsDetail(of: [uncounted]) == nil)
+    // Mixed population: a turn with usage but NO reported count (a killed agent whose result
+    // event never arrived) must not inflate ctx/call — only counted turns feed both sums.
+    let ghost = makeTurn(scope: "g", label: "G", startOffset: 0, duration: 5,
+                         usage: SZTokenUsage(inputTokens: 100_000, outputTokens: 500))
+    #expect(SZTurnBreakdown.callsDetail(of: [turn, ghost]) == "3 calls · ~201.5k ctx/call")
 }
 
 @Test func chatMessageBreakdownRoundTripsAndOldTranscriptsDecode() throws {

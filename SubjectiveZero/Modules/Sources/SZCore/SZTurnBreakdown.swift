@@ -352,11 +352,14 @@ public enum SZTurnBreakdown {
     /// The call-count story for a set of turns — "3 calls · ~55.5k ctx/call", the ctx/call clause
     /// derived from the turns' summed input tokens (reported input ≈ context × calls, so the
     /// division recovers the context; derived at render, never stored). nil when no CLI reported
-    /// a count.
+    /// a count. Both sums span only the turns that DID report one — a turn with usage but no
+    /// count (a killed agent whose result event never arrived) would otherwise inflate the
+    /// figure by adding to the numerator and nothing to the divisor.
     public static func callsDetail(of turns: [RunTurn]) -> String? {
-        guard let calls = reportedCalls(in: turns.flatMap(\.events)), calls > 0 else { return nil }
+        let counted = turns.filter { reportedCalls(in: $0.events) != nil }
+        guard let calls = reportedCalls(in: counted.flatMap(\.events)), calls > 0 else { return nil }
         var text = "\(calls) call\(calls == 1 ? "" : "s")"
-        if let input = totalUsage(of: turns)?.inputTokens, input > 0 {
+        if let input = totalUsage(of: counted)?.inputTokens, input > 0 {
             text += " · ~\(formatTokens(input / calls)) ctx/call"
         }
         return text

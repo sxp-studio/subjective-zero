@@ -347,9 +347,12 @@ extension SZHost {
             // Read live: the Director can stage a split/merge mid-run, and those pieces' coding agents must
             // be told to preserve the original's behavior rather than browse the library.
             stagedPieces: { [weak self] in self?.hiddenPieces ?? [] },
-            // Prefetch: cold-start coding briefs embed the library index (+ contract doc) so a first
-            // dispatch spends no tool rounds fetching them. Delete this line to turn the experiment off.
-            libraryIndexText: SZHostBridge.libraryIndexText())
+            // Prefetch: cold-start coding briefs embed the library categories (+ contract doc) so a
+            // first dispatch spends no tool rounds fetching them. Measured on claude (−20%) and
+            // codex (−12.5%) reported-in; `SZ_BRIEF_PREFETCH=0` reverts to the call-the-tool
+            // framing without a build (e.g. if an unmeasured provider regresses).
+            libraryIndexText: ProcessInfo.processInfo.environment["SZ_BRIEF_PREFETCH"] == "0"
+                ? nil : SZHostBridge.libraryCategoriesBlock())
     }
 
     /// Start a Director run over the current graph with the active provider (the `ui_run` entry point).

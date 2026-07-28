@@ -224,6 +224,62 @@ private func dirtyStore() -> SZStore {
     #expect(!staged.contains("saturation — scales chroma"))
 }
 
+/// A reconcile re-dispatch must NEVER carry the inlined index: it resumes (or re-grounds) a
+/// session that already saw one, and re-sending ~10KB into every retry is the prefetch's exact
+/// anti-goal. The blocker routes it to the `nodeReconcile` prompt; the resumed session id rides
+/// the request. Dispatch-level, so the guarantee doesn't silently hang on `compilePrompt` alone.
+@MainActor @Test func reconcileRedispatchSkipsThePrefetchAndResumesTheSession() async throws {
+    let tmp = FileManager.default.temporaryDirectory.appending(path: "orch-reconcile-\(UUID().uuidString)")
+    let runner = RecordingRunner()
+    let store = dirtyStore()
+    let node = try #require(store.project?.graph.nodes.first { $0.kind == .prompt }?.id)
+    let index = "color:\n  saturation — scales chroma"
+    let context = SZOrchestrationContext(
+        providerID: "claude", store: store, mcpPort: 42100,
+        projectURL: tmp, cacheDirectory: tmp, runner: runner,
+        libraryIndexText: index)
+    let plans = SZProceduralDirectorStrategy.plans(for: store.project!.graph, workSet: nil)
+    let provider = try #require(SZProviderRegistry.shared.provider(id: "claude"))
+
+    try await SZProceduralDirectorStrategy().dispatch(
+        plans, provider: provider, context: context,
+        reconcile: [node: .init(resumeSession: "sess-77", blocker: "compile failed: missing output")])
+
+    let argv = try #require(runner.argvs.first).joined(separator: " ")
+    #expect(argv.contains("--resume sess-77"))                    // continues THAT conversation
+    #expect(argv.contains("compile failed: missing output"))      // the re-grounding prompt
+    #expect(!argv.contains("saturation — scales chroma"))         // no index re-sent
+    #expect(!argv.contains("do NOT call `agent_library_index`"))  // no inline framing either
+
+    // Control: the same context WITHOUT reconcile inlines the index (cold start).
+    let coldRunner = RecordingRunner()
+    let coldContext = SZOrchestrationContext(
+        providerID: "claude", store: store, mcpPort: 42100,
+        projectURL: tmp, cacheDirectory: tmp, runner: coldRunner,
+        libraryIndexText: index)
+    try await SZProceduralDirectorStrategy().dispatch(plans, provider: provider, context: coldContext)
+    let coldArgv = try #require(coldRunner.argvs.first).joined(separator: " ")
+    #expect(coldArgv.contains("saturation — scales chroma"))
+    #expect(!coldArgv.contains("--resume"))
+}
+
+/// The whole inlined brief survives opencode's tool-name namespacing: every bare bridge token —
+/// including the ones inside the embedded contract doc — gets the `subz_` prefix (that's what its
+/// tool list shows), and the rewrite is idempotent over the ~12KB-larger prompt.
+@MainActor @Test func inlinedBriefSurvivesOpenCodeNamespacing() throws {
+    let n = SZNodeID()
+    let graph = SZGraph(nodes: [SZNode(id: n, kind: .prompt, title: "Blur", prompt: "blur it",
+                                       position: SZPoint(x: 0, y: 0))])
+    let plan = try #require(SZProceduralDirectorStrategy.plans(for: graph, workSet: nil).first)
+    let brief = SZProceduralDirectorStrategy.compilePrompt(plan, boundary: "Inputs:\n- (none)",
+                                                           libraryIndexText: "color:\n  saturation — scales chroma")
+    let rewritten = SZOpenCodeProvider.namespacedSubZTools(in: brief)
+    #expect(!rewritten.contains("`agent_"))                       // no bare bridge token survives…
+    #expect(rewritten.contains("`subz_agent_library_card"))       // …they're namespaced, not deleted
+    #expect(rewritten.contains("subz_agent_write_node_staged"))   // incl. inside the embedded doc
+    #expect(SZOpenCodeProvider.namespacedSubZTools(in: rewritten) == rewritten)   // idempotent
+}
+
 /// Default = library tiers: nothing outside a staged split/merge may lose its reference step.
 @MainActor @Test func plansDefaultToTheLibraryFramingWhenNothingIsStaged() {
     let n = SZNodeID()
