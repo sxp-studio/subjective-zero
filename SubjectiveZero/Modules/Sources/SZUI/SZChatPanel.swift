@@ -24,6 +24,7 @@ public struct SZChatPanel: View {
     private let streaming: Bool                    // the active scope has a turn in flight → show the dots
     private let isRunning: Bool                    // a whole run is in flight → Project-tab Stop slot, sends disabled
     private let showTokenCounts: Bool              // View ▸ Show Token Counts — the usage caption under replies
+    private let showTurnBreakdown: Bool            // Debug ▸ Show Turn Breakdown — expandable phase rows under replies
     private let onStopRun: () -> Void              // the send slot's whole-run Stop (Project tab, while running)
     private let workingScopes: Set<String>         // scopes with a streaming turn → their tab dot pulses
     private let unreadScopes: Set<String>          // finished-unvisited scopes → static tab dot until visited
@@ -107,15 +108,16 @@ public struct SZChatPanel: View {
     // state (`SZNodeStatusPill`) and the pulsing-orange streaming tab dot; the Director = the violet of
     // the flow/"then" edges it owns (`SZEdgeStyle.intentViolet`). Deliberate reuse of the app's semantic
     // palette so the panel reads as part of the same tool, not a bolt-on.
-    fileprivate static let userColor = Color(red: 0.50, green: 0.64, blue: 1.0)   // fileprivate: SZChatTurnRow styles mention tokens with it
-    private static let agentColor = Color(red: 0.96, green: 0.60, blue: 0.30)       // coding agent — warm orange, kin to the node's "coding" state
-    private static let directorColor = SZEdgeStyle.intentViolet                     // Director = its own flow-edge violet
+    static let userColor = Color(red: 0.50, green: 0.64, blue: 1.0)   // internal: SZChatTurnRow styles mention tokens with it
+    static let agentColor = Color(red: 0.96, green: 0.60, blue: 0.30)   // coding agent — warm orange, kin to the node's "coding" state; internal: the breakdown+profiler timelines color-code with it
+    static let directorColor = SZEdgeStyle.intentViolet                 // Director = its own flow-edge violet; internal: same
     private static let debugColor = Color(red: 0.70, green: 0.62, blue: 0.85)       // the debug chat agent — a muted "this is a tool" lilac
 
     public init(store: SZStore, scope: SZChatScope, tabs: [SZChatScope], project: SZProject?,
                 provider: String, streaming: Bool,
                 isRunning: Bool = false,
                 showTokenCounts: Bool = false,
+                showTurnBreakdown: Bool = false,
                 onStopRun: @escaping () -> Void = {},
                 workingScopes: Set<String> = [],
                 unreadScopes: Set<String> = [],
@@ -146,6 +148,7 @@ public struct SZChatPanel: View {
         self.streaming = streaming
         self.isRunning = isRunning
         self.showTokenCounts = showTokenCounts
+        self.showTurnBreakdown = showTurnBreakdown
         self.onStopRun = onStopRun
         self.workingScopes = workingScopes
         self.unreadScopes = unreadScopes
@@ -498,6 +501,7 @@ public struct SZChatPanel: View {
             // working: the chip flips exactly when the prop flips.
             queued: isUser && isQueued(message.id),
             showTokenCounts: showTokenCounts,
+            showTurnBreakdown: showTurnBreakdown,
             accent: isUser ? Self.userColor
                 : (isDebugReply ? Self.debugColor : (isDirector ? Self.directorColor : Self.agentColor)),
             label: isUser ? "you"
@@ -834,6 +838,7 @@ private struct SZChatTurnRow: View, Equatable {
     let working: Bool               // this turn is still in flight → dots + live elapsed timer
     let queued: Bool                // user message still waiting in the mailbox → queued chip
     let showTokenCounts: Bool
+    let showTurnBreakdown: Bool
     let accent: Color
     let label: String
     let symbol: String
@@ -892,9 +897,26 @@ private struct SZChatTurnRow: View, Equatable {
                     let tokens = showTokenCounts ? message.usage.map {
                         " · \(szFormatTokensCompact($0.inputTokens)) in / \(szFormatTokensCompact($0.outputTokens)) out"
                     } ?? "" : ""
-                    Text("Worked for \(szFormatDurationCompact(duration))\(tokens)")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                    let caption = "Worked for \(szFormatDurationCompact(duration))\(tokens)"
+                    if showTurnBreakdown, let breakdown = message.breakdown, !breakdown.isEmpty {
+                        // The same caption, now a disclosure over the turn's recorded phases.
+                        SZTurnBreakdownView(turnCaption: caption, events: breakdown,
+                                            profilerTarget: breakdown.compactMap(\.runID).first ?? message.id,
+                                            turnID: message.id)
+                    } else {
+                        Text(caption)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                } else if showTurnBreakdown, message.role == .assistant,
+                          let breakdown = message.breakdown, !breakdown.isEmpty {
+                    // A host narration carrying a breakdown but no turn duration of its own —
+                    // the run-complete rollup on the Director's "Run complete" line. nil caption →
+                    // the view derives a run-level "Ran for …" from the rollup's total row, so the
+                    // two disclosures read as the same idiom at different levels.
+                    SZTurnBreakdownView(turnCaption: nil, events: breakdown,
+                                        profilerTarget: breakdown.compactMap(\.runID).first ?? message.id,
+                                        turnID: message.id)
                 }
             }
         }
@@ -1006,11 +1028,7 @@ private func szFormatDurationCompact(_ interval: TimeInterval) -> String {
 /// The k→M boundary sits at 999,950 so `%.1f` can't round a k-value up to "1000.0k".
 /// `internal` (not private) for the unit tests.
 func szFormatTokensCompact(_ tokens: Int) -> String {
-    switch tokens {
-    case ..<1000: return "\(tokens)"
-    case ..<999_950: return String(format: "%.1fk", Double(tokens) / 1000)
-    default: return String(format: "%.1fM", Double(tokens) / 1_000_000)
-    }
+    SZTurnBreakdown.formatTokens(tokens)   // one tiered implementation (SZCore)
 }
 
 /// Whether a file should preview as an image (by its extension's UTType) — the composer's pending

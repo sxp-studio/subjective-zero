@@ -28,6 +28,7 @@ public enum SZPanelLayoutGeometry {
         case .viewport: CGSize(width: 240, height: 180)
         case .nodeEditor: CGSize(width: 480, height: 160)
         case .chat: CGSize(width: 280, height: 160)
+        case .profiler: CGSize(width: 420, height: 260)   // run list + stats need the room
         }
     }
 
