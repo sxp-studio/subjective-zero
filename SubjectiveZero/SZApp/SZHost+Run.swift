@@ -346,7 +346,10 @@ extension SZHost {
             workSet: { [weak self] in self?.runWorkSet },
             // Read live: the Director can stage a split/merge mid-run, and those pieces' coding agents must
             // be told to preserve the original's behavior rather than browse the library.
-            stagedPieces: { [weak self] in self?.hiddenPieces ?? [] })
+            stagedPieces: { [weak self] in self?.hiddenPieces ?? [] },
+            // Prefetch: cold-start coding briefs embed the library index (+ contract doc) so a first
+            // dispatch spends no tool rounds fetching them. Delete this line to turn the experiment off.
+            libraryIndexText: SZHostBridge.libraryIndexText())
     }
 
     /// Start a Director run over the current graph with the active provider (the `ui_run` entry point).

@@ -183,6 +183,47 @@ private func dirtyStore() -> SZStore {
     #expect(!SZPrompts.referencePreserve.contains("{{"))
 }
 
+/// The prefetch experiment: a brief handed the library index embeds it (and the contract doc) with
+/// "you are holding it" framing; without one, today's fetch framing renders byte-identically (the A/B
+/// control); a preserve-behavior piece never inlines. Injected text is `{{`-defused so a token inside
+/// the index cannot collide with the outer render (hash-order trap, same as the steer block).
+@MainActor @Test func inlinedLibraryIndexReplacesTheFetchRoundsOnColdStartsOnly() {
+    let n = SZNodeID(), piece = SZNodeID()
+    let graph = SZGraph(nodes: [
+        SZNode(id: n, kind: .prompt, title: "Blur", prompt: "blur it", position: SZPoint(x: 0, y: 0)),
+        SZNode(id: piece, kind: .prompt, title: "Gradient (1/2)", prompt: "stage 1", position: SZPoint(x: 1, y: 0)),
+    ])
+    let plans = SZProceduralDirectorStrategy.plans(for: graph, workSet: nil, stagedPieces: [piece])
+    let plan = try! #require(plans.first { $0.node == n })
+    let stagedPlan = try! #require(plans.first { $0.node == piece })
+    let index = "color:\n  saturation — scales chroma {{sneaky}}"
+
+    let inlined = SZProceduralDirectorStrategy.compilePrompt(plan, boundary: "Inputs:\n- (none)",
+                                                             libraryIndexText: index)
+    // The index body rides the brief (defused), and the framing flips to "don't fetch".
+    #expect(inlined.contains("saturation — scales chroma"))
+    #expect(inlined.contains("do NOT call `agent_library_index`"))
+    #expect(inlined.contains("NOT fetch `agent_docs_read"))
+    #expect(inlined.contains("single source of truth"))      // the embedded contract doc's schema prose
+    #expect(!inlined.contains("{{"))                         // defuse + full render, no residue
+    #expect(!inlined.contains("Spend tokens in tiers"))      // the fetch framing is gone…
+    #expect(inlined.contains("agent_library_card"))          // …but the deeper tiers remain earnable
+
+    // No index → today's framing, byte-identical (the experiment's control arm).
+    let control = SZProceduralDirectorStrategy.compilePrompt(plan, boundary: "Inputs:\n- (none)")
+    #expect(control.contains("Spend tokens in tiers"))
+    #expect(control.contains("agent_docs_read"))
+    #expect(!control.contains("do NOT call `agent_library_index`"))
+    #expect(!control.contains("{{"))
+
+    // Preserve-behavior wins over inlining: a piece's reference is the original's source, and
+    // handing it a library index to shop from would contradict its own framing.
+    let staged = SZProceduralDirectorStrategy.compilePrompt(stagedPlan, boundary: "Inputs:\n- (none)",
+                                                            libraryIndexText: index)
+    #expect(staged.contains("Do NOT look for a reference"))
+    #expect(!staged.contains("saturation — scales chroma"))
+}
+
 /// Default = library tiers: nothing outside a staged split/merge may lose its reference step.
 @MainActor @Test func plansDefaultToTheLibraryFramingWhenNothingIsStaged() {
     let n = SZNodeID()

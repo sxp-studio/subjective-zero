@@ -21,6 +21,17 @@ enum SZPrompts {
     /// `agent_library_index` and returns a reinterpretation instead of the same node, in pieces.
     static let referencePreserve = load("coding/reference-preserve.md.mustache")
 
+    /// `{{reference}}` when the host hands the brief the library index up front (the prefetch
+    /// experiment): same tiering as `referenceLibrary`, but tier 1 is embedded (`{{library_index}}`)
+    /// and the agent is told not to spend a round fetching it.
+    static let referenceInline = load("coding/reference-inline.md.mustache")
+
+    /// `{{schema}}` for `nodeCompile`: the fetch framing (call `agent_docs_read`) when the brief
+    /// carries no contract doc, or the inline framing (`{{contract_doc}}` embedded) when it does.
+    /// One of the two ALWAYS renders — `{{schema}}` must never survive into a prompt.
+    static let schemaFetch = load("coding/schema-fetch.md.mustache")
+    static let schemaInline = load("coding/schema-inline.md.mustache")
+
     /// Cold-start chat prompt: a Coding Agent edits an EXISTING node from a user message. Leans on the
     /// node's current source as the ABI reference (no ABI re-statement), so it can't drift from the ABI.
     static let nodeChat = load("coding/node-chat.md.mustache")

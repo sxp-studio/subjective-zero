@@ -65,7 +65,7 @@ extension SZHostBridge {
         switch name {
         case "agent_read_graph":         return try agentReadGraph()
         case "agent_read_node":          return try agentReadNode(arguments)
-        case "agent_library_index":      return agentLibraryIndex()
+        case "agent_library_index":      return Self.libraryIndexText()
         case "agent_library_card":       return try agentLibraryCard(arguments)
         case "agent_library_source":     return try agentLibrarySource(arguments)
         case "agent_write_node_staged":  return try agentWriteNodeStaged(arguments)
@@ -107,7 +107,7 @@ extension SZHostBridge {
     /// node's contract (the single source of truth — so `io` can't drift), merged with the hand-curated
     /// `useWhen`/`avoidWhen`/`purpose`/`tags` from `NodeLibrary/index.json`.
     /// One scan behind the index, so what an agent browses is exactly what ships.
-    private func libraryCatalog() -> [SZLibraryIndexEntry] {
+    nonisolated private static func libraryCatalog() -> [SZLibraryIndexEntry] {
         let fm = FileManager.default
         let root = SZHost.libraryURL
         let curation = (try? Data(contentsOf: root.appending(path: "index.json")))
@@ -128,7 +128,7 @@ extension SZHostBridge {
 
     /// A node's category — its first curated tag, which is the family it belongs to (`color`, `generator`,
     /// `source`, `audio`, …). Nodes without curation fall under `other`.
-    private static func libraryCategory(_ entry: SZLibraryIndexEntry) -> String {
+    nonisolated private static func libraryCategory(_ entry: SZLibraryIndexEntry) -> String {
         entry.tags?.first ?? "other"
     }
 
@@ -140,7 +140,10 @@ extension SZHostBridge {
     /// guess earlier and hid its working: it withheld what it scored low and lent authority to what it
     /// scored high, on token overlap. Hand over the evidence and let the reader judge. This costs ~1k tokens
     /// where the old typed-JSON dump cost ~4.4k, so reading it whole is cheaper than a shortlist was.
-    private func agentLibraryIndex() -> String {
+    /// Served over MCP (`agent_library_index`) AND inlined into cold-start coding briefs (the
+    /// prefetch experiment, `SZHost+Run.makeOrchestrationContext`) — one assembly for both, so
+    /// what a brief embeds is exactly what the tool would have returned.
+    nonisolated static func libraryIndexText() -> String {
         func ports(_ list: [SZLibraryIndexEntry.Port]) -> String {
             list.isEmpty ? "none" : list.map { "\($0.name):\($0.type.rawValue)" }.joined(separator: ",")
         }

@@ -109,6 +109,12 @@ public struct SZOrchestrationContext {
     /// Director can stage an op mid-run. Their coding agents get the preserve-behavior framing instead of
     /// the library tiers: their reference is the original's source, quoted in their seed prompt.
     public let stagedPieces: @MainActor @Sendable () -> Set<SZNodeID>
+    /// The assembled node-library index (the `agent_library_index` payload) to inline into each
+    /// COLD-START coding brief, so a first dispatch reads it in-prompt instead of spending its first
+    /// tool round fetching it (each round replays the CLI's whole context). Also flips the brief's
+    /// contract-schema section to its inlined variant — this nil-check is the prefetch experiment's
+    /// single switch. nil (default: tests / experiment off) keeps the call-the-tool framing.
+    public let libraryIndexText: String?
 
     public init(
         providerID: String,
@@ -129,7 +135,8 @@ public struct SZOrchestrationContext {
         takeDirectorMessages: @escaping @MainActor @Sendable () -> [SZNodeID: String] = { [:] },
         takeDirectorInbox: @escaping @MainActor @Sendable () -> [String] = { [] },
         workSet: @escaping @MainActor @Sendable () -> Set<SZNodeID>? = { nil },
-        stagedPieces: @escaping @MainActor @Sendable () -> Set<SZNodeID> = { [] }
+        stagedPieces: @escaping @MainActor @Sendable () -> Set<SZNodeID> = { [] },
+        libraryIndexText: String? = nil
     ) {
         self.providerID = providerID
         self.generationSettings = generationSettings
@@ -150,6 +157,7 @@ public struct SZOrchestrationContext {
         self.takeDirectorInbox = takeDirectorInbox
         self.workSet = workSet
         self.stagedPieces = stagedPieces
+        self.libraryIndexText = libraryIndexText
     }
 }
 

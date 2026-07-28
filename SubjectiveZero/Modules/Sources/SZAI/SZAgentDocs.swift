@@ -30,6 +30,14 @@ public enum SZAgentDocs {
         return doc
     }()
 
+    /// The node-contract doc body — ALSO embedded into cold-start coding briefs when the library
+    /// index is inlined (the prefetch experiment), so the schema prose lives in exactly one file,
+    /// same as `abiReference`.
+    public static let contractReference: String = {
+        guard let doc = read("node-contract") else { fatalError("SZAI: missing bundled doc node-contract.md") }
+        return doc
+    }()
+
     /// The markdown body for a topic id, or nil if the id isn't a known topic.
     public static func read(_ id: String) -> String? {
         guard topics.contains(where: { $0.id == id }),

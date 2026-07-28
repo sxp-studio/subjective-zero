@@ -39,7 +39,10 @@ Tier 3: Node.swift   - fetch full source for the ONE chosen node, only if copyin
 ```
 
 Accessed through MCP ([MCP.md](MCP.md)): `agent_library_index` → `agent_library_card` →
-`agent_library_source`.
+`agent_library_source`. Cold-start run briefs embed Tier 1 (and the contract-schema doc)
+directly, so a first dispatch spends no tool round fetching them — every tool round replays
+the CLI's whole context, which costs more than the payload. The tools remain the access path
+for chat turns and any agent whose brief carries no index.
 
 ### How discovery scales
 

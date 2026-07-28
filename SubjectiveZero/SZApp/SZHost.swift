@@ -416,7 +416,7 @@ final class SZHost {
     /// Prefer the copy bundled in the app (`NodeLibrary` is a folder reference in Resources), so a packaged
     /// build works; fall back to the source tree via `#filePath` for `swift test` / running from the
     /// checkout, where the bundle has no resources.
-    static var libraryURL: URL {
+    nonisolated static var libraryURL: URL {
         if let bundled = Bundle.main.resourceURL?.appending(path: "NodeLibrary"),
            FileManager.default.fileExists(atPath: bundled.path) {
             return bundled

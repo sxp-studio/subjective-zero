@@ -121,6 +121,7 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
                                     projectURL: context.projectURL, cacheDirectory: context.cacheDirectory,
                                     runner: context.runner, turnRunner: context.turnRunner,
                                     generationSettings: context.generationSettings,
+                                    libraryIndexText: context.libraryIndexText,
                                     reconcile: reconcile)
                 }
             }
@@ -140,15 +141,36 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
     /// below it wins on recency — a split stage told "don't use the library" in its seed still went and
     /// called `agent_library_index`. A staged piece gets the preserve-behavior section instead; its
     /// reference is the original's source, which its seed already quotes.
-    nonisolated static func compilePrompt(_ plan: CodingPlan, boundary: String) -> String {
-        SZPromptTemplate.render(SZPrompts.nodeCompile, [
+    nonisolated static func compilePrompt(_ plan: CodingPlan, boundary: String,
+                                          libraryIndexText: String? = nil) -> String {
+        // The prefetch experiment's single switch: a brief handed the index inlines BOTH payloads
+        // agents otherwise fetch every cold start (the library index + the contract doc), and the
+        // framing flips from "call the tool" to "you are holding it". Preserve-behavior pieces
+        // never inline — their reference is the original's source, and their framing forbids
+        // library shopping outright. Values are pre-rendered and `{{`-defused before entering the
+        // outer render: SZPromptTemplate walks an unordered dictionary, so a live token inside a
+        // substituted value would expand or not depending on the process's hash seed.
+        let reference: String
+        var schema = SZPrompts.schemaFetch
+        if plan.preserveBehavior {
+            reference = SZPrompts.referencePreserve
+        } else if let index = libraryIndexText {
+            reference = SZPromptTemplate.render(SZPrompts.referenceInline,
+                ["library_index": index.replacingOccurrences(of: "{{", with: "{ {")])
+            schema = SZPromptTemplate.render(SZPrompts.schemaInline,
+                ["contract_doc": SZAgentDocs.contractReference.replacingOccurrences(of: "{{", with: "{ {")])
+        } else {
+            reference = SZPrompts.referenceLibrary
+        }
+        return SZPromptTemplate.render(SZPrompts.nodeCompile, [
             "node": plan.node.uuidString,
             "prompt": plan.prompt,
             "inputs": plan.inputs.map(\.name).joined(separator: ", "),
             "outputs": plan.outputs.map(\.name).joined(separator: ", "),
             "boundary": boundary,
             "abi": SZAgentDocs.abiReference,   // the node-abi doc, embedded — one ABI prose source
-            "reference": plan.preserveBehavior ? SZPrompts.referencePreserve : SZPrompts.referenceLibrary,
+            "reference": reference,
+            "schema": schema,
         ])
     }
 
@@ -182,6 +204,7 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
         projectURL: URL, cacheDirectory: URL, runner: any SZProcessRunning,
         turnRunner: SZCodingTurnRunner?,
         generationSettings: SZProviderGenerationSettings = SZProviderGenerationSettings(),
+        libraryIndexText: String? = nil,
         reconcile: CodingReconcile = CodingReconcile()
     ) async -> (SZNodeID, String?) {
         let boundary = SZBoundaryPrompt.render(inputs: plan.inputs, outputs: plan.outputs, permissions: plan.permissions)
@@ -198,7 +221,7 @@ public struct SZProceduralDirectorStrategy: SZOrchestrating {
                 "boundary": boundary,
             ])
         } else {
-            prompt = compilePrompt(plan, boundary: boundary)
+            prompt = compilePrompt(plan, boundary: boundary, libraryIndexText: libraryIndexText)
         }
         let workingDirectory = cacheDirectory.appending(path: "agent/\(plan.node.uuidString)")
         try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
