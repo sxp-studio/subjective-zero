@@ -8,10 +8,43 @@ import Testing
 
 // The default layout: (viewport / nodeEditor) | chat.
 
-@Test func defaultLayoutShowsAllPanelsOnce() {
+@Test func defaultLayoutShowsAllProductionPanelsOnce() {
     let layout = SZPanelLayoutState.default
     #expect(layout.root.leafKinds == [.viewport, .nodeEditor, .chat])
-    #expect(layout.presentKinds == Set(SZPanelKind.allCases))
+    // The Debug panel is opt-in, never part of the launch layout.
+    #expect(layout.presentKinds == Set(SZPanelKind.allCases).subtracting([.profiler]))
+}
+
+@Test func normalizeStripsTheProfilerPanelWhereUnavailable() {
+    // A DEBUG build's saved layout lands in a build without the surface (release): the leaf
+    // collapses to its sibling and the restore position is forgotten; production panels survive.
+    var layout = SZPanelLayoutState.default
+    layout.insertPanel(.profiler)
+    #expect(layout.contains(.profiler))
+    layout.normalize(allowingProfiler: false)
+    #expect(!layout.contains(.profiler))
+    #expect(layout.restorePositions[.profiler] == nil)
+    #expect(layout.presentKinds == Set([.viewport, .nodeEditor, .chat]))
+    // Where available, the same layout keeps it.
+    var kept = SZPanelLayoutState.default
+    kept.insertPanel(.profiler)
+    kept.normalize(allowingProfiler: true)
+    #expect(kept.contains(.profiler))
+}
+
+@Test func normalizeResetsWhenTheProfilerIsTheWholeTree() {
+    // A DEBUG session that closed everything but the Profiler saves a single-leaf tree; a
+    // release build must land on the default layout, not an unremovable empty tile.
+    var layout = SZPanelLayoutState.default
+    layout.root = .panel(.profiler)
+    layout.normalize(allowingProfiler: false)
+    #expect(layout == .default)
+}
+
+@Test func legacyDebugRawValueDecodesAsProfiler() throws {
+    // The panel shipped one session as "debug" before its rename — saved layouts keep decoding.
+    #expect(try JSONDecoder().decode(SZPanelKind.self, from: Data(#""debug""#.utf8)) == .profiler)
+    #expect(try JSONDecoder().decode(SZPanelKind.self, from: Data(#""profiler""#.utf8)) == .profiler)
 }
 
 @Test(arguments: [SZPanelDropZone.left, .right, .top, .bottom])
@@ -20,7 +53,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
     layout.movePanel(.chat, onto: .viewport, zone: zone)
 
     // Chat left the right dock and now shares the viewport's slot.
-    #expect(layout.presentKinds == Set(SZPanelKind.allCases))
+    #expect(layout.presentKinds == Set([.viewport, .nodeEditor, .chat]))
     guard case .split(let orientation, let fraction, let leading, let trailing) = layout.root else {
         Issue.record("root should be the collapsed viewport/nodeEditor split"); return
     }

@@ -406,6 +406,10 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// Anonymous usage telemetry (the welcome screen's "Share anonymous usage data"). Optional
     /// for the same decode-compatibility reason; nil means ON.
     public var telemetryEnabled: Bool?
+    /// Expandable per-turn debug breakdown under chat replies (Debug ▸ Show Turn Breakdown).
+    /// Optional for the same decode-compatibility reason; nil means OFF. Display-only: collection
+    /// is gated separately (the host's trace flag).
+    public var showTurnBreakdown: Bool?
 
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
@@ -426,7 +430,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         providerGenerationSettings: [String: SZProviderGenerationSettings]? = nil,
         showWelcomeAtStartup: Bool? = nil,
         showTokenCounts: Bool? = nil,
-        telemetryEnabled: Bool? = nil
+        telemetryEnabled: Bool? = nil,
+        showTurnBreakdown: Bool? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -444,6 +449,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.showWelcomeAtStartup = showWelcomeAtStartup
         self.showTokenCounts = showTokenCounts
         self.telemetryEnabled = telemetryEnabled
+        self.showTurnBreakdown = showTurnBreakdown
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

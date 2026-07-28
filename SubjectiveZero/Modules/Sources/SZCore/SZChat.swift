@@ -167,6 +167,10 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
     /// Token usage the turn's CLI reported (assistant turns) — nil while in flight and for CLIs that
     /// report none; shown next to the duration.
     public var usage: SZTokenUsage?
+    /// The turn's debug breakdown — timed phases/instants the host stamped while the turn ran
+    /// (queue wait, first output, tool calls, compile/promote…). nil when tracing was off or the
+    /// turn recorded nothing; shown as a disclosure under the duration line.
+    public var breakdown: [SZTurnEvent]?
     /// Files attached to this turn (user turns) — copied into the agent's staging dir on send, shown
     /// as thumbnails/chips under the message. Empty for turns with no attachments.
     public var attachments: [SZChatAttachment]
@@ -177,7 +181,8 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
 
     public init(id: UUID = UUID(), role: SZChatRole, text: String, thinking: String = "",
                 timestamp: Date = Date(), duration: TimeInterval? = nil, usage: SZTokenUsage? = nil,
-                attachments: [SZChatAttachment] = [], transient: Bool = false) {
+                breakdown: [SZTurnEvent]? = nil, attachments: [SZChatAttachment] = [],
+                transient: Bool = false) {
         self.id = id
         self.role = role
         self.text = text
@@ -185,6 +190,7 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
         self.timestamp = timestamp
         self.duration = duration
         self.usage = usage
+        self.breakdown = breakdown
         self.attachments = attachments
         self.transient = transient
     }
@@ -192,7 +198,7 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
 
 extension SZChatMessage: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, role, text, thinking, timestamp, duration, usage, attachments, transient
+        case id, role, text, thinking, timestamp, duration, usage, breakdown, attachments, transient
     }
 
     // Hand-written for append tolerance (see header).
@@ -205,6 +211,7 @@ extension SZChatMessage: Codable {
         timestamp = try c.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
         duration = try c.decodeIfPresent(TimeInterval.self, forKey: .duration)
         usage = try c.decodeIfPresent(SZTokenUsage.self, forKey: .usage)
+        breakdown = try c.decodeIfPresent([SZTurnEvent].self, forKey: .breakdown)
         attachments = try c.decodeIfPresent([SZChatAttachment].self, forKey: .attachments) ?? []
         transient = try c.decodeIfPresent(Bool.self, forKey: .transient) ?? false
     }
@@ -221,6 +228,7 @@ extension SZChatMessage: Codable {
         try c.encode(timestamp, forKey: .timestamp)
         try c.encodeIfPresent(duration, forKey: .duration)
         try c.encodeIfPresent(usage, forKey: .usage)
+        try c.encodeIfPresent(breakdown, forKey: .breakdown)
         try c.encode(attachments, forKey: .attachments)
         if transient { try c.encode(true, forKey: .transient) }
     }

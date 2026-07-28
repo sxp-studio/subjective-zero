@@ -37,6 +37,13 @@ extension SZStore {
         mutateMessage(messageID, in: scope) { $0.usage = usage }
     }
 
+    /// Record a turn's debug breakdown (set when it finishes, tracing on) — the disclosure under
+    /// the duration line. Empty in, no-op: absence stays absence.
+    public func setChatBreakdown(_ events: [SZTurnEvent], _ messageID: UUID, in scope: SZChatScope) {
+        guard !events.isEmpty else { return }
+        mutateMessage(messageID, in: scope) { $0.breakdown = events }
+    }
+
     /// Replace ALL transcripts at once — the project-open restore path (the host feeds it
     /// `SZChatTranscriptIO.loadAll` filtered to live scopes). One @Observable fire.
     public func restoreChat(_ transcripts: [String: [SZChatMessage]]) {

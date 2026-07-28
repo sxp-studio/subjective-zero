@@ -11,10 +11,12 @@
 import Foundation
 
 /// A top-level panel of the app window. The raw value is the persisted key.
+/// `.profiler` is LAST in `allCases` so the production panels' ⌘⌥1/2/3 shortcuts never shift.
 public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
     case viewport
     case nodeEditor
     case chat
+    case profiler
 
     /// The name shown in the panel's header (its drag handle).
     public var displayName: String {
@@ -22,6 +24,39 @@ public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
         case .viewport: "Viewport"
         case .nodeEditor: "Node Editor"
         case .chat: "Chat"
+        case .profiler: "Profiler"
+        }
+    }
+
+    /// Whether the Profiler panel surface exists in this build — debug-only for now. The CASE
+    /// ships everywhere (Codable tolerance: a release build must decode a layout a DEBUG build
+    /// saved); the SURFACE doesn't: `normalize()` strips the leaf and the View menu filters the
+    /// toggle.
+    public static var profilerPanelAvailable: Bool {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// The kinds this build offers in menus/layouts.
+    public static var availableCases: [SZPanelKind] {
+        allCases.filter { $0 != .profiler || profilerPanelAvailable }
+    }
+
+    // Hand-written decode for one legacy alias: the panel briefly shipped (dev builds only) as
+    // "debug" before its rename. A failed kind decode would take the whole app-state down with
+    // it, so map rather than throw.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let kind = SZPanelKind(rawValue: raw) {
+            self = kind
+        } else if raw == "debug" {
+            self = .profiler
+        } else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "unknown panel kind \(raw)"))
         }
     }
 }
@@ -150,7 +185,20 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
     /// The post-drop autolayout + decode sanitizer: clamp every fraction to 0.1…0.9 so no panel
     /// collapses to nothing, and reset to `.default` if the tree is malformed (duplicate or zero
     /// leaves — possible via a hand-edited or stale app-state.json, never via the mutations above).
-    public mutating func normalize() {
+    public mutating func normalize(allowingProfiler: Bool = SZPanelKind.profilerPanelAvailable) {
+        // A layout saved by a DEBUG build may carry the Profiler into a build without the
+        // surface — drop the leaf (collapse to its sibling) rather than render an empty tile.
+        if !allowingProfiler, root.contains(.profiler) {
+            if let removal = root.removingLeaf(.profiler) {
+                root = removal.remaining
+            } else {
+                // The Profiler IS the whole tree (a DEBUG session closed everything else) — a
+                // release build would otherwise show an unremovable panel with no content.
+                self = .default
+                return
+            }
+            restorePositions[.profiler] = nil
+        }
         let leaves = root.leafKinds
         guard !leaves.isEmpty, Set(leaves).count == leaves.count else {
             self = .default
@@ -187,6 +235,7 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
         case .viewport: SZPanelRestorePosition(neighbor: .nodeEditor, zone: .top, share: 0.6)
         case .nodeEditor: SZPanelRestorePosition(neighbor: .viewport, zone: .bottom, share: 0.4)
         case .chat: SZPanelRestorePosition(neighbor: .viewport, zone: .right, share: 0.25)
+        case .profiler: SZPanelRestorePosition(neighbor: .chat, zone: .bottom, share: 0.4)
         }
     }
 }
