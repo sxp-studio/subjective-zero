@@ -39,14 +39,26 @@ extension SZHost {
                 switch event {
                 case .reply(let text): coalescer.addReply(text)
                 case .thinking(let text): coalescer.addThinking(text + "\n")
-                case .toolCall(let name): coalescer.addThinking("→ \(name)\n")
+                case .toolCall(let name):
+                    coalescer.addThinking("→ \(name)\n")
+                    SZTrace.instant(SZTurnStage.toolCall, detail: name)
                 case .usage(let usage): store.setChatUsage(usage, assistantID, in: scope)
                 }
             }
         }
+        // Spawn → first stdout chunk, ended at the MainActor consumer's first iteration (the
+        // AsyncStream hop adds sub-ms skew — fine for a debug readout). The fence and the consumer
+        // task both live inside deliver's context binding, so attribution rides along. NOT
+        // per-chunk: nothing else records on the 15 Hz reply/thinking path.
+        let firstOutput = SZTrace.begin(SZTurnStage.firstOutput)
         let consumer = Task { @MainActor in
+            var sawFirstOutput = false
             let lineBuffer = SZLineBuffer()
             for await chunk in chunks {
+                if !sawFirstOutput {
+                    sawFirstOutput = true
+                    firstOutput.end()
+                }
                 for line in lineBuffer.appendAndExtractLines(Data(chunk.utf8)) {
                     route(streamConsumer.consume(line))
                 }

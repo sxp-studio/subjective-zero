@@ -77,14 +77,29 @@ extension SZHost {
         }
         let assistantID = existingAssistantID ?? store.appendChatMessage(SZChatMessage(role: .assistant, text: ""), to: scope)
         inFlightAssistantIDs[scope.key] = assistantID   // also flips chatInFlight (derived)
+        let runTurn = claim != nil && claim == runClaim
+        // The run identity is CAPTURED here: finalize re-checks it against the live run, so a
+        // zombie turn settling after cancel-and-restart can't log itself into the new run.
+        let turnRunID = runTurn ? runID : nil
         let started = Date()
+        let startedMono = ContinuousClock.now
         defer {
             if let selfClaim { ledger.releaseAll(of: selfClaim) }
             // Ownership-checked: if a later turn overwrote this scope's marker (a race this guard
             // is the last line of defense against), leave THEIRS in place — nilling it would let a
             // flush persist their half-streamed reply.
             if inFlightAssistantIDs[scope.key] == assistantID { inFlightAssistantIDs[scope.key] = nil }
-            store.setChatDuration(Date().timeIntervalSince(started), assistantID, in: scope)
+            let wall = (ContinuousClock.now - startedMono).szSeconds
+            store.setChatDuration(wall, assistantID, in: scope)
+            // Breakdown lands before the flush below so it persists with the turn. Run-owned turns
+            // (dispatched under the run's claim) also log themselves for the run-complete rollup.
+            // (Runs OUTSIDE the context binding below — finalizeTurn keys by explicit turnID.)
+            finalizeTurn(assistantID: assistantID, scope: scope, started: started,
+                         ended: started.addingTimeInterval(wall), runID: turnRunID,
+                         generation: [request.model ?? provider.id,
+                                      request.reasoningEffort,
+                                      request.fastMode ? "fast" : nil]
+                            .compactMap(\.self).joined(separator: " · "))
             // A turn finishing off-screen marks its tab unread (static dot until visited).
             if scope.key != activeChatScope.key { unreadScopes.insert(scope.key) }
             // Turn end = flush point: the just-completed message (no longer in-flight) lands on disk,
@@ -92,7 +107,33 @@ extension SZHost {
             flushTranscript(scope)
             persistAgentSessions()
         }
-        let result = try await streamAgentTurn(provider: provider, request: request, into: scope, message: assistantID)
+        // The turn's trace identity, bound task-locally around the streaming stack: every fence
+        // downstream (first output, tool sightings, anything a provider ever measures) attributes
+        // to this turn with no parameters — see SZTrace.swift.
+        let traceContext = SZTrace.isEnabled
+            ? SZTraceContext(turnID: assistantID, scopeKey: scope.key, runID: turnRunID)
+            : nil
+        recordTurnPrompt(request.prompt, for: assistantID)
+        // And the turn's OWN agent listener: a raw TCP connection carries no caller identity, so
+        // without this, parallel coding agents' node-less tool calls (library/doc reads) are
+        // unattributable and drop their spans. The per-turn port IS the identity — every call this
+        // agent makes attributes exactly. Falls back to the shared agent bus (heuristic
+        // attribution) if no port is free; torn down with the turn.
+        var request = request
+        var turnListener: SZMCPServer?
+        if let traceContext, request.mcpServerPort != nil, let bridge = hostBridge {
+            turnListener = try? SZMCPServer.start(bridge: bridge, surface: .agent,
+                                                  from: (agentMCPServer?.port ?? 42100) + 1,
+                                                  traceContext: traceContext)
+            if let turnListener { request.mcpServerPort = turnListener.port }
+        }
+        defer { turnListener?.stop() }
+        let result = try await SZTrace.$context.withValue(traceContext) { [request] in
+            try await streamAgentTurn(provider: provider, request: request, into: scope, message: assistantID)
+        }
+        if let stats = result.outcome.reportedStats {
+            SZTrace.record(stats.turnEvent(started: started), turnID: assistantID)
+        }
         // A FAILED turn leaves no session behind. codex emits `thread.started` — a real, resumable
         // thread_id — before the backend rejects the request, so persisting it would let the next
         // turn `resume` a thread whose only content is that error, and replay it. A failed *resume*
@@ -391,6 +432,10 @@ extension SZHost {
         }
         runClaim = claim   // `.steer` ack waits derive their consumer from the `.run` holder
         runWorkSet = workSet
+        runStartedAt = Date()   // the rollup's wall-clock anchor
+        runStartedMono = ContinuousClock.now
+        runTurnLog = []
+        runID = UUID()          // the run's trace identity (stamped into run-owned turns' events)
         status = "running \(providerID)…"
         showChat(.director)                                  // a run narrates into the Director Agent tab
         let dirtyCount = runWorkSet.count
@@ -415,6 +460,10 @@ extension SZHost {
                     runClaim = nil
                     runTask = nil
                     runWorkSet = []        // run over → the work set is cleared (a node chat runs with it empty)
+                    runStartedAt = nil
+                    runStartedMono = nil
+                    runTurnLog = []
+                    runID = nil
                     dispatchPrompts = dispatchPrompts.filter { hiddenPieces.contains($0.key) }
                 }
                 flushAllTranscripts()      // run end = flush point (success, throw, or cancel)
@@ -438,17 +487,22 @@ extension SZHost {
                 if !ownsGraphOp {
                     adoptRunRenderEndpoint()   // show what this run just built
                     let (done, failed) = surfaceUnresolvedNodes()
-                    narrateDirector(
+                    let narrationID = narrateDirector(
                         failed == 0
                             ? (done == 0 ? "Run complete." : "Run complete — \(done) node\(done == 1 ? "" : "s") implemented.")
                             : "Run finished — \(done) implemented, \(failed) failed. See the flagged node\(failed == 1 ? "" : "s").")
+                    // Claim-guarded like the per-run state: a zombie narrating after cancel-and-
+                    // restart must not fold the NEW run's live log onto its own narration.
+                    if runClaim == claim { attachRunRollup(to: narrationID) }
                 }
             } catch {
                 status = "agent run failed: \(error)"
                 // Still surface the unfinished nodes so a thrown/cancelled run also flags them.
                 if !ownsGraphOp {
                     let (done, failed) = surfaceUnresolvedNodes()
-                    narrateDirector("Run failed: \(error). \(done) implemented, \(failed) unfinished.")
+                    let narrationID = narrateDirector("Run failed: \(error). \(done) implemented, \(failed) unfinished.")
+                    // A failed run's time is the most worth seeing — same zombie guard as above.
+                    if runClaim == claim { attachRunRollup(to: narrationID) }
                 }
                 print("[SZHost] agent run failed: \(error)")
             }

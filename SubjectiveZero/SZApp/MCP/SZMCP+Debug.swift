@@ -10,8 +10,16 @@ extension SZHostBridge {
         [
             tool("debug_get_build_errors", "Return the most recent node build errors, or (none)."),
             tool("debug_snapshot_state", "Return the live project graph as JSON."),
-            tool("debug_chat_transcript", "Return a chat transcript as JSON (role/text per message).",
+            tool("debug_chat_transcript", "Return a chat transcript as JSON — role/text/thinking plus, where present, timestamp/duration/usage/breakdown per message (the same numbers the in-app turn breakdown shows).",
                  properties: ["scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"]]),
+            tool("debug_turn_timings", "Per-turn timing data for profiling, as JSON: completed agent turns per scope — {turnID, start, duration, usage, events} where events are the turn's recorded phases (queue wait, first output, tool spans, compile/promote, the CLI's own report) with id/parent (span hierarchy) and runID (run grouping). The latest run's rollup rides the Director run-complete narration (run.* stages). `tracing` reports whether collection is on (SZ_TRACE / DEBUG).",
+                 properties: ["scope": ["type": "string", "description": "a node uuid or \"director\" to filter; omit for every scope"]]),
+            tool("debug_run_summary", "A recorded run's report as human-readable text — the same summary the Debug panel's Copy button produces: header (wall, tokens, cost), the run timeline with offsets, and each turn's phase list. Defaults to the most recent run.",
+                 properties: ["run": ["type": "string", "description": "a runID (or unique prefix) from debug_turn_timings; omit for the latest run"]]),
+            tool("debug_run_tokens", "A recorded run's per-turn TOKEN report as text — the same output the Profiler's Copy Tokens button produces: each turn's in (cached %), out (reasoning), and cost on the run's clock. Per-turn totals — CLIs report usage once, at turn end. Defaults to the most recent run.",
+                 properties: ["run": ["type": "string", "description": "a runID (or unique prefix) from debug_turn_timings; omit for the latest run"]]),
+            tool("debug_turn_prompt", "The rendered prompt a turn ACTUALLY sent to its CLI, verbatim — inspect what the agent was briefed with. Survives relaunches via the on-disk debug capture (newest \(SZHost.debugTurnCaptureCap) turns; tool-result payloads live beside it in Application Support/SubjectiveZero/debug-turns/<turnID>/).",
+                 properties: ["turn": ["type": "string", "description": "a turnID from debug_turn_timings; omit for the most recent turn"]]),
             tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (a Director Agent run in flight), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `tabs` (chat tab order, left→right), `orchestrator` (the active orchestration strategy), and `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
             tool("debug_set_orchestrator", "Select the orchestration (Director) strategy for the next run (stop-gap for the Settings screen): `procedural` (deterministic / offline) or `agentic` (an LLM Director Agent). Takes effect on the next ui_run.",
                  properties: ["strategy": ["type": "string", "enum": ["procedural", "agentic"]]]),
@@ -31,6 +39,10 @@ extension SZHostBridge {
         case "debug_get_build_errors": return host.lastBuildErrors ?? "(none)"
         case "debug_snapshot_state":   return debugSnapshotState()
         case "debug_chat_transcript":  return try debugChatTranscript(arguments)
+        case "debug_turn_timings":     return try debugTurnTimings(arguments)
+        case "debug_run_summary":      return try debugRunSummary(arguments)
+        case "debug_run_tokens":       return try debugRunTokens(arguments)
+        case "debug_turn_prompt":      return try debugTurnPrompt(arguments)
         case "debug_agent_state":      return debugAgentState()
         case "debug_set_orchestrator": return try debugSetOrchestrator(arguments)
         case "debug_fail_node_once":   return try debugFailNodeOnce(arguments)
@@ -79,10 +91,125 @@ extension SZHostBridge {
 
     private func debugChatTranscript(_ arguments: [String: Any]) throws -> String {
         let scope = try chatScope(arguments, tool: "debug_chat_transcript")
-        let messages = host.store.messages(for: scope).map {
-            ["role": $0.role.rawValue, "text": $0.text, "thinking": $0.thinking]
-        }
+        let messages = host.store.messages(for: scope).map { Self.messageJSON($0) }
         return SZJSONRPC.encode(["scope": scope.key, "messages": messages])
+    }
+
+    /// The profiling read path for a debugging agent on the test bus: every completed agent turn's
+    /// wall time, usage, and recorded phase events, per scope — machine-shaped (no transcript prose
+    /// to parse). Reads the store, so it covers restored transcripts too; with tracing off it
+    /// still lists turns (durations persist regardless), just without `events`.
+    private func debugTurnTimings(_ arguments: [String: Any]) throws -> String {
+        let scopeKeys: [String]
+        if arguments.string("scope") != nil {
+            scopeKeys = [try chatScope(arguments, tool: "debug_turn_timings").key]
+        } else {
+            scopeKeys = host.store.chat.keys.sorted()
+        }
+        var scopes: [String: Any] = [:]
+        for key in scopeKeys {
+            guard let scope = SZChatScope(key: key) else { continue }
+            let turns: [[String: Any]] = host.store.messages(for: scope).compactMap { message in
+                guard message.role != .user,
+                      message.duration != nil || !(message.breakdown ?? []).isEmpty else { return nil }
+                var turn: [String: Any] = ["turnID": message.id.uuidString,
+                                           "start": Self.iso8601.string(from: message.timestamp)]
+                if let duration = message.duration { turn["duration"] = duration }
+                if let usage = message.usage { turn["usage"] = Self.usageJSON(usage) }
+                if let events = message.breakdown, !events.isEmpty {
+                    turn["events"] = events.map { Self.eventJSON($0) }
+                }
+                return turn
+            }
+            if !turns.isEmpty { scopes[key] = turns }
+        }
+        return SZJSONRPC.encode(["scopes": scopes, "tracing": SZTrace.isEnabled])
+    }
+
+    /// The run report, rendered by the same SZCore code path as the Debug panel's Copy button.
+    private func debugRunSummary(_ arguments: [String: Any]) throws -> String {
+        try resolveRunRecord(arguments, toolName: "debug_run_summary")
+            .map(SZTurnBreakdown.renderSummary) ?? noRunsMessage
+    }
+
+    /// The panel's Copy Tokens twin: the per-turn token report (`renderTokenReport`).
+    private func debugRunTokens(_ arguments: [String: Any]) throws -> String {
+        try resolveRunRecord(arguments, toolName: "debug_run_tokens")
+            .map(SZTurnBreakdown.renderTokenReport) ?? noRunsMessage
+    }
+
+    private var noRunsMessage: String {
+        SZTrace.isEnabled ? "(no recorded runs in this project yet — do a run first)"
+                          : "(tracing is off — SZ_TRACE/DEBUG gate; no runs recorded)"
+    }
+
+    /// The shared `run` argument resolution: default latest, prefix-match otherwise. nil = no
+    /// records at all (the caller's tracing-aware empty message applies).
+    private func resolveRunRecord(_ arguments: [String: Any],
+                                  toolName: String) throws -> SZTurnBreakdown.RunRecord? {
+        let records = SZTurnBreakdown.runRecords(chat: host.store.chat, titles: host.nodeTitlesByScopeKey)
+        guard !records.isEmpty else { return nil }
+        guard let wanted = arguments.string("run") else { return records[0] }
+        let matches = records.filter { $0.id.uuidString.lowercased().hasPrefix(wanted.lowercased()) }
+        guard matches.count == 1 else {
+            throw SZMCPError.message(matches.isEmpty
+                ? "\(toolName): no run matches \"\(wanted)\" — see debug_turn_timings for runIDs"
+                : "\(toolName): \"\(wanted)\" is ambiguous (\(matches.count) runs) — use more of the id")
+        }
+        return matches[0]
+    }
+
+    /// The verbatim prompt a turn sent to its CLI — the in-memory ring, else the on-disk debug
+    /// capture (survives relaunches; newest `debugTurnCaptureCap` turns).
+    private func debugTurnPrompt(_ arguments: [String: Any]) throws -> String {
+        guard let turnID = arguments.uuid("turn") ?? host.turnPromptOrder.last else {
+            return "(no prompts recorded this session — run a turn first, or pass `turn` for a"
+                + " captured past turn)"
+        }
+        guard let prompt = host.heldPrompt(for: turnID) else {
+            throw SZMCPError.message("debug_turn_prompt: no prompt held for \(turnID.uuidString) — "
+                + "only the last \(SZHost.debugTurnCaptureCap) captured turns are kept")
+        }
+        return prompt
+    }
+
+    // MARK: transcript/timing JSON builders (shared by the two tools above)
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        // Fractional seconds, or every µs/ms-scale event in a breakdown collapses onto the same
+        // whole-second `start` and a debugging agent can't order them.
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static func messageJSON(_ message: SZChatMessage) -> [String: Any] {
+        var m: [String: Any] = ["role": message.role.rawValue, "text": message.text,
+                                "thinking": message.thinking,
+                                "timestamp": iso8601.string(from: message.timestamp)]
+        if let duration = message.duration { m["duration"] = duration }
+        if let usage = message.usage { m["usage"] = usageJSON(usage) }
+        if let events = message.breakdown, !events.isEmpty { m["breakdown"] = events.map { eventJSON($0) } }
+        return m
+    }
+
+    private static func usageJSON(_ usage: SZTokenUsage) -> [String: Any] {
+        var u: [String: Any] = ["inputTokens": usage.inputTokens, "outputTokens": usage.outputTokens]
+        if let cached = usage.cachedInputTokens { u["cachedInputTokens"] = cached }
+        if let reasoning = usage.reasoningOutputTokens { u["reasoningOutputTokens"] = reasoning }
+        if let cost = usage.costUSD { u["costUSD"] = cost }
+        return u
+    }
+
+    private static func eventJSON(_ event: SZTurnEvent) -> [String: Any] {
+        var e: [String: Any] = ["stage": event.stage, "start": iso8601.string(from: event.start)]
+        if let duration = event.duration { e["duration"] = duration }
+        if let detail = event.detail { e["detail"] = detail }
+        if let id = event.id { e["id"] = id.uuidString }
+        if let parentID = event.parentID { e["parent"] = parentID.uuidString }
+        if let runID = event.runID { e["runID"] = runID.uuidString }
+        if let addedTokens = event.addedTokens { e["addedTokens"] = addedTokens }
+        return e
     }
 
     private func debugSnapshotState() -> String {

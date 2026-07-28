@@ -46,6 +46,9 @@ final class SZHost {
     /// The bus spawned AGENTS dial — same bridge, `debug_*` withheld. Kept separate because a raw TCP
     /// connection carries no identity, so the port is the only way to tell a fleet agent from a test driver.
     private(set) var agentMCPServer: SZMCPServer?
+    /// The one bridge behind every listener — kept so `deliver` can spawn per-turn agent
+    /// listeners (exact trace attribution; see SZMCPServer.traceContext).
+    private(set) var hostBridge: SZHostBridge?
     /// Most recent node build errors, surfaced by `debug_get_build_errors`.
     private(set) var lastBuildErrors: String?
     /// The loaded project's `.subz` URL — the root for `.staging/` + live `nodes/`.
@@ -140,6 +143,32 @@ final class SZHost {
     /// In-flight pump deliveries (bounded by `deliveryCap` so a run-end release can't spawn one CLI
     /// process per queued scope at once). Pump-owned; mutated only on the MainActor.
     var activeDeliveries = 0
+    // Turn-breakdown glue (SZHost+TurnBreakdown.swift) — collection itself is SZTrace fences.
+    /// The finished turns of the CURRENT run, folded into the run-complete narration's rollup.
+    /// Cleared with the rest of the per-run state (guarded — a zombie must not wipe a newer run's).
+    var runTurnLog: [SZTurnBreakdown.RunTurn] = []
+    /// When the current run claimed its work set — the rollup's wall-clock anchor, with its
+    /// monotonic twin for durations (an NTP step mid-run must not skew the rollup).
+    var runStartedAt: Date?
+    var runStartedMono: ContinuousClock.Instant?
+    /// The current run's trace identity — stamped into every run-owned turn's context so its
+    /// events can be found across scopes. Minted in `startRun`, cleared with the per-run state.
+    var runID: UUID?
+    /// Runs recorded this session the user hasn't opened in the Profiler yet — its unread dots.
+    /// Session-scoped on purpose (an old transcript's runs aren't news).
+    var unreadRunIDs: Set<UUID> = []
+    /// The session's last `turnPromptCap` rendered prompts, keyed by turn id — the fast path for
+    /// what was ACTUALLY sent to the CLI (`debug_turn_prompt`). The durable copy lives in the
+    /// on-disk debug capture (`debug-turns/<turnID>/`, newest `debugTurnCaptureCap` turns), which
+    /// also holds every tool result's payload — the app-visible input tokens, as actual text.
+    nonisolated static let turnPromptCap = 20
+    nonisolated static let debugTurnCaptureCap = 40
+    var turnPrompts: [UUID: String] = [:]
+    var turnPromptOrder: [UUID] = []
+    /// Turn ids with an inspectable prompt (ring or disk) — gates the view-prompt/tokens buttons.
+    var heldPromptIDs: Set<UUID> = []
+    /// A transcript's "open in Profiler" ask: the record to select once the panel shows.
+    var profilerFocusRequest: UUID?
     /// True for the duration of `switchProject` — the pump must not start a turn mid-swap.
     var pumpSuspended = false
     /// The persistable queue content of the last `flushMessageQueue` write (id:state lines) — the
@@ -212,6 +241,11 @@ final class SZHost {
     // setShowTokenCounts. Toggled from the View menu (SZApp). Defaults OFF; display-only — usage is
     // always captured into the transcript, so turning it on later reveals past turns too.
     internal(set) var showTokenCounts: Bool = SZAppStateIO.load()?.showTokenCounts ?? false
+    /// Debug ▸ Show Turn Breakdown — the expandable per-turn phase breakdown under replies.
+    /// Gated like the Profiler surface: a DEBUG session's saved `true` must not resurface debug
+    /// chrome in a release build.
+    internal(set) var showTurnBreakdown: Bool =
+        SZPanelKind.profilerPanelAvailable && (SZAppStateIO.load()?.showTurnBreakdown ?? false)
 
     // Anonymous-telemetry opt-out — same app-state.json + restore story, mutated via
     // setTelemetryEnabled (SZHost+Telemetry). Defaults ON (nil/absent in app-state.json means ON);
@@ -398,6 +432,7 @@ final class SZHost {
         guard !started else { return }
         started = true
         installStoreFenceBackstop()   // the fence's debug tripwire (SZHost+Fence.swift)
+        if SZTrace.isEnabled { loadHeldPromptIDs() }   // past sessions' captured prompts light up
         // The pump's wake signal: every ledger release (turn end, run end, cancel) retries queued
         // deliveries. Event-driven — the only other pump entries are enqueue and restore.
         ledger.onAvailabilityChanged = { [weak self] in self?.pumpMailboxes() }
@@ -692,7 +727,8 @@ final class SZHost {
         #if DEBUG
         SZHostBridge.assertAgentSurfaceInvariants()   // no app test target — see the function's note
         #endif
-        let bridge = SZHostBridge(host: self)
+        let bridge = hostBridge ?? SZHostBridge(host: self)
+        hostBridge = bridge
         do {
             let server = try mcpServer ?? SZMCPServer.start(bridge: bridge, surface: .full)
             mcpServer = server
@@ -720,6 +756,15 @@ final class SZHost {
     /// module renders. Called by `agent_compile_node` ONLY after `compileNodeSource` returns `.ok`,
     /// so a broken source can never reach here — live state stays intact on failure.
     func promoteStagedNode(id: SZNodeID) throws {
+        // Host sequencing measured as a SPAN (closure, not begin/defer) so the reload sub-span
+        // nests UNDER promote in the event tree — rendered flat, promote and reload read as
+        // siblings whose numbers double-count. A thrown promote still records (span guarantees).
+        try SZTrace.span(SZTurnStage.promote) {
+            try promoteStagedNodeInner(id: id)
+        }
+    }
+
+    private func promoteStagedNodeInner(id: SZNodeID) throws {
         guard let projectURL = loadedProjectURL else { throw SZMCPError.message("no project loaded") }
         let fm = FileManager.default
         let staging = projectURL.appending(path: ".staging/nodes/\(id.uuidString)")
@@ -778,10 +823,12 @@ final class SZHost {
         // running shader keeps ignoring the new input). Recompile it in place first, via the same hot-reload
         // path the file watcher uses; loadProject then reconciles the contract + seeds any new input value.
         // Only when the source actually changed — a contract-only promote skips the recompile (see above).
-        if sourceChanged, runtime?.isNodeLoaded(id) == true {
-            try runtime?.reloadNode(id: id, source: liveSource)
+        try SZTrace.span(SZTurnStage.promoteReload) {
+            if sourceChanged, runtime?.isNodeLoaded(id) == true {
+                try runtime?.reloadNode(id: id, source: liveSource)
+            }
+            try runtime?.loadProject(at: projectURL)
         }
-        try runtime?.loadProject(at: projectURL)
         watchNodeSources(in: projectURL)          // a newly-generated node becomes hot-reloadable
         nodeAgentState[id]?.errorDetail = nil     // a successful promote clears any prior failure detail
         status = "promoted \(id.uuidString.prefix(8))"
@@ -979,11 +1026,14 @@ final class SZHost {
     /// carries operation-level narration (run begin / split-merge ops / complete) while each node's tab
     /// streams that agent's implementation detail. These are plain host strings, distinct from an LLM
     /// Director's own streamed narration.
-    func narrateDirector(_ text: String) {
-        store.appendChatMessage(SZChatMessage(role: .assistant, text: text), to: .director)
+    /// Returns the narration's message id so a caller can decorate it (the run-complete rollup).
+    @discardableResult
+    func narrateDirector(_ text: String) -> UUID {
+        let id = store.appendChatMessage(SZChatMessage(role: .assistant, text: text), to: .director)
         // Narration is part of the durable narrative, but mid-run it can arrive per node — the
         // run-end flushAllTranscripts covers those; only standalone narrations flush eagerly.
         if !isRunning { flushTranscript(.director) }
+        return id
     }
 
     /// Set a node input's default value — the editor's controls + `ui_set_input_default`. Persists to the

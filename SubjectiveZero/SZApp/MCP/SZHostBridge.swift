@@ -111,7 +111,8 @@ final class SZHostBridge {
 
     /// Dispatch one `tools/call`, trying each surface in turn. Image tools (which return an inline image,
     /// not text) are tried first; the text surfaces stay `String?` and are wrapped in `.text`.
-    func callTool(name: String, arguments: [String: Any], surface: Surface = .full) throws -> SZMCPToolResult {
+    func callTool(name: String, arguments: [String: Any], surface: Surface = .full,
+                  forcedContext: SZTraceContext? = nil) throws -> SZMCPToolResult {
         // Withheld, not merely unlisted: knowing the name from somewhere else must not be enough.
         guard !Self.debugToolNames.contains(name) || surface.exposesDebugTools else {
             throw SZMCPError.message("\(name) is not available to agents")
@@ -120,11 +121,47 @@ final class SZHostBridge {
         guard !Self.agentWithheldToolNames.contains(name) || surface == .full else {
             throw SZMCPError.message("\(name) is not available to agents")
         }
-        if let result = try handleImageTool(name: name, arguments: arguments) { return result }
-        if let result = try handleDebugTool(name: name, arguments: arguments) { return .text(result) }
-        if let result = try handleAgentTool(name: name, arguments: arguments) { return .text(result) }
-        if let result = try handleUITool(name: name, arguments: arguments) { return .text(result) }
-        throw SZMCPError.message("unknown tool: \(name)")
+        // Trace: WHO does this call belong to? A per-turn listener KNOWS (its port is the caller's
+        // identity — `forcedContext`); the standing AGENT bus falls back to the host's attribution
+        // rule. The `.full` test bus gets no fallback: a driving/debugging client poking tools
+        // mid-turn would satisfy "sole in-flight turn" and pollute that agent's breakdown.
+        // The MCP server's MainActor.run hop inherits no task-locals, so the bridge binds its own —
+        // and binding even a nil context deliberately SHADOWS anything ambient, so an
+        // unattributable call drops rather than misfiles. Every fence inside any handler (compile,
+        // promote, future tools) nests under this span automatically. debug_* is the observer, not
+        // the observed. `span` records thrown handlers too — a failing call still took time.
+        let traceContext = Self.debugToolNames.contains(name)
+            ? nil : (forcedContext ?? (surface == .agent ? host.traceContext(for: arguments) : nil))
+        return try SZTrace.$context.withValue(traceContext) {
+            // The span closes with the RESULT's approximate context weight (chars/4): every tool
+            // result feeds straight back into the agent's context, and these payloads — library
+            // reads, doc pages, compile output — are most of what a turn's "in" count is made of.
+            // The payload TEXT is filed under the turn's debug capture, so "what did this action
+            // add" is inspectable as content, not just a number.
+            try SZTrace.span(SZTurnStage.mcpTool, detail: name,
+                             closing: { (result: SZMCPToolResult) in
+                                 if let traceContext, case .text(let text) = result {
+                                     host.recordToolPayload(turnID: traceContext.turnID,
+                                                            tool: name, result: text)
+                                 }
+                                 return (detail: name, addedTokens: Self.contextWeight(of: result))
+                             }) {
+                if let result = try handleImageTool(name: name, arguments: arguments) { return result }
+                if let result = try handleDebugTool(name: name, arguments: arguments) { return .text(result) }
+                if let result = try handleAgentTool(name: name, arguments: arguments) { return .text(result) }
+                if let result = try handleUITool(name: name, arguments: arguments) { return .text(result) }
+                throw SZMCPError.message("unknown tool: \(name)")
+            }
+        }
+    }
+
+    /// ~tokens a tool result adds to the caller's context: text at the chars/4 rule of thumb;
+    /// an image at its base64 length/4 (rough, but honest about being the payload's scale).
+    private nonisolated static func contextWeight(of result: SZMCPToolResult) -> Int {
+        switch result {
+        case .text(let text): return text.count / 4
+        case .image(let base64): return base64.count / 4
+        }
     }
 
     /// Shared helper for a tool definition; `properties` is the JSON-Schema arg map (empty = no args).

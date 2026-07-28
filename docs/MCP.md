@@ -91,6 +91,26 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 - `debug_dump_logs` (build / agent / runtime)
 - `debug_get_build_errors`
 - `debug_snapshot_state`, `debug_load_state`
+- `debug_chat_transcript` - a scope's transcript as JSON, including each message's
+  `timestamp`/`duration`/`usage`/`breakdown` where present (the per-turn debug breakdown).
+- `debug_turn_timings` - the profiling read path: completed agent turns per scope as
+  `{turnID, start, duration, usage, events}` — the same phase data the in-app turn breakdown
+  shows (queue wait, first output, tool spans, compile/promote, the CLI's own report), plus the
+  latest run rollup on the Director's run-complete narration. Events carry `id`/`parent` (span
+  hierarchy — a compile fence nests under its `agent_compile_node` span) and `runID` (groups a
+  run's turns across scopes). Collection is `SZTrace` debug fences (`SZTrace.span(...) { }`,
+  see `Modules/Sources/SZCore/SZTrace.swift`), gated by `SZ_TRACE` (default: on in DEBUG only).
+- `debug_run_summary` - the latest (or a chosen) run's report as text — same output as the
+  Profiler's Copy Summary.
+- `debug_run_tokens` - the latest (or a chosen) run's per-turn token report as text (in with
+  cached share, out with reasoning share, cost) — same output as the Profiler's Copy Tokens.
+  Per-turn totals: CLIs report usage once, at turn end.
+- `debug_turn_prompt` - the rendered prompt a turn ACTUALLY sent to its CLI, verbatim —
+  inspect what an agent was briefed with. Survives relaunches: the newest 40 turns' prompts
+  AND tool-result payloads are captured under
+  `~/Library/Application Support/SubjectiveZero/debug-turns/<turnID>/` (debug builds only).
+  Timing events also carry `addedTokens` — the approximate context weight each action
+  (prompt, tool result) added to the turn's "in" count.
 - `debug_set_paused` - freeze/resume the render clock (mirrors the HUD Pause/Play) so successive
   `agent_view_frame`s render the same instant: the deterministic way to A/B a live input.
 - `debug_record_session`, `debug_replay_session` *(deferred - not a V1 gate; see below)*

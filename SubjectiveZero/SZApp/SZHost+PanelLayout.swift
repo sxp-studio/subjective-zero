@@ -82,6 +82,12 @@ extension SZHost {
         persistAppState()
     }
 
+    /// Debug ▸ Show Turn Breakdown — a live pref, persisted like every layout change.
+    func setShowTurnBreakdown(_ on: Bool) {
+        showTurnBreakdown = on
+        persistAppState()
+    }
+
     /// Write the live prefs (layout + snap + header auto-hide + grid cursor trail + confirmed default
     /// provider + project history) to app-state.json (~1 KB, synchronous). The remaining SZAppState fields
     /// (windowSize/theme) are still dormant — nothing reads or writes them yet, so saving defaults
@@ -104,7 +110,8 @@ extension SZHost {
                                                 ? nil : providerGenerationSettings,
                                              showWelcomeAtStartup: showWelcomeAtStartup,
                                              showTokenCounts: showTokenCounts,
-                                             telemetryEnabled: telemetryEnabled))
+                                             telemetryEnabled: telemetryEnabled,
+                                             showTurnBreakdown: showTurnBreakdown))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

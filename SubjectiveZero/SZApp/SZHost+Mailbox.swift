@@ -83,6 +83,9 @@ extension SZHost {
         }
 
         guard let envelope = mailbox.envelope(for: envelopeID) else { return }
+        // The wait ends HERE — prompt building below (recap, mention expansion) is delivery work,
+        // not queueing, and must not inflate the queue.wait row.
+        let waitEnded = Date()
         let text = envelope.message.text
 
         // A transient note under the already-shown bubble — the delivery-time counterpart of
@@ -145,6 +148,15 @@ extension SZHost {
             flushTranscript(scope)
         }
 
+        // Queue wait, keyed to THIS turn's own message id — misattribution is impossible by
+        // construction (v1 stashed per-scope and had to guard zombies). Recorded via the explicit-
+        // turnID escape hatch: the turn's context binding doesn't exist until deliver.
+        if SZTrace.isEnabled {
+            SZTrace.record(SZTurnEvent(stage: SZTurnStage.queueWait, start: envelope.enqueuedAt,
+                                       duration: waitEnded.timeIntervalSince(envelope.enqueuedAt)),
+                           turnID: assistantID)
+        }
+
         let generation = resolvedGenerationSettings(for: providerID)
         let request = SZAgentRunRequest(
             prompt: chatPrompt,
@@ -196,6 +208,10 @@ extension SZHost {
                 mailbox.markProcessed(envelopeID)
             }
         } catch {
+            // A deliver that bowed out before its turn-end path ran (claim refusal, zombie) left
+            // the queue-wait row parked under this turn — drop it rather than leak it. Harmless
+            // no-op when finalizeTurn already took the events.
+            SZTrace.discard(turnID: assistantID)
             if dropSessionIfStale(scope) {
                 reply("(session expired — retrying with a fresh session)")
                 status = "chat turn failed — retrying with a fresh session"

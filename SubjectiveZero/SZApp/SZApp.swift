@@ -243,6 +243,8 @@ struct SZApp: App {
     @NSApplicationDelegateAdaptor(SZAppDelegate.self) private var appDelegate
     @State private var host = SZHost()
     @State private var selectedNodeID: SZNodeID?      // canvas selection (edit/move/wire) — NOT chat scope
+    /// Opens the "Tokens" scene (the Profiler's token-inspection window).
+    @Environment(\.openWindow) private var openWindow
     // Sparkle (SZUpdater.swift). Explicit init: constructing the controller in a default-value
     // expression would run outside the struct's MainActor isolation under Swift 6.
     private let updaterController: SPUStandardUpdaterController
@@ -373,19 +375,22 @@ struct SZApp: App {
             }
             CommandGroup(after: .sidebar) {
                 Divider()
-                ForEach(Array(SZPanelKind.allCases.enumerated()), id: \.element) { index, kind in
+                ForEach(Array(SZPanelKind.availableCases.enumerated()), id: \.element) { index, kind in
                     Toggle(kind.displayName, isOn: panelVisibilityBinding(kind))
                         .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
                 }
-                // Panel chrome, so it lives with the panel-visibility toggles rather than in Graph.
-                Toggle("Auto-Hide Panel Headers", isOn: Binding(get: { host.autoHidePanelHeaders },
-                                                                set: { host.setAutoHidePanelHeaders($0) }))
-                // Appearance, so it sits with the panel-chrome prefs. Squares just the viewport tile.
-                Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
-                                                                 set: { host.setViewportRoundedCorners($0) }))
-                // Chat display, kept with the other view prefs — per-turn tokens under replies.
-                Toggle("Show Token Counts", isOn: Binding(get: { host.showTokenCounts },
-                                                          set: { host.setShowTokenCounts($0) }))
+                // The display prefs, grouped so the menu stays panels-first as panels accrue
+                // (the Profiler pushed it past comfortable).
+                Menu("Display") {
+                    Toggle("Auto-Hide Panel Headers", isOn: Binding(get: { host.autoHidePanelHeaders },
+                                                                    set: { host.setAutoHidePanelHeaders($0) }))
+                    // Appearance — squares just the viewport tile.
+                    Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
+                                                                     set: { host.setViewportRoundedCorners($0) }))
+                    // Chat display — per-turn tokens under replies.
+                    Toggle("Show Token Counts", isOn: Binding(get: { host.showTokenCounts },
+                                                              set: { host.setShowTokenCounts($0) }))
+                }
                 Divider()
             }
             // Graph — the node-graph view/arrange commands. Framing (Center View /
@@ -425,8 +430,33 @@ struct SZApp: App {
             CommandMenu("Debug") {
                 Button("Open Debug Chat") { host.showChat(.debug) }
                     .keyboardShortcut("d", modifiers: [.command, .shift])
+                // Per-turn phase breakdown under chat replies (collection rides the host's trace
+                // flag; this only shows/hides what was recorded).
+                Toggle("Show Turn Breakdown", isOn: Binding(get: { host.showTurnBreakdown },
+                                                            set: { host.setShowTurnBreakdown($0) }))
+                // Same binding as View ▸ Debug (⌘⌥4) — listed here too so the trace browser is
+                // discoverable next to its sibling debug affordances.
+                Toggle("Show Profiler", isOn: panelVisibilityBinding(.profiler))
             }
         }
+        #endif
+        #if DEBUG
+        // The Profiler's token-report viewer (the thinking rows' ↑↓ icon): an in-app utility
+        // window holding the per-turn token text — selectable, paste-anywhere, and guaranteed
+        // visible, unlike handing a temp file to whatever app owns ".txt". Opens via
+        // `openWindow(value: <report text>)`; dormant otherwise.
+        WindowGroup("Tokens", for: String.self) { $report in
+            ScrollView {
+                Text($report.wrappedValue ?? "")
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+            .background(Color(red: 0.09, green: 0.09, blue: 0.10))
+            .frame(minWidth: 560, minHeight: 200)
+        }
+        .defaultSize(width: 660, height: 280)
         #endif
     }
 
@@ -470,15 +500,19 @@ struct SZApp: App {
                 .disabled(host.isBusyForProjectOps || host.store.project == nil)
         }
         Menu("View") {
-            ForEach(Array(SZPanelKind.allCases.enumerated()), id: \.element) { _, kind in
+            // availableCases, like the menu bar — the Profiler toggle must not surface in a
+            // release build's gear menu either.
+            ForEach(Array(SZPanelKind.availableCases.enumerated()), id: \.element) { _, kind in
                 Toggle(kind.displayName, isOn: panelVisibilityBinding(kind))
             }
-            Toggle("Auto-Hide Panel Headers", isOn: Binding(get: { host.autoHidePanelHeaders },
-                                                            set: { host.setAutoHidePanelHeaders($0) }))
-            Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
-                                                             set: { host.setViewportRoundedCorners($0) }))
-            Toggle("Show Token Counts", isOn: Binding(get: { host.showTokenCounts },
-                                                      set: { host.setShowTokenCounts($0) }))
+            Menu("Display") {
+                Toggle("Auto-Hide Panel Headers", isOn: Binding(get: { host.autoHidePanelHeaders },
+                                                                set: { host.setAutoHidePanelHeaders($0) }))
+                Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
+                                                                 set: { host.setViewportRoundedCorners($0) }))
+                Toggle("Show Token Counts", isOn: Binding(get: { host.showTokenCounts },
+                                                          set: { host.setShowTokenCounts($0) }))
+            }
         }
         Menu("Graph") {
             Button("Center View") { host.centerView() }
@@ -564,6 +598,30 @@ struct SZApp: App {
             onClose: { host.continueFromWelcome() })
     }
 
+    /// The transcript's jump action, nil where the Profiler surface doesn't exist (its link then
+    /// never renders). Extracted so the panelContent builder stays type-checkable.
+    private var revealInProfilerAction: (@Sendable @MainActor (UUID) -> Void)? {
+        guard SZPanelKind.profilerPanelAvailable else { return nil }
+        let host = host
+        return { host.revealInProfiler($0) }
+    }
+
+    /// Prompt inspection, nil when tracing isn't recording prompts (the button then never renders).
+    private var viewTurnPromptAction: (@Sendable @MainActor (UUID) -> Void)? {
+        guard SZTrace.isEnabled else { return nil }
+        let host = host
+        return { host.viewTurnPrompt($0) }
+    }
+
+    /// Token inspection — the turn's actual in/out text in the "Tokens" window. Composed here
+    /// because `openWindow` is a scene-level action the SZUI panel can't reach on its own.
+    private var viewTurnTokensAction: (@Sendable @MainActor (UUID) -> Void)? {
+        guard SZTrace.isEnabled else { return nil }
+        let host = host
+        let openWindow = openWindow
+        return { openWindow(value: host.turnTokenReport(for: $0)) }
+    }
+
     /// One case per panel; the initializers are the pre-refactor ones, moved verbatim out of the old
     /// SplitView tree (min sizes now live in SZPanelLayoutGeometry, not `.frame` constraints).
     @ViewBuilder
@@ -629,6 +687,7 @@ struct SZApp: App {
                         project: host.store.project, provider: host.activeProviderID,
                         streaming: host.chatInFlight.contains(host.activeChatScope.key),
                         isRunning: host.isRunning, showTokenCounts: host.showTokenCounts,
+                        showTurnBreakdown: host.showTurnBreakdown,
                         onStopRun: { host.cancelRun() },
                         workingScopes: host.chatInFlight,
                         unreadScopes: host.unreadScopes,
@@ -651,6 +710,23 @@ struct SZApp: App {
                         onSetReasoningEffort: { host.setActiveReasoningEffort($0) },
                         onSetFastMode: { host.setActiveFastMode($0) },
                         onOpenProviderSetup: { host.presentProviderSetup() })
+                // The transcript's "open in Profiler" link — set only where the surface exists,
+                // so the button simply doesn't render in builds without the panel.
+                .environment(\.szRevealInProfiler, revealInProfilerAction)
+                .environment(\.szViewTurnPrompt, viewTurnPromptAction)
+                .environment(\.szHeldPromptTurnIDs, host.heldPromptIDs)
+        case .profiler:
+            // The trace browser (DEBUG builds — normalize() strips the leaf elsewhere). Reads
+            // transcripts via the store; no live host wiring beyond node titles for lane names.
+            SZProfilerPanel(store: host.store, titles: host.nodeTitlesByScopeKey,
+                            tracingEnabled: SZTrace.isEnabled,
+                            unreadRunIDs: host.unreadRunIDs,
+                            onSelectRun: { host.unreadRunIDs.remove($0) },
+                            focusRequest: host.profilerFocusRequest,
+                            onConsumeFocus: { host.profilerFocusRequest = nil })
+                .environment(\.szViewTurnPrompt, viewTurnPromptAction)
+                .environment(\.szHeldPromptTurnIDs, host.heldPromptIDs)
+                .environment(\.szViewTurnTokens, viewTurnTokensAction)
         }
     }
 }

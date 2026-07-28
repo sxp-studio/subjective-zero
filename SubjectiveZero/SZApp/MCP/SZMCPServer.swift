@@ -15,6 +15,11 @@ final class SZMCPServer: @unchecked Sendable {
     /// Which tool surface this listener serves. The host runs one of each: agents dial the `.agent`
     /// listener (no `debug_*`), closed-loop tests dial the `.full` one.
     let surface: SZHostBridge.Surface
+    /// A per-TURN listener's trace identity: a raw TCP connection carries no caller identity, so
+    /// the port is it — `deliver` spawns one listener per agent turn and every tool call arriving
+    /// here attributes to that turn exactly, parallel agents included. nil on the standing buses
+    /// (whose calls fall back to the bridge's attribution rule).
+    let traceContext: SZTraceContext?
     private let listener: NWListener
     private let bridge: SZHostBridge
     private let queue = DispatchQueue(label: "studio.sxp.subz.mcp")
@@ -30,22 +35,25 @@ final class SZMCPServer: @unchecked Sendable {
     /// quietly. The host starts its agent bus above the port the full bus took.
     @MainActor
     static func start(bridge: SZHostBridge, surface: SZHostBridge.Surface = .full,
-                      from: UInt16 = 42100) throws -> SZMCPServer {
+                      from: UInt16 = 42100, traceContext: SZTraceContext? = nil) throws -> SZMCPServer {
         var lastError: Error?
         for candidate in max(from, 42100)..<UInt16(42200) {
-            do { return try SZMCPServer(port: candidate, bridge: bridge, surface: surface) }
+            do { return try SZMCPServer(port: candidate, bridge: bridge, surface: surface,
+                                        traceContext: traceContext) }
             catch { lastError = error }
         }
         throw lastError ?? SZMCPError.message("no free MCP port in \(from)–42199")
     }
 
-    private init(port: UInt16, bridge: SZHostBridge, surface: SZHostBridge.Surface) throws {
+    private init(port: UInt16, bridge: SZHostBridge, surface: SZHostBridge.Surface,
+                 traceContext: SZTraceContext?) throws {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             throw SZMCPError.message("invalid MCP port \(port)")
         }
         self.port = port
         self.bridge = bridge
         self.surface = surface
+        self.traceContext = traceContext
         // LOOPBACK ONLY. Plain `NWListener(using: .tcp, on:)` binds every interface (lsof shows
         // `*:<port>`), so on a shared network any host could drive this bus — and its tools include
         // `ui_run`, which spawns a coding agent that writes and executes code with no approval gate.
@@ -58,7 +66,7 @@ final class SZMCPServer: @unchecked Sendable {
         self.listener.newConnectionHandler = { [bridge] connection in
             connection.start(queue: DispatchQueue(label: "studio.sxp.subz.mcp.conn.\(port)"))
             Self.receive(on: connection, bridge: bridge, surface: surface, identity: identity,
-                         buffer: SZLineBuffer())
+                         traceContext: traceContext, buffer: SZLineBuffer())
         }
         let startup = SZMCPStartupProbe()
         // A busy port surfaces here, not from init — fail startup so the caller can try another port.
@@ -91,7 +99,8 @@ final class SZMCPServer: @unchecked Sendable {
     func stop() { listener.cancel() }
 
     private static func receive(on connection: NWConnection, bridge: SZHostBridge,
-                               surface: SZHostBridge.Surface, identity: String, buffer: SZLineBuffer) {
+                               surface: SZHostBridge.Surface, identity: String,
+                               traceContext: SZTraceContext?, buffer: SZLineBuffer) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, isComplete, error in
             if let data, !data.isEmpty {
                 for line in buffer.appendAndExtractLines(data) {
@@ -101,7 +110,8 @@ final class SZMCPServer: @unchecked Sendable {
                     let done = DispatchSemaphore(value: 0)
                     Task {
                         if let response = await handle(line: line, bridge: bridge,
-                                                      surface: surface, identity: identity) {
+                                                      surface: surface, identity: identity,
+                                                      traceContext: traceContext) {
                             connection.send(content: Data((response + "\n").utf8), completion: .contentProcessed { _ in })
                         }
                         done.signal()
@@ -110,13 +120,15 @@ final class SZMCPServer: @unchecked Sendable {
                 }
             }
             guard !isComplete, error == nil else { connection.cancel(); return }
-            receive(on: connection, bridge: bridge, surface: surface, identity: identity, buffer: buffer)
+            receive(on: connection, bridge: bridge, surface: surface, identity: identity,
+                    traceContext: traceContext, buffer: buffer)
         }
     }
 
     /// Decode one JSON-RPC request and produce its response string (nil for notifications).
     private static func handle(line: String, bridge: SZHostBridge,
-                              surface: SZHostBridge.Surface, identity: String) async -> String? {
+                              surface: SZHostBridge.Surface, identity: String,
+                              traceContext: SZTraceContext?) async -> String? {
         let request = (try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]) ?? [:]
         let id = request["id"] ?? NSNull()
         guard let method = request["method"] as? String else {
@@ -142,7 +154,8 @@ final class SZMCPServer: @unchecked Sendable {
             do {
                 let result = try await MainActor.run {
                     let arguments = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
-                    return try bridge.callTool(name: name, arguments: arguments, surface: surface)
+                    return try bridge.callTool(name: name, arguments: arguments, surface: surface,
+                                               forcedContext: traceContext)
                 }
                 let payload: [String: Any]
                 switch result {
