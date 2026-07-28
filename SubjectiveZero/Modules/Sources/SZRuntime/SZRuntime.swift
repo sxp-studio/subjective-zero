@@ -116,12 +116,18 @@ public final class SZRuntime: @unchecked Sendable {
     /// `agent_compile_node`. The host promotes (copies to the live node folder + reloads) only on `.ok`,
     /// so a broken staged source never clobbers the live one. `.failed` carries the swiftc diagnostics.
     public func compileNodeSource(at source: URL) -> SZBuildResult {
+        // The measured thing measures itself: a `compile.check` fence with the outcome as detail,
+        // attributed via whatever trace context the caller bound (the MCP bridge's tool span) —
+        // off-turn callers have none, and the fence drops.
+        let fence = SZTrace.begin(SZTurnStage.compileCheck)
         do {
             _ = try toolchain.compile(
                 nodeSource: source,
                 into: workspace.appending(path: "staging-check/\(UUID().uuidString)"))
+            fence.end(detail: "ok")
             return .ok
         } catch {
+            fence.end(detail: "failed")
             return .failed("\(error)")
         }
     }

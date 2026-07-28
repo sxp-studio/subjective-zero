@@ -115,7 +115,22 @@ public struct SZClaudeProvider: SZProvider {
 
     public func parse(output: String, exitCode: Int32, preallocatedSessionID: String?) -> SZAgentOutcome {
         // claude's session id is the one we minted; success rides the exit code.
-        SZAgentOutcome(sessionID: preallocatedSessionID, failed: exitCode != 0)
+        var outcome = SZAgentOutcome(sessionID: preallocatedSessionID, failed: exitCode != 0)
+        // The CLI's own account of the turn rides the final `result` event: `duration_ms` (wall),
+        // `duration_api_ms` (API share), `num_turns` (live-verified 2.1.207; the event also carries
+        // ttft_ms, unused — the host measures first output itself, provider-neutrally). Scanned from
+        // the end: `result` is the stream's last event.
+        for line in output.split(separator: "\n").reversed() {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  obj["type"] as? String == "result" else { continue }
+            let stats = SZAgentReportedStats(
+                duration: (obj["duration_ms"] as? Int).map { Double($0) / 1000 },
+                apiDuration: (obj["duration_api_ms"] as? Int).map { Double($0) / 1000 },
+                turnCount: obj["num_turns"] as? Int)
+            if stats != SZAgentReportedStats() { outcome.reportedStats = stats }
+            break
+        }
+        return outcome
     }
 
     public func makeStreamConsumer() -> any SZAgentStreamConsumer { SZClaudeStreamConsumer() }

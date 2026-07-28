@@ -600,6 +600,38 @@ private let grokModelsLoggedOut =
             == [.usage(SZTokenUsage(inputTokens: 21507, outputTokens: 393, cachedInputTokens: 21505, costUSD: 0.16683)), .reply("10")])
 }
 
+/// The result event's self-reported turn stats reach the outcome — field names recorded verbatim
+/// from a live 2.1.207 run (`duration_ms` wall / `duration_api_ms` API share / `num_turns`). A
+/// stream with no result event, or a result carrying none of them, stays nil — absence is absence.
+@Test func claudeParseLiftsReportedStatsFromTheResultEvent() {
+    let claude = SZClaudeProvider()
+    let output = """
+    {"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}
+    {"type":"result","result":"hi","duration_ms":1305,"duration_api_ms":1283,"num_turns":1}
+    """
+    let ok = claude.parse(output: output, exitCode: 0, preallocatedSessionID: "minted")
+    #expect(ok.reportedStats == SZAgentReportedStats(duration: 1.305, apiDuration: 1.283, turnCount: 1))
+    #expect(ok.sessionID == "minted")
+
+    #expect(claude.parse(output: "", exitCode: 0, preallocatedSessionID: nil).reportedStats == nil)
+    #expect(claude.parse(output: #"{"type":"result","result":"done"}"#, exitCode: 0,
+                         preallocatedSessionID: nil).reportedStats == nil)
+}
+
+/// The stats → breakdown-row bridge: duration rides the event, turns/api the detail; a stats
+/// object with nothing but a duration renders no empty detail.
+@Test func reportedStatsTurnEventCarriesDurationAndDetail() {
+    let started = Date(timeIntervalSince1970: 100)
+    let full = SZAgentReportedStats(duration: 118, apiDuration: 46.9, turnCount: 6)
+        .turnEvent(started: started)
+    #expect(full.stage == SZTurnStage.providerReport)
+    #expect(full.start == started && full.duration == 118)
+    #expect(full.detail == "6 turns · api 47s")   // compact format rounds ≥10s to whole seconds
+
+    let bare = SZAgentReportedStats(duration: 5).turnEvent(started: started)
+    #expect(bare.duration == 5 && bare.detail == nil)
+}
+
 /// A NON-empty thinking block must surface as `.thinking` without clobbering the held reply
 /// candidate. Synthetic fixture: the CLI has only ever shipped empty blocks headless (see the
 /// redaction note on the consumer), so this pins the surfacing branch for the day it starts.

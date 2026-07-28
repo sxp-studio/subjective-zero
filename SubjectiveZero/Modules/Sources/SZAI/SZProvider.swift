@@ -84,16 +84,51 @@ public struct SZAgentRunRequest: Sendable {
     }
 }
 
+/// A CLI's own account of a finished turn, where it reports one — every field optional, set only
+/// from what the CLI actually said. Feeds the turn's debug breakdown (wall vs. CLI-reported time =
+/// harness overhead).
+public struct SZAgentReportedStats: Sendable, Equatable {
+    /// The turn's duration as the CLI measured it.
+    public var duration: TimeInterval?
+    /// The API-time share of `duration`, where the CLI splits it out.
+    public var apiDuration: TimeInterval?
+    /// How many model turns the CLI took internally, where it counts them.
+    public var turnCount: Int?
+
+    public init(duration: TimeInterval? = nil, apiDuration: TimeInterval? = nil,
+                turnCount: Int? = nil) {
+        self.duration = duration
+        self.apiDuration = apiDuration
+        self.turnCount = turnCount
+    }
+}
+
+extension SZAgentReportedStats {
+    /// The stats as one `provider.report` breakdown row — duration is the CLI's own wall clock
+    /// (ours minus theirs = harness overhead, visible by comparing the two lines).
+    public func turnEvent(started: Date) -> SZTurnEvent {
+        var bits: [String] = []
+        if let turns = turnCount { bits.append("\(turns) turn\(turns == 1 ? "" : "s")") }
+        if let api = apiDuration { bits.append("api \(SZTurnBreakdown.format(api))") }
+        return SZTurnEvent(stage: SZTurnStage.providerReport, start: started, duration: duration,
+                           detail: bits.isEmpty ? nil : bits.joined(separator: " · "))
+    }
+}
+
 /// What a provider extracts from a finished run.
 public struct SZAgentOutcome: Sendable, Equatable {
     public var sessionID: String?
     public var failed: Bool
     public var message: String?
+    /// The CLI's self-reported turn stats — nil for CLIs that report none.
+    public var reportedStats: SZAgentReportedStats?
 
-    public init(sessionID: String?, failed: Bool, message: String? = nil) {
+    public init(sessionID: String?, failed: Bool, message: String? = nil,
+                reportedStats: SZAgentReportedStats? = nil) {
         self.sessionID = sessionID
         self.failed = failed
         self.message = message
+        self.reportedStats = reportedStats
     }
 }
 
