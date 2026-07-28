@@ -41,6 +41,45 @@ import Testing
     #expect(decoded.stage == SZTurnStage.queueWait)
     #expect(decoded.duration == nil)
     #expect(decoded.detail == nil)
+    #expect(decoded.calls == nil)
+}
+
+@Test func callsRoundTripsAndStaysAbsent() throws {
+    let report = SZTurnEvent(stage: SZTurnStage.providerReport, start: Date(timeIntervalSince1970: 9),
+                             duration: 42, detail: "3 turns · api 8.2s", calls: 3)
+    let decoded = try JSONDecoder().decode(SZTurnEvent.self, from: JSONEncoder().encode(report))
+    #expect(decoded == report && decoded.calls == 3)
+    // Absent stays absent — a call-less event encodes no calls key (old builds' transcripts too).
+    let bare = SZTurnEvent(stage: SZTurnStage.providerReport, detail: "api 8.2s")
+    #expect(!String(decoding: try JSONEncoder().encode(bare), as: UTF8.self).contains("calls"))
+}
+
+@Test func reportedCallsSumsProviderReportRowsOnly() {
+    let events = [
+        SZTurnEvent(stage: SZTurnStage.providerReport, calls: 3),
+        SZTurnEvent(stage: SZTurnStage.providerReport, calls: 2),
+        SZTurnEvent(stage: SZTurnStage.mcpTool, calls: 9),          // wrong stage — ignored
+        SZTurnEvent(stage: SZTurnStage.providerReport),             // count-less report — absence
+    ]
+    #expect(SZTurnBreakdown.reportedCalls(in: events) == 5)
+    // No report carries a count → nil, not zero (a CLI that doesn't count isn't "0 calls").
+    #expect(SZTurnBreakdown.reportedCalls(in: [SZTurnEvent(stage: SZTurnStage.providerReport)]) == nil)
+    #expect(SZTurnBreakdown.reportedCalls(in: []) == nil)
+}
+
+@Test func callsDetailDividesUsageAcrossCalls() {
+    let turn = makeTurn(scope: "n", label: "N", startOffset: 0, duration: 30,
+                        usage: SZTokenUsage(inputTokens: 604_400, outputTokens: 1_000),
+                        events: [SZTurnEvent(stage: SZTurnStage.providerReport, calls: 3)])
+    #expect(SZTurnBreakdown.callsDetail(of: [turn]) == "3 calls · ~201.5k ctx/call")
+    // A single call reads singular; no usage → no ctx clause, the count still tells.
+    let single = makeTurn(scope: "n", label: "N", startOffset: 0, duration: 5,
+                          events: [SZTurnEvent(stage: SZTurnStage.providerReport, calls: 1)])
+    #expect(SZTurnBreakdown.callsDetail(of: [single]) == "1 call")
+    // No reported count anywhere → nil (nothing rendered, nothing invented).
+    let uncounted = makeTurn(scope: "n", label: "N", startOffset: 0, duration: 5,
+                             usage: SZTokenUsage(inputTokens: 100, outputTokens: 1))
+    #expect(SZTurnBreakdown.callsDetail(of: [uncounted]) == nil)
 }
 
 @Test func chatMessageBreakdownRoundTripsAndOldTranscriptsDecode() throws {
@@ -168,6 +207,26 @@ private func makeTurn(scope: String, label: String, isDirector: Bool = false, st
     // Rows follow the run's timeline: the director's decompose (t=0) leads, total is pinned last.
     #expect(rows.first?.stage == SZTurnStage.runDirector)
     #expect(rows.last?.stage == SZTurnStage.runTotal)
+}
+
+@Test func aggregateAppendsTheCallsBitWhenCLIsReportCounts() {
+    let base = Date(timeIntervalSince1970: 0)
+    let turns = [
+        makeTurn(scope: "node-a", label: "Grayscale", startOffset: 10, duration: 60,
+                 usage: SZTokenUsage(inputTokens: 400_000, outputTokens: 3_000),
+                 events: [SZTurnEvent(stage: SZTurnStage.providerReport, calls: 3)]),
+        makeTurn(scope: "node-a", label: "Grayscale", startOffset: 80, duration: 20,
+                 usage: SZTokenUsage(inputTokens: 200_000, outputTokens: 1_000),
+                 events: [SZTurnEvent(stage: SZTurnStage.providerReport, calls: 2)]),
+        // A node whose CLI reports no count gets no calls bit — nothing invented.
+        makeTurn(scope: "node-b", label: "Camera", startOffset: 10, duration: 30,
+                 usage: SZTokenUsage(inputTokens: 100_000, outputTokens: 500)),
+    ]
+    let rows = SZTurnBreakdown.aggregate(turns: turns, runStart: base, runEnd: base.addingTimeInterval(120))
+    let grayscale = rows.first { $0.stage == SZTurnStage.runNode && $0.detail?.hasPrefix("Grayscale") == true }
+    #expect(grayscale?.detail?.contains("5 calls · ~120.0k ctx/call") == true)   // 600k over 5 calls
+    let camera = rows.first { $0.stage == SZTurnStage.runNode && $0.detail?.hasPrefix("Camera") == true }
+    #expect(camera?.detail?.contains("call") == false)
 }
 
 @Test func aggregateOfNothingIsEmpty() {

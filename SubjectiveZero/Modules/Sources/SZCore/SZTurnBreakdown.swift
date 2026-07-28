@@ -28,10 +28,14 @@ public struct SZTurnEvent: Sendable, Equatable, Codable {
     /// result payload, the prompt row's rendered prompt. nil = not a context-adding action.
     /// This is what decomposes a turn's "in" count into causes the app can actually see.
     public var addedTokens: Int?
+    /// The CLI's own count of the model calls it made inside this turn — set on `provider.report`
+    /// rows where the CLI reports one. Reported input ≈ the CLI's context × this count, so it is
+    /// the divisor that turns a usage total into context-per-call. nil = the CLI reported none.
+    public var calls: Int?
 
     public init(stage: String, start: Date = Date(), duration: TimeInterval? = nil,
                 detail: String? = nil, id: UUID? = nil, parentID: UUID? = nil,
-                runID: UUID? = nil, addedTokens: Int? = nil) {
+                runID: UUID? = nil, addedTokens: Int? = nil, calls: Int? = nil) {
         self.stage = stage
         self.start = start
         self.duration = duration
@@ -40,12 +44,13 @@ public struct SZTurnEvent: Sendable, Equatable, Codable {
         self.parentID = parentID
         self.runID = runID
         self.addedTokens = addedTokens
+        self.calls = calls
     }
 }
 
 extension SZTurnEvent {
     private enum CodingKeys: String, CodingKey {
-        case stage, start, duration, detail, id, parentID, runID, addedTokens
+        case stage, start, duration, detail, id, parentID, runID, addedTokens, calls
     }
 
     // Append-tolerant like SZChatMessage: only `stage` is hard-required; a malformed event decodes
@@ -60,6 +65,7 @@ extension SZTurnEvent {
         parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
         runID = try c.decodeIfPresent(UUID.self, forKey: .runID)
         addedTokens = try c.decodeIfPresent(Int.self, forKey: .addedTokens)
+        calls = try c.decodeIfPresent(Int.self, forKey: .calls)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -72,6 +78,7 @@ extension SZTurnEvent {
         try c.encodeIfPresent(parentID, forKey: .parentID)
         try c.encodeIfPresent(runID, forKey: .runID)
         try c.encodeIfPresent(addedTokens, forKey: .addedTokens)
+        try c.encodeIfPresent(calls, forKey: .calls)
     }
 }
 
@@ -286,6 +293,7 @@ public enum SZTurnBreakdown {
             var bits = ["\(group.count) turn\(group.count == 1 ? "" : "s")"]
             if compile.count > 0 { bits.append("compile \(format(compile.seconds))") }
             if promote.count > 0 { bits.append("promote \(format(promote.seconds))") }
+            if let callsBit = callsDetail(of: group) { bits.append(callsBit) }
             rows.append(SZTurnEvent(stage: SZTurnStage.runNode,
                                     start: group.map(\.start).min() ?? runStart,
                                     duration: agentSeconds,
@@ -330,6 +338,28 @@ public enum SZTurnBreakdown {
             cachedInputTokens: cached.isEmpty ? nil : cached.reduce(0, +),
             reasoningOutputTokens: reasoning.isEmpty ? nil : reasoning.reduce(0, +),
             costUSD: costs.isEmpty ? nil : costs.reduce(0, +))
+    }
+
+    /// Sum of the CLIs' reported model-call counts across a set of events (their `provider.report`
+    /// rows) — nil when no row carries one; a CLI that reports no count contributes absence, not
+    /// zero.
+    public static func reportedCalls(in events: [SZTurnEvent]) -> Int? {
+        let counts = events.filter { $0.stage == SZTurnStage.providerReport }.compactMap(\.calls)
+        guard !counts.isEmpty else { return nil }
+        return counts.reduce(0, +)
+    }
+
+    /// The call-count story for a set of turns — "3 calls · ~55.5k ctx/call", the ctx/call clause
+    /// derived from the turns' summed input tokens (reported input ≈ context × calls, so the
+    /// division recovers the context; derived at render, never stored). nil when no CLI reported
+    /// a count.
+    public static func callsDetail(of turns: [RunTurn]) -> String? {
+        guard let calls = reportedCalls(in: turns.flatMap(\.events)), calls > 0 else { return nil }
+        var text = "\(calls) call\(calls == 1 ? "" : "s")"
+        if let input = totalUsage(of: turns)?.inputTokens, input > 0 {
+            text += " · ~\(formatTokens(input / calls)) ctx/call"
+        }
+        return text
     }
 
     /// One recorded run, reassembled from transcripts: the Director narration's rollup rows plus
@@ -529,7 +559,8 @@ public enum SZTurnBreakdown {
             let usage = turn.usage.map {
                 " · \(formatTokens($0.inputTokens)) in / \(formatTokens($0.outputTokens)) out"
             } ?? ""
-            lines.append("[\(turn.label)] \(turn.duration.map(format) ?? "?")\(usage)")
+            let calls = callsDetail(of: [turn]).map { " · \($0)" } ?? ""
+            lines.append("[\(turn.label)] \(turn.duration.map(format) ?? "?")\(usage)\(calls)")
             for event in turn.events {
                 lines.append("  \(rowTitle(for: event, in: turn.events))  \(event.duration.map(format) ?? "")")
             }
@@ -549,7 +580,8 @@ public enum SZTurnBreakdown {
         let totals = record.rollup.last { $0.stage == SZTurnStage.runTotal }?.detail
             ?? totalsDetail(turns: record.turns)
         var lines = ["tokens — \(title) · \(summaryDate(record.startedAt))"
-                     + (totals.map { " · \($0)" } ?? "")]
+                     + (totals.map { " · \($0)" } ?? "")
+                     + (callsDetail(of: record.turns).map { " · \($0)" } ?? "")]
         lines.append("")
         let labelWidth = (record.turns.map { $0.label.count + 2 }.max() ?? 2)
         for turn in record.turns {
@@ -557,7 +589,8 @@ public enum SZTurnBreakdown {
             let when = (offset >= 1 ? "+\(format(offset))" : "0").leftPadded(to: 7)
             let label = "[\(turn.label)]".rightPadded(to: labelWidth)
             lines.append("  \(when)  \(label)  "
-                         + (turn.usage.map(tokenLine) ?? "(no usage reported)"))
+                         + (turn.usage.map(tokenLine) ?? "(no usage reported)")
+                         + (callsDetail(of: [turn]).map { " · \($0)" } ?? ""))
         }
         lines.append("")
         lines.append("(per-turn totals — the CLI reports usage once, at turn end)")

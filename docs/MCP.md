@@ -110,7 +110,10 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
   AND tool-result payloads are captured under
   `~/Library/Application Support/SubjectiveZero/debug-turns/<turnID>/` (debug builds only).
   Timing events also carry `addedTokens` — the approximate context weight each action
-  (prompt, tool result) added to the turn's "in" count.
+  (prompt, tool result) added to the turn's "in" count — and, on `provider.report` rows,
+  `calls` — the CLI's own count of the model calls inside the turn (reported input ≈ its
+  context × `calls`, so the division recovers context-per-call; absent when the CLI reports
+  no count).
 - `debug_set_paused` - freeze/resume the render clock (mirrors the HUD Pause/Play) so successive
   `agent_view_frame`s render the same instant: the deterministic way to A/B a live input.
 - `debug_record_session`, `debug_replay_session` *(deferred - not a V1 gate; see below)*

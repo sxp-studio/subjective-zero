@@ -342,6 +342,9 @@ struct SZRunDetailView: View {
                 stat("tokens", "\(SZTurnBreakdown.formatTokens(usage.inputTokens)) in / "
                      + "\(SZTurnBreakdown.formatTokens(usage.outputTokens)) out")
             }
+            if let calls = SZTurnBreakdown.callsDetail(of: record.turns) {
+                stat("calls", calls)
+            }
             Spacer()
             // Lives HERE, not in the title row: the auto-hide panel header floats over the top
             // ~26pt on hover and would swallow the click.
@@ -702,6 +705,11 @@ private struct SZTurnDetailSection: View {
                 if let usage = turn.usage {
                     Text("\(SZTurnBreakdown.formatTokens(usage.inputTokens)) in / "
                          + "\(SZTurnBreakdown.formatTokens(usage.outputTokens)) out")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+                if let calls = SZTurnBreakdown.callsDetail(of: [turn]) {
+                    Text(calls)
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }

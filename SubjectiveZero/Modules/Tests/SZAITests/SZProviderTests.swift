@@ -627,9 +627,10 @@ private let grokModelsLoggedOut =
     #expect(full.stage == SZTurnStage.providerReport)
     #expect(full.start == started && full.duration == 118)
     #expect(full.detail == "6 turns · api 47s")   // compact format rounds ≥10s to whole seconds
+    #expect(full.calls == 6)                      // the count rides structurally, not just in prose
 
     let bare = SZAgentReportedStats(duration: 5).turnEvent(started: started)
-    #expect(bare.duration == 5 && bare.detail == nil)
+    #expect(bare.duration == 5 && bare.detail == nil && bare.calls == nil)
 }
 
 /// A NON-empty thinking block must surface as `.thinking` without clobbering the held reply

@@ -111,7 +111,8 @@ extension SZAgentReportedStats {
         if let turns = turnCount { bits.append("\(turns) turn\(turns == 1 ? "" : "s")") }
         if let api = apiDuration { bits.append("api \(SZTurnBreakdown.format(api))") }
         return SZTurnEvent(stage: SZTurnStage.providerReport, start: started, duration: duration,
-                           detail: bits.isEmpty ? nil : bits.joined(separator: " · "))
+                           detail: bits.isEmpty ? nil : bits.joined(separator: " · "),
+                           calls: turnCount)
     }
 }
 

@@ -209,6 +209,7 @@ extension SZHostBridge {
         if let parentID = event.parentID { e["parent"] = parentID.uuidString }
         if let runID = event.runID { e["runID"] = runID.uuidString }
         if let addedTokens = event.addedTokens { e["addedTokens"] = addedTokens }
+        if let calls = event.calls { e["calls"] = calls }
         return e
     }
 
