@@ -49,6 +49,13 @@ For the full per-type schema (every `type`, the `ui` kinds, the `default`/`optio
 is rejected at compile (`{ok:false, errors}`).
 
 {{reference}}
+## Spend model round-trips, not just tokens, carefully
+
+Every tool round ends your current model call and re-sends your entire context on the next one — a
+round-trip costs far more than the payload it fetches. Batch independent reads into ONE round (index +
+docs, or card + source), and never re-fetch what this brief already contains: the runtime ABI, your
+node's boundary, and the contract example are all above.
+
 ## Workflow — call these MCP tools in order
 
 1. `agent_write_node_staged { "node": "{{node}}", "contract": <the json OBJECT>, "source": "<full Node.swift>" }`

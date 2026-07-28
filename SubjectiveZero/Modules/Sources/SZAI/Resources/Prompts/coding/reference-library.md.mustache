@@ -4,10 +4,13 @@ SubjectiveZero ships a library of built-in nodes. If one does a similar job, rea
 more than starting cold. Spend tokens in tiers, cheapest first:
 
 1. `agent_library_index` → the catalog by category: what each node does, its typed I/O, its reuse mode.
-   Read it and decide for yourself; nothing is ranked, and a similar name is not a match.
+   Read it and decide for yourself; nothing is ranked, and a similar name is not a match. Read it at
+   most ONCE — it does not change during your turn.
 2. If one really does this node's job, earn the deeper tiers for it:
    - `agent_library_card { "node": "<id>" }` → its card (reuse notes, gotchas, setup caveats).
    - `agent_library_source { "node": "<id>" }` → its full `Node.swift`.
+   Card and source are one decision, not two: when the index already makes the node the likely
+   reference, request BOTH in the same round instead of spending a round deciding to spend a round.
 3. A match is a **reference, not a template**. The `reuse` hint (`copy-as-is` vs `reference-only`) is
    **guidance, not a rule — you decide.** Implement whichever fits THIS node:
    - **copy as-is** — it already does the job; adjust only contract metadata; or
