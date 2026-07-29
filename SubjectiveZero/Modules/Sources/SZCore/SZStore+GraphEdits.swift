@@ -14,27 +14,45 @@ extension SZStore {
         return mutate { $0.graph.nodes.append(node) } ? node.id : nil
     }
 
-    /// Connect an output port to an input port. Returns the connection id, or nil if no project is
-    /// loaded. Type-compatibility is the caller's call (the editor checks before connecting), but
-    /// cardinality is enforced here: a data input holds at most ONE incoming connection, so wiring an
-    /// occupied input swaps the old edge out. Repeating an existing connection — same data from→to, or
-    /// any flow edge between the same node pair — is idempotent and returns the existing id.
+    /// The outcome of `tryConnect` — `connect`'s result-carrying form, so a refusal is legible
+    /// instead of folding into nil.
+    public enum SZConnectResult: Equatable, Sendable {
+        case connected(SZConnectionID)
+        /// The data edge would close a cycle; `path` is the offending walk (from → … → from).
+        case cycleRefused(path: [SZNodeID])
+        case noProject
+    }
+
+    /// Connect an output port to an input port. Type-compatibility is the caller's call (the editor
+    /// checks before connecting), but cardinality is enforced here: a data input holds at most ONE
+    /// incoming connection, so wiring an occupied input swaps the old edge out. Repeating an existing
+    /// connection — same data from→to, or any flow edge between the same node pair — is idempotent and
+    /// returns the existing id. And the graph must stay a DAG: a DATA edge that would close a cycle is
+    /// refused, judged against the graph as if the occupied input's edge were already swapped out, so
+    /// a replace that breaks the old cycle path is never a false positive. Flow is never checked.
     ///
-    /// Flow is now a transient *drawing-intent* annotation ("A should feed B"), not a persistent
+    /// Flow is a transient *drawing-intent* annotation ("A should feed B"), not a persistent
     /// companion layer. So creating a DATA edge RESOLVES (removes) the matching flow intent edge between
     /// the same node pair — the green intent arrow becomes a solid blue wire, exactly like resolving a
     /// comment. (Inverse of the old `ensureFlow`-on-connect.) An intent the caller never wires stays
     /// visible as an unresolved arrow.
     @discardableResult
-    public func connect(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind) -> SZConnectionID? {
-        guard let graph = project?.graph else { return nil }
+    public func tryConnect(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind) -> SZConnectResult {
+        guard let graph = project?.graph else { return .noProject }
         assertFenceCleared([from.node, to.node])
         // Flow compares node pairs (port names vary: "" / "flow") because flow is node-to-node intent.
         if let existing = graph.connections.first(where: {
             $0.kind == kind && (kind == .flow
                 ? ($0.from.node == from.node && $0.to.node == to.node)
                 : ($0.from == from && $0.to == to))
-        }) { return existing.id }
+        }) { return .connected(existing.id) }
+        if kind == .data {
+            var probe = graph
+            probe.connections.removeAll { $0.kind == .data && $0.to == to }   // the swap victim goes either way
+            if let path = probe.wouldCloseCycle(from: from.node, to: to.node) {
+                return .cycleRefused(path: path)
+            }
+        }
         let connection = SZConnection(from: from, to: to, kind: kind)
         let applied = mutate { project in
             if kind == .data {
@@ -48,7 +66,15 @@ extension SZStore {
                 }
             }
         }
-        return applied ? connection.id : nil
+        return applied ? .connected(connection.id) : .noProject
+    }
+
+    /// `tryConnect` with every non-connection folded to nil — the original signature, kept so the
+    /// call sites that only need the id don't churn.
+    @discardableResult
+    public func connect(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind) -> SZConnectionID? {
+        if case .connected(let id) = tryConnect(from: from, to: to, kind: kind) { return id }
+        return nil
     }
 
     /// Remove a connection by id. Returns whether one was removed.

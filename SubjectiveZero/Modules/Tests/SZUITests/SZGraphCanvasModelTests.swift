@@ -162,6 +162,40 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     #expect(!SZGraphCanvasModel.canConnect(camTex, sock(camera.id, .input, .data, "mirror"), in: graph))
 }
 
+@Test func canConnectRefusesACycleClosingDataEdgeButAllowsDropBack() {
+    // camera.texture → gray.input is wired. The reverse edge gray.output → camera would close a
+    // cycle, so its sockets must never light up — while re-dropping the existing wire on its own
+    // input stays legal (the occupant is judged as already swapped out).
+    let camera = SZNode(
+        kind: .generated, title: "Camera", sfSymbol: "camera",
+        contract: SZNodeContract(title: "Camera", sfSymbol: "camera", summary: "cam",
+                                 inputs: [SZPort(name: "feedback", type: .texture)],
+                                 outputs: [SZPort(name: "texture", type: .texture)]),
+        position: SZPoint(x: 0, y: 0))
+    let gray = SZNode(
+        kind: .generated, title: "Grayscale", sfSymbol: "circle.lefthalf.filled",
+        contract: SZNodeContract(title: "Grayscale", sfSymbol: "circle.lefthalf.filled", summary: "luma",
+                                 inputs: [SZPort(name: "input", type: .texture)],
+                                 outputs: [SZPort(name: "output", type: .texture)]),
+        position: SZPoint(x: 400, y: 0))
+    let conn = SZConnection(from: SZPortRef(node: camera.id, port: "texture"),
+                            to: SZPortRef(node: gray.id, port: "input"), kind: .data)
+    let graph = SZGraph(nodes: [camera, gray], connections: [conn])
+    func sock(_ id: SZNodeID, _ side: SZSocketSide, _ port: String) -> SZSocket {
+        SZGraphCanvasModel.sockets(in: graph).first { $0.nodeID == id && $0.side == side && $0.kind == .data && $0.port == port }!
+    }
+    // The cycle-closing wire never validates, so its target never highlights (isValidTarget builds
+    // on canConnect).
+    #expect(!SZGraphCanvasModel.canConnect(sock(gray.id, .output, "output"),
+                                           sock(camera.id, .input, "feedback"), in: graph))
+    #expect(!SZGraphCanvasModel.isValidTarget(sock(camera.id, .input, "feedback"),
+                                              for: sock(gray.id, .output, "output"), in: graph,
+                                              tiers: [:], pickedConnectionID: nil, isLocked: { _ in false }))
+    // Dropping the picked-up wire back on its own port is not a cycle — the edge IS the occupant.
+    #expect(SZGraphCanvasModel.canConnect(sock(camera.id, .output, "texture"),
+                                          sock(gray.id, .input, "input"), in: graph))
+}
+
 @Test func incomingDataConnectionResolvesOnlyForWiredDataInputs() {
     let camera = cameraNode(at: SZPoint(x: 0, y: 0))
     let gray = SZNode(

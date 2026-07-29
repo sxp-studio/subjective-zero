@@ -17,10 +17,17 @@ extension SZHost {
     /// cost to those paths.
     private func draftFlowContracts() {
         guard let graph = store.project?.graph else { return }
-        let (drafted, ids) = graph.draftContractsFromFlow()
+        let (drafted, ids, skipped) = graph.draftContractsFromFlow()
         guard !ids.isEmpty else { return }
         store.mutate { $0.graph = drafted }
         persistGraphEditAndReload(action: "drafted \(ids.count) node contract\(ids.count == 1 ? "" : "s") from flow")
+        // Arrows whose data edge would close a cycle stay as intent — say so in the run's narration,
+        // or the run silently builds a graph missing wiring the user drew.
+        let title: (SZNodeID) -> String = { [store] in store.project?.graph.node(id: $0)?.title ?? $0.uuidString }
+        for pair in skipped {
+            narrateDirector("Left the \(title(pair.from)) → \(title(pair.to)) arrow as intent — "
+                + "wiring it would close a data cycle.")
+        }
     }
 
     /// The shared agent-turn substrate. Every agent turn — a coding dispatch, a Director turn,

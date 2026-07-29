@@ -119,8 +119,8 @@ public enum SZGraphCanvasModel {
     }
 
     /// Whether `a`→`b` is a legal connection (order-independent): different nodes, opposite sides, same
-    /// kind; data additionally requires equal port types (texture→texture, float→float, …). Flow is
-    /// always allowed between an output and an input.
+    /// kind; data additionally requires equal port types (texture→texture, float→float, …) and must not
+    /// close a cycle. Flow is always allowed between an output and an input.
     public static func canConnect(_ a: SZSocket, _ b: SZSocket, in graph: SZGraph) -> Bool {
         guard a.nodeID != b.nodeID, a.side != b.side, a.kind == b.kind else { return false }
         guard a.kind == .data else { return true }
@@ -129,7 +129,13 @@ public enum SZGraphCanvasModel {
         guard let outNode = graph.node(id: out.nodeID), let inNode = graph.node(id: inp.nodeID),
               let outType = portType(of: outNode, side: .output, port: out.port),
               let inType = portType(of: inNode, side: .input, port: inp.port) else { return false }
-        return outType == inType
+        guard outType == inType else { return false }
+        // The graph must stay a DAG. Judged as if the target input's occupied edge were already
+        // swapped out (`SZStore.connect`'s input-swap rule) — which also covers dropping a picked-up
+        // wire back on its own port, since that edge IS the occupant.
+        var probe = graph
+        probe.connections.removeAll { $0.kind == .data && $0.to == SZPortRef(node: inp.nodeID, port: inp.port) }
+        return probe.wouldCloseCycle(from: out.nodeID, to: inp.nodeID) == nil
     }
 
     /// Whether `socket` may receive an in-flight wire anchored at `source` — the per-socket test

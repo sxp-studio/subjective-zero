@@ -212,32 +212,10 @@ struct SZScheduler: Sendable {
     }
 
     /// Kahn's algorithm over DATA edges (flow is authoring intent, not runtime order). Returns nil on a
-    /// cycle. Ties broken by graph node order for determinism.
+    /// cycle. Forwards to the shared kernel (`SZGraph.topologicalOrder`) — the same one the connect
+    /// guards and load-time repair consult, so the scheduler cannot disagree with them. The
+    /// `SchedulerError.cycle` throw in `init` stays as the backstop.
     static func topologicalOrder(_ graph: SZGraph) -> [SZNodeID]? {
-        let nodeIDs = graph.nodes.map(\.id)
-        let index = Dictionary(uniqueKeysWithValues: nodeIDs.enumerated().map { ($1, $0) })
-        var indegree = Dictionary(uniqueKeysWithValues: nodeIDs.map { ($0, 0) })
-        var successors: [SZNodeID: [SZNodeID]] = [:]
-        for connection in graph.connections where connection.kind == .data {
-            let from = connection.from.node, to = connection.to.node
-            guard index[from] != nil, index[to] != nil, from != to else { continue }
-            successors[from, default: []].append(to)
-            indegree[to, default: 0] += 1
-        }
-
-        var ready = nodeIDs.filter { indegree[$0] == 0 }.sorted { index[$0]! < index[$1]! }
-        var result: [SZNodeID] = []
-        while let next = ready.first {
-            ready.removeFirst()
-            result.append(next)
-            for successor in successors[next] ?? [] {
-                indegree[successor]! -= 1
-                if indegree[successor] == 0 {
-                    let position = ready.firstIndex { index[$0]! > index[successor]! } ?? ready.endIndex
-                    ready.insert(successor, at: position)
-                }
-            }
-        }
-        return result.count == nodeIDs.count ? result : nil
+        graph.topologicalOrder()
     }
 }

@@ -17,8 +17,9 @@ private func flow(_ a: SZNodeID, _ b: SZNodeID) -> SZConnection {
     let camera = SZNodeID(), gray = SZNodeID()
     let graph = SZGraph(nodes: [prompt(camera, "Camera"), prompt(gray, "Gray")], connections: [flow(camera, gray)])
 
-    let (g, drafted) = graph.draftContractsFromFlow()
+    let (g, drafted, skipped) = graph.draftContractsFromFlow()
     #expect(Set(drafted) == [camera, gray])
+    #expect(skipped.isEmpty)
 
     // Head: no inputs, one texture output. Tail: one texture input, one texture output.
     let cam = g.node(id: camera)!.contract!
@@ -45,8 +46,8 @@ private func flow(_ a: SZNodeID, _ b: SZNodeID) -> SZConnection {
     let camera = SZNodeID(), gray = SZNodeID()
     let graph = SZGraph(nodes: [prompt(camera, "Camera"), prompt(gray, "Gray")], connections: [flow(camera, gray)])
 
-    let (once, _) = graph.draftContractsFromFlow()
-    let (twice, draftedAgain) = once.draftContractsFromFlow()
+    let (once, _, _) = graph.draftContractsFromFlow()
+    let (twice, draftedAgain, _) = once.draftContractsFromFlow()
     #expect(draftedAgain.isEmpty)                       // nothing left to draft — both already have contracts
     #expect(twice.connections.filter { $0.kind == .data }.count == 1)   // no duplicate data edge
     #expect(twice == once)                              // fully idempotent
@@ -62,10 +63,35 @@ private func flow(_ a: SZNodeID, _ b: SZNodeID) -> SZConnection {
         position: SZPoint(x: 0, y: 0))
     let graph = SZGraph(nodes: [cameraNode, prompt(gray, "Gray")], connections: [flow(camera, gray)])
 
-    let (g, drafted) = graph.draftContractsFromFlow()
+    let (g, drafted, _) = graph.draftContractsFromFlow()
     #expect(drafted == [gray])                          // the generated camera is left untouched
     #expect(g.connections.contains {                    // data edge uses the camera's real output name
         $0.kind == .data && $0.from == SZPortRef(node: camera, port: "texture")
             && $0.to == SZPortRef(node: gray, port: "input")
     })
+}
+
+@Test func aFlowArrowThatWouldCloseADataCycleStaysAsIntent() {
+    // Drawn a ⇄ b plus a → c. Pass 2 realizes b → a first (a is drafted first); realizing a → b
+    // would then close a data cycle, so THAT arrow stays flow — visible unresolved intent — while
+    // the rest of the drawing still realizes.
+    let a = SZNodeID(), b = SZNodeID(), c = SZNodeID()
+    let graph = SZGraph(nodes: [prompt(a, "A"), prompt(b, "B"), prompt(c, "C")],
+                        connections: [flow(a, b), flow(b, a), flow(a, c)])
+
+    let (g, drafted, skipped) = graph.draftContractsFromFlow()
+    #expect(Set(drafted) == [a, b, c])
+    #expect(skipped.count == 1)
+    #expect(skipped.first?.from == a && skipped.first?.to == b)
+
+    // b → a and a → c realized as data; a → b not.
+    #expect(g.connections.contains { $0.kind == .data && $0.from.node == b && $0.to.node == a })
+    #expect(g.connections.contains { $0.kind == .data && $0.from.node == a && $0.to.node == c })
+    #expect(g.connections.contains { $0.kind == .data && $0.from.node == a && $0.to.node == b } == false)
+    // The skipped arrow survives as flow intent; the realized ones are resolved away.
+    let flows = g.connections.filter { $0.kind == .flow }
+    #expect(flows.count == 1)
+    #expect(flows.first?.from.node == a && flows.first?.to.node == b)
+    // And the drafted graph still orders — the whole point of skipping.
+    #expect(g.topologicalOrder() != nil)
 }

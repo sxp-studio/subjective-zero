@@ -46,6 +46,29 @@ especially `docs/ARCHITECTURE.md` (incl. the host seam) and `docs/BUILD_SPEC.md`
 
 6. Do not be lazy, do not punt things to a 'v2' unless explicitly agreed upon.
 
+## Worktrees & landing
+
+Implementation work happens in a **git worktree inside the repo**, under `.claude/worktrees/`:
+
+```sh
+git worktree add .claude/worktrees/<name> -b <branch> main
+```
+
+Never create a new sibling directory at the parent level for a worktree or checkout.
+
+**Landing on `main`:**
+
+1. Rebase the branch on `main`.
+2. Run the full verify from guideline 5 — **both** suites green (`swift test` from
+   `SubjectiveZero/Modules`, and the `SubjectiveZero` scheme's `xcodebuild … test` for `SZAppTests`).
+3. Fast-forward-only merge to `main` (`git merge --ff-only <branch>`), then push.
+4. Commits are DCO-signed-off as "Clem" (`git commit -s`). No AI-attribution trailers
+   (no `Co-Authored-By` / "Generated with" lines).
+
+**Branch hygiene:** after the merge, remove the worktree and delete the branch. Work that parks
+instead of landing gets an explicit note (why, and where it resumes). History that must stay
+reachable past a branch delete gets an `archive/*` tag before the delete.
+
 ## Definition of done
 
 A step is **done** only when, together:

@@ -24,7 +24,7 @@ extension SZHostBridge {
                               "description": "absolute paths to image/video files (≥1)"],
                     "x": ["type": "number"], "y": ["type": "number"],
                  ]),
-            tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged.",
+            tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged. Data edges must keep the graph acyclic: a data connection that would close a cycle is refused with {status: \"refused\", reason} naming the path — rewire or drop an edge instead. Flow (intent) edges are never cycle-checked.",
                  properties: [
                     "from": ["type": "string"], "fromPort": ["type": "string"],
                     "to": ["type": "string"], "toPort": ["type": "string"],
@@ -282,6 +282,19 @@ extension SZHostBridge {
         }
         let src = try resolveSocket(on: fromNode, side: .output, port: fromPort)
         let dst = try resolveSocket(on: toNode, side: .input, port: toPort)
+        // A cycle-closing data edge gets a structured refusal naming the path — a rule refusal the
+        // agent should read and adapt to (cf. ui_run's `refused`), not a transport error. Checked
+        // before `canConnect` (which also refuses cycles) so the reason isn't misreported as a type
+        // mismatch. Judged as if the occupied target input's edge were already swapped out.
+        if kind == .data {
+            var probe = graph
+            probe.connections.removeAll { $0.kind == .data && $0.to == SZPortRef(node: to, port: toPort) }
+            if let path = probe.wouldCloseCycle(from: from, to: to) {
+                let titles = path.map { graph.node(id: $0)?.title ?? $0.uuidString }.joined(separator: " → ")
+                return SZJSONRPC.encode(["status": "refused",
+                                         "reason": "would close a data cycle: \(titles)"])
+            }
+        }
         guard SZGraphCanvasModel.canConnect(src, dst, in: graph) else {
             if from == to { throw SZMCPError.message("cannot connect node \(from) to itself") }
             throw SZMCPError.message("incompatible \(kindRaw) connection \(fromNode.title):\(fromPort) → \(toNode.title):\(toPort) (port types differ)")

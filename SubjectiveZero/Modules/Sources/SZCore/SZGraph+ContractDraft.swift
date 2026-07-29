@@ -25,9 +25,12 @@ extension SZGraph {
     /// — if no render endpoint is set yet —
     /// point it at a terminal drafted node so a freshly drawn pipeline renders without a manual display
     /// toggle. Nodes that already ship a contract (generated, library, split/merge pieces, a re-run node)
-    /// are left untouched, so this is idempotent across repeated runs. Returns the reconciled graph + the
-    /// ids newly given a contract.
-    public func draftContractsFromFlow() -> (graph: SZGraph, drafted: [SZNodeID]) {
+    /// are left untouched, so this is idempotent across repeated runs. An arrow whose data edge would
+    /// close a cycle is NOT realized — it stays visible as unresolved intent, reported in `skipped` so
+    /// the run can say why. Returns the reconciled graph + the ids newly given a contract + the skipped
+    /// pairs.
+    public func draftContractsFromFlow()
+        -> (graph: SZGraph, drafted: [SZNodeID], skipped: [(from: SZNodeID, to: SZNodeID)]) {
         let order = Dictionary(uniqueKeysWithValues: nodes.map(\.id).enumerated().map { ($1, $0) })
         var g = self
         var drafted: [SZNodeID] = []
@@ -45,7 +48,7 @@ extension SZGraph {
                 inputs: inputs, outputs: [Self.texturePort("output")])
             drafted.append(n.id)
         }
-        guard !drafted.isEmpty else { return (g, []) }
+        guard !drafted.isEmpty else { return (g, [], []) }
 
         // Endpoint — if unset, blit a terminal drafted node (no outgoing flow). Mark its output `display`.
         if g.renderEndpoint == nil {
@@ -64,13 +67,20 @@ extension SZGraph {
         // `SZStore.connect`, realizing an arrow RESOLVES it: the flow intent edges are removed afterward
         // (snapshot the realized pairs first — flow is read here, removed only after the loop).
         var realized: [(from: SZNodeID, to: SZNodeID)] = []
+        var skipped: [(from: SZNodeID, to: SZNodeID)] = []
         for nid in drafted {
             for (k, source) in incomingFlowSources(of: nid, order: order).enumerated() {
-                realized.append((source, nid))
                 let alreadyWired = g.connections.contains {
                     $0.kind == .data && $0.from.node == source && $0.to.node == nid
                 }
-                guard !alreadyWired else { continue }
+                if alreadyWired { realized.append((source, nid)); continue }
+                // A realization that would close a data cycle is not laid: the arrow stays as
+                // unresolved intent (its drafted input stays unwired), and the pair is reported.
+                guard g.wouldCloseCycle(from: source, to: nid) == nil else {
+                    skipped.append((source, nid))
+                    continue
+                }
+                realized.append((source, nid))
                 g.connections.append(SZConnection(
                     from: SZPortRef(node: source, port: textureOutputPort(of: source)),
                     to: SZPortRef(node: nid, port: k == 0 ? "input" : "input\(k + 1)"),
@@ -80,7 +90,7 @@ extension SZGraph {
         g.connections.removeAll { c in
             c.kind == .flow && realized.contains { $0.from == c.from.node && $0.to == c.to.node }
         }
-        return (g, drafted)
+        return (g, drafted, skipped)
     }
 
     // MARK: - Helpers

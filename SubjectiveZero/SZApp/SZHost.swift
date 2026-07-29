@@ -513,8 +513,12 @@ final class SZHost {
             return false
         }
 
-        // 1. Validate first — a corrupt bundle must fail before the old project is touched.
-        let project = try SZProjectIO.load(from: newURL)
+        // 1. Validate first — a corrupt bundle must fail before the old project is touched. A
+        //    persisted data cycle (a hand edit, an external writer) is repaired here — newest
+        //    cycle-closing edges dropped — rather than left to throw out of the scheduler below,
+        //    which used to forget the project and boot the sample. Saved back to disk in step 4.
+        var project = try SZProjectIO.load(from: newURL)
+        let repairedEdges = project.graph.repairDataCycles()
         // 2. The only await: permissions (camera…) before the camera node's setup runs.
         try await runtime.requestDeclaredPermissions(at: newURL)
         // Re-check after the await: the busy guard above passed, but an event-driven delivery (the
@@ -546,8 +550,10 @@ final class SZHost {
             persistProject()
         }
         // 4. Last fallible step: the runtime swap. On failure, drop the lock we just took (the old
-        // project keeps rendering, its lock untouched).
+        // project keeps rendering, its lock untouched). The runtime reads from disk, so a repaired
+        // graph must land there first.
         do {
+            if !repairedEdges.isEmpty { try SZProjectIO.save(project, to: newURL) }
             try runtime.loadProject(at: newURL)
         } catch {
             newLock.release()
@@ -561,6 +567,13 @@ final class SZHost {
         loadedProjectURL = newURL
         store.setProject(project)
         restoreTranscripts()            // chat history + resumable sessions (replaces the old map)
+        if !repairedEdges.isEmpty {
+            let title: (SZNodeID) -> String = { [store] in store.project?.graph.node(id: $0)?.title ?? $0.uuidString }
+            let edges = repairedEdges.map { "\(title($0.from.node)) → \(title($0.to.node))" }.joined(separator: ", ")
+            narrateDirector("This project's graph had a data cycle on disk — removed "
+                + (repairedEdges.count == 1 ? "the connection" : "\(repairedEdges.count) connections")
+                + " \(edges) so it can render. Rewire differently if that edge mattered.")
+        }
         // `load` already flagged nodes whose source contradicts their contract; attach the diagnostics so those
         // cards show WHY, not just that. After clearPerProjectState, so the details survive.
         classifyRebuildsAfterLoad()
@@ -910,6 +923,12 @@ final class SZHost {
         guard let projectURL = loadedProjectURL, let project = store.project else { return }
         do {
             try SZProjectIO.save(project, to: projectURL)
+        } catch {
+            status = "\(action) — persist failed: \(error)"
+            print("[SZHost] \(action) persist failed: \(error)")
+            return
+        }
+        do {
             // Synchronous by design: callers (split/merge) rely on the graph being persisted AND reloaded
             // before they `startRun` the Director. This no longer beachballs — the runtime reload is now
             // incremental (`SZRuntime.loadGraph` reuses every already-loaded node, compiling only genuinely
@@ -920,8 +939,9 @@ final class SZHost {
             watchNodeSources(in: projectURL)   // split/merge pieces become hot-reloadable
             status = action
         } catch {
-            status = "\(action) — persist failed: \(error)"
-            print("[SZHost] \(action) persist failed: \(error)")
+            // The save above succeeded — say so, or a reload error reads as data loss.
+            status = "\(action) — saved, but reload failed: \(error)"
+            print("[SZHost] \(action) saved, but reload failed: \(error)")
         }
     }
 
@@ -951,9 +971,21 @@ final class SZHost {
             status = denial
             return nil
         }
-        guard let id = store.connect(from: from, to: to, kind: kind) else { return nil }
-        persistGraphEditAndReload(action: "connected")
-        return id
+        switch store.tryConnect(from: from, to: to, kind: kind) {
+        case .connected(let id):
+            persistGraphEditAndReload(action: "connected")
+            return id
+        case .cycleRefused(let path):
+            status = "not connected — would close a data cycle: \(cyclePathDescription(path))"
+            return nil
+        case .noProject:
+            return nil
+        }
+    }
+
+    /// A cycle path as node titles ("A → B → A") for refusal/status text.
+    func cyclePathDescription(_ path: [SZNodeID]) -> String {
+        path.map { store.project?.graph.node(id: $0)?.title ?? $0.uuidString }.joined(separator: " → ")
     }
 
     /// Re-route one end of an existing connection (the editor's picked-up wire dropped elsewhere —
@@ -968,9 +1000,17 @@ final class SZHost {
             return false
         }
         guard let old = store.project?.graph.connections.first(where: { $0.id == id }),
-              store.disconnect(connection: id),
-              store.connect(from: end == .from ? newRef : old.from,
-                            to: end == .to ? newRef : old.to, kind: old.kind) != nil else { return false }
+              store.disconnect(connection: id) else { return false }
+        let result = store.tryConnect(from: end == .from ? newRef : old.from,
+                                      to: end == .to ? newRef : old.to, kind: old.kind)
+        guard case .connected = result else {
+            // A refused re-add must never silently lose the wire: put the removed edge back.
+            store.mutate { $0.graph.connections.append(old) }
+            if case .cycleRefused(let path) = result {
+                status = "not reconnected — would close a data cycle: \(cyclePathDescription(path))"
+            }
+            return false
+        }
         persistGraphEditAndReload(action: "reconnected")
         return true
     }
