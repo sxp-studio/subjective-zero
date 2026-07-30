@@ -25,6 +25,28 @@ private func loadedStore() -> SZStore {
 }
 
 @MainActor
+@Test func addPromptNodeWithASeedDeclaresExactlyThatPort() {
+    let store = loadedStore()
+    // The data-wire empty-drop spawn: one port of the dragged type, draft-convention name.
+    let sink = store.addPromptNode(prompt: "", position: SZPoint(x: 0, y: 0), seed: .input(.float3))!
+    let sinkNode = store.project?.graph.node(id: sink)
+    #expect(sinkNode?.kind == .prompt)
+    #expect(sinkNode?.contract?.inputs == [SZPort(name: "input", type: .float3)])
+    #expect(sinkNode?.contract?.outputs.isEmpty == true)
+
+    let source = store.addPromptNode(prompt: "", position: SZPoint(x: -100, y: 0),
+                                     seed: .output(.float3))!
+    let sourceNode = store.project?.graph.node(id: source)
+    #expect(sourceNode?.contract?.inputs.isEmpty == true)
+    #expect(sourceNode?.contract?.outputs == [SZPort(name: "output", type: .float3)])
+
+    // The spawn's follow-up connect lands on the seeded ports. (No type claim here — `connect`
+    // deliberately doesn't type-check; that's SZUI's `canConnect`, pinned in SZUITests.)
+    #expect(store.connect(from: SZPortRef(node: source, port: "output"),
+                          to: SZPortRef(node: sink, port: "input"), kind: .data) != nil)
+}
+
+@MainActor
 @Test func editOpsNoOpWithoutAProject() {
     let store = SZStore()   // nothing loaded
     #expect(store.addPromptNode(prompt: nil, position: SZPoint(x: 0, y: 0)) == nil)

@@ -19,6 +19,11 @@ names, types, `ui`, and `default`s — do NOT retype them to `texture` and do NO
 The port NAMES are meaningful (they are the user's card labels) — copy them verbatim; never substitute a
 generic `input` / `input2` for a name the boundary already gives you. The user's editor controls bind here.
 
+The boundary can be INCOMPLETE — a node spawned from a single wire may declare only one side (e.g. one
+input and no outputs). Declared ports are still fixed; you may ADD the ports the node's job obviously
+needs on the other side (an image effect with an input and no declared output should declare and write
+an `output` texture). Never remove or retype a declared port to make room.
+
 {{boundary}}
 
 CRITICAL: read every scalar input (bool/float/vector/color) LIVE inside `update(ctx)` exactly as shown

@@ -13,6 +13,16 @@ private func flow(_ a: SZNodeID, _ b: SZNodeID) -> SZConnection {
     SZConnection(from: SZPortRef(node: a, port: "flow"), to: SZPortRef(node: b, port: "flow"), kind: .flow)
 }
 
+/// A prompt node that already ships a contract — the data-spawn seed / permission-camera shape.
+private func seededPrompt(_ id: SZNodeID, _ title: String,
+                          inputs: [SZPort] = [], outputs: [SZPort] = []) -> SZNode {
+    var node = prompt(id, title)
+    node.contract = SZNodeContract(title: node.title, sfSymbol: node.sfSymbol,
+                                   summary: node.prompt ?? node.title,
+                                   inputs: inputs, outputs: outputs)
+    return node
+}
+
 @Test func draftsTextureContractsWiringAndEndpointFromFlow() {
     let camera = SZNodeID(), gray = SZNodeID()
     let graph = SZGraph(nodes: [prompt(camera, "Camera"), prompt(gray, "Gray")], connections: [flow(camera, gray)])
@@ -40,6 +50,102 @@ private func flow(_ a: SZNodeID, _ b: SZNodeID) -> SZConnection {
     // The terminal node becomes the render endpoint (display flagged), so it renders with no manual toggle.
     #expect(g.renderEndpoint == SZPortRef(node: gray, port: "output"))
     #expect(g.node(id: gray)!.contract!.outputs.first { $0.name == "output" }?.display == true)
+}
+
+@Test func draftLeavesASeededSpawnContractUntouched() {
+    // A data-wire empty-drop spawn ships a one-port contract, so drafting must never rewrite it —
+    // the seeded port IS the declaration. A float3 input offers texture drafting nothing to bind,
+    // so the incoming arrow stays as intent, REPORTED rather than silently dropped or realized
+    // into a mistyped edge.
+    let camera = SZNodeID(), seeded = SZNodeID()
+    let spawn = seededPrompt(seeded, "Spawn", inputs: [SZPort(name: "input", type: .float3)])
+    let graph = SZGraph(nodes: [prompt(camera, "Camera"), spawn], connections: [flow(camera, seeded)])
+
+    let (g, drafted, skipped) = graph.draftContractsFromFlow()
+    #expect(drafted == [camera])
+    #expect(g.node(id: seeded)?.contract == spawn.contract)
+    #expect(skipped.count == 1)
+    #expect(skipped.first?.from == camera && skipped.first?.to == seeded)
+    #expect(skipped.first?.reason == .noCompatiblePort)
+    #expect(g.connections.contains { $0.kind == .flow && $0.to.node == seeded })   // arrow survives
+    #expect(g.connections.contains { $0.kind == .data && $0.to.node == seeded } == false)
+}
+
+@Test func anArrowIntoASeededTextureInputRealizesIntoIt() {
+    // The seeded-spawn counterpart of drafting's flow→data promotion: the target already ships its
+    // contract (never rewritten), yet an arrow into its unwired texture input still realizes — even
+    // when nothing else needs drafting. The input is deliberately NOT named "input": the edge
+    // landing on "frame" proves the contracted branch bound the DECLARED port, not the drafted
+    // k-convention name.
+    let camera = SZNodeID(), seeded = SZNodeID()
+    let cameraNode = SZNode(
+        id: camera, kind: .generated, title: "Camera",
+        contract: SZNodeContract(title: "Camera", sfSymbol: "camera", summary: "cam",
+                                 outputs: [SZPort(name: "texture", type: .texture)]),
+        position: SZPoint(x: 0, y: 0))
+    let spawn = seededPrompt(seeded, "Spawn", inputs: [SZPort(name: "frame", type: .texture)])
+    let graph = SZGraph(nodes: [cameraNode, spawn], connections: [flow(camera, seeded)])
+
+    let (g, drafted, skipped) = graph.draftContractsFromFlow()
+    #expect(drafted.isEmpty && skipped.isEmpty)
+    #expect(g.node(id: seeded)?.contract == spawn.contract)
+    #expect(g.connections.contains {
+        $0.kind == .data && $0.from == SZPortRef(node: camera, port: "texture")
+            && $0.to == SZPortRef(node: seeded, port: "frame")
+    })
+    #expect(g.connections.contains { $0.kind == .flow } == false)   // realized ⇒ resolved
+    let (again, draftedAgain, skippedAgain) = g.draftContractsFromFlow()
+    #expect(again == g && draftedAgain.isEmpty && skippedAgain.isEmpty)   // idempotent
+}
+
+@Test func multipleArrowsConsumeAContractedNodesInputsInDeclarationOrder() {
+    // Two arrows into a two-input seeded node bind sequentially — the first-unwired scan re-reads
+    // the accumulating graph per arrow, so each realization consumes a slot. The third arrow finds
+    // no free input and stays as reported intent.
+    let a = SZNodeID(), b = SZNodeID(), c = SZNodeID(), seeded = SZNodeID()
+    func source(_ id: SZNodeID, _ title: String, port: String) -> SZNode {
+        SZNode(id: id, kind: .generated, title: title,
+               contract: SZNodeContract(title: title, sfSymbol: "circle", summary: "",
+                                        outputs: [SZPort(name: port, type: .texture)]),
+               position: SZPoint(x: 0, y: 0))
+    }
+    let spawn = seededPrompt(seeded, "Spawn", inputs: [SZPort(name: "frame", type: .texture),
+                                                       SZPort(name: "mask", type: .texture)])
+    let graph = SZGraph(nodes: [source(a, "A", port: "outA"), source(b, "B", port: "outB"),
+                                source(c, "C", port: "outC"), spawn],
+                        connections: [flow(a, seeded), flow(b, seeded), flow(c, seeded)])
+
+    let (g, drafted, skipped) = graph.draftContractsFromFlow()
+    #expect(drafted.isEmpty)
+    #expect(g.connections.contains {
+        $0.kind == .data && $0.from == SZPortRef(node: a, port: "outA")
+            && $0.to == SZPortRef(node: seeded, port: "frame")
+    })
+    #expect(g.connections.contains {
+        $0.kind == .data && $0.from == SZPortRef(node: b, port: "outB")
+            && $0.to == SZPortRef(node: seeded, port: "mask")
+    })
+    #expect(skipped.count == 1)
+    #expect(skipped.first?.from == c && skipped.first?.reason == .noCompatiblePort)
+    let flows = g.connections.filter { $0.kind == .flow }
+    #expect(flows.count == 1 && flows.first?.from.node == c)   // only the unbindable arrow survives
+}
+
+@Test func anArrowFromASourceWithNoTextureOutputStaysAsIntent() {
+    // A seeded float3 SOURCE declares no texture output, so its arrow has no texture wiring to
+    // realize — it must stay as reported intent, never an edge to a nonexistent or mistyped port
+    // (such an edge is invisible on canvas and dead at runtime).
+    let seeded = SZNodeID(), gray = SZNodeID()
+    let spawn = seededPrompt(seeded, "Spawn", outputs: [SZPort(name: "output", type: .float3)])
+    let graph = SZGraph(nodes: [spawn, prompt(gray, "Gray")], connections: [flow(seeded, gray)])
+
+    let (g, drafted, skipped) = graph.draftContractsFromFlow()
+    #expect(drafted == [gray])                          // the target still drafts its contract
+    #expect(skipped.count == 1)
+    #expect(skipped.first?.from == seeded && skipped.first?.to == gray)
+    #expect(skipped.first?.reason == .noCompatiblePort)
+    #expect(g.connections.contains { $0.kind == .data } == false)   // no phantom/mistyped edge
+    #expect(g.connections.contains { $0.kind == .flow && $0.from.node == seeded })   // arrow survives
 }
 
 @Test func draftIsIdempotentAndLeavesExistingContractsAlone() {
@@ -83,6 +189,7 @@ private func flow(_ a: SZNodeID, _ b: SZNodeID) -> SZConnection {
     #expect(Set(drafted) == [a, b, c])
     #expect(skipped.count == 1)
     #expect(skipped.first?.from == a && skipped.first?.to == b)
+    #expect(skipped.first?.reason == .wouldCloseCycle)
 
     // b → a and a → c realized as data; a → b not.
     #expect(g.connections.contains { $0.kind == .data && $0.from.node == b && $0.to.node == a })

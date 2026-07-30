@@ -89,7 +89,8 @@ floats over the viewport" sketch - panels are tiled sections, not overlays): a b
 A classic node-graph editor rendered natively over the viewport. Two node kinds
 ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md)):
 
-- **Prompt node (pre-gen):** prompt text + pending/busy indicator. No typed ports yet.
+- **Prompt node (pre-gen):** prompt text + pending/busy indicator. Usually no typed ports yet;
+  a wire-spawned node carries its one seeded port.
 - **Generated node (post-gen):** header (title + SF Symbol) and one port row per declared
   input/output; unconnected inputs render their compatible control (slider, toggle, dropdown,
   field, file picker); texture outputs show a **display** toggle.
@@ -99,9 +100,12 @@ is derived from the node's contract, so reflow on `ui_update_node` is
 a state-driven re-render - no per-node-type view code.
 
 Interactions (each backed by a `ui_` command): add prompt node, move, connect/disconnect (flow vs
-data), edit input defaults, toggle display. Split/merge and run are asked for in MESSAGES now -
-see the context menu below; the deterministic ops live on as the agents' `ui_split_node` /
-`ui_merge_nodes` / `ui_run` tools.
+data), edit input defaults, toggle display. Dragging a fresh wire into empty canvas spawns a
+prompt node joined by that wire: a flow wire adds a flow edge; a data wire also seeds the new
+node's contract with one port of the dragged port's exact type (`input`/`output`, the
+contract-draft naming) so the typed edge is legal immediately. Split/merge and run are asked for
+in MESSAGES now - see the context menu below; the deterministic ops live on as the agents'
+`ui_split_node` / `ui_merge_nodes` / `ui_run` tools.
 
 ## Canvas context menu - right-click = "what can I say here"
 

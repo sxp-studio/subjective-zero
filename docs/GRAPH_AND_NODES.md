@@ -30,8 +30,9 @@ self-contained, inspectable unit on disk.
 
 ## Node kinds
 
-- **Prompt node (pre-gen):** an intent in natural language. No typed ports yet; shows its prompt
-  and a pending state. This is what the user draws first.
+- **Prompt node (pre-gen):** an intent in natural language. Usually no typed ports yet (a
+  wire-spawned node carries its one seeded port); shows its prompt and a pending state. This is
+  what the user draws first.
 - **Generated node (post-gen):** has a real contract (typed I/O), a title, and an SF Symbol.
   Produced by a coding agent. Its UI is a pure function of its contract.
 
@@ -108,6 +109,14 @@ worth avoiding:
 A data connection is only valid between **type-compatible** ports. The graph is a **strict DAG**;
 frame feedback is expressed with the explicit **feedback node**, never a cycle
 ([RUNTIME.md](RUNTIME.md)).
+
+Dropping a fresh data wire on empty canvas spawns a prompt node whose contract is pre-seeded with
+one port of the dragged port's type (named `input`/`output` per the draft convention), so the data
+edge lands typed and legal; the edge stays runtime-inert until the node is implemented (the
+renderable subgraph only includes edges between generated nodes). Drafting never rewrites an
+existing contract, but it does realize flow arrows into an already-contracted prompt node's unwired
+texture inputs - and any arrow it can't realize (cycle, or no compatible texture port) is left as
+visible intent and narrated, never silently dropped.
 
 ## Lifecycle
 

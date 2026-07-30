@@ -967,7 +967,7 @@ public struct SZNodeEditorPanel: View {
     }
 
     /// A prompt-card center honoring the snap pref — the ONE placement rule shared by every creation
-    /// site (HUD/double-click add, file drop, flow-wire spawn).
+    /// site (HUD/double-click add, file drop, wire-drop spawn).
     private func snappedPromptCenter(_ center: CGPoint) -> CGPoint {
         snapToGrid ? SZNodeLayout.snappedCenter(center, size: SZNodeLayout.promptCardSize) : center
     }
@@ -1071,8 +1071,11 @@ public struct SZNodeEditorPanel: View {
 
     /// Shared drop for both wire gestures: the session decides (`outcome`), the panel dispatches —
     /// re-route / disconnect / connect through the host (persists + reloads; a connect swaps out an
-    /// occupied data input), spawn directly on the store (authoring-only — flow is not a runtime
-    /// construct, so no host round-trip / reload, like `addPromptNode(atScreen:)`).
+    /// occupied data input). A spawn creates its node directly on the store (like
+    /// `addPromptNode(atScreen:)`); the joining edge then follows each kind's own rule: flow is
+    /// authoring-only intent (store-direct, no host round-trip), while a spawned DATA edge goes
+    /// through `onConnect` like every other data edge, so the new node + edge persist immediately
+    /// (the runtime ignores prompt-node data edges, and the reload compiles nothing).
     private func endWireDrag() {
         defer { wire = nil }
         guard let outcome = wire?.outcome() else { return }
@@ -1085,19 +1088,41 @@ public struct SZNodeEditorPanel: View {
             onDeleteConnection(id)
         case let .connect(from, to, kind):
             onConnect(from, to, kind)
-        case let .spawnPromptNode(center, source, downstream):
+        case let .spawnPromptNode(center, source, kind, downstream):
             let snapped = snappedPromptCenter(center)
-            guard let newID = store.addPromptNode(prompt: "",
-                                                  position: SZPoint(x: snapped.x, y: snapped.y))
+            guard let newRef = spawnPromptNode(for: kind, source: source, downstream: downstream,
+                                               at: SZPoint(x: snapped.x, y: snapped.y))
             else { break }
-            let newRef = SZPortRef(node: newID, port: "flow")
-            if downstream {
-                store.connect(from: source, to: newRef, kind: .flow)   // source feeds new
-            } else {
-                store.connect(from: newRef, to: source, kind: .flow)   // new feeds source
+            // Oriented by the drag: downstream = source feeds new, else new feeds source.
+            let (fromRef, toRef) = downstream ? (source, newRef) : (newRef, source)
+            switch kind {
+            case .flow: store.connect(from: fromRef, to: toRef, kind: .flow)
+            case .data: onConnect(fromRef, toRef, .data)
             }
-            selectedNodeID = newID
-            autoEditNodeID = newID   // the new card opens into editing (see SZPromptNodeView)
+            selectedNodeID = newRef.node
+            autoEditNodeID = newRef.node   // the new card opens into editing (see SZPromptNodeView)
+        }
+    }
+
+    /// Create the node half of a wire-drop spawn and return the ref its edge should target. A flow
+    /// spawn is a plain prompt node wired node-to-node; a data spawn seeds the new node's contract
+    /// with the dragged port's exact type — resolved from the live graph (see `socketDragChanged`'s
+    /// staleness rule), so a source that vanished mid-drag makes the drop a nil no-op.
+    private func spawnPromptNode(for kind: SZConnectionKind, source: SZPortRef,
+                                 downstream: Bool, at position: SZPoint) -> SZPortRef? {
+        switch kind {
+        case .flow:
+            return store.addPromptNode(prompt: "", position: position)
+                .map { SZPortRef.flow(node: $0) }
+        case .data:
+            guard let node = project?.graph.node(id: source.node),
+                  let type = SZGraphCanvasModel.portType(of: node,
+                                                         side: downstream ? .output : .input,
+                                                         port: source.port)
+            else { return nil }
+            let seed: SZStore.SZPromptSeed = downstream ? .input(type) : .output(type)
+            return store.addPromptNode(prompt: "", position: position, seed: seed)
+                .map { SZPortRef(node: $0, port: seed.portName) }
         }
     }
 

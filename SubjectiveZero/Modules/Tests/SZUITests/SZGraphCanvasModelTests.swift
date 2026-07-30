@@ -122,6 +122,25 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     #expect(SZGraphCanvasModel.endpoints(of: dangling, in: graph) == nil)
 }
 
+@Test func aDataEdgeIntoASeededSpawnPromptNodeResolvesAtTheCardSideCenter() {
+    // The data-wire empty-drop spawn wires generated → seeded prompt node. The seeded contract is
+    // what makes `endpoints` resolve; the prompt card has no port rows, so the edge must terminate
+    // at the card's side-center.
+    let camera = cameraNode(at: SZPoint(x: 0, y: 0))
+    let spawn = SZNode(
+        kind: .prompt, title: "New Node", prompt: "",
+        contract: SZNodeContract(title: "New Node", sfSymbol: "sparkles", summary: "",
+                                 inputs: [SZPort(name: "input", type: .texture)], outputs: []),
+        position: SZPoint(x: 400, y: 0))
+    let conn = SZConnection(from: SZPortRef(node: camera.id, port: "texture"),
+                            to: SZPortRef(node: spawn.id, port: "input"), kind: .data)
+    let graph = SZGraph(nodes: [camera, spawn], connections: [conn])
+    let pts = SZGraphCanvasModel.endpoints(of: conn, in: graph)
+    #expect(pts != nil)
+    #expect(pts?.to.x == spawn.position.x.cg - SZNodeLayout.width / 2)   // left edge…
+    #expect(pts?.to.y == spawn.position.y.cg + SZNodeLayout.flowY(of: spawn))   // …at side-center
+}
+
 @Test func socketsEnumeratesFlowForAllPlusDataForGeneratedPorts() {
     let camera = cameraNode()                 // generated: 2 inputs + 1 output
     let prompt = promptNode()                 // prompt: flow only

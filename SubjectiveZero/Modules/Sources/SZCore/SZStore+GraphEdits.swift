@@ -7,10 +7,41 @@
 import Foundation
 
 extension SZStore {
+    /// A single typed port to pre-declare on a spawned prompt node — how a data wire dropped on
+    /// empty canvas gets a legal endpoint (`canConnect` requires exact type equality).
+    public enum SZPromptSeed: Equatable, Sendable {
+        case input(SZPortType)
+        case output(SZPortType)
+
+        /// The minted port's name (`SZDraftPortName`) — the spawner wires its follow-up edge to
+        /// this, so seed and edge can never disagree.
+        public var portName: String {
+            switch self {
+            case .input: return SZDraftPortName.input()
+            case .output: return SZDraftPortName.output
+            }
+        }
+    }
+
     /// Append a prompt (pre-gen) node at `position`. Returns its id, or nil if no project is loaded.
+    /// A `seed` additionally mints a one-port contract — node + contract in ONE mutation, never a
+    /// contract-less intermediate state. The seeded contract is the declaration the coding agent
+    /// later implements against; `draftContractsFromFlow` never rewrites it (though it still
+    /// realizes flow arrows into the node's unwired texture inputs).
     @discardableResult
-    public func addPromptNode(prompt: String?, position: SZPoint) -> SZNodeID? {
-        let node = SZNode(kind: .prompt, title: "New Node", prompt: prompt, position: position)
+    public func addPromptNode(prompt: String?, position: SZPoint,
+                              seed: SZPromptSeed? = nil) -> SZNodeID? {
+        var node = SZNode(kind: .prompt, title: "New Node", prompt: prompt, position: position)
+        if let seed {
+            let ports: (inputs: [SZPort], outputs: [SZPort])
+            switch seed {
+            case .input(let type):  ports = ([SZPort(name: seed.portName, type: type)], [])
+            case .output(let type): ports = ([], [SZPort(name: seed.portName, type: type)])
+            }
+            node.contract = SZNodeContract(title: node.title, sfSymbol: node.sfSymbol,
+                                           summary: prompt ?? node.title,
+                                           inputs: ports.inputs, outputs: ports.outputs)
+        }
         return mutate { $0.graph.nodes.append(node) } ? node.id : nil
     }
 

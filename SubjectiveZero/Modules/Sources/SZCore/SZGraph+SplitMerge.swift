@@ -183,7 +183,7 @@ extension SZGraph {
         let exists = connections.contains { $0.kind == .flow && $0.from.node == from && $0.to.node == to }
         guard !exists else { return }
         connections.append(SZConnection(
-            from: SZPortRef(node: from, port: "flow"), to: SZPortRef(node: to, port: "flow"), kind: .flow))
+            from: .flow(node: from), to: .flow(node: to), kind: .flow))
     }
 
     // MARK: - Reconciliation helpers (private, pure)

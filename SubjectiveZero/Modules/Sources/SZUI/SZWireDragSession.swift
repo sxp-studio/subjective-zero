@@ -66,15 +66,17 @@ struct SZWireDragSession {
         case connect(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind)
         case reconnect(SZConnectionID, SZConnectionEnd, SZPortRef)
         case disconnect(SZConnectionID)
-        /// A fresh FLOW (intent) wire dropped on empty canvas — "drag into space" means "generate
-        /// something here": spawn a prompt node at `center` (raw; the panel applies its snap rule)
-        /// and join it with a flow edge. `downstream` follows the dragged socket (flow-OUT → source
-        /// feeds new; flow-IN → new feeds source).
-        case spawnPromptNode(center: CGPoint, source: SZPortRef, downstream: Bool)
+        /// A fresh wire dropped on empty canvas — "drag into space" means "generate something
+        /// here": spawn a prompt node at `center` (raw; the panel applies its snap rule) and join
+        /// it with an edge of `kind`. A data wire additionally seeds the new node's contract with
+        /// one port of the dragged port's type (the panel resolves the type from the live graph).
+        /// `downstream` follows the dragged socket (OUT → source feeds new; IN → new feeds source).
+        case spawnPromptNode(center: CGPoint, source: SZPortRef, kind: SZConnectionKind,
+                             downstream: Bool)
     }
 
     /// The drop decision: a picked-up edge re-routes (or disconnects on an empty drop), a fresh wire
-    /// connects, a fresh flow wire in space spawns. Pure — reads only the session.
+    /// connects, a fresh wire in space spawns. Pure — reads only the session.
     func outcome() -> Outcome {
         if let picked {
             guard moved else { return .none }               // plain click / sub-threshold wobble: no-op
@@ -92,17 +94,21 @@ struct SZWireDragSession {
             return .connect(from: SZPortRef(node: out.nodeID, port: out.port),
                             to: SZPortRef(node: inp.nodeID, port: inp.port), kind: out.kind)
         }
-        if moved, source.kind == .flow {
-            // Anchor the new node by the EDGE the wire lands on, not its centroid: drop from a
-            // flow-OUT and the node grows rightward with its LEFT edge (input side) at the drop
-            // point; drop from a flow-IN and it grows leftward with its RIGHT edge at the drop. So
-            // the wire terminates cleanly at the node's socket instead of burying the drop point in
-            // the card's middle. Shift the centroid by half the (fixed) prompt-node width toward the
-            // flow direction. Snapping is the panel's (snappedPromptCenter), not the session's.
+        if moved {
+            // Anchor the new node by the EDGE the wire lands on, not its centroid: drop from an
+            // OUT socket and the node grows rightward with its LEFT edge (input side) at the drop
+            // point; drop from an IN socket and it grows leftward with its RIGHT edge at the drop.
+            // So the wire terminates cleanly at the node's socket instead of burying the drop point
+            // in the card's middle. Shift the centroid by half the (fixed) prompt-node width toward
+            // the wire direction. Snapping is the panel's (snappedPromptCenter), not the session's.
+            // Flow refs are node-to-node ("flow"); a data ref keeps the dragged port's name so the
+            // panel can look up its type and seed the matching port on the spawned node.
             var center = current
             center.x += source.side == .output ? SZNodeLayout.width / 2 : -SZNodeLayout.width / 2
-            return .spawnPromptNode(center: center,
-                                    source: SZPortRef(node: source.nodeID, port: "flow"),
+            let ref = source.kind == .flow
+                ? SZPortRef.flow(node: source.nodeID)
+                : SZPortRef(node: source.nodeID, port: source.port)
+            return .spawnPromptNode(center: center, source: ref, kind: source.kind,
                                     downstream: source.side == .output)
         }
         return .none

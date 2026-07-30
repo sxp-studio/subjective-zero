@@ -278,6 +278,11 @@ public struct SZPortRef: Codable, Equatable, Hashable, Sendable {
     public var node: SZNodeID
     public var port: String
     public init(node: SZNodeID, port: String) { self.node = node; self.port = port }
+
+    /// A flow (intent) endpoint. Flow is node-to-node, so every flow ref carries this fixed port
+    /// marker — the one home for the literal. (Flow SOCKETS key port as ""; comparisons match flow
+    /// by node, never by port string.)
+    public static func flow(node: SZNodeID) -> SZPortRef { SZPortRef(node: node, port: "flow") }
 }
 
 public struct SZConnection: Codable, Identifiable, Equatable, Sendable {

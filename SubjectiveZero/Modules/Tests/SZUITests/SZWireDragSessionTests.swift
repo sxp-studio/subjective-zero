@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The wire-drag state machine — pickup vs fresh-wire grabs, the nearer-end edge detach, the click
-// guard, and every drop outcome (connect / re-route / disconnect / flow-spawn) — pinned headlessly.
+// guard, and every drop outcome (connect / re-route / disconnect / spawn) — pinned headlessly.
 // This logic previously lived as view methods and every regression surfaced as a live gesture bug.
 import CoreGraphics
 import Foundation
@@ -193,7 +193,7 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     out.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
     #expect(out.outcome() == .spawnPromptNode(
         center: CGPoint(x: drop.x + SZNodeLayout.width / 2, y: drop.y),
-        source: SZPortRef(node: a.id, port: "flow"), downstream: true))
+        source: SZPortRef(node: a.id, port: "flow"), kind: .flow, downstream: true))
 
     // From a flow-IN the node is upstream and grows leftward. The center is RAW — snapping is the
     // panel's placement rule (snappedPromptCenter), applied at dispatch, not the session's.
@@ -203,17 +203,35 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     inp.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
     #expect(inp.outcome() == .spawnPromptNode(
         center: CGPoint(x: drop.x - SZNodeLayout.width / 2, y: drop.y),
-        source: SZPortRef(node: a.id, port: "flow"), downstream: false))
+        source: SZPortRef(node: a.id, port: "flow"), kind: .flow, downstream: false))
 }
 
-@Test func aDataWireDroppedInSpaceDoesNothing() {
-    let a = texNode("A", at: SZPoint(x: 0, y: 0), outputs: ["out"])
+@Test func aFreshDataWireDroppedInSpaceSpawnsWithTheDraggedPortAndKind() {
+    let a = texNode("A", at: SZPoint(x: 0, y: 0), inputs: ["input"], outputs: ["out"])
     let graph = SZGraph(nodes: [a], connections: [])
-    let grab = socket(a, .output, .data, "out")
-    var session = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+    let drop = CGPoint(x: 500, y: 300)
+
+    // A plain click on a data socket (sub-threshold, `moved` unset) must not spawn.
+    let out = socket(a, .output, .data, "out")
+    var session = SZWireDragSession.begin(from: out, atWorld: out.point, screen: out.point,
                                           in: graph, isLocked: unlocked)!
-    session.update(toWorld: CGPoint(x: 500, y: 300), zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
-    #expect(session.outcome() == .none)   // only FLOW wires spawn on empty drops
+    #expect(session.outcome() == .none)
+
+    // From a data-OUT the node is downstream, LEFT edge at the drop point — same anchoring as
+    // flow. The ref keeps the dragged port's name so the panel can resolve its type.
+    session.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    #expect(session.outcome() == .spawnPromptNode(
+        center: CGPoint(x: drop.x + SZNodeLayout.width / 2, y: drop.y),
+        source: SZPortRef(node: a.id, port: "out"), kind: .data, downstream: true))
+
+    // From an UNWIRED data-IN (a fresh wire, not a pickup) the node is upstream, mirrored.
+    let inp = socket(a, .input, .data, "input")
+    var upstream = SZWireDragSession.begin(from: inp, atWorld: inp.point, screen: inp.point,
+                                           in: graph, isLocked: unlocked)!
+    upstream.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    #expect(upstream.outcome() == .spawnPromptNode(
+        center: CGPoint(x: drop.x - SZNodeLayout.width / 2, y: drop.y),
+        source: SZPortRef(node: a.id, port: "input"), kind: .data, downstream: false))
 }
 
 // MARK: - Target validity (SZGraphCanvasModel)

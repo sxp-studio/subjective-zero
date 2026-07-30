@@ -12,21 +12,32 @@ extension SZHost {
     /// contract derived from its flow edges + lay the companion data wiring (`SZGraph.draftContractsFromFlow`),
     /// so the cards show their typed I/O UPFRONT and the textures bind as the fleet implements — the graph
     /// "comes to life". Persists + reloads so the new boundary is live, which is also what makes it the
-    /// boundary `promoteStagedNode` merges each agent's authored contract into. No-op when nothing needs
-    /// drafting (every dirty node already ships a contract — a re-run, split/merge pieces), so it adds no
-    /// cost to those paths.
+    /// boundary `promoteStagedNode` merges each agent's authored contract into. Also the realize-or-report
+    /// pass for arrows into ALREADY-contracted prompt nodes (a data-spawn seed, a permission camera):
+    /// their contracts are never rewritten, but their unwired texture inputs still get the wiring. Only a
+    /// true no-change (a re-run, split/merge pieces, nothing drawn) is free.
     private func draftFlowContracts() {
         guard let graph = store.project?.graph else { return }
         let (drafted, ids, skipped) = graph.draftContractsFromFlow()
-        guard !ids.isEmpty else { return }
-        store.mutate { $0.graph = drafted }
-        persistGraphEditAndReload(action: "drafted \(ids.count) node contract\(ids.count == 1 ? "" : "s") from flow")
-        // Arrows whose data edge would close a cycle stay as intent — say so in the run's narration,
-        // or the run silently builds a graph missing wiring the user drew.
+        // Apply on ANY change, not just new contracts: realizing an arrow into an already-contracted
+        // node (a data-spawn seed, a permission camera) edits only edges, with `ids` empty.
+        if drafted != graph {
+            store.mutate { $0.graph = drafted }
+            let action = ids.isEmpty
+                ? "realized flow arrows into data wiring"
+                : "drafted \(ids.count) node contract\(ids.count == 1 ? "" : "s") from flow"
+            persistGraphEditAndReload(action: action)
+        }
+        // An arrow drafting couldn't realize stays as intent — say why in the run's narration, or
+        // the run silently builds a graph missing wiring the user drew.
         let title: (SZNodeID) -> String = { [store] in store.project?.graph.node(id: $0)?.title ?? $0.uuidString }
-        for pair in skipped {
-            narrateDirector("Left the \(title(pair.from)) → \(title(pair.to)) arrow as intent — "
-                + "wiring it would close a data cycle.")
+        for skip in skipped {
+            let why: String
+            switch skip.reason {
+            case .wouldCloseCycle: why = "wiring it would close a data cycle"
+            case .noCompatiblePort: why = "no compatible texture port exists to carry it"
+            }
+            narrateDirector("Left the \(title(skip.from)) → \(title(skip.to)) arrow as intent — \(why).")
         }
     }
 

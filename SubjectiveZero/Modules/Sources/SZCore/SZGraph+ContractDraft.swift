@@ -19,18 +19,42 @@
 // in the Director's reconcile loop.
 import Foundation
 
+/// The draft port-naming convention — the ONE home for the literal names a drafted or seeded
+/// contract mints. `draftContractsFromFlow` declares them in pass 1 and wires them in pass 2, and
+/// `SZPromptSeed` mints a spawn's one-port contract with them; the coding-agent brief tells the
+/// agent to keep them verbatim.
+public enum SZDraftPortName {
+    public static let output = "output"
+    /// `input`, `input2`, … by incoming-arrow index: arrow k owns input k.
+    public static func input(_ k: Int = 0) -> String {
+        k == 0 ? "input" : "input\(k + 1)"
+    }
+}
+
 extension SZGraph {
+    /// Why a flow arrow was left as unresolved intent instead of realized into a data edge.
+    public enum SZFlowSkipReason: Equatable, Sendable {
+        /// The data edge would close a cycle.
+        case wouldCloseCycle
+        /// No compatible texture wiring: the source declares no texture output, or the target has no
+        /// unwired texture input left to bind.
+        case noCompatiblePort
+    }
+
     /// Draft a texture contract for every contract-less PROMPT node from its FLOW edges, realize each flow
     /// arrow as a DATA edge (removing the now-resolved intent arrow) so the implemented textures bind, and
     /// — if no render endpoint is set yet —
     /// point it at a terminal drafted node so a freshly drawn pipeline renders without a manual display
-    /// toggle. Nodes that already ship a contract (generated, library, split/merge pieces, a re-run node)
-    /// are left untouched, so this is idempotent across repeated runs. An arrow whose data edge would
-    /// close a cycle is NOT realized — it stays visible as unresolved intent, reported in `skipped` so
-    /// the run can say why. Returns the reconciled graph + the ids newly given a contract + the skipped
-    /// pairs.
+    /// toggle. Contracts that already exist (generated, library, split/merge pieces, a re-run node, a
+    /// data-spawn seed) are never rewritten, so this is idempotent across repeated runs — but arrows INTO
+    /// an already-contracted prompt node are still pass 2's to realize, into its declared unwired texture
+    /// inputs. An arrow that can't be realized — it would close a cycle, or no compatible texture port
+    /// exists on either end — stays visible as unresolved intent, reported in `skipped` with its reason
+    /// so the run can say why. Returns the reconciled graph + the ids newly given a contract + the
+    /// skipped arrows.
     public func draftContractsFromFlow()
-        -> (graph: SZGraph, drafted: [SZNodeID], skipped: [(from: SZNodeID, to: SZNodeID)]) {
+        -> (graph: SZGraph, drafted: [SZNodeID],
+            skipped: [(from: SZNodeID, to: SZNodeID, reason: SZFlowSkipReason)]) {
         let order = Dictionary(uniqueKeysWithValues: nodes.map(\.id).enumerated().map { ($1, $0) })
         var g = self
         var drafted: [SZNodeID] = []
@@ -41,49 +65,72 @@ extension SZGraph {
             let n = g.nodes[i]
             guard n.kind == .prompt, n.contract == nil else { continue }
             let inputs = incomingFlowSources(of: n.id, order: order).indices.map {
-                Self.texturePort($0 == 0 ? "input" : "input\($0 + 1)")
+                Self.texturePort(SZDraftPortName.input($0))
             }
             g.nodes[i].contract = SZNodeContract(
                 title: n.title, sfSymbol: n.sfSymbol, summary: n.prompt ?? n.title,
-                inputs: inputs, outputs: [Self.texturePort("output")])
+                inputs: inputs, outputs: [Self.texturePort(SZDraftPortName.output)])
             drafted.append(n.id)
         }
-        guard !drafted.isEmpty else { return (g, [], []) }
+        // Arrows INTO prompt nodes that already ship a contract (a data-spawn seed, a permission-
+        // declaring camera) are realized too — into their declared unwired texture inputs, the
+        // declaration respected, never rewritten — or reported, so drafting is never silent about
+        // an arrow the user drew.
+        let draftedSet = Set(drafted)
+        let contracted = g.nodes.filter { n in
+            n.kind == .prompt && n.contract != nil && !draftedSet.contains(n.id)
+                && g.connections.contains { $0.kind == .flow && $0.to.node == n.id && $0.from.node != n.id }
+        }.map(\.id)
+        guard !drafted.isEmpty || !contracted.isEmpty else { return (g, [], []) }
 
         // Endpoint — if unset, blit a terminal drafted node (no outgoing flow). Mark its output `display`.
-        if g.renderEndpoint == nil {
+        if g.renderEndpoint == nil, !drafted.isEmpty {
             let terminals = drafted.filter { id in
                 !g.connections.contains { $0.kind == .flow && $0.from.node == id }
             }
             if let tail = (terminals.isEmpty ? drafted : terminals).max(by: { order[$0]! < order[$1]! }) {
-                g.setOutputDisplay(on: tail, port: "output")
-                g.renderEndpoint = SZPortRef(node: tail, port: "output")
+                g.setOutputDisplay(on: tail, port: SZDraftPortName.output)
+                g.renderEndpoint = SZPortRef(node: tail, port: SZDraftPortName.output)
             }
         }
 
-        // Pass 2 — realize each flow arrow as a DATA edge into a drafted node, matching the drafted port
-        // names (source's existing texture output, else its drafted `output`), skipping pairs already
-        // data-connected. This is the flow→data promotion that makes the textures actually bind. As with
-        // `SZStore.connect`, realizing an arrow RESOLVES it: the flow intent edges are removed afterward
-        // (snapshot the realized pairs first — flow is read here, removed only after the loop).
+        // Pass 2 — realize each flow arrow as a DATA edge into a drafted or contracted target,
+        // skipping pairs already data-connected. Drafted targets bind their pass-1 names (input,
+        // input2, …); contracted targets bind their first unwired declared texture input. This is
+        // the flow→data promotion that makes the textures actually bind. As with `SZStore.connect`,
+        // realizing an arrow RESOLVES it: the flow intent edges are removed afterward (snapshot the
+        // realized pairs first — flow is read here, removed only after the loop).
         var realized: [(from: SZNodeID, to: SZNodeID)] = []
-        var skipped: [(from: SZNodeID, to: SZNodeID)] = []
-        for nid in drafted {
+        var skipped: [(from: SZNodeID, to: SZNodeID, reason: SZFlowSkipReason)] = []
+        for nid in drafted + contracted {
             for (k, source) in incomingFlowSources(of: nid, order: order).enumerated() {
                 let alreadyWired = g.connections.contains {
                     $0.kind == .data && $0.from.node == source && $0.to.node == nid
                 }
                 if alreadyWired { realized.append((source, nid)); continue }
+                // Both ports resolved against the DRAFTED graph (a pass-1 source's contract lives
+                // only in `g`). A source with no texture output, or a target with no free texture
+                // input, can't carry this wiring — the arrow stays as intent instead of an edge
+                // pointing at a phantom or mistyped port. Drafted targets keep the k-indexed names
+                // deliberately (arrow k owns input k, so a cycle-skipped arrow leaves ITS slot
+                // unwired); first-unwired would compact later arrows into earlier slots.
+                let inputPort = draftedSet.contains(nid)
+                    ? SZDraftPortName.input(k)
+                    : g.firstUnwiredTextureInput(of: nid)
+                guard let sourcePort = g.textureOutputPort(of: source), let inputPort else {
+                    skipped.append((source, nid, .noCompatiblePort))
+                    continue
+                }
                 // A realization that would close a data cycle is not laid: the arrow stays as
-                // unresolved intent (its drafted input stays unwired), and the pair is reported.
+                // unresolved intent (its input stays unwired), and the pair is reported.
                 guard g.wouldCloseCycle(from: source, to: nid) == nil else {
-                    skipped.append((source, nid))
+                    skipped.append((source, nid, .wouldCloseCycle))
                     continue
                 }
                 realized.append((source, nid))
                 g.connections.append(SZConnection(
-                    from: SZPortRef(node: source, port: textureOutputPort(of: source)),
-                    to: SZPortRef(node: nid, port: k == 0 ? "input" : "input\(k + 1)"),
+                    from: SZPortRef(node: source, port: sourcePort),
+                    to: SZPortRef(node: nid, port: inputPort),
                     kind: .data))
             }
         }
@@ -104,9 +151,22 @@ extension SZGraph {
         return sources.sorted { order[$0, default: 0] < order[$1, default: 0] }
     }
 
-    /// The name of `id`'s first texture output (its real contract's, else the drafted default `output`).
-    private func textureOutputPort(of id: SZNodeID) -> String {
-        node(id: id)?.contract?.outputs.first { $0.type == .texture }?.name ?? "output"
+    /// The name of `id`'s first texture output, resolved against THIS graph's contracts — nil when the
+    /// node declares none, in which case a flow arrow out of it has no texture wiring to realize.
+    /// The plain FIRST texture output, not `preferredTextureOutput`'s display-marked pick: the two
+    /// disagree on multi-output sources, and drafting wires from the first.
+    private func textureOutputPort(of id: SZNodeID) -> String? {
+        node(id: id)?.contract?.outputs.first { $0.type == .texture }?.name
+    }
+
+    /// The name of `id`'s first texture input with no incoming data edge, in declaration order — the
+    /// slot pass 2 binds when realizing an arrow into an already-contracted prompt node.
+    private func firstUnwiredTextureInput(of id: SZNodeID) -> String? {
+        node(id: id)?.contract?.inputs.first { p in
+            p.type == .texture && !connections.contains {
+                $0.kind == .data && $0.to == SZPortRef(node: id, port: p.name)
+            }
+        }?.name
     }
 
     private mutating func setOutputDisplay(on id: SZNodeID, port: String) {
