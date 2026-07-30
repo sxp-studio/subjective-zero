@@ -355,6 +355,25 @@ public struct SZProviderGenerationSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// A panel living in its own window instead of the main window's tile tree, with the window's
+/// frame in AppKit screen coordinates (bottom-left origin) — enough to put the window back on
+/// relaunch. The panel's dock-back spot rides `panelLayout.restorePositions`, not this record.
+public struct SZPoppedOutPanel: Codable, Equatable, Sendable {
+    public var panel: SZPanelID
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+
+    public init(panel: SZPanelID, x: Double, y: Double, width: Double, height: Double) {
+        self.panel = panel
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
 /// App-level preferences (docs/STATE.md), persisted per-machine by SZAppStateIO (app-state.json in
 /// Application Support — never in a project). `panelLayout` is live; windowSize/theme are still
 /// dormant placeholders.
@@ -410,6 +429,10 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// Optional for the same decode-compatibility reason; nil means OFF. Display-only: collection
     /// is gated separately (the host's trace flag).
     public var showTurnBreakdown: Bool?
+    /// Panels living in their own windows (pop-outs), with their screen frames — restored on
+    /// relaunch as part of the workspace arrangement. Optional for the same decode-compatibility
+    /// reason; nil means none popped out.
+    public var poppedOutPanels: [SZPoppedOutPanel]?
 
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
@@ -431,7 +454,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         showWelcomeAtStartup: Bool? = nil,
         showTokenCounts: Bool? = nil,
         telemetryEnabled: Bool? = nil,
-        showTurnBreakdown: Bool? = nil
+        showTurnBreakdown: Bool? = nil,
+        poppedOutPanels: [SZPoppedOutPanel]? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -450,6 +474,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.showTokenCounts = showTokenCounts
         self.telemetryEnabled = telemetryEnabled
         self.showTurnBreakdown = showTurnBreakdown
+        self.poppedOutPanels = poppedOutPanels
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

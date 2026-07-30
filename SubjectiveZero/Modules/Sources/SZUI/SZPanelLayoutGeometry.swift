@@ -44,9 +44,9 @@ public enum SZPanelLayoutGeometry {
     // MARK: - Layout
 
     /// The rect of every panel leaf, tiling `rect` (dividers carved out).
-    public static func leafFrames(root: SZPanelLayoutNode, in rect: CGRect) -> [SZPanelKind: CGRect] {
-        var frames: [SZPanelKind: CGRect] = [:]
-        walk(root, in: rect) { kind, leafRect in frames[kind] = leafRect } onDivider: { _ in }
+    public static func leafFrames(root: SZPanelLayoutNode, in rect: CGRect) -> [SZPanelID: CGRect] {
+        var frames: [SZPanelID: CGRect] = [:]
+        walk(root, in: rect) { id, leafRect in frames[id] = leafRect } onDivider: { _ in }
         return frames
     }
 
@@ -105,8 +105,8 @@ public enum SZPanelLayoutGeometry {
     /// splits across it take the max of their children.
     static func minLength(of node: SZPanelLayoutNode, along orientation: SZPanelSplitOrientation) -> CGFloat {
         switch node {
-        case .panel(let kind):
-            let size = minSize(for: kind)
+        case .panel(let id):
+            let size = minSize(for: id.kind)
             return orientation == .horizontal ? size.width : size.height
         case .split(let splitOrientation, _, let leading, let trailing):
             let a = minLength(of: leading, along: orientation)
@@ -121,11 +121,11 @@ public enum SZPanelLayoutGeometry {
 
     /// Single recursive pass emitting every leaf rect and divider.
     private static func walk(_ node: SZPanelLayoutNode, in rect: CGRect, path: SZPanelNodePath = [],
-                             onLeaf: (SZPanelKind, CGRect) -> Void,
+                             onLeaf: (SZPanelID, CGRect) -> Void,
                              onDivider: (SZPanelDividerFrame) -> Void) {
         switch node {
-        case .panel(let kind):
-            onLeaf(kind, rect)
+        case .panel(let id):
+            onLeaf(id, rect)
         case .split(let orientation, let fraction, let leading, let trailing):
             let available = max(axisLength(of: rect, along: orientation) - dividerThickness, 0)
             let leadingMin = minLength(of: leading, along: orientation)

@@ -115,9 +115,9 @@ extension SZHostBridge {
                     "scope": ["type": "string", "description": "the tab to move: a node uuid or \"director\""],
                     "before": ["type": "string", "description": "move it in front of this tab: a node uuid or \"director\""],
                  ], agentCallable: false),
-            tool("ui_show_panel", "Show a top-level panel (mirrors its View-menu toggle) — reopens at its remembered spot. Returns the resulting layout tree.",
+            tool("ui_show_panel", "Show a top-level panel (mirrors its View-menu toggle) — reopens at its remembered spot; a popped-out panel docks back instead. Returns the resulting layout tree.",
                  properties: ["panel": Self.panelProperty], agentCallable: false),
-            tool("ui_close_panel", "Close a top-level panel (mirrors its header ✕) — its split collapses and its spot is remembered. Returns {closed:true, layout}. The last panel can't be closed, and a panel that isn't open can't either: both return {closed:false, reason, layout}.",
+            tool("ui_close_panel", "Close a top-level panel (mirrors its header ✕) — its split collapses and its spot is remembered; a popped-out panel's window closes and its record is dropped. Returns {closed:true, layout, popped_out_panels}. The last panel can't be closed, and a panel that isn't open can't either: both return {closed:false, reason, layout, popped_out_panels}.",
                  properties: ["panel": Self.panelProperty], agentCallable: false),
             tool("ui_move_panel", "Move a panel (mirrors dragging its header onto another panel): an edge `zone` splits `onto` with `panel` on that side; \"center\" swaps the two. Returns the resulting layout tree.",
                  properties: [
@@ -125,11 +125,34 @@ extension SZHostBridge {
                     "onto": Self.panelProperty,
                     "zone": ["type": "string", "enum": ["left", "right", "top", "bottom", "center"]],
                  ], agentCallable: false),
+            tool("ui_clone_panel", "Clone a panel into a new tile beside it (a 50/50 split; mirrors the header's clone button — only the viewport is cloneable, up to \(SZPanelKind.viewport.maxInstances) tiles). Returns {cloned:true, id, layout, popped_out_panels} — `id` is the new tile's token (e.g. \"viewport:2\") — or {cloned:false, reason, layout, popped_out_panels}.",
+                 properties: ["panel": Self.panelProperty], agentCallable: false),
+            tool("ui_popout_panel", "Move a panel into its own floating window (mirrors the header's pop-out button — viewports only; the last tile can't pop out). Optional x/y/width/height place the window (AppKit screen coordinates, bottom-left origin); omitted, it opens exactly over its tile. Returns {popped_out:true, frame, layout, popped_out_panels} or {popped_out:false, reason, layout, popped_out_panels}.",
+                 properties: [
+                    "panel": Self.panelProperty,
+                    "x": ["type": "number"], "y": ["type": "number"],
+                    "width": ["type": "number"], "height": ["type": "number"],
+                 ], agentCallable: false),
+            tool("ui_dock_panel", "Dock a popped-out panel back into the main window as a tile. With `onto` + `zone` it lands on that edge of the target (the drag-to-dock path; edge zones only — a detached panel has nothing to swap with); omitted, it returns to its remembered spot (the dock-back button). Returns {docked:true, layout, popped_out_panels} or {docked:false, reason, layout, popped_out_panels}.",
+                 properties: [
+                    "panel": Self.panelProperty,
+                    "onto": Self.panelProperty,
+                    "zone": ["type": "string", "enum": ["left", "right", "top", "bottom"]],
+                 ], agentCallable: false),
         ]
     }
 
+    /// Every addressable tile token: bare kind strings for primaries, ":ordinal" for clones —
+    /// "viewport:2" is exactly the tile titled "Viewport 2" (one vocabulary for users, agents, disk).
+    private nonisolated static var panelTokens: [String] {
+        SZPanelKind.allCases.flatMap { kind in
+            (0..<kind.maxInstances).map { SZPanelID(kind, instance: $0).token }
+        }
+    }
+
     private nonisolated static var panelProperty: [String: Any] {
-        ["type": "string", "enum": SZPanelKind.allCases.map(\.rawValue)]
+        ["type": "string", "enum": panelTokens,
+         "description": "a panel — clones are instance-qualified (\"viewport:2\" = the tile titled Viewport 2)"]
     }
 
     func handleUITool(name: String, arguments: [String: Any]) throws -> String? {
@@ -159,6 +182,9 @@ extension SZHostBridge {
         case "ui_show_panel":      return try uiShowPanel(arguments)
         case "ui_close_panel":     return try uiClosePanel(arguments)
         case "ui_move_panel":      return try uiMovePanel(arguments)
+        case "ui_clone_panel":     return try uiClonePanel(arguments)
+        case "ui_popout_panel":    return try uiPopoutPanel(arguments)
+        case "ui_dock_panel":      return try uiDockPanel(arguments)
         default: return nil
         }
     }
@@ -763,31 +789,34 @@ extension SZHostBridge {
     }
 
     private func uiShowPanel(_ arguments: [String: Any]) throws -> String {
-        host.showPanel(try panelKindArgument(arguments, key: "panel"))
+        host.showPanel(try panelIDArgument(arguments, key: "panel"))
         return panelLayoutJSON()
     }
 
     private func uiClosePanel(_ arguments: [String: Any]) throws -> String {
-        let kind = try panelKindArgument(arguments, key: "panel")
-        // `removePanel` no-ops on the last panel and on one that isn't open. Report what happened rather
-        // than echoing a layout that silently didn't change (cf. ui_close_chat_tab's Director refusal).
-        guard host.panelLayout.contains(kind) else {
-            return refusedPanelClose("the \(kind.rawValue) panel isn't open")
+        let id = try panelIDArgument(arguments, key: "panel")
+        // The close no-ops on the last panel and on one that isn't open (tile OR pop-out). Report
+        // what happened rather than echoing a layout that silently didn't change (cf.
+        // ui_close_chat_tab's Director refusal).
+        guard host.panelLayout.contains(id) || host.isPoppedOut(id) else {
+            return refusedPanelClose("the \(id.token) panel isn't open")
         }
-        host.closePanel(kind)
-        guard !host.panelLayout.contains(kind) else {
+        host.closePanel(id)
+        guard !host.panelLayout.contains(id) && !host.isPoppedOut(id) else {
             return refusedPanelClose("the last panel can't be closed")
         }
-        return SZJSONRPC.encode(["closed": true, "layout": panelLayoutObject()])
+        return SZJSONRPC.encode(["closed": true, "layout": panelLayoutObject(),
+                                 "popped_out_panels": poppedOutTokens()])
     }
 
     private func refusedPanelClose(_ reason: String) -> String {
-        SZJSONRPC.encode(["closed": false, "reason": reason, "layout": panelLayoutObject()])
+        SZJSONRPC.encode(["closed": false, "reason": reason, "layout": panelLayoutObject(),
+                          "popped_out_panels": poppedOutTokens()])
     }
 
     private func uiMovePanel(_ arguments: [String: Any]) throws -> String {
-        let panel = try panelKindArgument(arguments, key: "panel")
-        let onto = try panelKindArgument(arguments, key: "onto")
+        let panel = try panelIDArgument(arguments, key: "panel")
+        let onto = try panelIDArgument(arguments, key: "onto")
         guard let zone = arguments.string("zone").flatMap(SZPanelDropZone.init(rawValue:)) else {
             throw SZMCPError.message("`zone` must be one of: left, right, top, bottom, center")
         }
@@ -795,12 +824,96 @@ extension SZHostBridge {
         return panelLayoutJSON()
     }
 
-    private func panelKindArgument(_ arguments: [String: Any], key: String) throws -> SZPanelKind {
-        guard let kind = arguments.string(key).flatMap(SZPanelKind.init(rawValue:)) else {
-            throw SZMCPError.message("`\(key)` must be one of: "
-                + SZPanelKind.allCases.map(\.rawValue).joined(separator: ", "))
+    private func uiClonePanel(_ arguments: [String: Any]) throws -> String {
+        let source = try panelIDArgument(arguments, key: "panel")
+        // Diagnose the refusal precisely — the gates mirror canClonePanel's, spelled out so the
+        // caller learns WHICH one bit.
+        guard source.kind.maxInstances > 1 else {
+            return refusedPanelOp("cloned", "\(source.kind.rawValue) isn't cloneable")
         }
-        return kind
+        guard host.panelLayout.contains(source) else {
+            return refusedPanelOp("cloned", "the \(source.token) panel isn't open")
+        }
+        guard let clone = host.clonePanel(source) else {
+            return refusedPanelOp("cloned",
+                                  "all \(source.kind.maxInstances) \(source.kind.rawValue) tiles already exist")
+        }
+        return SZJSONRPC.encode(["cloned": true, "id": clone.token, "layout": panelLayoutObject(),
+                                 "popped_out_panels": poppedOutTokens()])
+    }
+
+    private func uiPopoutPanel(_ arguments: [String: Any]) throws -> String {
+        let id = try panelIDArgument(arguments, key: "panel")
+        guard SZHost.popoutAllowedKinds.contains(id.kind) else {
+            return refusedPanelOp("popped_out", "\(id.kind.rawValue) panels can't pop out")
+        }
+        guard !host.isPoppedOut(id) else {
+            return refusedPanelOp("popped_out", "the \(id.token) panel is already popped out")
+        }
+        guard host.panelLayout.contains(id) else {
+            return refusedPanelOp("popped_out", "the \(id.token) panel isn't open")
+        }
+        guard host.panelLayout.presentIDs.count > 1 else {
+            return refusedPanelOp("popped_out", "the last panel can't pop out")
+        }
+        var frame: NSRect?
+        if let x = arguments.double("x"), let y = arguments.double("y"),
+           let width = arguments.double("width"), let height = arguments.double("height") {
+            frame = NSRect(x: x, y: y, width: width, height: height)
+        }
+        host.popOutPanel(id, frame: frame)
+        let applied = host.poppedOutPanels[id]
+        return SZJSONRPC.encode(["popped_out": true,
+                                 "frame": ["x": applied?.x ?? 0, "y": applied?.y ?? 0,
+                                           "width": applied?.width ?? 0, "height": applied?.height ?? 0],
+                                 "layout": panelLayoutObject(),
+                                 "popped_out_panels": poppedOutTokens()])
+    }
+
+    private func uiDockPanel(_ arguments: [String: Any]) throws -> String {
+        let id = try panelIDArgument(arguments, key: "panel")
+        guard host.isPoppedOut(id) else {
+            return refusedPanelOp("docked", "the \(id.token) panel isn't popped out")
+        }
+        let onto = arguments.string("onto")
+        let zone = arguments.string("zone")
+        if onto != nil || zone != nil {
+            // The explicit-target (drag-to-dock) path: both args or neither.
+            let target = try panelIDArgument(arguments, key: "onto")
+            guard let zone = zone.flatMap(SZPanelDropZone.init(rawValue:)), zone != .center else {
+                throw SZMCPError.message("`zone` must be one of: left, right, top, bottom"
+                    + " (docking only splits — a detached panel has nothing to swap with)")
+            }
+            guard host.panelLayout.contains(target) else {
+                return refusedPanelOp("docked", "the \(target.token) panel isn't open to dock onto")
+            }
+            host.dockPanel(id, onto: target, zone: zone)
+        } else {
+            host.dockPanel(id)
+        }
+        return SZJSONRPC.encode(["docked": true, "layout": panelLayoutObject(),
+                                 "popped_out_panels": poppedOutTokens()])
+    }
+
+    /// A structured panel-op refusal: `{<verb>: false, reason, layout, popped_out_panels}`.
+    /// The token array is deliberately NOT named "popped_out": that is ui_popout_panel's verb key,
+    /// and a dictionary literal with a duplicate key traps at runtime.
+    private func refusedPanelOp(_ verb: String, _ reason: String) -> String {
+        SZJSONRPC.encode([verb: false, "reason": reason, "layout": panelLayoutObject(),
+                          "popped_out_panels": poppedOutTokens()])
+    }
+
+    private func panelIDArgument(_ arguments: [String: Any], key: String) throws -> SZPanelID {
+        guard let id = arguments.string(key).flatMap(SZPanelID.init(token:)) else {
+            throw SZMCPError.message("`\(key)` must be one of: "
+                + Self.panelTokens.joined(separator: ", "))
+        }
+        return id
+    }
+
+    /// The popped-out panels as tokens, sorted for stable assertions.
+    private func poppedOutTokens() -> [String] {
+        host.poppedOutPanels.keys.sorted().map(\.token)
     }
 
     /// The layout tree after a panel op — lets a closed-loop test assert the exact resulting shape.

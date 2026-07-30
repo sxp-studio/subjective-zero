@@ -69,6 +69,17 @@ public final class SZRuntime: @unchecked Sendable {
     private let assets: SZAssetManager
     private let toolchain = SZToolchain()
     private let workspace: URL
+    /// The aspect-fit scaler behind size-mismatched presents (mirror viewports at their own size,
+    /// resize races). Its own kernel — NOT the preview stream's — and its own mutex: scaleTransform/
+    /// clipRect are mutated per encode, and mirrors present from independent display-link threads.
+    /// The critical section covers only set-transform + encode (CPU-cheap, per the lock-scope rule).
+    /// The box exists because MPS kernels aren't Sendable — safe here for the same narrow reason as
+    /// the class's own `@unchecked Sendable`: the kernel is only ever touched inside `withLock`.
+    private final class SZPresentScalerBox: @unchecked Sendable {
+        let kernel: MPSImageBilinearScale
+        init(device: any MTLDevice) { kernel = MPSImageBilinearScale(device: device) }
+    }
+    private let presentScaler = Mutex<SZPresentScalerBox?>(nil)
 
     /// The permission broker. The runtime owns permissions; capture lives in the node. The host
     /// pre-grants declared permissions (`requestDeclaredPermissions`) before loading.
@@ -534,35 +545,109 @@ public final class SZRuntime: @unchecked Sendable {
             // every project regardless of whether its node sources know about the timeline — and reading
             // the *current* endpoint means switching the display target while paused shows that node's
             // held frame, not a stale one. Re-presented each vsync so the freeze survives occlusion /
-            // display changes / resize.
+            // display changes / resize. The NON-allocating read matters: asking the pool at the layer's
+            // size would reallocate — i.e. destroy — the held frame on a paused resize.
             if state.timeline.paused {
-                return state.scheduler?.endpointTexture(assets: assets, width: width, height: height)
+                return state.scheduler?.heldEndpointTexture(assets: assets)
             }
             return encodeAndCommitFrame(&state, width: width, height: height).endpoint
         }
 
         // Blocking presentation below — no lock held.
+        presentEndpoint(endpoint, into: layer)
+    }
+
+    /// Mirror-viewport frame, called on that viewport's display-link thread: present the CURRENT
+    /// endpoint texture into `layer` WITHOUT advancing the timeline, WITHOUT writing
+    /// `state.renderSize`, and WITHOUT allocating in the texture pool — one viewport drives the
+    /// schedule (`drawLive`), every other visible viewport re-presents its output through here,
+    /// aspect-fitted to its own drawable size. Coherence rides the same whole-resource hazard
+    /// tracking as the paused hold (whole frames only, monotonic — see the class header).
+    ///
+    /// [Future per-viewport routing seam: an `endpoint: SZPortRef?` parameter resolving through the
+    /// same held-texture lookup slots in here (nil = the scheduler's renderEndpoint) — the host's
+    /// per-instance closure vend is the other half.]
+    public func presentCurrentFrame(into layer: CAMetalLayer) {
+        let size = layer.drawableSize   // synced by the view on the main thread
+        guard size.width > 0, size.height > 0 else { return }
+        let endpoint = engine.withLock { $0.scheduler?.heldEndpointTexture(assets: assets) }
+        presentEndpoint(endpoint, into: layer)
+    }
+
+    /// The shared presentation tail (blocking — call with NO lock held): acquire a drawable and
+    /// put `endpoint` on it. Equal sizes → the plain blit (the driver's hot path); mismatched
+    /// sizes (a mirror at its own size, a resize race, a paused resize) → clear to black and
+    /// aspect-fit-scale into the letterboxed region; no endpoint (node deleted, nothing rendered
+    /// yet) → clear to black rather than present an uninitialized buffer.
+    private func presentEndpoint(_ endpoint: (any MTLTexture)?, into layer: CAMetalLayer) {
         guard let drawable = layer.nextDrawable(),
               let presentBuffer = assets.commandQueue.makeCommandBuffer() else { return }
-        if let endpoint {
-            // Clamp to the drawable's actual size: the layer can resize between the drawableSize read
-            // (before encoding) and nextDrawable(), and an out-of-bounds blit fails Metal validation.
-            Self.encodeCopy(endpoint, into: drawable.texture,
-                            width: min(width, drawable.texture.width),
-                            height: min(height, drawable.texture.height),
+        let target = drawable.texture
+        if let endpoint, endpoint.width == target.width, endpoint.height == target.height {
+            Self.encodeCopy(endpoint, into: target, width: endpoint.width, height: endpoint.height,
                             on: presentBuffer)
+        } else if let endpoint {
+            Self.encodeClear(target, on: presentBuffer)
+            encodeAspectFitScale(endpoint, into: target, on: presentBuffer)
         } else {
-            // No render endpoint (e.g. its node was deleted): clear the drawable to black instead of
-            // presenting an uninitialized buffer, which shows up as garbage/glitching.
-            let pass = MTLRenderPassDescriptor()
-            pass.colorAttachments[0].texture = drawable.texture
-            pass.colorAttachments[0].loadAction = .clear
-            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-            pass.colorAttachments[0].storeAction = .store
-            presentBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+            Self.encodeClear(target, on: presentBuffer)
         }
         presentBuffer.present(drawable)
         presentBuffer.commit()
+    }
+
+    /// Clear a texture to opaque black (letterbox bars, endpoint-less viewports).
+    private static func encodeClear(_ texture: any MTLTexture, on commandBuffer: any MTLCommandBuffer) {
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        pass.colorAttachments[0].storeAction = .store
+        commandBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+    }
+
+    /// Encode the aspect-fit bilinear scale of `source` into `destination`'s letterboxed center.
+    /// The clipRect is essential: without it MPS fills the WHOLE destination with edge-clamped
+    /// samples, smearing the image across the letterbox bars.
+    private func encodeAspectFitScale(_ source: any MTLTexture, into destination: any MTLTexture,
+                                      on commandBuffer: any MTLCommandBuffer) {
+        let fit = Self.aspectFit(source: (source.width, source.height),
+                                 dest: (destination.width, destination.height))
+        let fittedWidth = min(Int((Double(source.width) * fit.scale).rounded()), destination.width)
+        let fittedHeight = min(Int((Double(source.height) * fit.scale).rounded()), destination.height)
+        guard fittedWidth > 0, fittedHeight > 0 else { return }
+        presentScaler.withLock { slot in
+            let box = slot ?? SZPresentScalerBox(device: assets.device)
+            slot = box
+            // Placement comes from the clipRect ALONE, translation stays zero: MPS composes the
+            // scale transform's translation RELATIVE to the clipRect origin (verified empirically
+            // — a centering translate + a matching clip origin landed the image at 2× the offset,
+            // half in, half clipped: the "black mirror tiles" bug). Zero translate puts the scaled
+            // image exactly in the clipped letterbox region; everything outside stays the cleared
+            // black bars.
+            var transform = MPSScaleTransform(scaleX: fit.scale, scaleY: fit.scale,
+                                              translateX: 0, translateY: 0)
+            withUnsafePointer(to: &transform) { pointer in
+                box.kernel.scaleTransform = pointer
+                box.kernel.clipRect = MTLRegion(
+                    origin: MTLOrigin(x: min(Int(fit.translateX.rounded()), destination.width - fittedWidth),
+                                      y: min(Int(fit.translateY.rounded()), destination.height - fittedHeight), z: 0),
+                    size: MTLSize(width: fittedWidth, height: fittedHeight, depth: 1))
+                box.kernel.encode(commandBuffer: commandBuffer, sourceTexture: source,
+                                  destinationTexture: destination)
+            }
+        }
+    }
+
+    /// Aspect-fit mapping of a source size into a destination size: uniform scale (the smaller of
+    /// the two axis ratios) and the centering translation. Pure — pinned by unit tests.
+    static func aspectFit(source: (width: Int, height: Int), dest: (width: Int, height: Int))
+        -> (scale: Double, translateX: Double, translateY: Double) {
+        let scale = min(Double(dest.width) / Double(source.width),
+                        Double(dest.height) / Double(source.height))
+        let tx = (Double(dest.width) - Double(source.width) * scale) / 2
+        let ty = (Double(dest.height) - Double(source.height) * scale) / 2
+        return (scale, tx, ty)
     }
 
     /// Real framebuffer readback of the render-endpoint texture (`agent_view_frame`). Renders a fresh
@@ -589,12 +674,13 @@ public final class SZRuntime: @unchecked Sendable {
                 return target
             }
 
-            let width = state.renderSize.width, height = state.renderSize.height
-
             // Paused → capture the HELD endpoint without advancing the schedule, matching the live
-            // viewport (both freeze the whole graph at the runtime level).
+            // viewport (both freeze the whole graph at the runtime level). The non-allocating read
+            // matters here too: renderSize can have moved under a paused hold (viewport resized),
+            // and an allocating read at the new size would destroy the held frame — the capture
+            // reports the held texture's own dimensions, which is the truth.
             if state.timeline.paused {
-                guard let endpoint = state.scheduler?.endpointTexture(assets: assets, width: width, height: height),
+                guard let endpoint = state.scheduler?.heldEndpointTexture(assets: assets),
                       let commandBuffer = assets.commandQueue.makeCommandBuffer(),
                       let capture = captureEndpoint(commandBuffer, endpoint) else { return (nil, nil) }
                 commandBuffer.commit()
@@ -602,7 +688,8 @@ public final class SZRuntime: @unchecked Sendable {
             }
 
             var capture: (any MTLTexture)?
-            let (buffer, _) = encodeAndCommitFrame(&state, width: width, height: height) { commandBuffer, endpoint in
+            let (buffer, _) = encodeAndCommitFrame(&state, width: state.renderSize.width,
+                                                   height: state.renderSize.height) { commandBuffer, endpoint in
                 capture = captureEndpoint(commandBuffer, endpoint)
             }
             return (buffer, capture)

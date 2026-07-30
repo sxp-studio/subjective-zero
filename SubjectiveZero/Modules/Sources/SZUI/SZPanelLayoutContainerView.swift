@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The rearrangeable panel container — renders the SZCore split tree as a FLAT ZStack of absolutely
 // positioned tiles, NOT nested split views. Flatness is the point: each panel's SwiftUI identity is
-// its SZPanelKind (stable ForEach id), so re-parenting a panel in the tree just moves a rect — the
-// viewport's MTKView is never torn down and the node editor's zoom/pan and the chat draft survive
+// its SZPanelID (stable ForEach id), so re-parenting a panel in the tree just moves a rect — the
+// viewport's Metal view is never torn down and the node editor's zoom/pan and the chat draft survive
 // any rearrangement. Dividers draw on top and drag to resize.
 //
 // State-derived like every SZUI panel: takes the layout VALUE plus intent callbacks; the host owns
@@ -13,6 +13,20 @@ import SZCore
 /// The container's named coordinate space — header drags and divider drags both speak it.
 /// (A standalone constant: the container view is generic, so a static on it is awkward to name.)
 let szPanelGridSpaceName = "szpanelgrid"
+
+/// A pending dock from OUTSIDE the container (a popped-out window dragged over the main window):
+/// the tinted rect to preview and the label spelling out the change. The host computes it from the
+/// pop-out drag (SZPopoutDockSession) and passes it down; the container just renders it with the
+/// same affordance as its own header drags.
+public struct SZPanelDockPreview: Equatable {
+    public var rect: CGRect
+    public var label: String
+
+    public init(rect: CGRect, label: String) {
+        self.rect = rect
+        self.label = label
+    }
+}
 
 public struct SZPanelLayoutContainerView<Content: View>: View {
     private let layout: SZPanelLayoutState
@@ -25,46 +39,74 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
     private let topInset: CGFloat
     /// View ▸ Auto-Hide Panel Headers — passed through to every tile's chrome.
     private let autoHideHeaders: Bool
-    /// View ▸ Rounded Viewport Corners — passed to every tile's chrome; only the viewport tile
-    /// honors it (squares its corners when off), so other tiles stay rounded regardless.
+    /// View ▸ Rounded Viewport Corners — passed to every tile's chrome; only viewport tiles
+    /// honor it (square their corners when off), so other tiles stay rounded regardless.
     private let viewportRoundedCorners: Bool
     /// The panel blown up to fill the window (others hidden), if any — a render override on top of
     /// the split tree, so restore returns the exact prior layout. Ignored if the named panel isn't present.
-    private let maximizedPanel: SZPanelKind?
+    private let maximizedPanel: SZPanelID?
+    /// A popped-out window's drag hovering a dock spot — rendered with the drop-preview affordance.
+    private let externalDockPreview: SZPanelDockPreview?
+    /// The user-facing name per tile (positional numbering from the host; defaults to the
+    /// identity name for previews/tests).
+    private let title: (SZPanelID) -> String
+    /// Whether a tile offers the clone header button (host-gated: kind cloneable + a free instance).
+    private let canClone: (SZPanelID) -> Bool
+    /// Whether a tile offers the pop-out header button (host-gated: kind allowed + not the last tile).
+    private let canPopOut: (SZPanelID) -> Bool
     private let onDividerFractionChange: (SZPanelNodePath, Double) -> Void
     private let onDividerDragEnd: (SZPanelNodePath, Double) -> Void
-    private let onMovePanel: (SZPanelKind, SZPanelKind, SZPanelDropZone) -> Void
-    private let onClosePanel: (SZPanelKind) -> Void
-    private let onToggleMaximize: (SZPanelKind) -> Void
-    private let content: (SZPanelKind) -> Content
+    private let onMovePanel: (SZPanelID, SZPanelID, SZPanelDropZone) -> Void
+    private let onClosePanel: (SZPanelID) -> Void
+    private let onToggleMaximize: (SZPanelID) -> Void
+    private let onClonePanel: (SZPanelID) -> Void
+    private let onPopOutPanel: (SZPanelID) -> Void
+    /// A header drag released OUTSIDE the container (dragged out of the window): tear the tile out
+    /// into its own window at the cursor. Gated by `canPopOut` like the header button.
+    private let onTearOutPanel: (SZPanelID) -> Void
+    private let content: (SZPanelID) -> Content
 
     /// A header drag in flight: the lifted panel and the cursor (grid space). Drives the dimming,
     /// the cursor ghost, and the drop-preview overlay.
-    @State private var panelDrag: (kind: SZPanelKind, location: CGPoint)?
+    @State private var panelDrag: (id: SZPanelID, location: CGPoint)?
 
     public init(layout: SZPanelLayoutState,
                 windowControlsZone: CGRect? = nil,
                 topInset: CGFloat = SZPanelLayoutGeometry.outerGap,
                 autoHideHeaders: Bool = false,
                 viewportRoundedCorners: Bool = true,
-                maximizedPanel: SZPanelKind? = nil,
+                maximizedPanel: SZPanelID? = nil,
+                externalDockPreview: SZPanelDockPreview? = nil,
+                title: @escaping (SZPanelID) -> String = { $0.displayName },
+                canClone: @escaping (SZPanelID) -> Bool = { _ in false },
+                canPopOut: @escaping (SZPanelID) -> Bool = { _ in false },
                 onDividerFractionChange: @escaping (SZPanelNodePath, Double) -> Void,
                 onDividerDragEnd: @escaping (SZPanelNodePath, Double) -> Void,
-                onMovePanel: @escaping (SZPanelKind, SZPanelKind, SZPanelDropZone) -> Void,
-                onClosePanel: @escaping (SZPanelKind) -> Void,
-                onToggleMaximize: @escaping (SZPanelKind) -> Void = { _ in },
-                @ViewBuilder content: @escaping (SZPanelKind) -> Content) {
+                onMovePanel: @escaping (SZPanelID, SZPanelID, SZPanelDropZone) -> Void,
+                onClosePanel: @escaping (SZPanelID) -> Void,
+                onToggleMaximize: @escaping (SZPanelID) -> Void = { _ in },
+                onClonePanel: @escaping (SZPanelID) -> Void = { _ in },
+                onPopOutPanel: @escaping (SZPanelID) -> Void = { _ in },
+                onTearOutPanel: @escaping (SZPanelID) -> Void = { _ in },
+                @ViewBuilder content: @escaping (SZPanelID) -> Content) {
         self.layout = layout
         self.windowControlsZone = windowControlsZone
         self.topInset = topInset
         self.autoHideHeaders = autoHideHeaders
         self.viewportRoundedCorners = viewportRoundedCorners
         self.maximizedPanel = maximizedPanel
+        self.externalDockPreview = externalDockPreview
+        self.title = title
+        self.canClone = canClone
+        self.canPopOut = canPopOut
         self.onDividerFractionChange = onDividerFractionChange
         self.onDividerDragEnd = onDividerDragEnd
         self.onMovePanel = onMovePanel
         self.onClosePanel = onClosePanel
         self.onToggleMaximize = onToggleMaximize
+        self.onClonePanel = onClonePanel
+        self.onPopOutPanel = onPopOutPanel
+        self.onTearOutPanel = onTearOutPanel
         self.content = content
     }
 
@@ -80,32 +122,38 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
             let frames = isMax ? [maximizedPanel!: rect]
                                : SZPanelLayoutGeometry.leafFrames(root: layout.root, in: rect)
             let dividers = isMax ? [] : SZPanelLayoutGeometry.dividerFrames(root: layout.root, in: rect)
-            // allCases order (not tree order) so the ForEach data stays stable across rearrangements —
-            // identity is the kind, the tree only decides the rects.
-            let kinds = SZPanelKind.allCases.filter { frames[$0] != nil }
+            // Sorted (kind block, then instance — SZPanelID's Comparable), not tree order, so the
+            // ForEach data stays stable across rearrangements — identity is the id, the tree only
+            // decides the rects.
+            let ids = frames.keys.sorted()
 
             ZStack(alignment: .topLeading) {
                 // Backdrop: window background + window-drag from any gap/margin (holes punched over
                 // every tile and divider so it never steals their mouse).
                 SZPanelWindowDragBackdrop(
                     passthroughRects: Array(frames.values) + dividers.map(\.rect))
-                ForEach(kinds, id: \.self) { kind in
-                    let frame = frames[kind]!
-                    SZPanelChromeView(kind: kind, canClose: kinds.count > 1,
-                                      canMaximize: layout.presentKinds.count > 1,
-                                      isMaximized: maximizedPanel == kind,
+                ForEach(ids, id: \.self) { id in
+                    let frame = frames[id]!
+                    SZPanelChromeView(id: id, title: title(id), canClose: ids.count > 1,
+                                      canMaximize: layout.presentIDs.count > 1,
+                                      isMaximized: maximizedPanel == id,
+                                      canClone: canClone(id),
+                                      canPopOut: canPopOut(id),
                                       autoHideEnabled: autoHideHeaders,
                                       viewportRoundedCorners: viewportRoundedCorners,
                                       headerLeadingInset: headerLeadingInset(for: frame),
-                                      onClose: { onClosePanel(kind) },
-                                      onToggleMaximize: { onToggleMaximize(kind) },
-                                      onHeaderDragChanged: { panelDrag = (kind, $0) },
-                                      onHeaderDragEnded: { endPanelDrag(kind, at: $0, frames: frames) }) {
-                        content(kind)
+                                      onClose: { onClosePanel(id) },
+                                      onToggleMaximize: { onToggleMaximize(id) },
+                                      onClone: { onClonePanel(id) },
+                                      onPopOut: { onPopOutPanel(id) },
+                                      onHeaderDragChanged: { panelDrag = (id, $0) },
+                                      onHeaderDragEnded: { endPanelDrag(id, at: $0, frames: frames,
+                                                                        containerSize: proxy.size) }) {
+                        content(id)
                     }
                     .frame(width: frame.width, height: frame.height)
                     .position(x: frame.midX, y: frame.midY)
-                    .opacity(panelDrag?.kind == kind ? 0.45 : 1)   // the lifted panel dims (tab-drag idiom)
+                    .opacity(panelDrag?.id == id ? 0.45 : 1)   // the lifted panel dims (tab-drag idiom)
                 }
                 ForEach(dividers, id: \.path) { divider in
                     let strip = SZPanelDividerView(divider: divider,
@@ -118,13 +166,14 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
                 dropPreviewOverlay(frames: frames)
                 dragGhost
             }
-            // Animate structural changes (drop/close/reopen) only — leafKinds ignores fractions, so
+            // Animate structural changes (drop/close/reopen) only — leafIDs ignores fractions, so
             // live divider drags track the cursor instead of chasing it through an animation.
-            .animation(.easeInOut(duration: 0.18), value: layout.root.leafKinds)
+            .animation(.easeInOut(duration: 0.18), value: layout.root.leafIDs)
             // Maximize/restore grows or shrinks the tile(s) — animate on the maximized panel so the
             // real content resizes smoothly into / out of the full window.
             .animation(.easeInOut(duration: 0.2), value: maximizedPanel)
             .animation(.easeOut(duration: 0.12), value: dropCandidate(frames: frames)?.preview)
+            .animation(.easeOut(duration: 0.12), value: externalDockPreview)
             .coordinateSpace(name: szPanelGridSpaceName)
         }
     }
@@ -140,43 +189,66 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
 
     /// The panel + zone under the cursor mid-drag (excluding the dragged panel itself), with the
     /// tinted preview rect. Leaf rects never overlap, so at most one panel contains the cursor.
-    private func dropCandidate(frames: [SZPanelKind: CGRect])
-        -> (target: SZPanelKind, zone: SZPanelDropZone, preview: CGRect)? {
+    private func dropCandidate(frames: [SZPanelID: CGRect])
+        -> (target: SZPanelID, zone: SZPanelDropZone, preview: CGRect)? {
         guard let drag = panelDrag,
-              let (target, rect) = frames.first(where: { $0.key != drag.kind && $0.value.contains(drag.location) })
+              let (target, rect) = frames.first(where: { $0.key != drag.id && $0.value.contains(drag.location) })
         else { return nil }
         let zone = SZPanelLayoutGeometry.dropZone(at: drag.location, in: rect)
         return (target, zone, SZPanelLayoutGeometry.dropPreviewRect(zone: zone, in: rect))
     }
 
-    /// Commit (or cancel) a header drag: over another panel → move; anywhere else → no-op.
-    private func endPanelDrag(_ kind: SZPanelKind, at location: CGPoint, frames: [SZPanelKind: CGRect]) {
+    /// Commit (or cancel) a header drag: over another panel → move; released OUTSIDE the window
+    /// (the gesture keeps tracking past the edge — its location just leaves the bounds) → tear
+    /// the tile out into its own window, if its kind can pop out. Released in an in-window gap →
+    /// no-op, as ever. The margin keeps near-edge releases that are still visually INSIDE the
+    /// window (the titlebar strip above the container, the outer gaps) as cancels — tear-out
+    /// means clearly past the edge, not one point over a boundary.
+    private static var tearOutMargin: CGFloat { 40 }   // computed: stored statics don't fit generic types
+
+    private func endPanelDrag(_ id: SZPanelID, at location: CGPoint, frames: [SZPanelID: CGRect],
+                              containerSize: CGSize) {
         defer { panelDrag = nil }
-        panelDrag = (kind, location)
-        guard let hit = dropCandidate(frames: frames) else { return }
-        onMovePanel(kind, hit.target, hit.zone)
+        panelDrag = (id, location)
+        let windowish = CGRect(origin: .zero, size: containerSize)
+            .insetBy(dx: -Self.tearOutMargin, dy: -Self.tearOutMargin)
+        if let hit = dropCandidate(frames: frames) {
+            onMovePanel(id, hit.target, hit.zone)
+        } else if !windowish.contains(location), canPopOut(id) {
+            onTearOutPanel(id)
+        }
     }
 
-    /// The overlay explaining the pending change: the half of the target the dragged panel would
-    /// take (or the whole target for a swap), tinted + dashed, with a capsule label spelling it out.
+    /// The overlay explaining a pending change — an internal header drag's candidate, or a
+    /// popped-out window hovering a dock spot (the host-computed external preview). One renderer,
+    /// one affordance.
     @ViewBuilder
-    private func dropPreviewOverlay(frames: [SZPanelKind: CGRect]) -> some View {
+    private func dropPreviewOverlay(frames: [SZPanelID: CGRect]) -> some View {
         if let drag = panelDrag, let hit = dropCandidate(frames: frames) {
-            RoundedRectangle(cornerRadius: SZPanelLayoutGeometry.tileCornerRadius, style: .continuous)
-                .fill(Self.accent.opacity(0.10))
-                .strokeBorder(Self.accent.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                .overlay {
-                    Text(Self.previewLabel(dragged: drag.kind, target: hit.target, zone: hit.zone))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Self.accent)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(.ultraThinMaterial, in: Capsule())
-                }
-                .frame(width: hit.preview.width, height: hit.preview.height)
-                .position(x: hit.preview.midX, y: hit.preview.midY)
-                .allowsHitTesting(false)
-                .transition(.opacity)
+            Self.previewRect(hit.preview,
+                             label: Self.previewLabel(dragged: title(drag.id), target: title(hit.target),
+                                                      zone: hit.zone))
+        } else if let external = externalDockPreview {
+            Self.previewRect(external.rect, label: external.label)
         }
+    }
+
+    /// The tinted + dashed pending-change rect with its capsule label.
+    private static func previewRect(_ rect: CGRect, label: String) -> some View {
+        RoundedRectangle(cornerRadius: SZPanelLayoutGeometry.tileCornerRadius, style: .continuous)
+            .fill(Self.accent.opacity(0.10))
+            .strokeBorder(Self.accent.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+            .overlay {
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Self.accent)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+            .allowsHitTesting(false)
+            .transition(.opacity)
     }
 
     /// A small capsule with the panel's name riding just above the cursor while its header is dragged.
@@ -185,7 +257,7 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
         if let drag = panelDrag {
             HStack(spacing: 5) {
                 Image(systemName: "rectangle.dashed")
-                Text(drag.kind.displayName)
+                Text(title(drag.id))
             }
             .font(.system(size: 11, weight: .semibold))
             .padding(.horizontal, 10).padding(.vertical, 5)
@@ -196,15 +268,16 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
         }
     }
 
-    private static var accent: Color { Color(red: 0.26, green: 0.59, blue: 1.0) }   // the app's insertion blue
+    /// The app's insertion blue — shared with SZPopoutDockSession's callers via this file's renderer.
+    private static var accent: Color { Color(red: 0.26, green: 0.59, blue: 1.0) }
 
-    private static func previewLabel(dragged: SZPanelKind, target: SZPanelKind, zone: SZPanelDropZone) -> String {
+    private static func previewLabel(dragged: String, target: String, zone: SZPanelDropZone) -> String {
         switch zone {
-        case .center: "Swap \(target.displayName) ↔ \(dragged.displayName)"
-        case .left: "Split left — \(dragged.displayName) here"
-        case .right: "Split right — \(dragged.displayName) here"
-        case .top: "Split top — \(dragged.displayName) here"
-        case .bottom: "Split bottom — \(dragged.displayName) here"
+        case .center: "Swap \(target) ↔ \(dragged)"
+        case .left: "Split left — \(dragged) here"
+        case .right: "Split right — \(dragged) here"
+        case .top: "Split top — \(dragged) here"
+        case .bottom: "Split bottom — \(dragged) here"
         }
     }
 }

@@ -38,3 +38,6 @@ internal/
 
 # Misc
 *.log
+
+# Coverage artifacts (swift test)
+*.profraw

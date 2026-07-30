@@ -193,14 +193,17 @@ struct SZScheduler: Sendable {
             id: Self.textureID(node: endpoint.node, port: endpoint.port), width: width, height: height)
     }
 
-    /// The pooled texture the CURRENT `renderEndpoint` points at, WITHOUT encoding a frame. The by-id
-    /// pool still holds every node's last-written output, so a paused viewport can present the live
-    /// endpoint by reading it directly — and following a display-target switch shows that node's held
-    /// frame rather than a stale cached one. nil if there's no endpoint.
-    func endpointTexture(assets: SZAssetManager, width: Int, height: Int) -> (any MTLTexture)? {
+    /// The pooled texture the CURRENT `renderEndpoint` points at, WITHOUT encoding a frame and
+    /// WITHOUT allocating — at whatever size the last schedule pass rendered it, nil when there's
+    /// no endpoint or it has never been written. The by-id pool still holds every node's
+    /// last-written output, so a paused or mirror viewport can present the live endpoint by
+    /// reading it directly — and following a display-target switch shows that node's held frame
+    /// rather than a stale cached one. Non-allocating is the point: the pool reallocates (and
+    /// thereby DESTROYS) a texture on any size change, so a present-only reader asking at its own
+    /// size would trash the held frame it came for.
+    func heldEndpointTexture(assets: SZAssetManager) -> (any MTLTexture)? {
         guard let endpoint = renderEndpoint else { return nil }
-        return assets.texture(
-            id: Self.textureID(node: endpoint.node, port: endpoint.port), width: width, height: height)
+        return assets.existing(id: Self.textureID(node: endpoint.node, port: endpoint.port))
     }
 
     static func textureID(node: SZNodeID, port: String) -> String { "\(node.uuidString):\(port)" }

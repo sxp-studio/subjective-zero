@@ -12,17 +12,56 @@ floats over the viewport" sketch - panels are tiled sections, not overlays): a b
 `SZPanelLayoutContainerView` as rounded tiles on a near-black window background.
 
 - Every panel wears a thin **name header** (`SZPanelChromeView`): the drag handle, plus a ✕.
+- **Panel identity is `SZPanelID`** - a kind plus an instance ordinal, addressed everywhere by
+  one string token: `viewport` (the primary), `viewport:2`, … Identity is stable - closing an
+  instance never renumbers another's token, and the next clone fills the lowest free number.
+  Kinds may repeat up to `SZPanelKind.maxInstances` (viewport 8, everything else 1); each
+  `SZPanelID` appears at most once. **Titles are positional, not identities**
+  (`SZPanelID.displayTitles`): a lone viewport is "Viewport"; several live ones (tiles +
+  pop-out windows) are always a dense "Viewport 1..n" in instance order, renumbering as
+  instances come and go - so what users SEE always counts 1..n while records/agents hold
+  stable tokens underneath.
+- **Clone** (header button / View ▸ Clone Viewport / `ui_clone_panel`): splits the source tile
+  50/50 with a new instance of its kind - the lowest free number, so closed numbers are reused.
+  Only the viewport is cloneable today; every viewport shows the same render, with per-clone
+  render routing as the planned follow-on.
+- **Render resolution: the drivership ladder** (`SZViewportDriverRegistry`) - fullscreen
+  pop-outs > windowed pop-outs > the primary tile. Fullscreen a pop-out on a projector and the
+  graph renders at projector resolution while the editor tiles show a crisp downscale; fullscreen
+  outranks floating windows regardless of area (an accidentally-enlarged preview window must
+  never steal native resolution from the stage output). Within a rung, largest drawable area
+  wins with ~15% hysteresis. With everything docked, the primary tile drives unconditionally -
+  tiles never compete by area, so no divider drag can reshape the frame and docking a window
+  back restores normal tile rendering. Mirrors are aspect-fit, letterboxed when shapes differ.
+- **Pop out** (header button / View ▸ Pop Out Viewport / `ui_popout_panel` — or **drag the tile's
+  header out of the window**: releasing outside the container tears it out into a window under
+  the cursor): moves a viewport into its own floating window; via the button it opens exactly
+  over its tile (the tile detaches in place; the layout closes the gap behind it). The window is fullscreen-capable (green button - the projector case).
+  Pop-outs are children of the main window's lifetime: closing the main window closes them first
+  (quit-on-close is unchanged), and they hide behind the welcome surface. The window's ✕/⌘W
+  **docks the panel back**; View-menu off / `ui_close_panel` closes it for real.
+- **Dock back**: the pop-out header's dock button returns the panel to its remembered spot
+  (animating the window home first), or **drag the pop-out window - titlebar or anywhere on its
+  body - over the main window** to dock it at any edge zone, with the same tinted drop preview as
+  internal drags (`SZPopoutDockSession` owns the hit-testing; the manager reconstructs native
+  window drags from move events + the mouse button, since AppKit has no end-of-drag API).
+  `ui_dock_panel` mirrors both paths.
 - **Drag a header onto another panel** to rearrange: edge zones split that panel (a tinted overlay
   + label explain the pending change), the center zone swaps the two. Dropping runs a quick
-  autolayout (`normalize()`: fraction clamping + tree sanitizing).
+  autolayout (`normalize()`: fraction clamping + tree sanitizing, including stripping instances
+  beyond a kind's cap).
 - **Dividers** (the gaps between tiles) drag to resize, with per-orientation resize cursors and
   per-panel minimum sizes.
 - **Closing** a panel collapses its split and remembers its spot; reopening (View-menu toggles,
   ⌘⌥1/2/3 - chat also via the HUD message icon) restores it.
 - The layout persists per machine in `app-state.json` (`SZAppState` via `SZAppStateIO`, Application
-  Support) - deliberately **not** in the project: a `.subz` is a portable document.
+  Support) - deliberately **not** in the project: a `.subz` is a portable document. Popped-out
+  windows persist beside it (`poppedOutPanels`, screen frames sanitized against the current
+  displays on restore), so the whole arrangement - windows included - survives a relaunch.
 - Panel tiles render as a flat ZStack keyed by panel identity, so rearranging never tears down
   panel internals (the Metal viewport, canvas zoom/pan, and chat drafts survive every move).
+  Popping out / docking intentionally recreates the panel's view in its new window (render state
+  lives in the runtime).
 
 ```
 ┌─ SZApp window ──────────────────────────────────┐

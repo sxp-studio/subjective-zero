@@ -51,6 +51,11 @@ human-diffable style as `project.json`, but never part of a `.subz`: a project i
 document and says nothing about this machine's window). Live today: `panelLayout` - the window's
 panel split tree + remembered reopen spots ([UI.md](UI.md#layout)), saved on every layout change
 and restored (sanitized via `normalize()`) at launch; a missing/corrupt file just means defaults.
+Tiles are addressed by `SZPanelID` tokens (`viewport`, `viewport:2` for clones) - a clone-free
+layout encodes byte-identically to the pre-instance format, so old builds keep reading new files
+until a clone exists. Also live: `poppedOutPanels` - panels living in their own windows with their
+screen frames, restored (frames sanitized against the current displays) when the workspace next
+appears; the panel's dock-back spot rides `panelLayout.restorePositions`, not this record.
 Also live: `defaultProviderID` - the provider confirmed in the Agent Providers setup sheet
 ([AI_PROVIDERS.md](AI_PROVIDERS.md)); nil means first-run setup hasn't been confirmed, which is
 what auto-presents the sheet at launch (post-first-run, a composer picker switch re-persists it -

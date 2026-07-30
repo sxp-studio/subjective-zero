@@ -74,6 +74,7 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
                                             // CHANGE resets agent sessions and is refused while
                                             // busy; response echoes the resolved selection)
 - `ui_show_panel`, `ui_close_panel`, `ui_move_panel`  // panel layout: reopen / ✕ / header drag & drop
+- `ui_clone_panel`, `ui_popout_panel`, `ui_dock_panel`  // viewport clones + pop-out windows (panels addressed by token, e.g. "viewport:2")
 
 **`agent_` (orchestration + host ops)**
 - `agent_read_graph`, `agent_read_node`

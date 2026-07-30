@@ -28,9 +28,10 @@ enum SZPendingGraphOp {
 @Observable
 final class SZHost {
     private(set) var runtime: SZRuntime?
-    /// Per-frame viewport render, vended to SZUI's panel — called on the panel's display-link render
-    /// thread (SZRuntime.drawLive(into:) is thread-safe; see its threading contract).
-    private(set) var renderViewportFrame: ((CAMetalLayer) -> Void)?
+    /// Which viewport instance drives the frame schedule (the rest mirror) — consulted at call
+    /// time by the closures `renderFrame(for:)` vends (SZHost+Popout.swift); re-synced by
+    /// `syncViewportDriver()` on every visibility change.
+    let viewportDriver = SZViewportDriverRegistry()
     internal(set) var status = "starting…"
     private var started = false
     /// One source watcher per watched node, id-keyed — so `watchNodeSources` can re-run idempotently
@@ -190,7 +191,29 @@ final class SZHost {
     // (SZHost+PanelLayout.swift). Transient like cameraCommand below: it's a render override, NOT
     // part of the split tree and never persisted, so clearing it restores the exact prior layout
     // (divider fractions untouched). Any structural edit (move/close/reopen) also clears it.
-    internal(set) var maximizedPanel: SZPanelKind?
+    internal(set) var maximizedPanel: SZPanelID?
+
+    // Panels living in their own windows (pop-outs) — the layout tree's sibling truth, keyed by
+    // SZPanelID with the window's screen frame. Same app-state.json + restore story as the layout
+    // (the workspace arrangement includes its windows); mutated via SZHost+Popout.swift only. The
+    // AppKit windows themselves live on `popoutManager`.
+    internal(set) var poppedOutPanels: [SZPanelID: SZPoppedOutPanel] = {
+        var map: [SZPanelID: SZPoppedOutPanel] = [:]
+        for record in SZAppStateIO.load()?.poppedOutPanels ?? [] { map[record.panel] = record }
+        return map
+    }()
+
+    /// The pop-out windows' manager (windows, delegates, drag-to-dock tracking). Not observable
+    /// state — the observable truths are `panelLayout` + `poppedOutPanels` + the candidate below.
+    @ObservationIgnored let popoutManager = SZPopoutWindowManager()
+
+    /// A popped-out window's drag hovering a dock spot — published for the container's
+    /// drop-preview overlay (the same affordance as internal header drags).
+    internal(set) var popoutDockCandidate: SZPanelDockPreview?
+
+    /// Debounce for pop-out frame persistence (windowDidMove fires per mouse move; the disk write
+    /// waits for the drag to settle — SZHost+Popout.notePopoutFrameChanged).
+    @ObservationIgnored var popoutFramePersistDebounce: Task<Void, Never>?
 
     // Node-editor snap-to-grid — same app-state.json home and restore-on-launch story as the layout.
     // Toggled from the Graph menu (SZApp), mutated via setSnapToGrid (SZHost+PanelLayout.swift); also
@@ -449,7 +472,8 @@ final class SZHost {
             return
         }
         self.runtime = runtime
-        self.renderViewportFrame = { layer in runtime.drawLive(into: layer) }
+        popoutManager.host = self   // the windows' back-channel (dock intents, frame persistence)
+        syncViewportDriver()        // seed the driver from the restored layout
         installPreviewFrameSink(runtime)
         armPreviewGraphObservation()
 

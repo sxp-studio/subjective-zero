@@ -10,13 +10,20 @@ import SwiftUI
 import SZCore
 
 struct SZPanelChromeView<Content: View>: View {
-    let kind: SZPanelKind
+    let id: SZPanelID
+    /// The user-facing name (positional — "Viewport 2" means the second LIVE viewport, not
+    /// instance identity; the container passes it from the host's title source).
+    let title: String
     let canClose: Bool
     /// Whether the maximize/restore button is offered — true once more than one panel is present,
     /// so maximizing this one actually hides something (stays true while maximized, unlike canClose).
     let canMaximize: Bool
     /// This panel currently fills the window (others hidden) — flips the button to the restore glyph.
     let isMaximized: Bool
+    /// Whether the clone button is offered (a free instance of this panel's kind exists — host-gated).
+    let canClone: Bool
+    /// Whether the pop-out button is offered (the kind allows it and this isn't the last tile).
+    let canPopOut: Bool
     /// View ▸ Auto-Hide Panel Headers (SZHost.autoHidePanelHeaders, via the container).
     let autoHideEnabled: Bool
     /// View ▸ Rounded Viewport Corners (SZHost.viewportRoundedCorners, via the container). Only the
@@ -27,6 +34,8 @@ struct SZPanelChromeView<Content: View>: View {
     let headerLeadingInset: CGFloat
     let onClose: () -> Void
     let onToggleMaximize: () -> Void
+    let onClone: () -> Void
+    let onPopOut: () -> Void
     /// Header drag, reported in the container's grid space — the container resolves the hovered
     /// panel + drop zone and commits the move. A sub-threshold release never fires either callback,
     /// so the ✕ button keeps winning plain clicks (the chat-tab-drag interaction pattern).
@@ -43,7 +52,7 @@ struct SZPanelChromeView<Content: View>: View {
     /// taller than the header so the trigger is forgiving. Chat's is a thin sliver instead: its
     /// tab strip sits at the very top when auto-hide is on, and a tall band would pop the header
     /// over the tabs on every tab hover — so there, summoning means pushing to the top edge.
-    private var triggerBand: CGFloat { kind == .chat ? 8 : 36 }
+    private var triggerBand: CGFloat { id.kind == .chat ? 8 : 36 }
     /// Hysteresis: once revealed, the header's own footprint keeps it alive — the cursor sitting
     /// ON the revealed header must never count as "out of the band", whatever the trigger size.
     private var revealThreshold: CGFloat { headerVisible ? max(triggerBand, Self.headerHeight) : triggerBand }
@@ -62,7 +71,7 @@ struct SZPanelChromeView<Content: View>: View {
     /// The tile's clip/border radius. Only the viewport squares off (radius 0) when the pref is off;
     /// every other tile keeps the standard rounding.
     private var cornerRadius: CGFloat {
-        kind == .viewport && !viewportRoundedCorners ? 0 : SZPanelLayoutGeometry.tileCornerRadius
+        id.kind == .viewport && !viewportRoundedCorners ? 0 : SZPanelLayoutGeometry.tileCornerRadius
     }
 
     var body: some View {
@@ -74,7 +83,7 @@ struct SZPanelChromeView<Content: View>: View {
         ZStack(alignment: .top) {
             content()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, kind == .chat && !autoHideEnabled ? Self.headerHeight : 0)
+                .padding(.top, id.kind == .chat && !autoHideEnabled ? Self.headerHeight : 0)
             header
                 // Slides in from above the tile's top edge (the tile's clip shape swallows it while
                 // hidden) with a fade riding along.
@@ -107,11 +116,23 @@ struct SZPanelChromeView<Content: View>: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text(kind.displayName)
+            Text(title)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: 0)
+            if canClone {
+                // Stacked squares — a new tile of this panel beside it. Boxy glyph like the arrows
+                // pair below, so it takes the same optical dial-down from the ✕'s size.
+                SZPanelHeaderButton(systemName: "plus.square.on.square",
+                                    help: "Clone \(title)",
+                                    size: 7.5, weight: .semibold, action: onClone)
+            }
+            if canPopOut {
+                SZPanelHeaderButton(systemName: "arrow.up.forward.square",
+                                    help: "Move \(title) to Its Own Window",
+                                    size: 7.5, weight: .semibold, action: onPopOut)
+            }
             if canMaximize {
                 // Diagonal expand/contract arrows — bare strokes like the ✕. The arrows glyph fills a
                 // wider box than xmark, so it's rendered a touch smaller/lighter to read at a matching
@@ -119,11 +140,11 @@ struct SZPanelChromeView<Content: View>: View {
                 SZPanelHeaderButton(
                     systemName: isMaximized ? "arrow.down.right.and.arrow.up.left"
                                             : "arrow.up.left.and.arrow.down.right",
-                    help: isMaximized ? "Restore \(kind.displayName)" : "Maximize \(kind.displayName)",
+                    help: isMaximized ? "Restore \(title)" : "Maximize \(title)",
                     size: 7, weight: .semibold, action: onToggleMaximize)
             }
             if canClose {
-                SZPanelHeaderButton(systemName: "xmark", help: "Close \(kind.displayName)",
+                SZPanelHeaderButton(systemName: "xmark", help: "Close \(title)",
                                     action: onClose)
             }
         }
@@ -170,10 +191,11 @@ struct SZPanelChromeView<Content: View>: View {
     }
 }
 
-/// A header icon button (maximize/restore, close): the glyph centered in a shared square frame so
-/// every header button shares one baseline and hit target, brightening from secondary to primary
-/// with a faint chip under the cursor — the app's "brighten under the cursor" hover idiom.
-private struct SZPanelHeaderButton: View {
+/// A header icon button (clone, pop-out, maximize/restore, close): the glyph centered in a shared
+/// square frame so every header button shares one baseline and hit target, brightening from
+/// secondary to primary with a faint chip under the cursor — the app's "brighten under the cursor"
+/// hover idiom. Internal (not private): the pop-out window's shell header reuses it.
+struct SZPanelHeaderButton: View {
     let systemName: String
     let help: String
     var size: CGFloat = 8

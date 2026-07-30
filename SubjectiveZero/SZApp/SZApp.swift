@@ -35,6 +35,10 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     /// be silently refused, and racing the initial load is undefined.
     private var didFinishStarting = false
 
+    // Pop-out panel windows close synchronously in the MAIN window's willClose (SZPopoutWindows),
+    // so the main window is genuinely the last one and this fires exactly as in the single-window
+    // days. (Pre-existing quirk, out of scope: the DEBUG "Tokens" window also counts as a window
+    // and keeps the app alive if it's open when the main window closes.)
     nonisolated func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     /// Finder double-click / drag-to-Dock / "Open With" of a project bundle. Before startup finishes:
@@ -91,6 +95,10 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
         host?.flushAllTranscripts()
         host?.flushMessageQueue()   // a queued-not-delivered message redelivers next launch
         host?.persistAgentSessions()
+        // Pop-out frame moves persist behind a debounce — a quit inside that window must not
+        // restore a stale frame next launch (the in-memory record is already authoritative).
+        host?.popoutFramePersistDebounce?.cancel()
+        host?.persistAppState()
         host?.releaseProjectLock()
     }
 
@@ -194,6 +202,11 @@ private struct SZWindowChromeConfigurator: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.backgroundColor = NSColor(white: 0.04, alpha: 1)
             appDelegate.installWindowCloseGuard(on: window, host: host)
+            // The pop-out manager learns the MAIN window here (this configurator only ever lives
+            // in it) — the close-children observer and dock-drag hit-testing hang off it. The
+            // welcome edge doubles as the pop-outs' hide/show + relaunch-restore signal.
+            host.popoutManager.mainWindow = window
+            host.popoutManager.setWorkspaceActive(!welcome)
 
             // Resize on the welcome↔workspace edge only: shrink to the compact launcher frame while
             // welcome is up, restore the saved workspace frame when a project takes over.
@@ -276,12 +289,19 @@ struct SZApp: App {
                         autoHideHeaders: host.autoHidePanelHeaders,
                         viewportRoundedCorners: host.viewportRoundedCorners,
                         maximizedPanel: host.maximizedPanel,
+                        externalDockPreview: host.popoutDockCandidate,
+                        title: { host.panelTitle($0) },
+                        canClone: { host.canClonePanel($0) },
+                        canPopOut: { host.canPopOutPanel($0) },
                         onDividerFractionChange: { host.setPanelDividerFraction($1, at: $0) },
                         onDividerDragEnd: { host.commitPanelDividerFraction($1, at: $0) },
                         onMovePanel: { host.movePanel($0, onto: $1, zone: $2) },
                         onClosePanel: { host.closePanel($0) },
-                        onToggleMaximize: { host.toggleMaximizePanel($0) }) { kind in
-                            panelContent(kind)
+                        onToggleMaximize: { host.toggleMaximizePanel($0) },
+                        onClonePanel: { host.clonePanel($0) },
+                        onPopOutPanel: { host.popOutPanel($0) },
+                        onTearOutPanel: { host.tearOutPanel($0) }) { id in
+                            panelContent(id)
                         }
                 } else {
                     Color.black.overlay(Text(host.status).foregroundStyle(.white))
@@ -318,6 +338,11 @@ struct SZApp: App {
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)
+                // The pop-out windows render the same panel content as the tiles. AnyView-erased
+                // like the HUD gear menu; safe to build outside a scene today because the only
+                // allowed kind (viewport) touches no view-local @State — revisit this capture if
+                // more kinds join popoutAllowedKinds.
+                host.popoutManager.makePanelContent = { id in AnyView(panelContent(id)) }
                 await host.start(openingIfLaunchedWithFile: appDelegate.takePendingOpenURL())
                 appDelegate.appDidFinishStarting()   // open a .subz that arrived mid-startup
             }
@@ -379,6 +404,20 @@ struct SZApp: App {
                     Toggle(kind.displayName, isOn: panelVisibilityBinding(kind))
                         .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
                 }
+                Divider()
+                // The viewport's window affordances (menu mirrors of the header buttons — clones
+                // beyond the primary are addressed by their own headers, not menu items).
+                Button("Clone Viewport") { host.clonePanel(.viewport) }
+                    .disabled(!host.canClonePanel(.viewport))
+                Button(host.isPoppedOut(.viewport) ? "Dock Viewport" : "Pop Out Viewport") {
+                    if host.isPoppedOut(.viewport) {
+                        host.popoutManager.dockToRememberedSpot(id: .viewport)
+                    } else {
+                        host.popOutPanel(.viewport)
+                    }
+                }
+                .disabled(!host.isPoppedOut(.viewport) && !host.canPopOutPanel(.viewport))
+                Divider()
                 // The display prefs, grouped so the menu stays panels-first as panels accrue
                 // (the Profiler pushed it past comfortable).
                 Menu("Display") {
@@ -460,11 +499,15 @@ struct SZApp: App {
         #endif
     }
 
-    /// View-menu checkmark ↔ the panel's presence in the layout tree. Closing the last panel is
-    /// refused by the model, so the checkmark simply snaps back.
+    /// View-menu checkmark ↔ the panel's visibility: a tile in the layout tree OR a popped-out
+    /// window both count as "shown" (toggling off a popped-out panel closes its window; toggling
+    /// a popped-out panel "on" is showPanel's dock-back). The menu enumerates KINDS and binds to
+    /// each kind's primary instance — clones have no menu entry (their affordances are the header
+    /// buttons). Closing the last panel is refused by the model, so the checkmark snaps back.
     private func panelVisibilityBinding(_ kind: SZPanelKind) -> Binding<Bool> {
-        Binding(get: { host.panelLayout.contains(kind) },
-                set: { $0 ? host.showPanel(kind) : host.closePanel(kind) })
+        let id = SZPanelID(kind)
+        return Binding(get: { host.panelLayout.contains(id) || host.isPoppedOut(id) },
+                       set: { $0 ? host.showPanel(id) : host.closePanel(id) })
     }
 
     /// The HUD gear menu's items — the canvas-side mirror of the macOS menu bar. Mirrors the `.commands`
@@ -505,6 +548,19 @@ struct SZApp: App {
             ForEach(Array(SZPanelKind.availableCases.enumerated()), id: \.element) { _, kind in
                 Toggle(kind.displayName, isOn: panelVisibilityBinding(kind))
             }
+            Divider()
+            // Mirrors View ▸ Clone/Pop Out Viewport verbatim (lockstep rule; no shortcuts here).
+            Button("Clone Viewport") { host.clonePanel(.viewport) }
+                .disabled(!host.canClonePanel(.viewport))
+            Button(host.isPoppedOut(.viewport) ? "Dock Viewport" : "Pop Out Viewport") {
+                if host.isPoppedOut(.viewport) {
+                    host.popoutManager.dockToRememberedSpot(id: .viewport)
+                } else {
+                    host.popOutPanel(.viewport)
+                }
+            }
+            .disabled(!host.isPoppedOut(.viewport) && !host.canPopOutPanel(.viewport))
+            Divider()
             Menu("Display") {
                 Toggle("Auto-Hide Panel Headers", isOn: Binding(get: { host.autoHidePanelHeaders },
                                                                 set: { host.setAutoHidePanelHeaders($0) }))
@@ -624,11 +680,16 @@ struct SZApp: App {
 
     /// One case per panel; the initializers are the pre-refactor ones, moved verbatim out of the old
     /// SplitView tree (min sizes now live in SZPanelLayoutGeometry, not `.frame` constraints).
+    /// Addressed by SZPanelID: the viewport case vends a PER-INSTANCE render closure (driver or
+    /// mirror — SZHost+Popout.swift); the single-instance panels only care about the kind. Note a
+    /// pop-out/dock intentionally recreates the panel's view in its new window (one expected
+    /// "[SZViewportPanel] makeNSView" print per transition — render state lives in the runtime);
+    /// WITHIN a window, layout edits still never recreate it (the container's stable ForEach ids).
     @ViewBuilder
-    private func panelContent(_ kind: SZPanelKind) -> some View {
-        switch kind {
+    private func panelContent(_ id: SZPanelID) -> some View {
+        switch id.kind {
         case .viewport:
-            SZViewportPanel(device: host.runtime?.device, renderFrame: host.renderViewportFrame)
+            SZViewportPanel(device: host.runtime?.device, renderFrame: host.renderFrame(for: id))
         case .nodeEditor:
             SZNodeEditorPanel(store: host.store, project: host.store.project,
                               status: host.status, isRunning: host.isRunning,

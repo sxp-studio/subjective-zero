@@ -150,6 +150,46 @@ private func temporaryURL() -> URL {
     #expect(loaded?.telemetryEnabled == nil)
 }
 
+@Test func roundTripPreservesPoppedOutPanels() throws {
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    let popped = [SZPoppedOutPanel(panel: SZPanelID(.viewport, instance: 1),
+                                   x: 120, y: 80, width: 640, height: 400)]
+    try SZAppStateIO.save(SZAppState(poppedOutPanels: popped), to: url)
+    #expect(SZAppStateIO.load(from: url)?.poppedOutPanels == popped)
+}
+
+@Test func fileWithoutPoppedOutPanelsStillDecodes() throws {
+    // An app-state.json predating pop-out windows (no poppedOutPanels key) → nil, none popped out.
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"windowSize":{"width":1440,"height":900},"theme":"system","defaultProviderID":"claude"}"#.utf8)
+        .write(to: url)
+    let loaded = SZAppStateIO.load(from: url)
+    #expect(loaded != nil)
+    #expect(loaded?.poppedOutPanels == nil)
+    #expect(loaded?.defaultProviderID == "claude")
+}
+
+@Test func legacyKindKeyedPanelLayoutInsideAppStateDecodes() throws {
+    // A whole pre-instance app-state.json: the panelLayout subtree carries bare kind strings.
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let legacy = #"""
+    {"windowSize":{"width":1440,"height":900},"theme":"system",
+     "panelLayout":{"root":{"split":{"orientation":"horizontal","fraction":0.75,
+       "leading":{"panel":{"_0":"viewport"}},"trailing":{"panel":{"_0":"chat"}}}},
+      "restorePositions":["nodeEditor",{"neighbor":"viewport","zone":"bottom","share":0.4}]}}
+    """#
+    try Data(legacy.utf8).write(to: url)
+    let loaded = SZAppStateIO.load(from: url)
+    #expect(loaded?.panelLayout?.root.leafIDs == [.viewport, .chat])
+    #expect(loaded?.panelLayout?.restorePositions[.nodeEditor]
+            == SZPanelRestorePosition(neighbor: .viewport, zone: .bottom, share: 0.4))
+}
+
 @Test func noteRecentProjectDedupesToFront() {
     var state = SZAppState(recentProjectPaths: ["/tmp/A.subz", "/tmp/B.subz", "/tmp/C.subz"])
     state.noteRecentProject(path: "/tmp/B.subz")

@@ -110,3 +110,28 @@ import Testing
     let defined = Set(SZHostBridge.debugToolDefinitions.compactMap { $0["name"] as? String })
     #expect(SZHostBridge.debugToolNames == defined)
 }
+
+@Test @MainActor func panelWindowToolsAreServedButWithheldFromAgents() {
+    // The clone/pop-out/dock tools are workspace navigation, like ui_show_panel: on the full (test)
+    // bus, never on the agent surface. A reclassification (an agentCallable flip in the definition)
+    // fails here rather than at an agent's first window grab.
+    let full = Set(SZHostBridge.toolDefinitions(for: .full).compactMap { $0["name"] as? String })
+    for name in ["ui_clone_panel", "ui_popout_panel", "ui_dock_panel"] {
+        #expect(full.contains(name), "\(name) missing from the full surface")
+        #expect(SZHostBridge.agentWithheldToolNames.contains(name), "\(name) must be agent-withheld")
+    }
+}
+
+@Test @MainActor func panelToolsAddressTilesByInstanceToken() {
+    // The panel argument's enum is the token vocabulary: bare kinds for primaries, ":ordinal" for
+    // clones, sized by each kind's cap — one addressing scheme shared with the
+    // persisted layout. Pins a viewport clone token being offered and single-instance kinds not
+    // growing one.
+    let showPanel = SZHostBridge.toolDefinitions(for: .full)
+        .first { $0["name"] as? String == "ui_show_panel" }
+    let panelEnum = ((showPanel?["inputSchema"] as? [String: Any])?["properties"] as? [String: Any])
+        .flatMap { ($0["panel"] as? [String: Any])?["enum"] as? [String] } ?? []
+    #expect(panelEnum.contains("viewport"))
+    #expect(panelEnum.contains("viewport:2"))
+    #expect(!panelEnum.contains("chat:2"))
+}
