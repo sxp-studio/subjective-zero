@@ -5,8 +5,8 @@
 <h1 align="center">SubjectiveZero</h1>
 
 <p align="center">
-  A native-macOS, agentic creative-coding &amp; realtime-VFX harness.<br>
-  Describe visual ideas as prompt nodes - agents turn them into live native code.
+  An agentic node editor for creative-coding &amp; realtime VFX.<br>
+  Describe visual ideas as a graph of prompts - agents turn them into live native code - refine and iterate
 </p>
 
 <p align="center">
@@ -19,206 +19,132 @@
 
 https://github.com/user-attachments/assets/bbcd7fae-9686-4333-9023-b8c8d8d950a4
 
-## What it is
+## Intro
 
-**SubZ (SubjectiveZero)** is an open-source, **native-macOS** creative-coding and realtime-VFX
-harness for the agentic era. You describe visual ideas as **prompt nodes**; orchestrated agents
-turn those ideas into isolated, inspectable node implementations that compile, hot-reload, and
-render in a live Metal viewport.
+**SubZ (SubjectiveZero)** is an open-source creative-coding and realtime-VFX harness for the
+agentic era. You describe visual ideas as **prompt nodes**; orchestrated agents turn those ideas
+into isolated, inspectable node implementations that compile, hot-reload, and render in realtime.
 
-It's a harness for making things, not just effects: the graph is a structured sequence of nodes
-that can do many things - **not only VFX**. You stay in the loop the whole way, drawing
-connections by hand or chatting with the agents building each piece.
+SubZ has the following key features:
 
-SubZ is built on a few deliberate principles:
+- Designed for realtime effects with a thin runtime
+- AI provider agnostic with agent orchestration built-in
+- Node Editor with generative UI
 
-- macOS-first, **native code everywhere - no WebView**.
-- A small but modular codebase (so agents can be scoped to one concern).
-- A more permissive graph: a structured sequence of nodes that can do many things, **not just
-  VFX**.
-- Chat with agents directly (the coordinating agent or any node's agent).
-- Orchestration driven by behavior trees *(coming soon)*.
+SubZ is written the way it's meant to be used, by AI coding agents on a short leash with a human
+reviewing every change. It's in beta and shipping real releases, but interfaces, the project
+format, and the node ABI can still change between versions.
 
-Cross-platform is deferred via **portable formats** (state is JSON), not portable code.
-
-> **Built the way it's meant to be used.** SubZ is written by AI coding
-> agents kept on a short leash, with a human reviewing every change. It's the same
-> human-in-the-loop workflow SubZ puts in your hands. We think that's the point,
-> not a caveat.
-
-> **Status: beta.** SubZ is under active development. The app is usable and shipping real
-> releases, but interfaces, project formats, and the node ABI can still change between versions.
-
-## The core loop (this is the product)
+## The Core Loop
 
 Everything in SubZ serves one loop:
 
 1. You draft a graph of **prompt nodes** and connect them with **flow** connections.
-2. You start the **Director Agent** - the agent that coordinates the project - and it produces a plan.
-3. The Director Agent dispatches/messages a **coding agent per node** with an API contract and prompt.
-4. As agents make progress, each node's UI takes shape: title, SF Symbol, and the granular
-   typed inputs/outputs draft themselves in.
-5. The app runs live, and you iterate - manually drawing connections, or chatting with the
-   Director Agent and/or individual node agents.
+2. The director agent will refine your graph and draft a plan for your effect
+3. The director agent will spawn a fleet of parallel coding agents to build your nodes
+4. As agents make progress, each node's UI takes shape through agent MCP callbacks
+5. The app runs live, and you iterate - manually drawing connections, or chatting with agents
 
-The viewport runs on a native Metal implementation driven by a thin runtime.
+## Concepts
+
+**Node** — a unit of compute: a source code `Node.swift` file plus a `node-contract.json` declaring its typed
+inputs and outputs. The Swift side is deliberately small (`setup()`, `teardown()`, and a
+per-frame `update()`), which is what makes hot reload practical.
+
+**Agents** — the Director Agent coordinates the project, planning work, dispatching coding agents
+and reconciling what comes back. A coding agent owns one node's implementation. You can chat with
+either. Orchestration sits behind a seam; each agent type's behavior is plain Swift today, with
+behavior trees planned.
+
+**MCP server** — how agents reach the app: reporting status, reading state, drafting a node's
+contract into the UI, querying the node library. It maps closely onto the UI's own interactions,
+so the same surface can drive closed-loop testing.
+
+**Node library** — built-in nodes that agents read as reference. An agent picks one to learn
+from, or decides none fits; it copies source only when that source would work as-is.
 
 ## Getting started
 
-SubZ is a native macOS app. It requires **macOS 15 (Sequoia) or later** on Apple Silicon.
+SubZ is a native app:
 
-### Download the app
+- **macOS** — 15 (Sequoia) or later, on Apple Silicon.
+- **Windows** — *coming soon*.
 
-Grab the latest signed &amp; notarized build from the
-[**Releases**](https://github.com/sxp-studio/subjective-zero/releases/latest) page. SubZ is
-distributed as a DMG **outside the App Store**; mount it, drag the app to `/Applications`, and
-launch. Updates are delivered in-app via Sparkle (**Check for Updates…**).
+Grab the signed, notarized build from
+[Releases](https://github.com/sxp-studio/subjective-zero/releases/latest). It ships as a DMG
+outside the App Store, so mount it, drag the app to `/Applications`, and launch. Updates arrive
+in-app through Sparkle (**Check for Updates…**).
 
-### Build from source
-
-A fresh clone builds ad-hoc with **zero signing setup**:
+A fresh clone builds ad-hoc, with no signing setup:
 
 ```sh
 git clone https://github.com/sxp-studio/subjective-zero.git
 cd subjective-zero
-open SubjectiveZero/SZApp.xcodeproj   # then run the "SubjectiveZero" scheme in Xcode
+open SubjectiveZero/SZApp.xcodeproj   # then run the "SubjectiveZero" scheme
 ```
 
-To build just the Swift packages (no app bundle):
+Or build just the Swift packages, without the app bundle:
 
 ```sh
 cd SubjectiveZero/Modules && swift build
 ```
 
-### Set up an agent provider
+To actually drive agents you need at least one provider CLI installed and logged in: `claude`,
+`codex`, `grok`, `pi`, or `opencode`. SubZ runs them as subprocesses and stores no credentials of
+its own, so auth stays with each CLI's own login. The in-app Agent Providers sheet shows what's
+ready and what isn't; [`docs/APP_SETUP.md`](docs/APP_SETUP.md) has the full walkthrough.
 
-To actually drive agents, you need at least one provider CLI **installed and logged in**:
+## Codebase
 
-- **Claude Code** - the `claude` CLI
-- **Codex** - the `codex` CLI
-- **Grok** - the `grok` CLI
-- **Pi** - the `pi` CLI
-- **opencode** - the `opencode` CLI
+Five Swift packages. Only `SZApp` is an app bundle; it links the others.
 
-SubZ drives these as subprocesses and stores no provider credentials of its own - auth belongs to
-each CLI's own interactive login. The in-app **Agent Providers** sheet shows each provider's
-status and remedies; see [`docs/APP_SETUP.md`](docs/APP_SETUP.md) for the full setup walkthrough.
+- `SZApp` — the macOS app: window, runtime hosting, the MCP command bus, panel wiring.
+- `SZCore` — the state model and its JSON serialization. The portable representation of
+  App / Project / Graph / Node, depended on by everything else.
+- `SZAI` — providers, agent sessions, and orchestration.
+- `SZRuntime` — compiles and executes the graph, and owns the graphics API context and the
+  device permissions (camera, mic).
+- `SZUI` — the panels: viewport, node editor, chat, HUD, settings.
 
-## High-Level Architecture
+Start reading at [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the dependency graph and
+ownership rules, then [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) for the canonical types, node
+ABI, and MCP surface. The rest of `docs/` goes a level deeper on one area each:
+[CORE_LOOP](docs/CORE_LOOP.md), [STATE](docs/STATE.md), [RUNTIME](docs/RUNTIME.md),
+[GRAPH_AND_NODES](docs/GRAPH_AND_NODES.md), [AGENT_ORCHESTRATION](docs/AGENT_ORCHESTRATION.md),
+[AI_PROVIDERS](docs/AI_PROVIDERS.md), [MCP](docs/MCP.md), [NODE_LIBRARY](docs/NODE_LIBRARY.md),
+[UI](docs/UI.md).
 
-The product ships as an Apple-notarized bundle/DMG distributed **outside the App Store**. Code
-is split into independent Swift packages; only `SZApp` is an actual macOS app bundle linking the
-others.
+## Privacy
 
-### Packages
-
-- **SZApp** - the macOS app bundle. Creates the window, hosts the runtime, runs the MCP command bus, shows the UI panels.
-- **SZCore** - shared state model and JSON serialization. Depended on by every other package.
-  This is the canonical, portable representation of App / Project / Graph / Node.
-- **SZAI** - provider wrapping, agents, and orchestration strategies (behavior trees *coming
-  soon*). Provides a consistent interface for the app to call into agent sessions (tools,
-  permissions), handles spawn/messaging for human↔agent and agent↔agent, and failure recovery.
-- **SZRuntime** - a lightweight rendering engine. Owns the `MTLDevice`, command queue, and
-  resource allocation (`MTLTexture`); owns the viewport context (resolution, pixel
-  format, drawable) and permissions (camera, mic). Compiles and executes the node graph and
-  handles failures.
-- **SZUI** - SwiftUI + AppKit panels and surfaces: viewport, node editor, and chat, plus the HUD and settings.
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the dependency graph, ownership rules, and
-the end-to-end sequence of the core loop.
-
-## Agents
-
-SubZ ships with agent *types* behind a pluggable orchestration seam. Today each type's behavior is
-plain Swift; the design goal is to describe it with a behavior tree / state machine, ideally
-configurable in an open format like JSON *(coming soon)*.
-
-- **Director Agent** - coordinates the project from a high level: plans, dispatches coding agents,
-  reconciles results.
-- **Coding Agent** - one per graph node. Receives an API contract + prompt from the Director Agent
-  to implement the node; you can then iterate by chatting with it directly.
-
-A key part of the app is the **MCP server**: agents use it to interact with the app - notifying
-status, reading state, requesting UI updates as a node's contract drafts itself, and querying
-the node library. There's a 1:1 mapping with key UI interactions so the same surface can drive
-automated, closed-loop testing while agents build.
-
-Current providers are **Claude Code** (CLI), **Codex** (CLI + Codex.app), **Grok** (CLI),
-**Pi** (CLI), and **opencode** (CLI). Claude Code and Codex surface available models and thinking
-level from a static capability manifest (neither CLI enumerates models), with a manual override;
-Grok, Pi, and opencode enumerate their models from the CLI at runtime. In every case the CLI is used for health and
-session control. See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md).
-
-## Nodes and the node library
-
-A node is a unit of compute: a `Node.swift` file plus a `node-contract.json` describing typed
-inputs/outputs. The Swift spec is deliberately simple to support hot reload - `setup()`,
-`teardown()`, and `update()` (per-frame, with the runtime context).
-
-SubZ maintains a **built-in node library** used as a *reference*: agents pick a good node to
-learn from (and copy its source only when it would work as-is), or decide none fits. The library
-uses a 3-tier "earn the tokens" model - a cheap index, per-node cards, then full source on
-demand - so agents stay correct without blowing their context window. See
-[`docs/NODE_LIBRARY.md`](docs/NODE_LIBRARY.md).
-
-## Documentation
-
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) - packages, ownership, the host seam, core-loop spine.
-- [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) - concrete build targets: canonical types, node ABI, V1 MCP list, file manifest.
-- [`docs/CORE_LOOP.md`](docs/CORE_LOOP.md) - the canonical user journey + system sequence, incl. split/merge.
-- [`docs/STATE.md`](docs/STATE.md) - state model, JSON shapes, transactions/undo.
-- [`docs/RUNTIME.md`](docs/RUNTIME.md) - Metal ownership, node module shape, scheduling, hot reload.
-- [`docs/GRAPH_AND_NODES.md`](docs/GRAPH_AND_NODES.md) - node anatomy, I/O types + UI, connections.
-- [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md) - Director Agent + coding agents, behavior trees.
-- [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md) - provider wrapping; capability discovery (static manifest or runtime enumeration, per provider).
-- [`docs/MCP.md`](docs/MCP.md) - MCP server design and command surface.
-- [`docs/NODE_LIBRARY.md`](docs/NODE_LIBRARY.md) - the built-in library and how agents consume it.
-- [`docs/UI.md`](docs/UI.md) - native panels.
-
-## Privacy & telemetry
-
-Release builds send a small set of anonymous usage events so we can see where new
-users get stuck and keep the app healthy:
-
-- **Identity**: a random install ID (a UUID minted on first launch). No account,
-  no email, no fingerprinting beyond OS version, CPU architecture, and Mac model.
-- **Events**: `app_launch`, `app_active_heartbeat`, `agent_provider_default`,
-  and the first-run setup funnel — `setup_shown`, `setup_skipped`,
-  `setup_completed`, `setup_stuck_relaunch` (each carries at most provider names
-  and their readiness, e.g. `claude:ready`).
-- **Never sent**: project content, graphs, prompts, chat transcripts, file paths,
-  or code.
-- **Opting out**: uncheck **"Share anonymous usage data"** on the welcome screen
-  (Help ▸ Welcome). The preference persists in
-  `~/Library/Application Support/SubjectiveZero/app-state.json`.
-- **Source builds**: DEBUG builds print payloads to the console instead of
-  sending, and builds without a bundled reporting key send nothing at all.
+Release builds report a small set of anonymous events (a random install ID, OS and hardware, app
+launch, and the first-run setup funnel) so we can see where new users get stuck. Project content,
+prompts, chat, file paths, and code are never sent. To opt out, uncheck "Share anonymous usage
+data" on the welcome screen (Help ▸ Welcome). Full detail in [`docs/PRIVACY.md`](docs/PRIVACY.md).
 
 ## License
 
-SubZ is open source under the **AGPL-3.0** ([`LICENSE`](LICENSE)). In plain terms:
-
-- **Free to use, self-host, and build on.** Read the source, run it, fork it,
-  write nodes and plugins for it. The full terms live in [`LICENSE`](LICENSE) and
-  [`NOTICE`](NOTICE).
-- **What you make is yours.** Graphs, nodes, and effects you create in SubZ aren't
-  covered by the AGPL (a section 7 exception, spelled out in [`NOTICE`](NOTICE)).
-  Use them in client work, commercial productions, live shows, or alongside tools
-  like TouchDesigner, under whatever license you want.
-- **Using it commercially is fine.** Running SubZ for professional or paid work
-  needs no separate license. You'd only need a commercial license to embed SubZ's
-  own code in a closed-source product, or to run a modified version as a hosted
-  service. For that, reach out at subz@sxp.studio.
-- **The name and marks are ours.** "Subjective Zero", "SubZ", "sxp.studio", and
-  the logos are trademarks of SXP Studio EURL, and aren't part of the open-source
-  license. Forks are welcome, but please give yours its own name and don't imply
-  it's built or endorsed by us.
+SubZ is open source under the AGPL-3.0 ([`LICENSE`](LICENSE)). Read it, run it, fork it, build on
+it, including for paid professional work. What you make with SubZ — graphs, nodes, effects — is
+yours and isn't covered by the AGPL, under a section 7 exception spelled out in
+[`NOTICE`](NOTICE). You'd only need a commercial license to embed SubZ's own code in a
+closed-source product or to run a modified version as a hosted service; for that, reach out at
+subz@sxp.studio. "Subjective Zero", "SubZ", "sxp.studio" and the logos are trademarks of SXP
+Studio EURL and aren't part of the open-source license, so forks are welcome but please give
+yours its own name.
 
 Copyright © 2026 SXP Studio EURL.
 
 ## Contributing
 
-SubZ is authored and maintained by [Clem](https://github.com/clemzio), its main
-contributor.
+SubZ is maintained by [Clem](https://github.com/clemzio). Bug fixes, new nodes, and docs can go
+straight to a PR; for a larger feature or anything that changes the UI or core behavior, open an
+issue first. Commits are DCO signed-off (`git commit -s`) — [`CONTRIBUTING.md`](CONTRIBUTING.md)
+covers why and how contributions are licensed, and [`AGENTS.md`](AGENTS.md) covers the codebase
+conventions.
 
-Contributions are welcome under the terms in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Both suites should be green before you open a PR:
+
+```sh
+cd SubjectiveZero/Modules && swift build && swift test
+cd SubjectiveZero && xcodebuild -project SZApp.xcodeproj -scheme SubjectiveZero -configuration Debug test
+```
