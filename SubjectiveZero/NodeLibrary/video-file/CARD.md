@@ -10,10 +10,16 @@ counterpart to `image-file`; a permission-free alternative to `camera.macos` for
   `CACurrentMediaTime()`), wraps the newest `CVPixelBuffer` through a `CVMetalTextureCache`, and samples
   it into the output with the `fit` uv transform. The player is rebuilt only when `path` changes.
 - **Knobs:** `path` (filePicker), `loop` (bool, re-seeks to zero on end via an
-  `AVPlayerItemDidPlayToEndTime` observer), `rate` (0 pauses, 1 = normal, up to 4×), `fit`
-  (fit/fill/stretch — default `fill`, the natural full-frame video look). All read live.
+  `AVPlayerItemDidPlayToEndTime` observer), `mute` (bool, default OFF → `player.isMuted`), `rate`
+  (0 pauses, 1 = normal, up to 4×), `fit` (fit/fill/stretch — default `fill`, the natural full-frame
+  video look). All read live.
 - **Gotchas:** outputs black until the first frame decodes and while `path` is empty/invalid.
   `holdUntilFrameCompletes` pins the pixel buffer + Metal binding for the frame's GPU lifetime (torn
   frames otherwise — same hazard as the camera node). `teardown()` pauses the player and removes the
   end observer before the dylib unloads. The last decoded frame is held between decodes, so a slow
-  render loop won't strobe.
+  render loop won't strobe. Audio does NOT follow the transport — nothing outside `update()` touches the
+  `AVPlayer`, so whenever frames stop (Pause, an occluded/minimized window) the clip keeps playing sound
+  over a frozen image. **Every knob here, `mute` included, only lands on the next rendered frame**, so
+  toggling mute while frames are stopped changes nothing until they resume (Reset Time also forces one
+  frame). Mute before pausing. Silencing a paused clip *from* the UI needs a runtime change — a one-shot
+  encode when a live input value is written while suspended, like `resetTimeline` already does.

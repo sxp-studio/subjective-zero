@@ -306,7 +306,7 @@
       ],
       "purpose": "Play a local video file as a live texture source, scaled to the viewport.",
       "platform": "any",
-      "useWhen": "You need a video clip as input to an effect chain — a permission-free alternative to the camera. Set path, loop, rate, and fit.",
+      "useWhen": "You need a video clip as input to an effect chain — a permission-free alternative to the camera.",
       "avoidWhen": "You need a still image (use image-file) or a live camera feed (use camera.macos).",
       "reuse": "reference-only"
     },

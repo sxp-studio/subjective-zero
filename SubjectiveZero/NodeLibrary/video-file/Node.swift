@@ -20,6 +20,7 @@ final class Node: SZNode {
     private var lastPixelBuffer: CVPixelBuffer?
     private var desiredRate: Float = 1
     private var loopEnabled = true
+    private var muted = false
     /// Previous frame's `ctx.time`; a backward step signals a Reset Time (rewind) so we seek to the start.
     private var lastClockTime: Double = 0
 
@@ -32,6 +33,9 @@ final class Node: SZNode {
         guard let out = ctx.outputTexture("output") else { return }
 
         loopEnabled = ctx.inputBool("loop") ?? true
+        // Read BEFORE the rebuild, like `loop`: a player built by `reloadIfNeeded` this frame seeds
+        // itself from `muted`, so a stale value would start the new clip audible for a frame.
+        applyMute(ctx.inputBool("mute") ?? false)
         reloadIfNeeded(path: ctx.inputString("path") ?? "")
 
         // A BACKWARD jump in the shared clock (`ctx.time`) is a HUD Reset Time (rewind) → seek the clip
@@ -122,6 +126,7 @@ final class Node: SZNode {
 
         let newPlayer = AVPlayer(playerItem: item)
         newPlayer.actionAtItemEnd = .none   // we handle looping so a non-loop stop just holds the last frame
+        newPlayer.isMuted = muted           // inherit the live mute state — a path change must not un-silence
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
         ) { [weak self] _ in
@@ -139,6 +144,15 @@ final class Node: SZNode {
         guard rate != desiredRate else { return }
         desiredRate = rate
         player?.rate = rate
+    }
+
+    /// Apply a live `mute` change — silences the clip's audio track while the picture keeps playing.
+    /// Tracked so a player rebuilt by a `path` change starts in the same state (this guard won't
+    /// re-apply it), exactly like `desiredRate`.
+    private func applyMute(_ value: Bool) {
+        guard value != muted else { return }
+        muted = value
+        player?.isMuted = value
     }
 
     /// The per-axis uv scale mapping output uv → frame uv for the fit mode (see image-file for the derivation).

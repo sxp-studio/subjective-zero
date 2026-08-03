@@ -16,6 +16,12 @@
       "ui": { "kind": "toggle" }
     },
     {
+      "name": "mute",
+      "type": "bool",
+      "default": { "type": "bool", "value": false },
+      "ui": { "kind": "toggle" }
+    },
+    {
       "name": "rate",
       "type": "float",
       "default": { "type": "float", "value": 1.0 },
