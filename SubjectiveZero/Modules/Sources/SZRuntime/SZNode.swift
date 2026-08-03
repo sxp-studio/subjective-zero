@@ -218,6 +218,11 @@ enum SZRuntimeSupport {
         /// The first scalar of a named input port — the common single-float case (e.g. a slider).
         public func inputFloat(_ port: String) -> Float? { inputFloats(port)?.first }
 
+        /// The on/off state of a named `bool` input port (the card's toggle). A bool rides the same
+        /// scalar channel as everything else — there is no separate wire — so this is where the 0/1
+        /// crosses back into a Bool: read it as `ctx.inputBool("loop") ?? true`, never by hand.
+        public func inputBool(_ port: String) -> Bool? { inputFloat(port).map { $0 > 0.5 } }
+
         /// The full variable-length value(s) of a connected `floatArray` input port (e.g. audio samples or
         /// an FFT spectrum) — the array the upstream node emitted via `setOutputFloats`. Unlike
         /// `inputFloats` (capped at 16, for scalars/vectors), this grows + retries to read any length.

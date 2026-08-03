@@ -165,7 +165,7 @@ enum SZBoundaryPrompt {
         case .texture:
             return "- `\(p.name)` — texture\(meta) — read with `ctx.inputTexture(\"\(p.name)\")` (may be nil before a frame arrives)"
         case .bool:
-            return "- `\(p.name)` — bool\(meta) — read LIVE each frame with `(ctx.inputFloat(\"\(p.name)\") ?? 1) > 0.5`"
+            return "- `\(p.name)` — bool\(meta) — read LIVE each frame with `ctx.inputBool(\"\(p.name)\")`"
         case .float:
             return "- `\(p.name)` — float\(meta) — read LIVE each frame with `ctx.inputFloat(\"\(p.name)\")`"
         case .float2, .float3, .float4, .colorRGB, .colorRGBA, .float3x3, .float4x4:

@@ -33,7 +33,8 @@ struct SZFrameContext {
     let width: Int; let height: Int; let frameIndex: UInt64; let time: Double
     func inputTexture(_ port: String) -> (any MTLTexture)?   // declared texture input (may be nil before a frame)
     func outputTexture(_ port: String) -> (any MTLTexture)?  // declared texture output you must fill
-    func inputFloat(_ port: String) -> Float?                // float/bool input (bool: > 0.5)
+    func inputFloat(_ port: String) -> Float?                // float input (e.g. a slider)
+    func inputBool(_ port: String) -> Bool?                  // bool input (the card's toggle)
     func inputFloats(_ port: String) -> [Float]?             // float2/3/4, colorRGB/RGBA, float3x3/4x4
     func inputString(_ port: String) -> String?              // enum (chosen value) / string input
     func inputFloatArray(_ port: String) -> [Float]?         // connected `floatArray` input — any length (audio samples / spectrum)
@@ -110,8 +111,8 @@ final class Node: SZNode {
 
     func update(_ ctx: SZFrameContext) {
         // Read EVERY declared input live, every frame — a hardcoded value is a dead knob in the editor.
-        let amount = ctx.inputFloat("amount") ?? 1.0          // float; bool reads the same way (> 0.5)
-        let bypass = (ctx.inputFloat("bypass") ?? 0) > 0.5    // bool
+        let amount = ctx.inputFloat("amount") ?? 1.0          // float
+        let bypass = ctx.inputBool("bypass") ?? false         // bool
         let mode   = ctx.inputString("mode") ?? "rgb"         // enum -> the chosen value
         let pivot  = ctx.inputFloats("pivot") ?? [0.5, 0.5, 0.5]   // colorRGB / vectors / matrices
 

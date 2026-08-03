@@ -31,7 +31,7 @@ final class Node: SZNode {
     func update(_ ctx: SZFrameContext) {
         guard let out = ctx.outputTexture("output") else { return }
 
-        loopEnabled = (ctx.inputFloat("loop") ?? 1) > 0.5
+        loopEnabled = ctx.inputBool("loop") ?? true
         reloadIfNeeded(path: ctx.inputString("path") ?? "")
 
         // A BACKWARD jump in the shared clock (`ctx.time`) is a HUD Reset Time (rewind) → seek the clip

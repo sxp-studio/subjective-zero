@@ -99,8 +99,8 @@ final class Node: SZNode {
 
         // Live scalar inputs (v3 ABI): mirror flips horizontally; aspectFit=true fills the frame
         // edge-to-edge (crop, the default look), false fits the whole image (letterbox bars).
-        let mirror = (ctx.inputFloat("mirror") ?? 1) > 0.5
-        let fill = (ctx.inputFloat("aspectFit") ?? 1) > 0.5
+        let mirror = ctx.inputBool("mirror") ?? true
+        let fill = ctx.inputBool("aspectFit") ?? true
         let outAspect = Double(out.width) / Double(max(1, out.height))
         let camAspect = Double(camera.width) / Double(max(1, camera.height))
         var scale = SIMD2<Float>(1, 1)

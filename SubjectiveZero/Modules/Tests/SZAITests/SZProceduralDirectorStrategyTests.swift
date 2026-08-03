@@ -300,7 +300,7 @@ private func dirtyStore() -> SZStore {
     let b = SZBoundaryPrompt.render(inputs: inputs, outputs: outputs, permissions: [.camera])
 
     #expect(b.contains("`mirror` — bool"))                 // type preserved, not flattened to texture
-    #expect(b.contains(#"ctx.inputFloat("mirror")"#))      // bool read live
+    #expect(b.contains(#"ctx.inputBool("mirror")"#))       // bool read live, through the bool accessor
     #expect(b.contains(#"ctx.inputFloat("amount")"#))      // float read live
     #expect(b.contains(#"ctx.inputTexture("input")"#))     // texture read
     #expect(b.contains(#"ctx.outputTexture("output")"#))   // output fill

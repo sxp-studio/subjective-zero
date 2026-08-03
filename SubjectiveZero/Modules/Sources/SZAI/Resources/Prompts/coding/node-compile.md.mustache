@@ -28,7 +28,8 @@ an `output` texture). Never remove or retype a declared port to make room.
 
 CRITICAL: read every scalar input (bool/float/vector/color) LIVE inside `update(ctx)` exactly as shown
 above, every frame — NEVER hardcode its value. A hardcoded `let mirror = false` makes the user's toggle a
-dead control. `ctx.inputFloat(name)` returns the current UI value each frame (a `bool` input is `> 0.5`).
+dead control. `ctx.inputFloat(name)` returns the current UI value each frame; a `bool` input reads as
+`ctx.inputBool(name)`.
 
 ## node-contract.json shape
 

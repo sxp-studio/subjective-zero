@@ -67,7 +67,7 @@ rejects it (`{ok:false, errors}`) — it is never silently dropped.
 | `float4x4`  | `{"type":"float4x4","value":[…16…]}`                 | `field` | `ctx.inputFloats("name")` (16) |
 | `colorRGB`  | `{"type":"colorRGB","value":[1,0,0]}`               | `colorWell` | `ctx.inputFloats("name")` (3) |
 | `colorRGBA` | `{"type":"colorRGBA","value":[1,0,0,1]}`            | `colorWell` | `ctx.inputFloats("name")` (4) |
-| `bool`      | `{"type":"bool","value":true}`                      | `toggle` | `ctx.inputFloat("name")` (`> 0.5`) |
+| `bool`      | `{"type":"bool","value":true}`                      | `toggle` | `ctx.inputBool("name")` |
 | `enum`      | `{"type":"enum","value":"warm"}` + an `options` list | `dropdown` | `ctx.inputString("name")` (the chosen `value`) |
 | `string`    | `{"type":"string","value":"hi"}`                    | `field`, or `filePicker` for a path | `ctx.inputString("name")` |
 | `texture`   | — (no by-value default)                              | — | `ctx.inputTexture` / `ctx.outputTexture` (by id; input may be nil before a frame) |
