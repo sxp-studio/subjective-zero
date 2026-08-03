@@ -170,9 +170,11 @@ public final class SZRuntime: @unchecked Sendable {
         let dylib = try toolchain.compile(
             nodeSource: source, into: workspace.appending(path: "build/\(id.uuidString)"))
         // The in-place module swap must not interleave a live-viewport frame encode.
-        try engine.withLock { _ in
+        try engine.withLock { state in
             var ctx = SZRuntimeContextRaw()
             ctx.device = Unmanaged.passUnretained(assets.device as AnyObject).toOpaque()
+            let paused = state.timeline.paused
+            defer { if paused { loader.setPaused(true) } }   // reloaded while paused ⇒ stays paused
             try withUnsafeMutablePointer(to: &ctx) { pointer in
                 // SZLoader.load = open(new) → unloadLive(old: teardown releases an exclusive device like the
                 // camera's AVCaptureSession + dlclose) → activate(new: setup re-acquires). The same-node device
@@ -269,6 +271,10 @@ public final class SZRuntime: @unchecked Sendable {
                 let raw = UnsafeMutableRawPointer(pointer)
                 for nodeID in schedule.order where added.contains(nodeID) {
                     newLoaders[nodeID]?.activate(setupContext: raw)
+                    // A node set up while the clock is stopped must not come up running — otherwise a
+                    // clip added to a paused graph plays audio over a frozen picture. Asserting it here
+                    // rather than asking nodes to remember it is what makes that structural.
+                    if state.timeline.paused { newLoaders[nodeID]?.setPaused(true) }
                 }
             }
 
@@ -367,8 +373,19 @@ public final class SZRuntime: @unchecked Sendable {
     /// so the whole graph holds still; on resume the clock continues from where it stopped (the paused
     /// span is excluded, so no time jump).
     public func setPaused(_ paused: Bool) {
-        engine.withLock { $0.timeline.setPaused(paused, now: CACurrentMediaTime()) }
+        engine.withLock { state in
+            state.timeline.setPaused(paused, now: CACurrentMediaTime())
+            // Stopping the SCHEDULE only freezes what a node computes inside `update()`. Anything running
+            // on its own — an AVPlayer's audio, a capture session — never hears about it, and can't ask:
+            // pause means no more frames. So tell it. Inside the lock, serialized against frames like any
+            // other graph mutation (the ABI tells nodes not to block here).
+            for loader in state.loaders.values { loader.setPaused(paused) }
+        }
     }
+
+    /// Whether the render clock is paused. The runtime owns this — the host mirrors it for the HUD and
+    /// must read it back rather than assume, or the mirror drifts from the nodes' actual state.
+    public var isPaused: Bool { engine.withLock { $0.timeline.paused } }
 
 
     /// Rewind the playback clock to the start (the HUD Reset Time button): the next frame restarts at

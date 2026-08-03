@@ -23,6 +23,12 @@ public enum SZPortBindingAudit {
     private static let inputAccessors  = ["inputTexture", "inputFloatArray", "inputFloats", "inputFloat", "inputBool", "inputString"]
     private static let outputAccessors = ["outputTexture", "setOutputFloats", "setOutputFloat"]
 
+    /// Types that run on their OWN clock — they keep going when `update()` stops being called, so a graph
+    /// that looks paused would still be playing audio or holding the mic. Constructing one without
+    /// implementing `setPaused` is the "#knobs" bug's cousin: the control (Pause) is dead. A `ctx`
+    /// accessor can't catch this, because the leak is in what the node OWNS, not what it reads.
+    private static let liveResourceTypes = ["AVPlayer", "AVCaptureSession", "AVAudioEngine"]
+
     public static func audit(contract: SZNodeContract, source: String) -> Result {
         // Scan CODE only, not comments: an agent leaving a breadcrumb like `// TODO: ctx.inputFloat("x")`
         // for an undeclared port must not hard-block an otherwise-correct node.
@@ -38,6 +44,19 @@ public enum SZPortBindingAudit {
         }
         for name in referencedOutputs.subtracting(declaredOutputs).sorted() {
             errors.append("Node.swift writes output port \"\(name)\" but node-contract.json declares no such output.")
+        }
+        // Unlike the declared-but-unread case, this one is unambiguous enough to block: the type names
+        // are constructed right there in the source, and the fix is a single line the node needs anyway.
+        // `func setPaused(`, not just "pause" — nodes call `player.pause()` / `engine.pause()` on their
+        // own objects all the time, and matching those would wave the leak straight through.
+        if !scan.contains("func setPaused(") {
+            for type in liveResourceTypes where scan.contains("\(type)(") {
+                errors.append("""
+                    Node.swift creates an \(type), which keeps running when the graph's clock stops \
+                    (a paused graph would still play audio / hold the device). Stop it in \
+                    `func setPaused(_ paused: Bool)` — see node-abi.
+                    """)
+            }
         }
 
         var warnings: [String] = []

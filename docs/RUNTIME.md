@@ -52,12 +52,25 @@ protocol SZNode {
     func setup(_ context: SZSetupContext)      // called on (re)load / when the compiler changes things
     func update(_ context: SZFrameContext)     // called once per frame
     func teardown()                            // called on reload / removal
+    func setPaused(_ paused: Bool)             // optional (v7): the runtime paused / resumed
 }
 ```
 
 - **`setup()` / `teardown()`** bracket a module's life. They run on hot reload and whenever the
   graph compiler changes things (e.g. contract change, rewire).
 - **`update(context)`** runs once per frame with the runtime context.
+- **`setPaused(_:)`** carries the one transport event `update()` cannot: pause stops the schedule,
+  so there is no frame in which to notice it. A resource running on its own (`AVPlayer`, capture session,
+  audio engine) stops here, or a paused graph keeps playing audio over a frozen picture. Everything else
+  stays in `update()` - a *rewind* needs no callback because `resetTimeline` renders a frame even while
+  paused, which is how `video-file` catches it (a backward `ctx.time`). Named to mirror the host's own
+  `SZRuntime.setPaused` that triggers it, so the flag never has to be inverted on the way across - the one
+  mistake that would matter here, since node sources are agent-written and an inverted branch fails
+  silently in the leaking direction. The runtime asserts it after `activate()` too, so a node set up or
+  hot-reloaded while paused can't come up running. Called under the engine lock, serialized against
+  frames - don't block.
+  Not yet covered: frames also stop with no signal when every viewport is occluded/miniaturized or a panel
+  is maximized; those states have no shared "can anything present?" predicate today.
 - The **exported ABI is host-owned and stable** - node source is generated/regenerated freely,
   but the shape it must conform to does not drift.
 

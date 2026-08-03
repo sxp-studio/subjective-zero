@@ -39,9 +39,9 @@ final class Node: SZNode {
         reloadIfNeeded(path: ctx.inputString("path") ?? "")
 
         // A BACKWARD jump in the shared clock (`ctx.time`) is a HUD Reset Time (rewind) → seek the clip
-        // back to its start so it replays from the top like the rest of the graph. (Pause itself is handled
-        // at the runtime level — the schedule stops and the viewport holds the last frame — so this node
-        // doesn't freeze its own player.)
+        // back to its start so it replays from the top like the rest of the graph. A rewind is always
+        // followed by a frame (the runtime renders one even while paused), which is why it belongs here
+        // and pause does not — see `setPaused`.
         if ctx.time < lastClockTime { player?.seek(to: .zero) }
         lastClockTime = ctx.time
         applyRate(ctx.inputFloat("rate") ?? 1)
@@ -137,6 +137,14 @@ final class Node: SZNode {
         player = newPlayer
         newPlayer.play()
         newPlayer.rate = desiredRate
+    }
+
+    /// The runtime paused or resumed. The player runs on its own clock, so without this a paused graph
+    /// keeps playing the clip's audio over a frozen picture — and `update()` isn't called while paused,
+    /// so this is the only signal we get. Resuming restores `desiredRate`, which this node already
+    /// tracks, so a 0.5× clip doesn't come back at 1× and one the user parked at rate 0 stays parked.
+    func setPaused(_ paused: Bool) {
+        if paused { player?.pause() } else { player?.rate = desiredRate }
     }
 
     /// Apply a live `rate` change (0 pauses). Tracked so looping restarts at the current rate.

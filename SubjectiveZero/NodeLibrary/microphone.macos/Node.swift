@@ -94,6 +94,16 @@ final class Node: SZNode {
         running = false
     }
 
+    /// The runtime paused or resumed. The engine's IO thread keeps pulling the input device whether or
+    /// not frames are being drawn, so without this a paused graph sits there holding the mic open.
+    /// `engine.pause()` rather than `stop()`: it halts the IO without tearing down the render thread (see
+    /// `teardown` above for that cost), so resuming is cheap. Guarded on `running` — an engine we
+    /// deliberately never started (unauthorized → synthetic fallback) must stay untouched either way.
+    func setPaused(_ paused: Bool) {
+        guard running else { return }
+        if paused { engine.pause() } else { try? engine.start() }
+    }
+
     // MARK: capture + device switching
 
     private func flagNeedsReconfigure() {

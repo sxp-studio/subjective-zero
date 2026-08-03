@@ -46,8 +46,10 @@ enum SZNodeABI {
     /// Bumped on a breaking ABI change. The loader rejects a mismatch. v2 = binding-table context;
     /// v3 = scalar-input value channel; v4 = string-input channel; v5 = output value channel
     /// (a node's non-texture output flowing across a data edge to a downstream input); v6 = frame-lifetime
-    /// hold (pin an object until the frame's command buffer completes — pooled capture buffers etc.).
-    static let version: Int32 = 6
+    /// hold (pin an object until the frame's command buffer completes — pooled capture buffers etc.);
+    /// v7 = setPaused (the one transport event `update()` can't deliver, because pause means no more
+    /// frames — so a node's self-driving resource can stop when the graph does).
+    static let version: Int32 = 7
 
     static let apiVersionSymbol = "SZPluginAPIVersion"
     static let setupSymbol = "SZNodeSetup"
@@ -55,6 +57,8 @@ enum SZNodeABI {
     static let teardownSymbol = "SZNodeTeardown"
     /// Optional (v4): a node's dynamic enum options for a port. Absent on a node that has none.
     static let enumerateOptionsSymbol = "SZNodeEnumerateOptions"
+    /// Optional (v7): the runtime paused/resumed. Absent on a node that owns nothing running on its own.
+    static let setPausedSymbol = "SZNodeSetPaused"
 
     typealias APIVersionFn = @convention(c) () -> Int32
     typealias SetupFn = @convention(c) (UnsafeMutableRawPointer?) -> Void
@@ -63,6 +67,8 @@ enum SZNodeABI {
     /// `(portName, out, capacity) -> fullLength`: writes the port's options as positional-pair JSON
     /// (`[["label","value"],…]`) into `out`, returning the full byte length (grow + retry on truncation).
     typealias EnumerateOptionsFn = @convention(c) (UnsafePointer<CChar>?, UnsafeMutablePointer<CChar>?, Int32) -> Int32
+    /// `(paused)`: 1 = paused, 0 = running. No context — this isn't a frame, it's the transport moving.
+    typealias SetPausedFn = @convention(c) (Int32) -> Void
 }
 
 /// The raw context struct passed across the C-ABI boundary. **Its layout must byte-match the copy inside
@@ -280,7 +286,7 @@ enum SZRuntimeSupport {
         }
     }
 
-    /// The frozen node ABI. `setup`/`teardown` default to no-ops; a node implements `update`.
+    /// The frozen node ABI. `setup`/`teardown`/`setPaused` default to no-ops; a node implements `update`.
     /// `dynamicOptions` defaults to none — a node overrides it only to offer runtime-enumerated choices
     /// for an `enum` port (e.g. the live camera list); the host calls it for the editor dropdown + snapshot.
     public protocol SZNode {
@@ -288,11 +294,13 @@ enum SZRuntimeSupport {
         func update(_ ctx: SZFrameContext)
         func teardown()
         func dynamicOptions(for port: String) -> [SZEnumOption]
+        func setPaused(_ paused: Bool)
     }
     public extension SZNode {
         func setup(_ ctx: SZSetupContext) {}
         func teardown() {}
         func dynamicOptions(for port: String) -> [SZEnumOption] { [] }
+        func setPaused(_ paused: Bool) {}
     }
 
     // Holds the single live node instance for this dylib. Swift 5 mode (no strict concurrency).
@@ -325,6 +333,13 @@ enum SZRuntimeSupport {
     public func SZNodeTeardown() {
         SZNodeHost.node?.teardown()
         SZNodeHost.node = nil
+    }
+
+    // The runtime paused / resumed (v7). Unlike teardown the node stays live — it is being paused, not
+    // unloaded. Serialized against frames, so it must not block.
+    @_cdecl("SZNodeSetPaused")
+    public func SZNodeSetPaused(_ paused: Int32) {
+        SZNodeHost.node?.setPaused(paused != 0)
     }
 
     // The host asks the node for a port's dynamic enum options (v4). Uses the live instance if set up,

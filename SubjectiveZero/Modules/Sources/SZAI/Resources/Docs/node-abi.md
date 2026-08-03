@@ -13,6 +13,7 @@ final class Node: SZNode {
     func setup(_ ctx: SZSetupContext) { /* build pipeline(s) ONCE here */ }
     func update(_ ctx: SZFrameContext) { /* per-frame GPU work; read inputs, write outputs */ }
     // func teardown() { }   // optional; default no-op
+    // func setPaused(_ paused: Bool) { }   // optional; stop anything running on its own
 }
 
 enum SZNodeMain { static func make() -> SZNode { Node() } }
@@ -25,6 +26,7 @@ protocol SZNode {
     func setup(_ ctx: SZSetupContext)   // default no-op; build pipelines here
     func update(_ ctx: SZFrameContext)  // per-frame GPU work
     func teardown()                     // default no-op
+    func setPaused(_ paused: Bool)      // default no-op; see below
 }
 struct SZSetupContext { let device: any MTLDevice }
 struct SZFrameContext {
@@ -45,6 +47,12 @@ struct SZFrameContext {
                                                              //  their deinit could run after your module was hot-reloaded)
 }
 ```
+
+**Own an `AVPlayer` / `AVCaptureSession` / `AVAudioEngine`? Stop it in `setPaused(_:)`.** Pause stops the
+frames, not your resource, and `update()` isn't called while paused — so this is your only signal, and
+without it a paused graph keeps playing audio or holding the mic. Resume from your own state (the rate you
+were playing at) and don't block. A *rewind* needs nothing here: it always arrives with a frame. Creating
+one of those types without `setPaused` is a compile error.
 
 ## Rules
 

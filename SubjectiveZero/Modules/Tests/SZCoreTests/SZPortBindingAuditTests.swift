@@ -79,3 +79,63 @@ private func output(_ name: String, _ type: SZPortType = .texture) -> SZPort { S
     #expect(r.errors.isEmpty)
     #expect(r.warnings.isEmpty)
 }
+
+// MARK: - Live resources must stop when the runtime pauses (ABI v7)
+
+@Test func flagsALiveResourceThatIgnoresPause() {
+    let c = contract(inputs: [input("path", .string)], outputs: [output("output")])
+    let src = """
+    func update(_ ctx: SZFrameContext) {
+        player = AVPlayer(playerItem: item)   // nothing stops it — keeps playing while paused
+        player?.play()
+        _ = ctx.outputTexture("output")
+    }
+    """
+    let r = SZPortBindingAudit.audit(contract: c, source: src)
+    #expect(r.errors.count == 1)
+    #expect(r.errors[0].contains("AVPlayer"))
+    #expect(r.errors[0].contains("setPaused"))
+}
+
+@Test func aLiveResourceHandledInSetPausedIsClean() {
+    let c = contract(inputs: [input("path", .string)], outputs: [output("output")])
+    let src = """
+    func update(_ ctx: SZFrameContext) {
+        player = AVPlayer(playerItem: item)
+        player?.play()
+        _ = ctx.outputTexture("output")
+    }
+    func setPaused(_ paused: Bool) {
+        if paused { player?.pause() } else { player?.rate = 1 }
+    }
+    """
+    #expect(SZPortBindingAudit.audit(contract: c, source: src).errors.isEmpty)
+}
+
+/// The near-miss the check has to survive: a node that CALLS `.pause()` on its own player but never
+/// implements `func setPaused` is still leaking. Matching the bare word would wave it through.
+@Test func callingPauseOnTheResourceIsNotImplementingIt() {
+    let c = contract(inputs: [input("path", .string)], outputs: [output("output")])
+    let src = """
+    func update(_ ctx: SZFrameContext) {
+        player = AVPlayer(playerItem: item)
+        if somethingElse { player?.pause() }   // its own object — not the ABI callback
+        _ = ctx.outputTexture("output")
+    }
+    """
+    let r = SZPortBindingAudit.audit(contract: c, source: src)
+    #expect(r.errors.count == 1)
+    #expect(r.errors[0].contains("AVPlayer"))
+}
+
+/// A node that owns nothing running on its own clock is never touched by this check.
+@Test func nodesWithoutLiveResourcesAreUnaffected() {
+    let c = contract(inputs: [input("amount")], outputs: [output("output")])
+    let src = """
+    func update(_ ctx: SZFrameContext) {
+        let a = ctx.inputFloat("amount") ?? 1
+        _ = (a, ctx.outputTexture("output"))
+    }
+    """
+    #expect(SZPortBindingAudit.audit(contract: c, source: src).errors.isEmpty)
+}

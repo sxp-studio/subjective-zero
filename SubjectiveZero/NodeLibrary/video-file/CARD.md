@@ -17,9 +17,8 @@ counterpart to `image-file`; a permission-free alternative to `camera.macos` for
   `holdUntilFrameCompletes` pins the pixel buffer + Metal binding for the frame's GPU lifetime (torn
   frames otherwise — same hazard as the camera node). `teardown()` pauses the player and removes the
   end observer before the dylib unloads. The last decoded frame is held between decodes, so a slow
-  render loop won't strobe. Audio does NOT follow the transport — nothing outside `update()` touches the
-  `AVPlayer`, so whenever frames stop (Pause, an occluded/minimized window) the clip keeps playing sound
-  over a frozen image. **Every knob here, `mute` included, only lands on the next rendered frame**, so
-  toggling mute while frames are stopped changes nothing until they resume (Reset Time also forces one
-  frame). Mute before pausing. Silencing a paused clip *from* the UI needs a runtime change — a one-shot
-  encode when a live input value is written while suspended, like `resetTimeline` already does.
+  render loop won't strobe. `setPaused` is what makes Pause actually stop the clip (audio included) and
+  Play resume it at `desiredRate` — the player runs on its own clock, and `update()` isn't called while
+  paused, so without it a paused graph keeps playing sound over a frozen image. Knobs still only land on
+  the next rendered frame, so toggling `mute` while frames are stopped changes nothing until they resume.
+  An occluded/minimized window still stops frames with no signal (see RUNTIME.md).

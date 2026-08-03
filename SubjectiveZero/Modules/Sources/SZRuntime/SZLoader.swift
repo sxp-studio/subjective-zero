@@ -38,6 +38,7 @@ final class SZLoader: @unchecked Sendable {
     private var update: SZNodeABI.UpdateFn?
     private var teardownFn: SZNodeABI.TeardownFn?
     private var enumerateOptionsFn: SZNodeABI.EnumerateOptionsFn?
+    private var setPausedFn: SZNodeABI.SetPausedFn?
     private var loadedCopy: URL?
 
     /// An `open`ed-but-not-yet-`activate`d module: the dylib is mapped + its symbols resolved, but
@@ -49,6 +50,7 @@ final class SZLoader: @unchecked Sendable {
         let update: SZNodeABI.UpdateFn
         let teardown: SZNodeABI.TeardownFn
         let enumerateOptions: SZNodeABI.EnumerateOptionsFn?   // optional (v4)
+        let setPaused: SZNodeABI.SetPausedFn?                 // optional (v7)
         let copy: URL
     }
     private var pending: Pending?
@@ -95,6 +97,8 @@ final class SZLoader: @unchecked Sendable {
         // Optional — resolved without throwing; a node with no dynamic options simply won't export it.
         let enumerate = dlsym(newHandle, SZNodeABI.enumerateOptionsSymbol)
             .map { unsafeBitCast($0, to: SZNodeABI.EnumerateOptionsFn.self) }
+        let setPaused = dlsym(newHandle, SZNodeABI.setPausedSymbol)
+            .map { unsafeBitCast($0, to: SZNodeABI.SetPausedFn.self) }
 
         pending = Pending(
             handle: newHandle,
@@ -102,6 +106,7 @@ final class SZLoader: @unchecked Sendable {
             update: unsafeBitCast(try symbol(SZNodeABI.updateSymbol), to: SZNodeABI.UpdateFn.self),
             teardown: unsafeBitCast(try symbol(SZNodeABI.teardownSymbol), to: SZNodeABI.TeardownFn.self),
             enumerateOptions: enumerate,
+            setPaused: setPaused,
             copy: copy)
     }
 
@@ -116,6 +121,7 @@ final class SZLoader: @unchecked Sendable {
         update = p.update
         teardownFn = p.teardown
         enumerateOptionsFn = p.enumerateOptions
+        setPausedFn = p.setPaused
         loadedCopy = p.copy
     }
 
@@ -134,6 +140,10 @@ final class SZLoader: @unchecked Sendable {
         guard let update else { return 1 }
         return update(context)
     }
+
+    /// Tell the live node the runtime paused / resumed (v7). No-op for a node that doesn't implement
+    /// it — which is every node that owns nothing running on its own.
+    func setPaused(_ paused: Bool) { setPausedFn?(paused ? 1 : 0) }
 
     /// Ask the live node for a port's dynamic enum options (v4) — the host's editor dropdown + snapshot
     /// source. Empty if the node has no dynamic options for `port` (or isn't activated). Grows + retries
@@ -172,6 +182,7 @@ final class SZLoader: @unchecked Sendable {
         update = nil
         teardownFn = nil
         enumerateOptionsFn = nil
+        setPausedFn = nil
         loadedCopy = nil
     }
 

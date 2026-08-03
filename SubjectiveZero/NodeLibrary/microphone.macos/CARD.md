@@ -25,4 +25,7 @@ frame). The **source** node of the composable audio pipeline: `microphone.macos`
   `ctx.inputFloatArray("samples")`.
 - **Gotchas:** mono only (channel 0); fixed 2048-sample window (not yet a latency/FFT-size enum like the
   prior art). The `device` UID→CoreAudio-id match assumes `AVCaptureDevice.uniqueID` == the device UID
-  (true on macOS); a mismatch degrades gracefully to the default input.
+  (true on macOS); a mismatch degrades gracefully to the default input. `setPaused` follows the runtime's
+  transport — the engine's IO thread pulls the mic whether or not frames are drawn, so without it a paused
+  graph sits there holding the input device open. It guards on `running`, so a Play press never starts the
+  engine when the mic isn't authorized (that path stays on the synthetic fallback).
