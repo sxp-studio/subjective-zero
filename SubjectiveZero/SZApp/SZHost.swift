@@ -713,6 +713,10 @@ final class SZHost {
         // A freshly opened project starts playing from t=0 — reset the render clock and clear any pause
         // carried over from the previous project. (Deliberately here, not in `runtime.loadProject`, so
         // incremental live reloads — promote / graph edits — never yank the animation back to 0.)
+        // `resetTimeline` deliberately preserves the paused/playing state, so clearing the mirror alone
+        // left the runtime clock paused behind a HUD reading Play — frozen viewport, and (since ABI v7)
+        // suspended node resources with it. Tell the runtime, which owns the clock.
+        runtime?.setPaused(false)
         runtime?.resetTimeline()
         isPaused = false
     }
