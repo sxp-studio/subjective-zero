@@ -47,15 +47,17 @@ public struct SZOpenCodeProvider: SZProvider {
 
     /// Served from the last catalog snapshot (fetched or seeded) — empty until one lands, which keeps
     /// every consumer honest: the picker serves nothing to mislabel, `resolvedGenerationSettings` falls
-    /// through to "", and `launch()` omits `-m` (opencode's own configured default carries the run).
+    /// through to "", and `launch()` omits `-m` (opencode's own selection carries the run).
     public var models: [SZProviderModel] { catalog.snapshot.withLock { $0?.models ?? [] } }
     public var defaultModel: String { catalog.snapshot.withLock { $0?.defaultModelID ?? "" } }
 
-    /// Provider-level fallbacks only — every enumerated model overrides these from its own `variants`
-    /// map (openai reasoning models expose low…max; non-reasoning models get an empty menu). Used just
-    /// for a stored id no longer in the catalog. "medium" is opencode's conventional middle effort.
-    public let defaultReasoningEffort = "medium"
-    public let supportedReasoningEfforts = ["low", "medium", "high", "xhigh", "max"]
+    /// Deliberately empty at the provider level: every reasoning model carries its own menu from its
+    /// `variants` map, so the fallback serves exactly the models whose menu was never enumerated — a
+    /// non-reasoning model (no `variants`) and the "" CLI-default resolution — and argv must not carry
+    /// a `--variant` guess for either (opencode ignores an inapplicable one, verified 1.18.4, but on a
+    /// reasoning default it would silently override the CLI's own variant choice).
+    public let defaultReasoningEffort = ""
+    public let supportedReasoningEfforts: [String] = []
     /// opencode has no fast-mode FLAG: fast is a distinct model id ("…-terra-fast" alongside "…-terra"),
     /// so it surfaces in the dynamic catalog as a selectable model, not a toggle. (Same "no such flag"
     /// reason grok/pi carry false.)
@@ -84,8 +86,18 @@ public struct SZOpenCodeProvider: SZProvider {
 
     // MARK: - Dynamic catalog
 
+    /// A persisted snapshot seeds the MODELS only — its default is dropped, not re-trusted: it may
+    /// be the retired heuristic's guess (pre-fix builds persisted one; for the reporter, the
+    /// API-key-only `gpt-5.3-codex-spark`, which would re-break every run until a refetch SUCCEEDS —
+    /// the launch refresh is best-effort) or a configured pick the user has since changed outside
+    /// the app. Dropping it costs nothing: launch omits `-m`, so opencode still runs the user's
+    /// configured model itself, and the launch-time refetch re-derives the true default for the
+    /// picker. Only a fetch may set a default, so a poisoned persisted value can never outlive one
+    /// seeding.
     public func seedModelCatalog(_ snapshot: SZProviderModelCatalog) {
-        catalog.snapshot.withLock { $0 = snapshot }
+        var seeded = snapshot
+        seeded.defaultModelID = nil
+        catalog.snapshot.withLock { $0 = seeded }
     }
 
     /// One `opencode models --verbose` run (token-free — it reads the local models.dev cache, no
@@ -100,9 +112,10 @@ public struct SZOpenCodeProvider: SZProvider {
         guard result.exitCode == 0, !result.timedOut else {
             throw SZOpenCodeCatalogError.fetchFailed(exitCode: result.exitCode, timedOut: result.timedOut)
         }
-        // The user's OWN configured default (opencode's merged config `model`) wins the pre-selection —
-        // best-effort and token-free: any failure leaves it nil and the heuristic below picks. Read
-        // AFTER the catalog fetch guard so a broken CLI never triggers a second spawn.
+        // The user's OWN configured default (opencode's merged config `model`) is the only
+        // pre-selection — best-effort and token-free: any failure leaves it nil and the snapshot
+        // carries no default. Read AFTER the catalog fetch guard so a broken CLI never triggers a
+        // second spawn.
         let configured = await Self.configuredDefaultModel(runner: runner)
         guard let snapshot = Self.catalogSnapshot(fromVerboseOutput: result.output,
                                                   configuredDefaultModel: configured) else {
@@ -116,8 +129,8 @@ public struct SZOpenCodeProvider: SZProvider {
     /// debug config` (token-free JSON). Verified opencode 1.18.4: the top-level `model` key is present
     /// ONLY when the user set one — an authed install with no `model` configured (13 openai models
     /// served) emitted NO `model` key, so this never surfaces opencode's own auto-selected default and
-    /// can't smuggle a zen tier past the heuristic. Best-effort: a nonzero exit, timeout, or missing
-    /// key returns nil, so catalog resolution falls through to the heuristic. The output is scanned
+    /// can't smuggle an opencode auto-pick in as a user choice. Best-effort: a nonzero exit, timeout,
+    /// or missing key returns nil, so the snapshot carries no default. The output is scanned
     /// string-state-aware (same extractor as the catalog) so a leading banner/log line can't defeat
     /// the parse.
     static func configuredDefaultModel(runner: any SZProcessRunning) async -> String? {
@@ -136,10 +149,14 @@ public struct SZOpenCodeProvider: SZProvider {
     /// Map `opencode models --verbose` output into a snapshot. Internal for the recorded-fixture tests.
     /// Each top-level `{ … }` is one model object; `Self.topLevelJSONObjects` extracts them
     /// string-state-aware (robust to the pretty formatting). Only `status == "active"` models are
-    /// kept. Default precedence: the user's `configuredDefaultModel` when opencode currently serves it
-    /// (their explicit choice) → else the first model NOT on an opencode-hosted "zen" tier (a real
-    /// authed provider, so a free/quota-limited freebie is never the default) → else the first model
-    /// overall (a zen-only install gets exactly the first model opencode lists).
+    /// kept. The default is the user's `configuredDefaultModel` when opencode currently serves it
+    /// (their explicit choice) — otherwise NONE: launch omits `-m` and opencode's own selection
+    /// carries the run. Two generations of host-side guessing both broke on facts only opencode's
+    /// backends know: "first model overall" defaulted a zen-only user onto a quota-exhausted freebie
+    /// (2026-07-23), and its replacement "first non-zen model" defaulted a ChatGPT-OAuth user onto
+    /// `openai/gpt-5.3-codex-spark`, which OpenAI serves API-key accounts only — a 400 on every run
+    /// (2026-08-07). The catalog cannot see account entitlements, so an unconfigured default is
+    /// opencode's to pick, not ours.
     static func catalogSnapshot(fromVerboseOutput output: String,
                                 configuredDefaultModel: String? = nil) -> SZProviderModelCatalog? {
         var raw: [[String: Any]] = []
@@ -158,23 +175,7 @@ public struct SZOpenCodeProvider: SZProvider {
         // A configured default only wins if opencode still serves it — a stale/inactive id in the
         // user's config must not pin a model no run could actually use.
         let configured = configuredDefaultModel.flatMap { modelIDs.contains($0) ? $0 : nil }
-        let firstAuthed = models.first { !isOpenCodeHostedID($0.id) }?.id
-        let defaultID = configured ?? firstAuthed ?? models.first?.id
-        return SZProviderModelCatalog(models: models, defaultModelID: defaultID)
-    }
-
-    /// True for opencode's own hosted "zen" tiers (providerID `opencode` or `opencode-<x>` such as
-    /// `opencode-go` — the free, quota-limited models). A qualified id is `providerID/bare`, so we
-    /// test the leading segment: exact `opencode`, or the `opencode-` namespace, without matching an
-    /// unrelated provider that merely starts with the letters (e.g. a hypothetical `opencodex`).
-    /// `opencode/*` verified on 1.18.4. Only the single `opencode-go` token was actually observed (a
-    /// user report, 2026-07-23) — matching the whole `opencode-` namespace is a DELIBERATE
-    /// extrapolation: opencode's own hosted tiers share that vendor prefix, and treating the family as
-    /// hosted is the safe default (worst case a real authed `opencode-<x>` provider loses only its
-    /// silent-default preference — the user can still pick it), pending measurement of other tokens.
-    static func isOpenCodeHostedID(_ id: String) -> Bool {
-        let provider = id.prefix { $0 != "/" }
-        return provider == "opencode" || provider.hasPrefix("opencode-")
+        return SZProviderModelCatalog(models: models, defaultModelID: configured)
     }
 
     private static func model(fromVerbose obj: [String: Any], duplicatedNames: Set<String>) -> SZProviderModel? {
@@ -257,9 +258,10 @@ public struct SZOpenCodeProvider: SZProvider {
         // permission config once the coding flow's required tools are pinned, then live-verify a
         // ui_run coding agent still writes+compiles.
         args.append("--auto")
-        // No known model (runtime catalog before its first fetch) → no `-m`: opencode runs its own
-        // configured default, by construction an id it currently serves (grok's lesson — pinning a
-        // stale id is what breaks every run when the catalog re-points).
+        // No known model (no stored pick and no opencode-configured default — the normal state, and
+        // also any catalog before its first fetch) → no `-m`: opencode's own selection carries the
+        // run, by construction an id the account can actually use (see catalogSnapshot — both
+        // host-side default guesses broke on account facts only opencode's backends know).
         let model = request.model ?? defaultModel
         if !model.isEmpty { args += ["-m", model] }
         // The effort token IS opencode's `--variant` key (mapped 1:1 in the catalog); resolvedGeneration-

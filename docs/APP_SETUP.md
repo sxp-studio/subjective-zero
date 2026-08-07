@@ -101,8 +101,8 @@ sheet shows the same remedies listed here.
   **Model** menu on the opencode card there (picking one re-tests it on the spot). The app also honors
   a `model` you set in your opencode config (whatever `opencode debug config` reports as the resolved
   top-level `model`), so long as opencode still serves it: that becomes the pre-selected default. Absent
-  a configured model, the app picks the first authed provider's model (never one of opencode's free
-  hosted "zen" tiers unless those are all you have).
+  a configured model, the app sets no default at all — runs pass no model flag and opencode's own
+  selection carries them, exactly as if you ran `opencode run` yourself.
 
 ### Muse Code (`muse`)
 

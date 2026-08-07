@@ -42,13 +42,13 @@ protocol SZProvider {
   multi-provider harness (like pi) with a RUNTIME-enumerated catalog — the user authes their own
   backends (`opencode auth login`) and opencode routes to them; subz drives the harness. Distinct
   from pi in sessions: opencode mints its own `ses_…` id, parsed back from the stream (codex-style).
-  Catalog default precedence (`SZOpenCodeProvider.catalogSnapshot`): the user's own configured `model`
-  (read token-free from `opencode debug config`) when opencode still serves it → else the first model
-  NOT on an opencode-hosted "zen" tier (providerID `opencode`/`opencode-go` — the free, quota-limited
-  freebies, which must never be the silent default when a real authed provider exists) → else the first
-  listed model (a zen-only install still gets a working default). A failing provider's model is
-  re-pickable from its Agent Providers card, and Test probes the *resolved* model, not the provider
-  default.
+  Catalog default (`SZOpenCodeProvider.catalogSnapshot`): the user's own configured `model` (read
+  token-free from `opencode debug config`) when opencode still serves it — otherwise NONE: runs omit
+  `-m` and opencode's own selection carries the run. The app never guesses a default from the
+  catalog; two generations of guessing broke on account facts only opencode's backends know (a
+  quota-exhausted "zen" freebie, then an API-key-only model on a ChatGPT-OAuth account). A failing
+  provider's model is re-pickable from its Agent Providers card, and Test probes the *resolved*
+  model, not the provider default.
 - **muse** - CLI only (Meta's Muse Code, `muse`; added 2026-08, verified against 0.1.0-R708.1 —
   the beta released 2026-08-05, whose portal docs are account-gated, so every CLI-integration fact
   is live-measured). Static single-model manifest (`muse-spark-1.2`, the id read back from a live
@@ -73,7 +73,8 @@ For each, we wrap and surface to the UI:
 > `SZProviderModel`: "claude-opus-4-8" → "Opus 4.8", "gpt-5.6-terra" → "GPT-5.6 Terra" - never
 > floating aliases, so a version label can't silently re-point; new models ship via app updates, and a
 > type-any-model manual override stays deferred) / `defaultModel` /
-> `supportedReasoningEfforts` (`[]` = the CLI has no effort concept; claude `--effort`
+> `supportedReasoningEfforts` (`[]` = no provider-level fallback menu — the CLI has no effort
+> concept, or declares efforts per enumerated model only; claude `--effort`
 > low/medium/high/xhigh/max, uniform across its seven models - recorded from claude 2.1.206 and
 > re-confirmed by a `max` turn on each model at 2.1.220; codex provider default
 > low/medium/high/xhigh - recorded from codex-cli 0.144.1's `models_cache.json`, with per-model

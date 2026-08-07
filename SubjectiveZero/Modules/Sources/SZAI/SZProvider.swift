@@ -230,10 +230,12 @@ public protocol SZProvider: Sendable {
     var displayName: String { get }
     var models: [SZProviderModel] { get }
     var defaultModel: String { get }
-    var defaultReasoningEffort: String { get }   // opaque token; "" if the CLI has no such concept
-    /// Effort tokens this CLI maps to a flag, in menu order. `[]` = the CLI has no effort concept —
-    /// the UI hides the dimension and argv never emits one. The fallback for models that don't
-    /// override it: read `supportedReasoningEfforts(for:)`, never this, when a model is in hand.
+    var defaultReasoningEffort: String { get }   // opaque token; "" if there is no provider-level fallback
+    /// Effort tokens this CLI maps to a flag, in menu order — the PROVIDER-LEVEL fallback for models
+    /// that don't override it. `[]` = no fallback menu: either the CLI has no effort concept, or the
+    /// provider deliberately declares efforts per enumerated model only — for a model without its own
+    /// menu the UI hides the dimension and argv never emits one. Read
+    /// `supportedReasoningEfforts(for:)`, never this, when a model is in hand.
     var supportedReasoningEfforts: [String] { get }
     /// True if `launch()` can express fast mode in argv at all. The fallback for models that don't
     /// override it: read `supportsFastMode(for:)`, never this, before showing a toggle or emitting a
@@ -294,7 +296,7 @@ public extension SZProvider {
     var usesPreallocatedSessionID: Bool { false }
     var authStatusArgs: [String] { [] }
     var authFailureMarkers: [String] { [] }
-    var supportedReasoningEfforts: [String] { [] }   // conservative for future providers; both shipped ones override
+    var supportedReasoningEfforts: [String] { [] }   // the honest default: no menu until a provider declares one
     var supportsFastMode: Bool { false }
     func prepare(_ request: SZAgentRunRequest) throws {}
     func makeStreamConsumer() -> any SZAgentStreamConsumer { SZNullStreamConsumer() }
