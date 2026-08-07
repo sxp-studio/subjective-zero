@@ -90,7 +90,7 @@ cd SubjectiveZero/Modules && swift build
 ```
 
 To actually drive agents you need at least one provider CLI installed and logged in: `claude`,
-`codex`, `grok`, `pi`, or `opencode`. SubZ runs them as subprocesses and stores no credentials of
+`codex`, `grok`, `pi`, `opencode`, or `muse`. SubZ runs them as subprocesses and stores no credentials of
 its own, so auth stays with each CLI's own login. The in-app Agent Providers sheet shows what's
 ready and what isn't; [`docs/APP_SETUP.md`](docs/APP_SETUP.md) has the full walkthrough.
 

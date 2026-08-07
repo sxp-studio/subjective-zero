@@ -235,16 +235,36 @@ extension SZHost {
         }
     }
 
-    /// While the sheet is open: re-check every 3s (cheap tiers only) + first-run auto-probe.
+    /// While the sheet is open: re-check every 3s (cheap tiers only) + first-run auto-probe, and
+    /// on a slower cadence the one probe shape the cheap tiers can never re-arm (below).
     func startProviderHealthPolling() {
         guard providerHealthPollTask == nil else { return }
         providerHealthPollTask = Task { @MainActor [weak self] in
+            var tick = 0
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.refreshProviderHealthOnce()
                 self.autoProbeProvidersIfFirstRun()
+                if tick % 5 == 0 { self.reprobeStatuslessLoggedOutProviders() }
+                tick += 1
                 try? await Task.sleep(for: .seconds(3))
             }
+        }
+    }
+
+    /// A provider with NO cheap auth-status command (empty `authStatusArgs`) has no tier-2
+    /// transition to drop a held logged-out probe verdict: its cheap tier reads the same
+    /// "installed" before and after a login, so once a probe records authNeeded, no amount of
+    /// logging in could ever turn the card green — the verdict would stick until a manual Test.
+    /// While the sheet is open, re-probe exactly that stuck shape every 15s. Spend stays bounded:
+    /// a still-logged-out probe dies on the CLI's own local credential check (the recorded marker
+    /// lane, no backend turn), so only the single probe that finds the login landed costs tokens —
+    /// the same price as the Test click it replaces.
+    func reprobeStatuslessLoggedOutProviders() {
+        for provider in enabledProviders
+        where provider.authStatusArgs.isEmpty
+            && providerProbes[provider.id]?.status == .authNeeded {
+            runProviderProbe(provider.id)
         }
     }
 

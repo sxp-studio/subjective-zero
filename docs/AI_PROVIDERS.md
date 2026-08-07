@@ -49,6 +49,17 @@ protocol SZProvider {
   listed model (a zen-only install still gets a working default). A failing provider's model is
   re-pickable from its Agent Providers card, and Test probes the *resolved* model, not the provider
   default.
+- **muse** - CLI only (Meta's Muse Code, `muse`; added 2026-08, verified against 0.1.0-R708.1 —
+  the beta released 2026-08-05, whose portal docs are account-gated, so every CLI-integration fact
+  is live-measured). Static single-model manifest (`muse-spark-1.2`, the id read back from a live
+  run's `run.model.configured` event; no enumeration command exists). Auth is `muse auth set
+  --api-key-stdin` (Meta developer account API key) or the `muse login` device flow. Distinct in
+  its MCP attachment: a per-scope STAGED CONFIG HOME (`XDG_CONFIG_HOME` → a throwaway dot-dir in
+  the agent's working directory, with settings.json naming an nc bridge script and an auth.json
+  symlink into the user's real store) — no per-invocation MCP flag. CAUTION for users: the model
+  is metered, and Meta's launch coverage describes a data-sharing "Contributor" tier (unverified
+  here beyond the measured negative that no `…-contributor` model id is CLI-selectable, 0.1.0);
+  see APP_SETUP.md.
 
 For each, we wrap and surface to the UI:
 
@@ -113,21 +124,21 @@ These choices are set per agent role (Director Agent vs Coding Agent can differ)
 - Failure recovery: a crashed/stalled session is restarted by the host; in-flight tree state
   decides whether to resume or re-prompt.
 
-## CLI integration (verified 2026-06-13; grok column 2026-07-12; pi column 2026-07-12; opencode column 2026-07-21)
+## CLI integration (verified 2026-06-13; grok column 2026-07-12; pi column 2026-07-12; opencode column 2026-07-21; muse column 2026-08-07)
 
 Concrete facts the adapters rely on, from the installed CLIs (claude code 2.1.177, codex-cli
-0.137.0, grok 0.2.93, pi 0.80.6, opencode 1.18.4):
+0.137.0, grok 0.2.93, pi 0.80.6, opencode 1.18.4, muse 0.1.0-R708.1):
 
-| Need | claude code | codex | grok | pi | opencode |
-|---|---|---|---|---|---|
-| Non-interactive run | `claude -p/--print` | `codex exec` (alias `e`) | `grok -p/--single` | `pi -p --mode json` (prompt is a trailing positional; stdin MUST reach EOF or the CLI hangs with zero output — the runner wires /dev/null) | `opencode run` (prompt trailing positional; `--auto` bypasses permission prompts) |
-| Structured / streamed output | `--output-format json\|stream-json`, `--json-schema <s>` | `--json` (JSONL), `--output-schema <file>` | `--output-format json\|streaming-json` (token-level `thought`/`text` chunks; NO tool events) | `--mode json` (JSONL events: session header, message/turn lifecycle, `tool_execution_*`); CAUTION: a FAILED turn still exits 0 — `parse()` reads the last assistant `stopReason` | `--format json` (JSONL: `step_start`/`reasoning`/`tool_use`/`text`/`step_finish`, each carrying `sessionID`); a failed turn exits nonzero AND emits a top-level `error` event |
-| Model selection | `--model <alias\|full>` | `-m/--model` or `-c model="…"` (`--oss` for local) | `-m/--model` (enumerable via `grok models`) | `--model <provider/id>` qualified (catalog enumerated at runtime via `--mode rpc` → `get_available_models`) | `-m <provider/model>` qualified (catalog enumerated at runtime via `opencode models --verbose`) |
-| Thinking level | `--effort <low\|medium\|high\|xhigh\|max>` | `-c` reasoning config key | `--reasoning-effort` exists but is NOT honoured (measured) - never emitted | `--thinking <minimal\|low\|medium\|high\|xhigh\|max>`, per-model menus derived from the catalog's `thinkingLevelMap`; out-of-menu values silently clamp | `--variant <low\|medium\|high\|xhigh\|max>`, per-model menus from each model's `variants` map (maps to OpenAI's `reasoningEffort`); `none` dropped |
-| Attach SubZ MCP server | `--mcp-config <json>` | `codex mcp` / config | `<cwd>/.grok/config.toml`, staged per run by `prepare()` (no per-invocation flag) | no built-in MCP: `prepare()` stages `<cwd>/.subz/mcp-bridge.mjs` (a pi extension speaking the host's TCP protocol), loaded via `--extension` | inline `OPENCODE_CONFIG_CONTENT` env carrying an `mcp.subz` local (nc) server; NO cwd file (opencode roots a session at the git repo and drops a cwd-staged `opencode.json`), no per-invocation flag |
-| Sessions | host-minted `--session-id`, `--resume <id>` | id parsed from `thread.started` | host-minted `--session-id`, `--resume <id>` | host-minted `--session-id` (one flag creates AND resumes; header echoes it) | id parsed from any event's `sessionID` (`ses_…`); `-s <id>` resumes |
-| Fallback | `--fallback-model <list>` | - | - | - | - |
-| Health | `claude --version`, `claude auth status` (JSON, exit 0/1 - verified 2.1.200) | `codex --version`, `codex login status` (exit 0/1 - verified 0.141.0) | `grok --version`, `grok models` (exit 0 in BOTH auth states - output markers decide) | `pi --version`, `pi --list-models --offline` (exit 0 in BOTH auth states - output markers decide; login is TUI-only: `pi` then `/login`) | `opencode --version`, `opencode auth list` (exit 0 in BOTH auth states - "0 credentials" marker decides; login is `opencode auth login`) |
+| Need | claude code | codex | grok | pi | opencode | muse |
+|---|---|---|---|---|---|---|
+| Non-interactive run | `claude -p/--print` | `codex exec` (alias `e`) | `grok -p/--single` | `pi -p --mode json` (prompt is a trailing positional; stdin MUST reach EOF or the CLI hangs with zero output — the runner wires /dev/null) | `opencode run` (prompt trailing positional; `--auto` bypasses permission prompts) | `muse exec` (prompt trailing positional; `--disable-approval` bypasses approvals, sandbox stays on; `--no-foreign-personal-context` keeps other CLIs' imported skills out) |
+| Structured / streamed output | `--output-format json\|stream-json`, `--json-schema <s>` | `--json` (JSONL), `--output-schema <file>` | `--output-format json\|streaming-json` (token-level `thought`/`text` chunks; NO tool events) | `--mode json` (JSONL events: session header, message/turn lifecycle, `tool_execution_*`); CAUTION: a FAILED turn still exits 0 — `parse()` reads the last assistant `stopReason` | `--format json` (JSONL: `step_start`/`reasoning`/`tool_use`/`text`/`step_finish`, each carrying `sessionID`); a failed turn exits nonzero AND emits a top-level `error` event | `--json` (the session EVENT LOG as JSONL envelopes: `run_output_delta` chunks, `task_lifecycle` per task with task_kind `tool.{name}`, final `run_terminal` with the authoritative text); reasoning is encrypted, per-turn usage rides only the durable log (`muse export`) |
+| Model selection | `--model <alias\|full>` | `-m/--model` or `-c model="…"` (`--oss` for local) | `-m/--model` (enumerable via `grok models`) | `--model <provider/id>` qualified (catalog enumerated at runtime via `--mode rpc` → `get_available_models`) | `-m <provider/model>` qualified (catalog enumerated at runtime via `opencode models --verbose`) | `--model <id>` (no enumeration command; single static id `muse-spark-1.2`, read back from `run.model.configured`) |
+| Thinking level | `--effort <low\|medium\|high\|xhigh\|max>` | `-c` reasoning config key | `--reasoning-effort` exists but is NOT honoured (measured) - never emitted | `--thinking <minimal\|low\|medium\|high\|xhigh\|max>`, per-model menus derived from the catalog's `thinkingLevelMap`; out-of-menu values silently clamp | `--variant <low\|medium\|high\|xhigh\|max>`, per-model menus from each model's `variants` map (maps to OpenAI's `reasoningEffort`); `none` dropped | `--reasoning-effort <minimal\|low\|medium\|high\|xhigh\|ultra>` (recorded from the CLI's own rejection of `none`, which is echo-provider-only; default high) |
+| Attach SubZ MCP server | `--mcp-config <json>` | `codex mcp` / config | `<cwd>/.grok/config.toml`, staged per run by `prepare()` (no per-invocation flag) | no built-in MCP: `prepare()` stages `<cwd>/.subz/mcp-bridge.mjs` (a pi extension speaking the host's TCP protocol), loaded via `--extension` | inline `OPENCODE_CONFIG_CONTENT` env carrying an `mcp.subz` local (nc) server; NO cwd file (opencode roots a session at the git repo and drops a cwd-staged `opencode.json`), no per-invocation flag | staged config HOME: `prepare()` writes a throwaway `XDG_CONFIG_HOME` (settings.json `mcp_servers.subz` stdio → an nc bridge script, `command` is a bare path with no args field; auth.json symlinks to the user's real store — the binary ignores `MUSE_AUTH_PATH`), no per-invocation flag |
+| Sessions | host-minted `--session-id`, `--resume <id>` | id parsed from `thread.started` | host-minted `--session-id`, `--resume <id>` | host-minted `--session-id` (one flag creates AND resumes; header echoes it) | id parsed from any event's `sessionID` (`ses_…`); `-s <id>` resumes | host-minted `--session-id` (one flag creates AND resumes — the second exec appends at sequence 2; `muse resume` is the interactive TUI, not a headless lane) |
+| Fallback | `--fallback-model <list>` | - | - | - | - | - |
+| Health | `claude --version`, `claude auth status` (JSON, exit 0/1 - verified 2.1.200) | `codex --version`, `codex login status` (exit 0/1 - verified 0.141.0) | `grok --version`, `grok models` (exit 0 in BOTH auth states - output markers decide) | `pi --version`, `pi --list-models --offline` (exit 0 in BOTH auth states - output markers decide; login is TUI-only: `pi` then `/login`) | `opencode --version`, `opencode auth list` (exit 0 in BOTH auth states - "0 credentials" marker decides; login is `opencode auth login`) | `muse --version` only — NO token-free auth status command exists (empty `authStatusArgs`, the seam's "auth not checked" lane); the probe's marker ("missing meta credentials", exit 1, fails fast pre-network) is the sole auth detector |
 
 pi's user config (extensions, skills, AGENTS.md/CLAUDE.md) is deliberately NOT silenced — pi
 users self-select for a customized harness, and the subz bridge registers additively beside
@@ -153,6 +164,9 @@ Provider health is **three tiers, cheapest first** (`SZProviderHealth.swift` /
    authenticated"; pi 0.80.6's `--list-models` exits 0 and says "No models available. Use
    /login…"). Token-free, so tiers 1–2 are safe for the launch pass and the setup sheet's 3s
    re-check loop. A ready transition here is also what triggers a dynamic-catalog re-fetch (pi).
+   EMPTY `authStatusArgs` is the documented lane for a CLI with no token-free status command
+   (muse 0.1.0 — every auth-revealing invocation is a paid turn): the cheap pass reports
+   "Installed — auth not checked" and the probe is the arbiter.
 3. **probe** - `healthProbe()`: one real one-shot prompt through the provider's own
    `prepare()`/`launch()`/`parse()` path (default model, no MCP, temp cwd). The only token-costing
    tier; it runs once per provider during first-run setup, on the per-card Test button, and under

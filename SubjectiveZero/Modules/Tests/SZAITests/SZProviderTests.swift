@@ -65,10 +65,11 @@ private extension Array where Element == String {
 
 @Test func registryVendsAllProviders() {
     let reg = SZProviderRegistry.shared
-    #expect(reg.providers.map(\.id).sorted() == ["claude", "codex", "grok", "opencode", "pi"])
+    #expect(reg.providers.map(\.id).sorted() == ["claude", "codex", "grok", "muse", "opencode", "pi"])
     #expect(reg.defaultProvider.id == "claude")
     #expect(reg.provider(id: "claude")?.defaultModel == "claude-opus-5")
     #expect(reg.provider(id: "codex")?.defaultModel == "gpt-5.6-terra")
+    #expect(reg.provider(id: "muse")?.defaultModel == "muse-spark-1.2")
     // grok's, pi's and opencode's catalogs are runtime-enumerated (grok's backend re-points
     // unversioned ids; pi and opencode are BYOK — the user's authed providers decide): at rest they
     // serve NOTHING, deliberately — no hardcoded grok/pi/opencode model id exists anywhere here.
@@ -1563,4 +1564,173 @@ private final class OpenCodeSplitRunner: SZProcessRunning {
     req.prompt = "-v is not a flag here"
     let argv = SZOpenCodeProvider().launch(req, preallocatedSessionID: nil).arguments
     #expect(argv.last == " -v is not a flag here")
+}
+
+// MARK: - Muse Code
+
+/// muse attaches MCP through a STAGED CONFIG HOME (no per-invocation flag): `prepare()` writes a
+/// throwaway `XDG_CONFIG_HOME` as a dot-dir in the SCOPE's working directory (the per-agent path;
+/// the cache dir is shared app-wide and concurrent scopes would race on it) — settings.json
+/// naming the nc bridge script (`command` is a bare executable path, the schema has no args
+/// field) plus an auth.json symlink into the user's real credential store — and `launch()` points
+/// the env at it. Sessions are claude-style host-minted UUIDs.
+@Test func museLaunchBuildsArgvStagesConfigHomeAndMintsSession() async throws {
+    let muse = SZMuseCodeProvider()
+    let stub = StubRunner()
+    let work = FileManager.default.temporaryDirectory.appending(path: "muse-cfg-\(UUID().uuidString)")
+    var req = request(port: 42123)
+    req.workingDirectory = work
+    defer { try? FileManager.default.removeItem(at: work) }
+
+    let result = try await muse.run(req, runner: stub)
+
+    let call = try #require(stub.lastCall)
+    #expect(call.launchPath == "/usr/bin/env")
+    #expect(call.arguments.prefix(3) == ["muse", "exec", "--json"])
+    #expect(call.arguments.value(after: "--model") == "muse-spark-1.2")
+    #expect(call.arguments.value(after: "--reasoning-effort") == "high")
+    // Headless autonomy + hermetic runs (no imported foreign personal skills).
+    #expect(call.arguments.contains("--disable-approval"))
+    #expect(call.arguments.contains("--no-foreign-personal-context"))
+    #expect(call.arguments.last == "make it grayscale")   // prompt is the trailing positional
+
+    // The staged config home rides the env, never argv.
+    let home = work.appending(path: ".muse-config")
+    let launch = muse.launch(req, preallocatedSessionID: "x")
+    #expect(launch.environment["XDG_CONFIG_HOME"] == home.path)
+    #expect(launch.environment["MUSE_NO_AUTO_UPDATE"] == "1")   // no binary swap mid-run
+    let settings = try String(contentsOf: home.appending(path: "muse/settings.json"), encoding: .utf8)
+    #expect(settings.contains(#""schema_version":1"#))
+    #expect(settings.contains(#""transport":"stdio""#))
+    #expect(settings.contains(#""framing":"line_delimited_json""#))
+    let bridge = home.appending(path: "subz-mcp-bridge.sh")
+    #expect(settings.contains(bridge.path))
+    let script = try String(contentsOf: bridge, encoding: .utf8)
+    #expect(script.contains("exec /usr/bin/nc 127.0.0.1 42123"))
+    // The bridge must be spawnable — muse execs the settings `command` path directly.
+    let permissions = try FileManager.default.attributesOfItem(atPath: bridge.path)[.posixPermissions] as? Int
+    #expect(permissions == 0o755)
+    // Credentials stay in the USER's store, reached via symlink from the staged home.
+    let authLink = home.appending(path: "muse/auth.json")
+    let destination = try FileManager.default.destinationOfSymbolicLink(atPath: authLink.path)
+    #expect(destination == SZMuseCodeProvider.userAuthFile().path)
+
+    // muse takes a host-minted UUID, echoed back as the session id (claude-style).
+    let sessionID = try #require(result.outcome.sessionID)
+    #expect(call.arguments.value(after: "--session-id") == sessionID)
+    #expect(UUID(uuidString: sessionID) != nil)
+    #expect(result.outcome.failed == false)
+}
+
+/// A muse chat turn continues by RE-PASSING the session's id as `--session-id` — measured: the
+/// second exec appends to the retained session (first event at sequence 2). There is no `--resume`
+/// on exec; the `muse resume` subcommand is the interactive TUI picker.
+@Test func museResumeRepassesSessionID() async throws {
+    let muse = SZMuseCodeProvider()
+    var req = request(port: nil)
+    req.resumeSessionID = "S-existing"
+
+    let argv = muse.launch(req, preallocatedSessionID: nil).arguments
+    #expect(argv.value(after: "--session-id") == "S-existing")
+
+    let result = try await muse.run(req, runner: StubRunner())
+    #expect(result.outcome.sessionID == "S-existing")
+}
+
+/// A portless run (the health probe) stages a settings file WITHOUT the MCP server — rewritten
+/// every spawn, so a stale port from a previous app launch self-heals (grok's lesson).
+@Test func museOmitsMCPWhenNoPort() throws {
+    let muse = SZMuseCodeProvider()
+    let work = FileManager.default.temporaryDirectory.appending(path: "muse-cfg-\(UUID().uuidString)")
+    var req = request(port: 42123)
+    req.workingDirectory = work
+    defer { try? FileManager.default.removeItem(at: work) }
+
+    try muse.prepare(req)   // stage WITH a port first — the portless rewrite must supersede it
+    req.mcpServerPort = nil
+    try muse.prepare(req)
+    let settings = try String(
+        contentsOf: work.appending(path: ".muse-config/muse/settings.json"), encoding: .utf8)
+    #expect(!settings.contains("mcp_servers"))
+    #expect(settings.contains(#""schema_version":1"#))
+}
+
+/// A leading-`-` prompt gets a space prefix so muse's clap parser doesn't read it as a flag
+/// (measured accepted; pi/opencode's guard, same reason).
+@Test func musePromptPositionalSurvivesFlagLikeLeadingCharacters() {
+    var req = request(port: nil)
+    req.prompt = "-v is not a flag here"
+    let argv = SZMuseCodeProvider().launch(req, preallocatedSessionID: nil).arguments
+    #expect(argv.last == " -v is not a flag here")
+}
+
+// Recorded from Muse Code 0.1.0 (0.1.0-R708.1), 2026-08-07: `muse exec --json` emits the session
+// event log as JSONL envelopes — run_output_delta text chunks, task_lifecycle records for every
+// task (tool AND housekeeping), and a final run_terminal with the authoritative reply text.
+// Trimmed to the fields the consumer reads; shapes verbatim from a live turn.
+private let museDeltaLine = #"{"payload_type":"run.output.delta","payload":{"kind":"run_output_delta","command_id":"c1","text":"OK"}}"#
+private let museToolProposedLine = #"{"payload_type":"task.lifecycle.proposed","payload":{"kind":"task_lifecycle","task_id":"t1","event":{"kind":"proposed","task_id":"t1","task_kind":"tool.mcp__subz__agent_read_graph"}}}"#
+private let museReminderProposedLine = #"{"payload_type":"task.lifecycle.proposed","payload":{"kind":"task_lifecycle","task_id":"t2","event":{"kind":"proposed","task_id":"t2","task_kind":"reminder.agent.plugin:tbh-reminders:scope-reminder"}}}"#
+private let museModelProposedLine = #"{"payload_type":"task.lifecycle.proposed","payload":{"kind":"task_lifecycle","task_id":"t3","event":{"kind":"proposed","task_id":"t3","task_kind":"model.meta.response"}}}"#
+private let museTerminalLine = #"{"payload_type":"run.terminal.completed","payload":{"kind":"run_terminal","command_id":"c1","terminal":"completed","text":"OK","reason":null}}"#
+
+/// The consumer maps the recorded stream: deltas accumulate as the reply candidate, a TOOL task's
+/// `proposed` record becomes one bare-named `.toolCall` (housekeeping tasks — reminders, the model
+/// round itself — are lifecycle noise, not tool calls), text preceding a tool call flushes as
+/// narration, and the terminal's authoritative text lands as the one `.reply`.
+@Test func museStreamConsumerParsesRecordedStream() {
+    let consumer = SZMuseStreamConsumer()
+    var events: [SZAgentStreamEvent] = []
+    events += consumer.consume(#"{"payload_type":"run.output.delta","payload":{"kind":"run_output_delta","text":"Let me look at the graph."}}"#)
+    events += consumer.consume(museReminderProposedLine)   // housekeeping → nothing
+    events += consumer.consume(museModelProposedLine)      // housekeeping → nothing
+    events += consumer.consume(museToolProposedLine)       // narration flush + the tool call
+    events += consumer.consume(museDeltaLine)
+    events += consumer.consume(museTerminalLine)
+    events += consumer.finish()
+
+    #expect(events == [
+        .thinking("Let me look at the graph."),
+        .toolCall(name: "agent_read_graph"),
+        .reply("OK"),
+    ])
+}
+
+/// The terminal's text wins over the accumulated deltas, and the deltas must not duplicate into
+/// narration or a second reply. (In the recorded streams the two are the SAME text — the synthetic
+/// divergent terminal here exists to pin the preference, which identical fixtures cannot.) And a
+/// stream that dies before its terminal still yields the accumulated text once, from finish().
+@Test func museStreamConsumerPrefersTerminalTextAndSurvivesTruncation() {
+    let clean = SZMuseStreamConsumer()
+    var events: [SZAgentStreamEvent] = []
+    events += clean.consume(museDeltaLine)
+    events += clean.consume(
+        #"{"payload_type":"run.terminal.completed","payload":{"kind":"run_terminal","terminal":"completed","text":"TERMINAL-OK","reason":null}}"#)
+    events += clean.finish()
+    #expect(events == [.reply("TERMINAL-OK")])
+
+    let truncated = SZMuseStreamConsumer()
+    events = truncated.consume(museDeltaLine)   // stream ends here — no terminal
+    events += truncated.finish()
+    #expect(events == [.reply("OK")])
+}
+
+/// parse() reads the terminal envelope, not just the exit code: an exit-0 stream whose terminal
+/// is "failed" must land as a failed outcome (the exit code of that lane is unmeasured — see the
+/// provider), and a terminal-less stream stays on the exit code.
+@Test func museParseReadsTerminalEnvelope() {
+    let muse = SZMuseCodeProvider()
+    let failedTerminal = #"{"payload_type":"run.terminal.failed","payload":{"kind":"run_terminal","terminal":"failed","text":"","reason":"tool startup failed"}}"#
+    #expect(muse.parse(output: failedTerminal, exitCode: 0, preallocatedSessionID: "s").failed)
+    #expect(!muse.parse(output: museTerminalLine, exitCode: 0, preallocatedSessionID: "s").failed)
+    #expect(muse.parse(output: museTerminalLine, exitCode: 1, preallocatedSessionID: "s").failed)
+    #expect(!muse.parse(output: museDeltaLine, exitCode: 0, preallocatedSessionID: "s").failed)
+}
+
+/// A non-`completed` terminal surfaces as a ⚠ note (the failure itself rides the exit code).
+@Test func museStreamConsumerNotesFailedTerminal() {
+    let consumer = SZMuseStreamConsumer()
+    let events = consumer.consume(
+        #"{"payload_type":"run.terminal.failed","payload":{"kind":"run_terminal","terminal":"failed","text":"","reason":"tool startup failed"}}"#)
+    #expect(events == [.thinking("⚠ run ended failed: tool startup failed")])
 }

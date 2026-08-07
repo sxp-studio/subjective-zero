@@ -104,6 +104,30 @@ sheet shows the same remedies listed here.
   a configured model, the app picks the first authed provider's model (never one of opencode's free
   hosted "zen" tiers unless those are all you have).
 
+### Muse Code (`muse`)
+
+- Install (ask first): `curl -fsSL https://dev.meta.ai/install.sh | bash` (installs to
+  `~/.local/bin`; the `muse` command is a launcher script that keeps the real binary updated).
+- Health: `muse --version` (prints "Muse Code 0.1.0 (0.1.0-R708.1)").
+- Auth status: **none exists** (verified 0.1.0) - there is no token-free status command, so the
+  app reports "Installed — auth not checked" and the Test probe is what proves auth. A
+  credential-less run fails fast (exit 1, "missing meta credentials…") before any network turn.
+- Log in (pick one):
+  - `muse auth set --api-key-stdin` with a Meta developer account API key (dev.meta.ai) piped on
+    stdin - the key never rides argv; it lands in `~/.config/muse/auth.json`.
+  - `muse login` interactively (browser device flow); ask before launching.
+- Caution - **metered billing with a data-sharing tier**: Muse Spark is pay-per-token. Per
+  Meta's launch coverage (UNVERIFIED here - the portal's own terms are account-gated), a heavily
+  discounted "Contributor" tier lets Meta train on session data (prompts, outputs, and whatever
+  code the agent reads), and accounts may default to it. What IS verified (0.1.0): the tier is
+  not selectable from the CLI - a `…-contributor` model id is refused - so whatever tier your
+  account is on applies to every run. If you don't want data sharing, read the data terms in
+  your dev.meta.ai portal and verify the account is on the Standard tier before running real
+  work through muse; consider a spend cap there while you're at it.
+- Caution: `muse` self-updates in the background (launcher + binary, hourly check). The app
+  suppresses this for its own spawns (`MUSE_NO_AUTO_UPDATE=1`), so user-driven runs are where
+  updates land.
+
 The app resolves CLIs on its own synthesized search path (inherited PATH + nvm/volta/bun/cargo/
 `~/.local/bin`/`~/.opencode/bin`/Homebrew/`Codex.app` + system dirs), so a CLI visible in the user's
 shell is normally visible to the app even when launched from Finder.

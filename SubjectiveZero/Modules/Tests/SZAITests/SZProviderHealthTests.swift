@@ -2,7 +2,8 @@
 // The health tiers (SZProviderHealth.swift): six-status vocabulary, install + auth checks, and the
 // classification grammar — driven by outputs RECORDED from the real CLIs (claude 2.1.200,
 // codex-cli 0.141.0, logged-out variants captured via HOME-override runs on 2026-07-03;
-// grok 0.2.93, logged-out variants via GROK_HOME-override runs on 2026-07-12), so the
+// grok 0.2.93, logged-out variants via GROK_HOME-override runs on 2026-07-12; muse 0.1.0-R708.1,
+// logged-out variant via XDG_CONFIG_HOME-override runs on 2026-08-07), so the
 // fixtures are the CLI contract we detect against, not invented strings.
 import Foundation
 import Synchronization
@@ -98,6 +99,16 @@ private let opencodeAuthLoggedOut = SZProcessResult(
     output: "Credentials ~/.local/share/opencode/auth.json\n\n0 credentials")
 private let opencodeMissing = SZProcessResult(
     exitCode: 127, output: "env: opencode: No such file or directory")
+private let museVersionOK = SZProcessResult(exitCode: 0, output: "Muse Code 0.1.0 (0.1.0-R708.1)")
+// A credential-less `muse exec` fails FAST with exit 1 before any network turn — the marker path
+// classifies it. (muse 0.1.0 has no token-free auth status command, so this only ever runs as the
+// tier-3 probe; the cheap pass reports "auth not checked".)
+private let museExecLoggedOut = SZProcessResult(
+    exitCode: 1,
+    output: "missing meta credentials: run `muse login` or set META_API_KEY, " +
+            "or save credentials at /Users/x/.config/muse/auth.json")
+private let museMissing = SZProcessResult(
+    exitCode: 127, output: "env: muse: No such file or directory")
 
 @Test func readyWhenVersionAndAuthPass() async {
     let claude = await SZClaudeProvider().healthReport(runner: ScriptedStubRunner([
@@ -137,6 +148,16 @@ private let opencodeMissing = SZProcessResult(
     ]))
     #expect(opencode.status == .ready)
     #expect(opencode.version == "1.18.4")
+
+    // muse has NO token-free auth status command (empty authStatusArgs — measured, see the
+    // provider): the cheap pass stops at the version tier and says so, and the probe arbitrates.
+    let muse = await SZMuseCodeProvider().healthReport(runner: ScriptedStubRunner([
+        .init(argvPrefix: ["muse", "--version"], result: museVersionOK),
+    ]))
+    #expect(muse.status == .ready)
+    #expect(muse.version == "Muse Code 0.1.0 (0.1.0-R708.1)")
+    #expect(muse.message.contains("auth not checked"))
+    #expect(muse.diagnostics.map(\.tier) == [.install])   // no auth tier ran
 }
 
 /// pi's status command reports logged-out in its OUTPUT while exiting 0 (grok-shaped) — the
@@ -285,6 +306,17 @@ private let opencodeMissing = SZProcessResult(
     #expect(report.diagnostics[0].timedOut)   // the receipt still says what actually happened
 }
 
+/// A credential-less muse probe fails fast with exit 1 + the recorded missing-credentials marker —
+/// authNeeded, not a generic failure. This is muse's ONLY auth-detection lane: the cheap tier
+/// can't check auth at all (no status command), so the probe's marker path carries it alone.
+@Test func museProbeClassifiesLoggedOut() async {
+    let report = await SZMuseCodeProvider().healthProbe(runner: ScriptedStubRunner([
+        .init(argvPrefix: ["muse"], result: museExecLoggedOut),
+    ]))
+    #expect(report.status == .authNeeded)
+    #expect(report.probeVerified == false)
+}
+
 /// A logged-out pi one-shot under --offline fails fast with exit 1 + the API-key marker (recorded)
 /// — authNeeded, not a generic failure. And pi's exit-0-on-error json mode means a probe can exit
 /// 0 with a failed turn: parse() reads stopReason, so that classifies healthFailed, not ready.
@@ -392,11 +424,12 @@ private let opencodeMissing = SZProcessResult(
         .init(argvPrefix: ["pi", "--list-models"], result: piListModelsLoggedIn),
         .init(argvPrefix: ["opencode", "--version"], result: opencodeVersionOK),
         .init(argvPrefix: ["opencode", "auth", "list"], result: opencodeAuthLoggedIn),
+        .init(argvPrefix: ["muse", "--version"], result: museVersionOK),
     ])
     let report = await SZProviderVerifier.run(defaultProviderID: "claude", appVersion: "0.2.1",
                                               appBuild: "42", probe: false, runner: runner)
     #expect(report.ok)
-    #expect(report.providers.map(\.status) == [.ready, .missingCLI, .ready, .ready, .ready])
+    #expect(report.providers.map(\.status) == [.ready, .missingCLI, .ready, .ready, .ready, .ready])
 
     // The printed JSON must round-trip: it's a machine contract (APP_SETUP.md), not a log line.
     let decoder = JSONDecoder()
@@ -404,7 +437,7 @@ private let opencodeMissing = SZProcessResult(
     let decoded = try decoder.decode(SZProviderVerificationReport.self,
                                      from: Data(SZProviderVerifier.json(report).utf8))
     #expect(decoded.ok && decoded.appVersion == "0.2.1" && decoded.defaultProviderID == "claude")
-    #expect(decoded.providers.count == 5)
+    #expect(decoded.providers.count == 6)
     // Failure receipts survive the round-trip (the excerpt is what a setup agent acts on).
     #expect(decoded.providers[1].diagnostics.first?.outputExcerpt?.contains("No such file") == true)
 }
@@ -421,11 +454,15 @@ private let opencodeMissing = SZProcessResult(
         .init(argvPrefix: ["pi", "--list-models"], result: piListModelsLoggedOut),
         .init(argvPrefix: ["opencode", "--version"], result: opencodeVersionOK),
         .init(argvPrefix: ["opencode", "auth", "list"], result: opencodeAuthLoggedOut),
+        // muse can't be "cheap-tier logged out" (no status command — an INSTALLED muse reads
+        // ready-with-auth-unknown), so this all-red scenario has it missing instead.
+        .init(argvPrefix: ["muse", "--version"], result: museMissing),
     ])
     let report = await SZProviderVerifier.run(defaultProviderID: nil, appVersion: "dev",
                                               appBuild: "dev", probe: false, runner: runner)
     #expect(!report.ok)
-    #expect(report.providers.map(\.status) == [.authNeeded, .missingCLI, .authNeeded, .authNeeded, .authNeeded])
+    #expect(report.providers.map(\.status) ==
+            [.authNeeded, .missingCLI, .authNeeded, .authNeeded, .authNeeded, .missingCLI])
 }
 
 /// --probe upgrades a cheap-ready provider with the real prompt probe, keeping both tiers'
@@ -442,6 +479,7 @@ private let opencodeMissing = SZProcessResult(
         .init(argvPrefix: ["pi", "--version"],
               result: SZProcessResult(exitCode: 127, output: "env: pi: No such file or directory")),
         .init(argvPrefix: ["opencode", "--version"], result: opencodeMissing),
+        .init(argvPrefix: ["muse", "--version"], result: museMissing),
     ])
     let report = await SZProviderVerifier.run(defaultProviderID: nil, appVersion: "dev",
                                               appBuild: "dev", probe: true, runner: runner)
@@ -452,17 +490,22 @@ private let opencodeMissing = SZProcessResult(
     #expect(report.providers[2].diagnostics.map(\.tier) == [.install])   // missing → never probed
     #expect(report.providers[3].diagnostics.map(\.tier) == [.install])   // missing → never probed
     #expect(report.providers[4].diagnostics.map(\.tier) == [.install])   // missing → never probed
+    #expect(report.providers[5].diagnostics.map(\.tier) == [.install])   // missing → never probed
 }
 
 /// The remedies the setup sheet shows are provider data, not UI prose — every provider must vend
-/// the full set (install command, login command, auth-status argv, logged-out markers).
+/// the full set (install command, login command, logged-out markers). The auth-status argv is the
+/// one optional member: a CLI with no token-free status command declares it empty (the seam's
+/// documented "auth not checked" lane, muse today) — but then its markers are its ONLY
+/// logged-out detection, so they stay mandatory.
 @Test func allProvidersVendSetupRemedies() {
     for provider in SZProviderRegistry.shared.providers {
         #expect(!provider.installCommand.isEmpty, "\(provider.id) needs installCommand")
         #expect(!provider.loginCommand.isEmpty, "\(provider.id) needs loginCommand")
-        #expect(!provider.authStatusArgs.isEmpty, "\(provider.id) needs authStatusArgs")
         #expect(!provider.authFailureMarkers.isEmpty, "\(provider.id) needs authFailureMarkers")
-        #expect(provider.authStatusArgs.first == provider.healthArgs.first,
-                "\(provider.id) auth check should exercise the same CLI")
+        if !provider.authStatusArgs.isEmpty {
+            #expect(provider.authStatusArgs.first == provider.healthArgs.first,
+                    "\(provider.id) auth check should exercise the same CLI")
+        }
     }
 }
