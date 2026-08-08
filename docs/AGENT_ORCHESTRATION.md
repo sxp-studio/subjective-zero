@@ -4,22 +4,24 @@
 `SZCore` ([ARCHITECTURE.md](ARCHITECTURE.md#the-host-seam)). Agents act on the app only through the
 host's MCP server ([MCP.md](MCP.md)).
 
-> **Status - the behavior-tree formalism is provisional (V1 uses hardcoded Swift).**
-> The declarative **behavior tree / state machine in JSON** described below is the *intended target*,
-> but it is the one genuinely **unproven, loosely-defined** part of the design. So **V1 implements
-> the orchestration in plain Swift** behind the `Orchestrator` interface (a proven
-> `contract-plan → parallel coding → reconcile` strategy). The BT engine is **prototyped before it is
-> specced or built**; nothing in the build spec freezes a BT JSON schema yet. Read the JSON trees
-> below as **illustrations of intended behavior**, not a committed format.
+> **Status — orchestration is now AUTHORED, and its spec is
+> [AGENT_GRAPHS.md](AGENT_GRAPHS.md).**
+> The strategies this document once described — a procedural one and an LLM Director one,
+> selected by a debug toggle behind `SZOrchestrating` — are **deleted**. A run is a
+> traversal of an agent's declared graph: JSON topology wiring runtime-compiled Swift
+> steps, with prose in `.md.mustache` briefs. The words *procedural* and *agentic* survive
+> as the names of two shipped **graph variants**, not as strategies.
 >
-> Orchestration is a **pluggable strategy** behind an `SZOrchestrating` seam (in
-> `SZAI/Orchestration/`), **toggled by a debug setting**. V1 ships **two** editable strategies: a
-> **procedural, flow-aware** one (deterministic / offline - the baseline + CI path) and an **LLM
-> Director** one (plain Swift + LLM calls, fed the flow-drafted graph as context). Both are
-> **contract-first** - the Director/host declares each node's typed I/O upfront (and a promote MERGES the
-> agent's authored contract into that live boundary rather than replacing either side) so the graph
-> "comes to life" with visible I/O before the coding agents fill the source. The Director may split/merge but it's **gated in Swift** (the
-> BT-as-files engine that would make this authorable stays deferred).
+> What remains true here, and what the source headers cite this file for: the **roles**
+> (Director and Coding agents), **cross-agent messaging**, and how work is **routed** to a
+> node's agent. Read the JSON trees below as history — the authored format that replaced
+> them is specced in AGENT_GRAPHS.md, and the authoring loop in
+> [AUTHORING.md](AUTHORING.md).
+>
+> Still true of both eras: orchestration is **contract-first** — the Director declares each
+> node's typed I/O upfront (and a promote MERGES the agent's authored contract into that
+> live boundary rather than replacing either side), so the graph "comes to life" with
+> visible I/O before the coding agents fill the source.
 
 ## Roles
 

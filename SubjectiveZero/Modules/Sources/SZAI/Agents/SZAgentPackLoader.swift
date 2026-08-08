@@ -148,6 +148,9 @@ public enum SZAgentPackLoader {
         let folders = ((try? fm.contentsOfDirectory(
             at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            // A pack root is a user directory: dot-folders there are the filesystem's or the
+            // host's business, never an agent.
+            .filter { !$0.lastPathComponent.hasPrefix(".") }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
         var packs: [SZAgentPack] = []
@@ -251,6 +254,9 @@ public enum SZAgentPackLoader {
         let steps = ((try? fm.contentsOfDirectory(
             at: folder.appending(path: "steps"), includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            // A pack root is a user directory: dot-folders there are the filesystem's or the
+            // host's business, never an agent.
+            .filter { !$0.lastPathComponent.hasPrefix(".") }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
             .map { stepFolder in
                 SZAgentPack.StepFolder(

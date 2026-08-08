@@ -71,6 +71,13 @@ turn uses it — briefs are read per render, no relaunch. Templates use `{{token
 from a closed, per-kind namespace; a token nothing substitutes is refused at load, never shipped
 to a model as a literal.
 
+> **Which graphs are live today.** The director's build variants and `chat`, and the coding
+> agent's `item`, are traversed. The coding agent's `chat` and `request` graphs, and the debug
+> agent's `chat`, ship and validate but nothing routes to them yet — those conversations and the
+> split/merge lane still render from the host's own copies under `Resources/Prompts/`. Editing
+> their pack briefs changes nothing until they are routed; the graphs are there so the routing is
+> a wiring change rather than a redesign.
+
 **Change the flow.** Add a node, wire an edge, remove one. Outcomes are ports: the step declares
 what it can answer, the graph decides where each answer goes, and an answer with no edge ends the
 traversal.
@@ -107,12 +114,17 @@ edit  →  debug_check_pack  →  build
 referenced step through the real toolchain — without spending a token:
 
 ```
-agent director · seat: director · 3 steps · 5 prompts
+agent coding · seat: coding · 2 steps · 11 prompts
+  graph chat · chat · 1 node
+  graph item · item · 3 nodes
+  graph request · request · 3 nodes
+agent debug · no seat · 0 steps · 1 prompt
+  graph chat · chat · 1 node
+agent director · seat: director · 4 steps · 6 prompts
   graph agentic · build · rounds: 2 · 4 nodes
-  graph chat · chat · 3 nodes
+  graph chat · chat · 4 nodes
   graph procedural · build · 2 nodes
   graph recovery · build · rounds: 1 · 3 nodes
-…
 verdict: validates — 3 agents, zero defects
 ```
 
@@ -223,7 +235,10 @@ variant appears in the run-graph picker by existing.
 **A turn's outcomes.** `ok`/`error`, period. Content routing belongs to steps, where the answer
 is typed and declared — prose scanning for verdicts is unrepresentable.
 
-**A step's reach.** It reads facts and returns an outcome; it cannot mutate the app. Anything it
+**A step's reach.** It reads facts and returns an outcome — plus, when it needs the world to move,
+a named EFFECT the host performs (`.outcome("build", effects: ["requestBuild"])`). It never mutates
+the app itself, and an effect name outside its kind's declared set is refused before anything runs.
+Anything else it
 wants done travels through the graph.
 
 **The token namespaces.** A brief may only name what its kind's assembly substitutes, so a

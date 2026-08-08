@@ -63,7 +63,7 @@ names a seat, never an agent id — replace a folder and whoever now holds the s
   "kind": "build",             // the kind this graph HANDLES
   "label": "Agentic",          // picker display name (optional)
   "hint": "…",                 // picker subtitle (optional)
-  "caps": { "rounds": 2 },     // settled re-entries this graph buys (≥ 1; omit with the settled entry)
+  "caps": { "rounds": 2 },     // settled re-entries this graph buys (≥ 1; omitted = one)
   "entry": { "build": "decompose", "settled": "work-left" },
   "nodes": [ … ],
   "edges": [ { "from": "decompose", "outcome": "ok", "to": "implement" } ]
@@ -105,7 +105,7 @@ default), **procedural** (token-free and contract-first — no turns, first sett
 re-dispatch; a healthy fleet ends the run untouched).
 
 Selection is per-run, resolved at Build: `SZ_RUN_GRAPH` (env, per launch) > the persisted choice
-(the AI Settings run-graph pane, or `debug_set_orchestrator`) > the pack default. A stale or
+(`debug_set_orchestrator`) > the pack default. A stale or
 typoed choice falls back to the default with one honest status line, never silently. A new
 build-kind file in the director's `graphs/` is selectable with no Swift change.
 
@@ -143,8 +143,8 @@ runs one stateless completion, and decodes the reply into the requested type —
 first balanced JSON object in a fenced or prose-wrapped reply counts). On a shape mismatch the
 host is asked again with the decode error and the previous reply attached (the repair loop), up
 to `retries` more times, then the step throws honestly. The step never names a model — routing is
-the host's. The shipped packs' steps are pure conditions; the surface is there for the step that
-needs it.
+the host's. The director's `route-reply` step is the shipped example: it rules what a chat turn
+was, and only its `build` ruling carries the effect that starts a run.
 
 ## Facts: one spec, compiled twice
 
@@ -171,7 +171,8 @@ graphs — and its seat — still load. Validation covers the library as a whole
 holder each), variant defaults, graph shape (duplicate ids, dangling/duplicate edges, undeclared
 outcomes, unbounded cycles, entry rules), turn briefs (the template exists; every `{{token}}` is
 one the kind's assembly substitutes; every partial a token renders from ships in the pack — no
-literal token ever reaches a model), dispatch targets (a held seat whose holder handles `item`)
+literal token reaches a model from a turn brief; an `askModel` template is resolved at RUN time and
+is not scanned, so a typo there ships literally), dispatch targets (a held seat whose holder handles `item`)
 and items facts (catalogued, `[String]`-typed), and — through the step seam — each compiled step's
 declared outcomes and facts kind. With no step provider those checks are **skipped and the report
 says so**; they never pass silently.
@@ -192,8 +193,8 @@ Prompts need no watcher — briefs are read from disk per render, so a saved edi
 next turn. Step sources are compiled code, so each `steps/<name>/Step.swift` is watched:
 save → recompile → swap on green, keep the old module on red, with the compiler's own words
 surfacing at the next run's gate. In the Agent Graph panel every card carries its **source pill**:
-a step opens its `Step.swift`, a turn opens its brief — the very files in the materialized tree —
-and a turn's hover shows the template and, once delivered, the rendered bytes of the actual turn.
+a step opens its `Step.swift`, a turn opens its brief, and a dispatch links into the graph it calls
+— the very files (and graphs) the next traversal will use.
 
 ## RUNS records and the panel
 
@@ -229,6 +230,26 @@ real machine with event lists. The invariants:
 - **Stop is not timeout.** Stop cancels the traversal and outstanding items and concludes
   `cancelled` — nothing is synthesized; a stopped conversation just ends. Termination is
   absorbing: after the conclusion, every event is a no-op by construction.
+
+## Effects
+
+A step answers with an outcome, and may ask for named host ACTIONS alongside it:
+
+```swift
+return .outcome("build", effects: ["requestBuild"])
+```
+
+The names are closed per kind, declared in the facts spec beside the facts themselves
+(`SZChatEffect.requestBuild`, `SZBuildEffect.captureStatuses`, `SZRequestEffect.split`/`.merge`)
+and generated into `SZEffectCatalog`. The engine validates every requested name against the graph
+kind's set BEFORE performing any of them — an unknown or cross-kind name is a traversal defect
+naming it, and nothing runs. What survives validation the host performs in the step's own order,
+after the step returned and before the edge routes.
+
+That ordering is the contract: an effect is how a step reaches the world (a chat turn ruling
+`build` starts the run), and it lands before the traversal moves on. Today `requestBuild` is the
+only one a shipped step requests; the others exist in the spec, and the host answers them with an
+honest status line until their lanes are graph-routed.
 
 ## Termination
 

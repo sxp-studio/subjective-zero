@@ -226,15 +226,22 @@ extension SZHost {
     /// What the last materialization wrote for one agent, so a prune can tell OUR stale
     /// copies from the user's own additions. Absent (first run, or an older build) reads as
     /// empty — the conservative direction: nothing of theirs is ever taken on a guess.
+    /// Beside the packs root, never inside it: the root is enumerated as a pack library,
+    /// and host bookkeeping filed there would read as an agent that will not load.
+    static func materializedManifestURL(for agent: String) -> URL {
+        materializedAgentPacksRoot.deletingLastPathComponent()
+            .appending(path: "agent-pack-manifests/\(agent).json")
+    }
+
     static func materializedManifest(for agent: String) -> Set<String> {
-        let url = materializedAgentPacksRoot.appending(path: ".materialized/\(agent).json")
+        let url = materializedManifestURL(for: agent)
         guard let data = try? Data(contentsOf: url),
               let paths = try? JSONDecoder().decode([String].self, from: data) else { return [] }
         return Set(paths)
     }
 
     static func writeMaterializedManifest(_ paths: Set<String>, for agent: String) {
-        let url = materializedAgentPacksRoot.appending(path: ".materialized/\(agent).json")
+        let url = materializedManifestURL(for: agent)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
         guard let data = try? JSONEncoder().encode(paths.sorted()) else { return }

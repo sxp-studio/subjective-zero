@@ -2,7 +2,7 @@
   "name": "recovery",
   "kind": "build",
   "label": "Recovery",
-  "hint": "No planning turn: if the fleet is failing, one reconcile turn unblocks the stuck nodes and redispatches the work set; a healthy fleet ends the run untouched.",
+  "hint": "No planning turn: a failing fleet gets a reconcile turn and a re-dispatch, then once more when that set settles; still failing after that ends the run at the round cap. A healthy fleet ends it untouched.",
   "caps": { "rounds": 1 },
   "entry": { "build": "nodes-failing", "settled": "nodes-failing" },
   "nodes": [
