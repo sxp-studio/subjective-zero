@@ -24,8 +24,8 @@ extension SZHostBridge {
             tool("debug_turn_prompt", "The rendered prompt a turn ACTUALLY sent to its CLI, verbatim — inspect what the agent was briefed with. Survives relaunches via the on-disk debug capture (newest \(SZHost.debugTurnCaptureCap) turns; tool-result payloads live beside it in Application Support/SubjectiveZero/debug-turns/<turnID>/).",
                  properties: ["turn": ["type": "string", "description": "a turnID from debug_turn_timings; omit for the most recent turn"]]),
             tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (a Director Agent run in flight), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `tabs` (chat tab order, left→right), `orchestrator` (the active orchestration strategy), and `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
-            tool("debug_set_orchestrator", "Select the orchestration (Director) strategy for the next run (stop-gap for the Settings screen): `procedural` (deterministic / offline) or `agentic` (an LLM Director Agent). Takes effect on the next ui_run.",
-                 properties: ["strategy": ["type": "string", "enum": ["procedural", "agentic"]]]),
+            tool("debug_set_orchestrator", "Select the orchestration (Director) strategy for the next run (stop-gap for the Settings screen): `procedural` (deterministic / offline), `agentic` (an LLM Director Agent), or `graph` (the agent-graph engine; needs SZ_AGENT_PACKS pointing at a pack root until packs ship in-bundle). Takes effect on the next ui_run.",
+                 properties: ["strategy": ["type": "string", "enum": ["procedural", "agentic", "graph"]]]),
             tool("debug_fail_node_once", "Test affordance: force a node to fail its NEXT coding dispatch — report `needsInput` without running an agent — so the reconcile loop fires live & repeatably (the agents rarely fail on their own). Consumed once. Call before ui_run.",
                  properties: [
                     "node": ["type": "string", "description": "node id (UUID)"],
@@ -143,7 +143,7 @@ extension SZHostBridge {
             "sessions": Array(host.agentSessions.keys).sorted(),
             "chatting": host.nodeAgentState.filter(\.value.isChatting).keys.map(\.uuidString).sorted(),
             "tabs": host.chatTabs.map(\.key),       // chat tab order (left→right), Director first
-            "orchestrator": host.orchestratorStrategy.rawValue,   // active strategy
+            "orchestrator": host.orchestratorName,   // active strategy (incl. the graph engine)
             // node uuid → last reported status line (the reconcile signal).
             "statuses": Dictionary(uniqueKeysWithValues: host.nodeStatusLines.map { ($0.key.uuidString, $0.value) }),
         ])
