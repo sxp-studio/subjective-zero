@@ -253,7 +253,8 @@ struct SZNodeView: View, Equatable {
 
 /// A card action pill (file / speech / ⋯) tucked below a node card. Its own hover state so it
 /// brightens under the cursor — view-local, no content-layer re-render.
-private struct SZCardPillButton: View {
+/// The under-card capsule button both canvases share (node editor + agent graph).
+struct SZCardPillButton: View {
     let symbol: String
     let help: String
     let action: () -> Void

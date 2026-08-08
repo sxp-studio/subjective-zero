@@ -56,6 +56,7 @@ struct SZAgentGraphCardView: View {
 
     var body: some View {
         card.help(state.detail ?? face.title)
+            .overlay(alignment: .bottomLeading) { sourceButton }
     }
 
     /// The Run view's second header line exists exactly when it has something to say — the
@@ -96,27 +97,23 @@ struct SZAgentGraphCardView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            sourcePill
             finishedGlyph
         }
         .padding(.horizontal, 12)
         .frame(height: SZNodeLayout.headerHeight)
     }
 
-    /// The implementation door: what this card actually does, one click away. Only drawn
-    /// when the face carries a source AND a host wired the opener.
+    /// The implementation door, tucked just BELOW the card like the node editor's action
+    /// pills — outside the frame, so it neither fights the card's gestures nor crowds the
+    /// header. Only drawn when the face carries a source AND a host wired the opener.
     @ViewBuilder
-    private var sourcePill: some View {
+    private var sourceButton: some View {
         if let source = face.source, let openSource {
-            Button {
-                openSource(source)
-            } label: {
-                Image(systemName: face.form == .step ? "curlybraces" : "doc.text")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-            .buttonStyle(.plain)
-            .help(face.form == .step ? "Open the step's Step.swift" : "Open the brief template")
+            SZCardPillButton(
+                symbol: face.form == .step ? "curlybraces" : "doc.text",
+                help: face.form == .step ? "Open the step's Step.swift" : "Open the brief template",
+                action: { openSource(source) })
+            .offset(x: 2, y: 27)
         }
     }
 
