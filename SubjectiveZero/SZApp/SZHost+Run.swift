@@ -431,6 +431,18 @@ extension SZHost {
         guard isProviderReadyForNewWork(activeProviderID) else {
             surfaceProviderNotReady(); return
         }
+        // The graph orchestrator reads its agent packs from disk until packs ship in-bundle —
+        // without a valid root the run refuses up front with one honest line, never deep in.
+        var graphPacksRoot: URL?
+        if useGraphOrchestrator {
+            guard let root = Self.graphAgentPacksRoot() else {
+                status = "graph orchestrator needs SZ_AGENT_PACKS until packs ship in-bundle"
+                narrateDirector("Run not started — the graph orchestrator needs SZ_AGENT_PACKS "
+                    + "(a pack root on disk) until packs ship in-bundle.")
+                return
+            }
+            graphPacksRoot = root
+        }
         let providerID = activeProviderID
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
         // This run's WORK SET: the prompt nodes dirty at start (`dirty`, computed above for the
@@ -494,11 +506,20 @@ extension SZHost {
                 persistAgentSessions()
             }
             do {
-                let sessions = try await orchestrator.run(makeOrchestrationContext(
+                let context = makeOrchestrationContext(
                     providerID: providerID, mcpPort: mcpPort,
                     projectURL: projectURL, cacheDirectory: cacheDirectory,
                     instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed,
-                    claim: claim))
+                    claim: claim)
+                // The graph engine rides beside the frozen strategies: selected → built over
+                // the validated pack root; otherwise the legacy enum's choice runs unchanged.
+                let strategy: any SZOrchestrating
+                if let graphPacksRoot {
+                    strategy = makeGraphOrchestrator(packsRoot: graphPacksRoot)
+                } else {
+                    strategy = orchestrator
+                }
+                let sessions = try await strategy.run(context)
                 // Remember each node's coding-agent session so a chat turn can resume it. A
                 // freshly-minted session replaces any disk-restored one → off probation.
                 for (node, sessionID) in sessions {
@@ -536,6 +557,49 @@ extension SZHost {
             // Before the `defer`, which drops `dispatchPrompts` for anything no longer in `hiddenPieces`.
             drainPendingGraphOp()
         }
+    }
+
+    /// The graph orchestrator's pack root: `SZ_AGENT_PACKS`, an existing directory. nil = unset
+    /// or invalid — the run refuses with the status line in `startRun`.
+    nonisolated static func graphAgentPacksRoot() -> URL? {
+        guard let path = ProcessInfo.processInfo.environment["SZ_AGENT_PACKS"], !path.isEmpty
+        else { return nil }
+        let url = URL(filePath: path)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return nil }
+        return url
+    }
+
+    /// The graph orchestrator's thread-machine bounds. No rounds knob exists on main, so the
+    /// ceiling is a plain constant; the per-set dispatch deadline mirrors the coding-turn
+    /// budgets (`SZ_AGENT_TIMEOUT` wall + `SZ_AGENT_INACTIVITY_TIMEOUT` grace), so the set's
+    /// watchdog can never fire before a healthy turn's own budget would have ended it.
+    nonisolated static func graphOrchestratorBounds() -> SZThreadMachine.Bounds {
+        let env = ProcessInfo.processInfo.environment
+        let wall = env["SZ_AGENT_TIMEOUT"].flatMap(TimeInterval.init) ?? 900
+        let grace = env["SZ_AGENT_INACTIVITY_TIMEOUT"].flatMap(TimeInterval.init) ?? 120
+        return SZThreadMachine.Bounds(roundCeiling: 8,
+                                      dispatchDeadline: .seconds(wall + grace),
+                                      defaultRounds: 1)
+    }
+
+    /// Build the graph strategy for one run: the host's step runtime behind the evaluation and
+    /// declaration seams, and the identity router carrying the user's resolved generation
+    /// choices — the same values the frozen strategies read off the context, now flowing
+    /// through the routing seam.
+    private func makeGraphOrchestrator(packsRoot: URL) -> SZGraphDirectorStrategy {
+        let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
+        let generation = resolvedGenerationSettings(for: activeProviderID)
+        return SZGraphDirectorStrategy(
+            packsRoot: packsRoot,
+            steps: steps,
+            router: SZIdentityRouter(choice: SZModelChoice(
+                providerID: activeProviderID,
+                model: generation.model,
+                reasoningEffort: generation.reasoningEffort)),
+            bounds: Self.graphOrchestratorBounds(),
+            declarations: { agent, step in try await steps.declaration(agent: agent, step: step) })
     }
 
     /// Cancel the in-flight Director run (the `Stop` HUD action). Task cancellation propagates into the

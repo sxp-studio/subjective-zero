@@ -402,6 +402,19 @@ final class SZHost {
         ProcessInfo.processInfo.environment["SZ_ORCHESTRATOR"]
             .flatMap(SZOrchestrationStrategy.init(rawValue:)) ?? .agentic
     var orchestrator: any SZOrchestrating { orchestratorStrategy.make() }
+    /// The graph-engine rebuild's THIRD strategy, selected out-of-band from the frozen two-case
+    /// enum (`SZ_ORCHESTRATOR=graph` at launch, `debug_set_orchestrator "graph"` live) — a
+    /// parallel flag so the frozen `SZOrchestrationStrategy` seam carries zero diffs while all
+    /// three coexist; it folds into a real three-way selection when the legacy strategies
+    /// retire. Constructed per run in SZHost+Run.swift (it needs the packs root + step runtime).
+    private(set) var useGraphOrchestrator: Bool =
+        ProcessInfo.processInfo.environment["SZ_ORCHESTRATOR"] == "graph"
+    /// The selection as the debug surfaces report it.
+    var orchestratorName: String { useGraphOrchestrator ? "graph" : orchestratorStrategy.rawValue }
+    /// The compiled-step execution table for the graph orchestrator's condition steps — one
+    /// instance for the host's lifetime, so a re-scheduled step coalesces into the runtime's
+    /// latest-source-wins compile instead of rebuilding a cold table every run.
+    let stepRuntime = SZStepRuntime()
     /// The in-flight `ui_run`, if any.
     internal(set) var runTask: Task<Void, Never>?
     /// In-flight interactive chat turns by scope key (`sendChat`'s tasks) — retained so the
@@ -1084,7 +1097,12 @@ final class SZHost {
     /// Returns false for an unknown name (left unchanged).
     @discardableResult
     func setOrchestrator(_ name: String) -> Bool {
+        if name == "graph" {   // the third strategy rides beside the frozen enum (see the flag)
+            useGraphOrchestrator = true
+            return true
+        }
         guard let strategy = SZOrchestrationStrategy(rawValue: name) else { return false }
+        useGraphOrchestrator = false
         orchestratorStrategy = strategy
         return true
     }
