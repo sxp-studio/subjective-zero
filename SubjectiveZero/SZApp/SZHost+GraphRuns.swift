@@ -111,7 +111,11 @@ extension SZHost {
                     // graph, the coding seat's item graph, else whatever comes first.
                     defaultGraphName: (pack.graph(handling: .build) ?? pack.graph(handling: .item)
                         ?? pack.graphs.first)?.name ?? "",
-                    seat: pack.seat?.rawValue)
+                    seat: pack.seat?.rawValue,
+                    // Only the seat with variants carries an active mark today; a pack
+                    // with a single handler per kind marks nothing.
+                    activeGraphName: pack.seat == .director && pack.variants(handling: .build).count > 1
+                        ? activeRunGraphVariant() : nil)
             }
         }
         agentGraphPlanCache = agents

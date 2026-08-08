@@ -180,6 +180,7 @@ extension SZHost {
     func setRunGraphVariant(_ name: String?) {
         runGraphVariant = name
         persistAppState()
+        agentGraphPlanCache = nil   // the sidebar's active badge follows the choice, now
     }
 }
 

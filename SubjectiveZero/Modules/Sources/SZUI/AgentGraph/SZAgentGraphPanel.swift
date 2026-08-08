@@ -47,15 +47,19 @@ public struct SZAgentGraphPlanAgent: Identifiable, Equatable, Sendable {
     public var defaultGraphName: String
     /// The seat this agent holds — what a dispatch's `to` resolves against. nil = seatless.
     public var seat: String?
+    /// The graph a delivery ACTUALLY runs when variants exist (env > persisted choice >
+    /// pack default, resolved by the host). nil = no variant dimension for this agent.
+    public var activeGraphName: String?
 
     public init(id: String, title: String, symbol: String, graphs: [Graph],
-                defaultGraphName: String, seat: String? = nil) {
+                defaultGraphName: String, seat: String? = nil, activeGraphName: String? = nil) {
         self.id = id
         self.title = title
         self.symbol = symbol
         self.graphs = graphs
         self.defaultGraphName = defaultGraphName
         self.seat = seat
+        self.activeGraphName = activeGraphName
     }
 }
 
@@ -430,6 +434,14 @@ public struct SZAgentGraphPanel: View {
                     .foregroundStyle(selected ? .primary : .secondary)
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
+                // The variant a Build actually runs, marked where the variants are listed.
+                if entry.name == agent.activeGraphName {
+                    Text("active")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(SZChatPanel.directorColor.opacity(0.9))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Capsule().fill(SZChatPanel.directorColor.opacity(0.15)))
+                }
             }
             .padding(.vertical, 3).padding(.horizontal, 6)
             .background(RoundedRectangle(cornerRadius: 5)
