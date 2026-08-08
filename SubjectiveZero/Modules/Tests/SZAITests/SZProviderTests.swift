@@ -1062,15 +1062,29 @@ private let piRPCCatalogLoggedOut = """
 }
 
 /// The coding prompt drives the 3-tier library browse, and keeps the agent's agency.
-/// The browse now lives behind `node-compile`'s `{{reference}}` token — a split/merge piece swaps it for the
-/// preserve-behavior section — so assert on the RENDERED ordinary prompt, not the bare template.
+/// The browse lives behind `node-compile`'s `{{reference}}` token — a split/merge piece swaps it for the
+/// preserve-behavior section — so assert on the RENDERED ordinary prompt (through the brief
+/// renderer + the draft coding pack, the path every real dispatch takes), not a bare template.
 ///
 /// A library hit informs the implementation; it doesn't dictate it. The prompt frames a match as a
 /// reference and leaves writing from scratch open, so a near-miss isn't adapted into a node that should
 /// have been written fresh. `SZLibrarySearch` does the structural half (an empty shortlist when nothing
 /// fits); the wording half is asserted here.
-@Test func codingPromptBrowsesLibraryWithAgency() {
-    let prompt = SZPromptTemplate.render(SZPrompts.nodeCompile, ["reference": SZPrompts.referenceLibrary])
+@Test func codingPromptBrowsesLibraryWithAgency() throws {
+    let packsRoot = URL(filePath: #filePath)
+        .deletingLastPathComponent()   // SZAITests
+        .deletingLastPathComponent()   // Tests
+        .deletingLastPathComponent()   // Modules
+        .appending(path: "Sources/SZAI/Resources/AgentsDraft")
+    let node = SZNodeID()
+    let graph = SZGraph(nodes: [SZNode(id: node, kind: .prompt, title: "Blur", prompt: "blur it",
+                                       position: SZPoint(x: 0, y: 0))])
+    let graphJSON = String(decoding: try JSONEncoder().encode(graph), as: UTF8.self)
+    let facts = String(decoding: try JSONSerialization.data(
+        withJSONObject: ["attempt": 1, "graphJSON": graphJSON]), as: UTF8.self)
+    let prompt = try SZBriefRenderer(packRoot: packsRoot).render(
+        agent: "coding", template: "prompts/node-compile.md.mustache", kind: .item,
+        factsJSON: facts, delivery: SZBriefDelivery(item: node.uuidString))
     // the tiers: search narrows, index browses, card confirms, source commits
     for tool in ["agent_library_index", "agent_library_card", "agent_library_source"] {
         #expect(prompt.contains(tool), "coding prompt should mention \(tool)")

@@ -332,7 +332,7 @@ public struct SZBriefRenderer: Sendable {
 
     /// An `.item` brief's plan: the target node plus its typed boundary — the contract's
     /// declared ports, or texture ports derived from the graph wiring for a contract-less
-    /// node (same derivation the previous dispatch planned with; one home while both exist).
+    /// node (`SZGraph+DerivedPorts`, the one home for the derivation).
     private func itemPlan(facts: Facts, delivery: SZBriefDelivery) throws
         -> (node: SZNode, inputs: [SZPort], outputs: [SZPort], permissions: [SZEntitlement]) {
         let item = try require(delivery.item, delivery: "item")

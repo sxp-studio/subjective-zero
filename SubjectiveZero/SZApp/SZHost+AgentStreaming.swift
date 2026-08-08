@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One shared path for streaming an agent turn's output into a chat transcript. Both interactive
-// chat (`SZHost.sendChat`) and a run's per-node coding agents (`SZProceduralDirectorStrategy`) funnel
+// chat (`SZHost.sendChat`) and a run's per-node coding agents (the graph orchestrator's item
+// turns) funnel
 // through this, so run output lands in the node/Director tabs exactly the way chat replies already do.
 //
 // The pipeline is order-preserving: provider stdout arrives off-main per chunk → an AsyncStream →

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// P3 EQUIVALENCE GATE: the NEW render path — SZBriefRenderer over the DRAFT agent packs
+// THE EQUIVALENCE GATE: the render path — SZBriefRenderer over the DRAFT agent packs
 // (Sources/SZAI/Resources/AgentsDraft) — must reproduce, byte for byte, every prompt the
-// previous orchestrator rendered, as pinned by the fixtures SZPromptEquivalenceTests
-// recorded. The fixtures are the gate and are NEVER edited to make this pass; every render
-// here uses the SAME fixed inputs the recording harness used (same sample-anchored ids,
-// prompts, and contract — restated below because the recorder keeps its world private).
+// previous orchestrator rendered, as pinned by the committed fixtures (recorded before that
+// orchestrator was deleted; the recording harness went with it). The fixtures are the gate
+// and are NEVER edited to make this pass; every render here uses the SAME fixed inputs the
+// recording harness used (same sample-anchored ids, prompts, and contract — restated below
+// because the recorder kept its world private).
 //
 // Facts documents are hand-assembled JSON following the SZFacts spec field names. Where a
 // value is host context that does not exist yet in the new architecture, the EXACT input the
@@ -15,9 +16,8 @@
 //  - node-anchored chat carries the host-read contract/source strings verbatim,
 //  - graph-op requests carry the recorder's kitchen-sink boundary contract.
 //
-// SKIPPED (see `skipped` below): the *.txt fixtures pin DISPATCH SHAPE and ARGV ASSEMBLY —
-// host/transport behavior the new architecture reaches next phase (thread machine + provider
-// transport), not bytes a brief renderer produces. They stay pinned for that phase.
+// The retired strategies' *.txt fixtures (dispatch shape / argv assembly) moved to
+// Fixtures/Legacy/ when their subject was deleted — historical, no gate reads them.
 import Foundation
 import Testing
 @testable import SZAI
@@ -136,19 +136,7 @@ private let libraryIndexText = "## Sources\n- `camera.macos` — the live camera
 
 struct SZEquivalenceGateTests {
 
-    /// The dispatch/argv fixtures pin behavior that is NOT brief rendering: the strategies'
-    /// dispatch event shape and the provider argv assembly. Both belong to the host/thread
-    /// machine and provider transport, which the rebuild reaches next phase — skipping them
-    /// here is honest scoping, not a hole (they remain pinned for that phase's gate).
-    private static let skipped: Set<String> = [
-        "dispatch-procedural.txt",
-        "dispatch-agentic.txt",
-        "dispatch-agentic-briefed.txt",
-        "argv-claude-cold.txt",
-        "argv-claude-resume.txt",
-    ]
-
-    /// Every *.md fixture, rendered through the NEW path: SZBriefRenderer + the draft packs.
+    /// Every *.md fixture, rendered through the living path: SZBriefRenderer + the draft packs.
     private static func renderAll() throws -> [String: String] {
         let renderer = SZBriefRenderer(packRoot: draftPacksRoot)
         let base = try encoded(fixtureGraph())
@@ -299,21 +287,15 @@ struct SZEquivalenceGateTests {
         }
     }
 
-    /// The gate covers the whole pinned set: every fixture on disk is either rendered by the
-    /// new path or explicitly skipped — nothing can drop out silently, and the skip list
-    /// cannot carry entries that no longer exist.
-    @Test func everyFixtureIsEitherRenderedOrExplicitlySkipped() throws {
+    /// The gate covers the whole pinned set: every fixture on disk is rendered — nothing can
+    /// drop out silently, and a stale pin (a fixture nothing renders) fails loudly.
+    @Test func everyFixtureIsRendered() throws {
         let rendered = try Self.renderAll()
         let onDisk = try FileManager.default.contentsOfDirectory(atPath: fixturesDir.path)
             .filter { !$0.hasPrefix(".") }
         for name in onDisk.sorted() {
-            #expect(rendered[name] != nil || Self.skipped.contains(name),
-                    "fixture \(name) is neither rendered by the new path nor in the skip list")
+            #expect(rendered[name] != nil, "fixture \(name) is not rendered by the gate")
         }
-        for name in Self.skipped.sorted() {
-            #expect(onDisk.contains(name), "skip list names a fixture that no longer exists: \(name)")
-        }
-        #expect(rendered.keys.allSatisfy { !Self.skipped.contains($0) })
     }
 
     // The draft packs' own health — load, shape, briefs, seats, and full validation with

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Director-run orchestration — the `ui_run` entry point and the host capabilities a strategy
-// sequences: contract drafting, the shared agent-turn substrate (`deliver`), per-node coding
+// Director-run orchestration — the `ui_run` entry point and the host capabilities the graph
+// orchestrator sequences: the shared agent-turn substrate (`deliver`), per-node coding
 // turns + the Director turn streamed into their tabs, the orchestration context that bundles them, and
 // the post-run reconcile/surfacing.
 import Foundation
@@ -8,39 +8,6 @@ import SZAI
 import SZCore
 
 extension SZHost {
-    /// Contract-first authorship: before a run, give every contract-less DRAWN prompt node a texture
-    /// contract derived from its flow edges + lay the companion data wiring (`SZGraph.draftContractsFromFlow`),
-    /// so the cards show their typed I/O UPFRONT and the textures bind as the fleet implements — the graph
-    /// "comes to life". Persists + reloads so the new boundary is live, which is also what makes it the
-    /// boundary `promoteStagedNode` merges each agent's authored contract into. Also the realize-or-report
-    /// pass for arrows into ALREADY-contracted prompt nodes (a data-spawn seed, a permission camera):
-    /// their contracts are never rewritten, but their unwired texture inputs still get the wiring. Only a
-    /// true no-change (a re-run, split/merge pieces, nothing drawn) is free.
-    private func draftFlowContracts() {
-        guard let graph = store.project?.graph else { return }
-        let (drafted, ids, skipped) = graph.draftContractsFromFlow()
-        // Apply on ANY change, not just new contracts: realizing an arrow into an already-contracted
-        // node (a data-spawn seed, a permission camera) edits only edges, with `ids` empty.
-        if drafted != graph {
-            store.mutate { $0.graph = drafted }
-            let action = ids.isEmpty
-                ? "realized flow arrows into data wiring"
-                : "drafted \(ids.count) node contract\(ids.count == 1 ? "" : "s") from flow"
-            persistGraphEditAndReload(action: action)
-        }
-        // An arrow drafting couldn't realize stays as intent — say why in the run's narration, or
-        // the run silently builds a graph missing wiring the user drew.
-        let title: (SZNodeID) -> String = { [store] in store.project?.graph.node(id: $0)?.title ?? $0.uuidString }
-        for skip in skipped {
-            let why: String
-            switch skip.reason {
-            case .wouldCloseCycle: why = "wiring it would close a data cycle"
-            case .noCompatiblePort: why = "no compatible texture port exists to carry it"
-            }
-            narrateDirector("Left the \(title(skip.from)) → \(title(skip.to)) arrow as intent — \(why).")
-        }
-    }
-
     /// The shared agent-turn substrate. Every agent turn — a coding dispatch, a Director turn,
     /// a user chat — funnels through here: append an empty assistant message to `scope`, mark the turn in
     /// flight (the chat panel's working dots), stream the provider's turn into that scope's tab, record its
@@ -306,8 +273,8 @@ extension SZHost {
         }
     }
 
-    /// Build the orchestration context for a run — bundles the host capabilities a strategy sequences:
-    /// stream each coding turn into its node's tab, draft contracts, run a Director turn (agentic),
+    /// Build the orchestration context for a run — bundles the host capabilities the orchestrator
+    /// sequences: stream each coding turn into its node's tab, run a Director turn,
     /// read node status + drain Director messages (reconcile). Each is captured weakly so a torn-down
     /// host degrades gracefully. Kept separate from `startRun` so its run body reads as build-context → run.
     private func makeOrchestrationContext(
@@ -333,9 +300,6 @@ extension SZHost {
             // A chat-triggered run carries the user's words into the decompose prompt — unless the
             // Director's own chat turn requested it, in which case that turn WAS the decompose.
             instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed,
-            // Host capabilities the strategy sequences: contract-first drafting (procedural) and one
-            // Director Agent turn (agentic), each streamed/persisted by the host.
-            draftContracts: { [weak self] in self?.draftFlowContracts() },
             // Grant any entitlement the live graph now declares before the fleet runs — covers a
             // permission the Director introduced mid-run (only those at initial load were pre-granted in
             // `start`), so a node's `setup()` sees it authorized on the promote-reload (e.g. microphone).
@@ -349,7 +313,7 @@ extension SZHost {
                     prompt: prompt, providerID: providerID, mcpPort: mcpPort,
                     projectURL: projectURL, cacheDirectory: cacheDirectory)
             },
-            // The coding agents' reported status, so the agentic strategy can assess unresolved
+            // The coding agents' reported status, so the orchestrator can assess unresolved
             // nodes and reconcile after dispatch.
             nodeStatus: { [weak self] in self?.nodeStatusLines ?? [:] },
             // The Director's during-run messages to nodes (its `ui_send_chat`-to-a-node calls),
@@ -433,15 +397,11 @@ extension SZHost {
         }
         // The graph orchestrator reads its agent packs from disk until packs ship in-bundle —
         // without a valid root the run refuses up front with one honest line, never deep in.
-        var graphPacksRoot: URL?
-        if useGraphOrchestrator {
-            guard let root = Self.graphAgentPacksRoot() else {
-                status = "graph orchestrator needs SZ_AGENT_PACKS until packs ship in-bundle"
-                narrateDirector("Run not started — the graph orchestrator needs SZ_AGENT_PACKS "
-                    + "(a pack root on disk) until packs ship in-bundle.")
-                return
-            }
-            graphPacksRoot = root
+        guard let graphPacksRoot = Self.graphAgentPacksRoot() else {
+            status = "graph orchestrator needs SZ_AGENT_PACKS until packs ship in-bundle"
+            narrateDirector("Run not started — the graph orchestrator needs SZ_AGENT_PACKS "
+                + "(a pack root on disk) until packs ship in-bundle.")
+            return
         }
         let providerID = activeProviderID
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
@@ -511,15 +471,7 @@ extension SZHost {
                     projectURL: projectURL, cacheDirectory: cacheDirectory,
                     instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed,
                     claim: claim)
-                // The graph engine rides beside the frozen strategies: selected → built over
-                // the validated pack root; otherwise the legacy enum's choice runs unchanged.
-                let strategy: any SZOrchestrating
-                if let graphPacksRoot {
-                    strategy = makeGraphOrchestrator(packsRoot: graphPacksRoot)
-                } else {
-                    strategy = orchestrator
-                }
-                let sessions = try await strategy.run(context)
+                let sessions = try await makeGraphOrchestrator(packsRoot: graphPacksRoot).run(context)
                 // Remember each node's coding-agent session so a chat turn can resume it. A
                 // freshly-minted session replaces any disk-restored one → off probation.
                 for (node, sessionID) in sessions {
@@ -573,21 +525,20 @@ extension SZHost {
 
     /// The graph orchestrator's thread-machine bounds. No rounds knob exists on main, so the
     /// ceiling is a plain constant; the per-set dispatch deadline mirrors the coding-turn
-    /// budgets (`SZ_AGENT_TIMEOUT` wall + `SZ_AGENT_INACTIVITY_TIMEOUT` grace), so the set's
-    /// watchdog can never fire before a healthy turn's own budget would have ended it.
+    /// budgets (`SZAgentTurnBudgets`: `SZ_AGENT_TIMEOUT` wall + `SZ_AGENT_INACTIVITY_TIMEOUT`
+    /// grace), so the set's watchdog can never fire before a healthy turn's own budget would
+    /// have ended it.
     nonisolated static func graphOrchestratorBounds() -> SZThreadMachine.Bounds {
-        let env = ProcessInfo.processInfo.environment
-        let wall = env["SZ_AGENT_TIMEOUT"].flatMap(TimeInterval.init) ?? 900
-        let grace = env["SZ_AGENT_INACTIVITY_TIMEOUT"].flatMap(TimeInterval.init) ?? 120
-        return SZThreadMachine.Bounds(roundCeiling: 8,
-                                      dispatchDeadline: .seconds(wall + grace),
-                                      defaultRounds: 1)
+        SZThreadMachine.Bounds(
+            roundCeiling: 8,
+            dispatchDeadline: .seconds(SZAgentTurnBudgets.codingTimeout
+                + SZAgentTurnBudgets.codingInactivityTimeout),
+            defaultRounds: 1)
     }
 
-    /// Build the graph strategy for one run: the host's step runtime behind the evaluation and
-    /// declaration seams, and the identity router carrying the user's resolved generation
-    /// choices — the same values the frozen strategies read off the context, now flowing
-    /// through the routing seam.
+    /// Build the graph orchestrator for one run: the host's step runtime behind the evaluation
+    /// and declaration seams, and the identity router carrying the user's resolved generation
+    /// choices through the routing seam.
     private func makeGraphOrchestrator(packsRoot: URL) -> SZGraphDirectorStrategy {
         let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
         let generation = resolvedGenerationSettings(for: activeProviderID)

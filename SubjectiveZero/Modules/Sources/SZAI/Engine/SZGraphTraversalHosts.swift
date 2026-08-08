@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The graph strategy's two SZTraversalHost adapters — how the engine's seams read the live
-// `SZOrchestrationContext` the host already builds for the frozen strategies. One adapter per
+// `SZOrchestrationContext` the host builds at `startRun`. One adapter per
 // ROLE: the DIRECTOR-bound host projects the build facts and runs Director turns through the
 // host's injected runner; an ITEM-bound host (one per dispatched order) projects that order's
-// item facts and assembles each coding turn's request exactly as the frozen dispatch did.
+// item facts and assembles each coding turn's request exactly as the previous dispatch did.
 //
 // Facts documents follow the SZFacts spec field names (SZCore/AgentFacts) and are encoded with
 // deterministic `.sortedKeys` bytes. They are LOCAL Encodable documents rather than the spec
@@ -146,8 +146,7 @@ final class SZDirectorTraversalHost: SZTraversalHost {
     }
 
     private func buildFacts() -> BuildFactsDocument {
-        // The work set, reimplemented minimally from the previous strategies' derivation (the
-        // frozen code stays uncalled): every node needing implementation, scoped to the run's
+        // The work set: every node needing implementation, scoped to the run's
         // captured set when the host provides one — authoritative even when empty, in graph
         // order so multi-node projections stay deterministic without inventing a new order.
         let graph = context.store.project?.graph
@@ -176,10 +175,10 @@ final class SZDirectorTraversalHost: SZTraversalHost {
 
 // MARK: - The ITEM-bound host
 
-/// One dispatched order's traversal host. Request assembly in `runTurn` mirrors the frozen
-/// procedural dispatch field-for-field (working dir, package/cache dirs, MCP port + allowlist,
-/// generation settings, the coding budgets) so a graph-dispatched coding turn launches exactly
-/// like a legacy one; the session captured from the result is what a `.message` turn resumes.
+/// One dispatched order's traversal host. Request assembly in `runTurn` carries every field a
+/// coding turn launches with (working dir, package/cache dirs, MCP port + allowlist,
+/// generation settings, the coding budgets); the session captured from the result is what a
+/// `.message` turn resumes.
 @MainActor
 final class SZItemTraversalHost: SZTraversalHost {
     private let context: SZOrchestrationContext
@@ -249,13 +248,13 @@ final class SZItemTraversalHost: SZTraversalHost {
             mcpServerPort: context.mcpPort,
             allowedMCPTools: context.allowedMCPTools,
             // A `.message` turn continues the node's own conversation — the session this run
-            // captured for it (the frozen reconcile's resume); a `.spawn` turn starts cold.
+            // captured for it (the reconcile resume); a `.spawn` turn starts cold.
             resumeSessionID: turn.session == .message ? sessions.session(for: nodeID) : nil,
             model: turn.choice.model,
             reasoningEffort: turn.choice.reasoningEffort,
             fastMode: context.generationSettings.fastMode ?? false,
-            timeout: SZProceduralDirectorStrategy.codingTimeout,
-            inactivityTimeout: SZProceduralDirectorStrategy.codingInactivityTimeout)
+            timeout: SZAgentTurnBudgets.codingTimeout,
+            inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
         guard let provider = registry.provider(id: turn.choice.providerID) else {
             return SZTurnReport(
                 failed: true,

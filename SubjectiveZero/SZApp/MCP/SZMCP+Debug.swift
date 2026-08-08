@@ -23,8 +23,8 @@ extension SZHostBridge {
                  properties: ["run": ["type": "string", "description": "a runID (or unique prefix) from debug_turn_timings; omit for the latest run"]]),
             tool("debug_turn_prompt", "The rendered prompt a turn ACTUALLY sent to its CLI, verbatim — inspect what the agent was briefed with. Survives relaunches via the on-disk debug capture (newest \(SZHost.debugTurnCaptureCap) turns; tool-result payloads live beside it in Application Support/SubjectiveZero/debug-turns/<turnID>/).",
                  properties: ["turn": ["type": "string", "description": "a turnID from debug_turn_timings; omit for the most recent turn"]]),
-            tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (a Director Agent run in flight), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `tabs` (chat tab order, left→right), `orchestrator` (the active orchestration strategy), and `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
-            tool("debug_set_orchestrator", "Select the orchestration (Director) strategy for the next run (stop-gap for the Settings screen): `procedural` (deterministic / offline), `agentic` (an LLM Director Agent), or `graph` (the agent-graph engine; needs SZ_AGENT_PACKS pointing at a pack root until packs ship in-bundle). Takes effect on the next ui_run.",
+            tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (a Director Agent run in flight), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `tabs` (chat tab order, left→right), `orchestrator` (always \"graph\" — strategy selection is retired), and `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
+            tool("debug_set_orchestrator", "Strategy selection is RETIRED: the agent-graph engine is the only orchestrator (needs SZ_AGENT_PACKS pointing at a pack root until packs ship in-bundle). `graph` is accepted as a no-op for compatibility; the retired values (`procedural`, `agentic`) return an error.",
                  properties: ["strategy": ["type": "string", "enum": ["procedural", "agentic", "graph"]]]),
             tool("debug_fail_node_once", "Test affordance: force a node to fail its NEXT coding dispatch — report `needsInput` without running an agent — so the reconcile loop fires live & repeatably (the agents rarely fail on their own). Consumed once. Call before ui_run.",
                  properties: [
@@ -143,18 +143,28 @@ extension SZHostBridge {
             "sessions": Array(host.agentSessions.keys).sorted(),
             "chatting": host.nodeAgentState.filter(\.value.isChatting).keys.map(\.uuidString).sorted(),
             "tabs": host.chatTabs.map(\.key),       // chat tab order (left→right), Director first
-            "orchestrator": host.orchestratorName,   // active strategy (incl. the graph engine)
+            "orchestrator": SZHost.orchestratorName,   // always "graph" — selection retired
             // node uuid → last reported status line (the reconcile signal).
             "statuses": Dictionary(uniqueKeysWithValues: host.nodeStatusLines.map { ($0.key.uuidString, $0.value) }),
         ])
     }
 
+    /// Strategy selection is retired — the tool survives so a scripted caller learns the truth
+    /// instead of hitting an unknown-tool error: `graph` acks as a no-op, a retired value
+    /// refuses with the remedy, anything else is unknown.
     private func debugSetOrchestrator(_ arguments: [String: Any]) throws -> String {
         guard let strategy = arguments.string("strategy") else {
             throw SZMCPError.message("debug_set_orchestrator needs `strategy`")
         }
-        guard host.setOrchestrator(strategy) else { throw SZMCPError.message("unknown strategy \(strategy)") }
-        return SZJSONRPC.encode(["orchestrator": strategy])
+        switch strategy {
+        case SZHost.orchestratorName:
+            return SZJSONRPC.encode(["orchestrator": SZHost.orchestratorName])
+        case "procedural", "agentic":
+            throw SZMCPError.message("\(strategy) retired — the graph orchestrator is the path; "
+                + "token-free runs use a turn-less pack root via SZ_AGENT_PACKS")
+        default:
+            throw SZMCPError.message("unknown strategy \(strategy) — the orchestrator is \"graph\"")
+        }
     }
 
     private func debugChatTranscript(_ arguments: [String: Any]) throws -> String {

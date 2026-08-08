@@ -122,3 +122,34 @@ private func noUnrenderedTokens(_ rendered: String) -> Bool { !rendered.contains
     #expect(noUnrenderedTokens(out))
     #expect(!out.contains("\n\n\n"))
 }
+
+// MARK: - the shared boundary renderer (SZBoundaryPrompt — split/merge seeds AND item briefs)
+
+/// The boundary names each port's TYPE and the exact live-read call, so the agent
+/// preserves the typed contract AND reads scalar inputs instead of hardcoding them (the silent-no-op).
+@Test func renderBoundaryDescribesTypesAndLiveReads() {
+    let inputs = [
+        SZPort(name: "input", type: .texture),
+        SZPort(name: "mirror", type: .bool, ui: SZPortUI(kind: .toggle), def: .bool(true)),
+        SZPort(name: "amount", type: .float, ui: SZPortUI(kind: .slider), def: .float(0.5)),
+        SZPort(name: "camera", type: .enumeration, ui: SZPortUI(kind: .dropdown), def: .enumeration("default")),
+    ]
+    let outputs = [SZPort(name: "output", type: .texture, display: true)]
+    let b = SZBoundaryPrompt.render(inputs: inputs, outputs: outputs, permissions: [.camera])
+
+    #expect(b.contains("`mirror` — bool"))                 // type preserved, not flattened to texture
+    #expect(b.contains(#"ctx.inputBool("mirror")"#))       // bool read live, through the bool accessor
+    #expect(b.contains(#"ctx.inputFloat("amount")"#))      // float read live
+    #expect(b.contains(#"ctx.inputTexture("input")"#))     // texture read
+    #expect(b.contains(#"ctx.outputTexture("output")"#))   // output fill
+    #expect(b.contains("default true"))                    // ui/default surfaced
+    #expect(b.contains(#"ctx.inputString("camera")"#))     // enum delivered live via the v4 string ABI
+    #expect(b.contains("camera"))                          // declared permission surfaced
+
+    // A contract-less node derives texture-only ports → texture read guidance, no scalar reads.
+    let textureOnly = SZBoundaryPrompt.render(
+        inputs: [SZPort(name: "input", type: .texture)],
+        outputs: [SZPort(name: "output", type: .texture, display: true)], permissions: [])
+    #expect(textureOnly.contains(#"ctx.inputTexture("input")"#))
+    #expect(!textureOnly.contains("inputFloat"))
+}

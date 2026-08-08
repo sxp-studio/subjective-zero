@@ -7,39 +7,9 @@ import Foundation
 import SZCore
 
 enum SZPrompts {
-    /// The coding-agent prompt. Its `{{abi}}` token embeds the `node-abi` agent doc
-    /// (`SZAgentDocs.abiReference`) so the ABI prose lives in one file, not restated here, and its
-    /// `{{reference}}` token selects how the agent should look for prior art (see below).
-    static let nodeCompile = load("coding/node-compile.md.mustache")
-
-    /// `{{reference}}` for a normal node: browse the built-in library in cheap-first tiers, and decide for
-    /// yourself whether anything fits.
-    static let referenceLibrary = load("coding/reference-library.md.mustache")
-
-    /// `{{reference}}` for a node STAGED by a split/merge: its reference is the original's source, quoted in
-    /// its own seed prompt. Without this the library section wins on recency — the agent goes shopping in
-    /// `agent_library_index` and returns a reinterpretation instead of the same node, in pieces.
-    static let referencePreserve = load("coding/reference-preserve.md.mustache")
-
-    /// `{{reference}}` when the host hands the brief the library index up front: same tiering as
-    /// `referenceLibrary`, but tier 1 is embedded (`{{library_index}}`) and the agent is told not
-    /// to spend a round fetching it.
-    static let referenceInline = load("coding/reference-inline.md.mustache")
-
-    /// `{{schema}}` for `nodeCompile`: the fetch framing (call `agent_docs_read`) when the brief
-    /// carries no contract doc, or the inline framing (`{{contract_doc}}` embedded) when it does.
-    /// One of the two ALWAYS renders — `{{schema}}` must never survive into a prompt.
-    static let schemaFetch = load("coding/schema-fetch.md.mustache")
-    static let schemaInline = load("coding/schema-inline.md.mustache")
-
     /// Cold-start chat prompt: a Coding Agent edits an EXISTING node from a user message. Leans on the
     /// node's current source as the ABI reference (no ABI re-statement), so it can't drift from the ABI.
     static let nodeChat = load("coding/node-chat.md.mustache")
-
-    /// Re-grounding prompt for a RESUMED Coding Agent whose node didn't resolve on a prior dispatch:
-    /// restates the prior blocker + the CURRENT (possibly Director-adjusted) boundary,
-    /// leaning on the resumed session's memory for the rest. Used by the agentic strategy's reconcile loop.
-    static let nodeReconcile = load("coding/node-reconcile.md.mustache")
 
     /// Seed prompt for one piece of a split node. Carries the original intent + this stage's boundary
     /// contract so the Coding Agent implements only its slice of the pipeline.
@@ -53,14 +23,6 @@ enum SZPrompts {
         SZPromptTemplate.render(load("library/index.md.mustache"), ["categories": categories])
     }
 
-    /// The Director Agent prompt: given the live graph, establish each node's typed contract + wiring
-    /// via `ui_*`, adding nodes only when intent is under-specified. Does NOT implement node code.
-    static let director = load("director/decompose.md.mustache")
-
-    /// The Director Agent's RECONCILE prompt: after a dispatch, the nodes that didn't finish + their
-    /// reported blockers, so the Director adjusts each one's contract/prompt via `ui_*` before it's retried.
-    static let directorReconcile = load("director/reconcile.md.mustache")
-
     /// The Director Agent's cold-start CHAT framing: same coordination job as decompose, but
     /// conversational — and it can call `ui_run` to dispatch implementation (the run starts after
     /// its turn ends). The chat turn IS the decompose turn for a message-triggered run.
@@ -70,7 +32,7 @@ enum SZPrompts {
     /// injected as the `{{toolbelt}}` token so decompose and chat can't drift apart.
     static let directorToolbelt = load("director/toolbelt.md.mustache")
 
-    /// Load a prompt by its path under `Resources/Prompts/` (e.g. "coding/node-compile.md.mustache").
+    /// Load a prompt by its path under `Resources/Prompts/` (e.g. "coding/node-chat.md.mustache").
     private static func load(_ relativePath: String) -> String {
         let parts = relativePath.split(separator: "/")
         let file = String(parts.last ?? "")
@@ -118,7 +80,7 @@ public enum SZGraphPrompts {
     }
 
     /// A fenced Swift block for a node's source, or a "no source yet" note for an un-implemented node.
-    /// Internal (not private): the new engine's brief renderer assembles the same value.
+    /// Internal (not private): the brief renderer assembles the same value.
     static func sourceBlock(_ source: String?) -> String {
         guard let source, !source.isEmpty else { return "_(no source yet — this node was not implemented)_" }
         return "```swift\n\(source)\n```"
@@ -128,7 +90,7 @@ public enum SZGraphPrompts {
     /// token replacer with no conditional sections, so the empty case has to collapse to nothing here —
     /// the template puts `{{instruction}}` alone on a line, and "" leaves a clean paragraph break.
     /// Framed as HOW to perform the op, so an agent can't mistake it for the node's own intent.
-    /// Internal (not private): the new engine's brief renderer assembles the same value.
+    /// Internal (not private): the brief renderer assembles the same value.
     static func steerBlock(_ instruction: String?, verb: String) -> String {
         let steer = instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !steer.isEmpty else { return "" }
@@ -142,8 +104,8 @@ public enum SZGraphPrompts {
 }
 
 /// Shared renderer for a node's typed boundary in agent prompts — each port's type, ui/default, and the
-/// EXACT live-read call in `update()`. ONE renderer used by the coding prompt (node-compile) AND the
-/// split/merge seed prompts, so every agent both PRESERVES the typed contract and READS its scalar inputs
+/// EXACT live-read call in `update()`. ONE renderer used by the coding brief (node-compile, via the
+/// brief renderer) AND the split/merge seed prompts, so every agent both PRESERVES the typed contract and READS its scalar inputs
 /// (never hardcodes them → no dead controls). The promote merge holds the live boundary's types; this
 /// makes the agent's SOURCE honor it.
 enum SZBoundaryPrompt {
@@ -214,20 +176,12 @@ enum SZBoundaryPrompt {
     }
 }
 
-/// Builds the Director Agent's turn prompt — the live graph as context + the user's instruction.
-/// Public so the host renders it when it spawns the Director turn (`SZAgenticDirectorStrategy`).
+/// The Director Agent's prompt VALUE BUILDERS — graph projections and per-turn context lines.
+/// The brief renderer (`SZBriefRenderer`) assembles run-turn briefs from these; the host renders
+/// the chat framings below directly when it spawns a Director chat turn.
 public enum SZDirectorPrompt {
-    public static func render(graph: SZGraph, instruction: String) -> String {
-        SZPromptTemplate.render(SZPrompts.director, [
-            "graph": graphSummary(graph),
-            "instruction": instructionLine(instruction),
-            "toolbelt": SZPrompts.directorToolbelt,
-        ])
-    }
-
     /// The decompose brief's `{{instruction}}` value: the user's words verbatim, or the
-    /// explicit no-instruction fallback. One home — the legacy render above and the new
-    /// engine's brief renderer must produce the same bytes.
+    /// explicit no-instruction fallback.
     static func instructionLine(_ instruction: String) -> String {
         instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "(none — make the current graph as drawn ready to implement)"
@@ -263,27 +217,9 @@ public enum SZDirectorPrompt {
         """
     }
 
-    /// Build the Director's reconcile-turn prompt: the live graph + the unresolved nodes with each
-    /// one's current contract/intent and its last reported blocker, so the Director decides per node how to
-    /// unblock it (adjust contract/prompt via `ui_*`) before the fleet retries.
-    public static func renderReconcile(
-        graph: SZGraph, unresolved: [SZNodeID], statuses: [SZNodeID: String],
-        inbox: [String] = [], round: Int, cap: Int
-    ) -> String {
-        SZPromptTemplate.render(SZPrompts.directorReconcile, [
-            "graph": graphSummary(graph),
-            "blockers": blockerLines(graph: graph, unresolved: unresolved, statuses: statuses),
-            // The coding agents' mid-run `ui_send_chat scope=director` messages — previously a
-            // silent black hole (appended to the tab, read by no LLM). FIFO, verbatim.
-            "inbox": inboxLines(inbox),
-            "round": String(round),
-            "cap": String(cap),
-        ])
-    }
-
     /// The reconcile brief's `{{blockers}}` value: one block per unresolved node — its typed
     /// boundary, its intent, and what its Coding Agent last reported (or the explicit
-    /// no-status fallback). One home for the legacy render above and the new brief renderer.
+    /// no-status fallback).
     static func blockerLines(graph: SZGraph, unresolved: [SZNodeID],
                              statuses: [SZNodeID: String]) -> String {
         let blocks = unresolved.map { id -> String in

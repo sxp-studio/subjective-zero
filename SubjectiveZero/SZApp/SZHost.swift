@@ -392,25 +392,11 @@ final class SZHost {
     /// The sheet's cheap-tier re-check loop (~3s) — alive only while the sheet is open, so a just
     /// installed / just-logged-in CLI flips its card green without a manual Refresh.
     var providerHealthPollTask: Task<Void, Never>?
-    /// The active orchestration strategy — a pluggable `SZOrchestrating` selected by a debug
-    /// setting (`SZ_ORCHESTRATOR` env at launch, swappable live via `debug_set_orchestrator` for
-    /// closed-loop tests; TODO: replace with a Settings screen). Concrete SZAI; no SZCore seam.
-    /// Default = `.agentic`: an LLM Director Agent declares each node's REAL typed contract + wiring,
-    /// so a drawn node keeps its true I/O instead of being force-drafted to texture-in/out. The
-    /// `.procedural` path stays the deterministic / offline / CI opt-in (set `SZ_ORCHESTRATOR=procedural`).
-    private(set) var orchestratorStrategy: SZOrchestrationStrategy =
-        ProcessInfo.processInfo.environment["SZ_ORCHESTRATOR"]
-            .flatMap(SZOrchestrationStrategy.init(rawValue:)) ?? .agentic
-    var orchestrator: any SZOrchestrating { orchestratorStrategy.make() }
-    /// The graph-engine rebuild's THIRD strategy, selected out-of-band from the frozen two-case
-    /// enum (`SZ_ORCHESTRATOR=graph` at launch, `debug_set_orchestrator "graph"` live) — a
-    /// parallel flag so the frozen `SZOrchestrationStrategy` seam carries zero diffs while all
-    /// three coexist; it folds into a real three-way selection when the legacy strategies
-    /// retire. Constructed per run in SZHost+Run.swift (it needs the packs root + step runtime).
-    private(set) var useGraphOrchestrator: Bool =
-        ProcessInfo.processInfo.environment["SZ_ORCHESTRATOR"] == "graph"
-    /// The selection as the debug surfaces report it.
-    var orchestratorName: String { useGraphOrchestrator ? "graph" : orchestratorStrategy.rawValue }
+    /// The graph orchestrator is THE orchestrator — strategy selection is retired. Constructed
+    /// per run in SZHost+Run.swift (it needs the packs root + step runtime). `SZ_ORCHESTRATOR`
+    /// is still READ, but only to warn once at launch when it names a retired value (see
+    /// `warnIfRetiredOrchestratorRequested`); the debug surfaces report the constant below.
+    static let orchestratorName = "graph"
     /// The compiled-step execution table for the graph orchestrator's condition steps — one
     /// instance for the host's lifetime, so a re-scheduled step coalesces into the runtime's
     /// latest-source-wins compile instead of rebuilding a cold table every run.
@@ -460,6 +446,15 @@ final class SZHost {
         return URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appending(path: "NodeLibrary")
     }
 
+    /// `SZ_ORCHESTRATOR` selected a strategy while three coexisted. The selection is retired;
+    /// the env var is read once at launch purely to tell a caller still setting it the truth.
+    private func warnIfRetiredOrchestratorRequested() {
+        guard let value = ProcessInfo.processInfo.environment["SZ_ORCHESTRATOR"],
+              value != Self.orchestratorName else { return }
+        print("[SZHost] SZ_ORCHESTRATOR=\(value): procedural/agentic retired — the graph "
+            + "orchestrator is the path; token-free runs use a turn-less pack root via SZ_AGENT_PACKS")
+    }
+
     /// Instantiate the runtime, vend the viewport render closure, open the launch project (env
     /// override → last open → first-launch sample copy; SZHost+ProjectLifecycle.swift), and start
     /// the app-level services. Loading is delegated to `switchProject` — launch is just the first
@@ -467,6 +462,7 @@ final class SZHost {
     func start(openingIfLaunchedWithFile launchFileURL: URL? = nil) async {
         guard !started else { return }
         started = true
+        warnIfRetiredOrchestratorRequested()
         installStoreFenceBackstop()   // the fence's debug tripwire (SZHost+Fence.swift)
         if SZTrace.isEnabled { loadHeldPromptIDs() }   // past sessions' captured prompts light up
         // The pump's wake signal: every ledger release (turn end, run end, cancel) retries queued
@@ -1089,21 +1085,6 @@ final class SZHost {
         }
         resetAgentSessions()
         trackProviderDefaultTelemetry()
-        return true
-    }
-
-    /// Select the orchestration strategy for the next run (`debug_set_orchestrator`). Stop-gap —
-    /// TODO: replace with a Settings screen. The live render is unaffected until the next `ui_run`.
-    /// Returns false for an unknown name (left unchanged).
-    @discardableResult
-    func setOrchestrator(_ name: String) -> Bool {
-        if name == "graph" {   // the third strategy rides beside the frozen enum (see the flag)
-            useGraphOrchestrator = true
-            return true
-        }
-        guard let strategy = SZOrchestrationStrategy(rawValue: name) else { return false }
-        useGraphOrchestrator = false
-        orchestratorStrategy = strategy
         return true
     }
 

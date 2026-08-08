@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The GRAPH Director strategy — the third selectable orchestration strategy, and the first
-// consumer of the whole rebuilt stack: a validated agent-pack library declares WHAT runs
+// The GRAPH Director strategy — THE orchestrator, and the first consumer of the whole
+// rebuilt stack: a validated agent-pack library declares WHAT runs
 // (graphs, briefs, steps), `SZThreadMachine` decides WHEN (events → commands), `SZGraphEngine`
 // runs each traversal, and this file is the MOTOR between them — it executes the machine's
-// commands in order and reports what it observed back as events. It conforms to the frozen
-// `SZOrchestrating` seam without touching it: the host special-cases the selection, so the
-// legacy enum and both frozen strategies carry zero diffs while all three coexist.
+// commands in order and reports what it observed back as events. It fulfills the
+// `SZOrchestrating` seam the host invokes at `startRun`.
 //
 // The split of labor, stated once:
 //  - the MACHINE owns thread lifecycle (one open set, one settled reply, absorbing termination);

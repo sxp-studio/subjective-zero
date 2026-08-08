@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Port derivation for contract-less nodes: what a node's data wiring implies its ports are,
 // straight from the graph. The brief renderer briefs agents with these; the neutral home
-// exists so nothing prompt-shaped depends on orchestration-strategy files. (The frozen
-// legacy strategy carries a private copy of the same three functions until it is deleted —
-// byte-equal by review, single home from then on.)
+// exists so nothing prompt-shaped depends on orchestration files — this is the single home
+// for the derivation.
 import Foundation
 
 extension SZGraph {
