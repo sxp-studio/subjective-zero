@@ -29,6 +29,9 @@ public struct SZAgentGraphFace: Equatable, Sendable {
     public enum Source: Equatable, Sendable {
         case step(name: String)
         case brief(path: String)
+        /// A dispatch's "body" is the graph it calls into — the pill LINKS to the target
+        /// seat's item graph rather than opening a file.
+        case dispatch(target: String)
     }
     public var form: Form
     public var title: String
@@ -98,7 +101,8 @@ public enum SZAgentGraphLayout {
         case .dispatch(let dispatch):
             // Send-and-conclude: one outcome, no out-edges.
             return SZAgentGraphFace(form: .dispatch, title: node.title ?? "→ \(dispatch.to)",
-                                    symbol: "arrow.triangle.branch", outcomes: ["sent"])
+                                    symbol: "arrow.triangle.branch", outcomes: ["sent"],
+                                    source: .dispatch(target: dispatch.to))
         }
     }
 

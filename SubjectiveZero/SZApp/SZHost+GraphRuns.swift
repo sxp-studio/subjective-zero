@@ -110,7 +110,8 @@ extension SZHost {
                     // The front door each seat mostly exists for: the Director's build
                     // graph, the coding seat's item graph, else whatever comes first.
                     defaultGraphName: (pack.graph(handling: .build) ?? pack.graph(handling: .item)
-                        ?? pack.graphs.first)?.name ?? "")
+                        ?? pack.graphs.first)?.name ?? "",
+                    seat: pack.seat?.rawValue)
             }
         }
         agentGraphPlanCache = agents

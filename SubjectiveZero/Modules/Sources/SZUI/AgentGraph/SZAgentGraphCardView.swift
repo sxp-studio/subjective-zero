@@ -110,8 +110,14 @@ struct SZAgentGraphCardView: View {
     private var sourceButton: some View {
         if let source = face.source, let openSource {
             SZCardPillButton(
-                symbol: face.form == .step ? "curlybraces" : "doc.text",
-                help: face.form == .step ? "Open the step's Step.swift" : "Open the brief template",
+                symbol: "doc.text",
+                help: {
+                    switch source {
+                    case .step: "Open the step's Step.swift"
+                    case .brief: "Open the brief template"
+                    case .dispatch(let target): "Open the \(target) seat's item graph"
+                    }
+                }(),
                 action: { openSource(source) })
             .offset(x: 2, y: 27)
         }

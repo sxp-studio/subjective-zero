@@ -45,14 +45,17 @@ public struct SZAgentGraphPlanAgent: Identifiable, Equatable, Sendable {
     public var graphs: [Graph]
     /// The graph its group opens on — the kind this agent mostly exists for.
     public var defaultGraphName: String
+    /// The seat this agent holds — what a dispatch's `to` resolves against. nil = seatless.
+    public var seat: String?
 
     public init(id: String, title: String, symbol: String, graphs: [Graph],
-                defaultGraphName: String) {
+                defaultGraphName: String, seat: String? = nil) {
         self.id = id
         self.title = title
         self.symbol = symbol
         self.graphs = graphs
         self.defaultGraphName = defaultGraphName
+        self.seat = seat
     }
 }
 
@@ -148,6 +151,18 @@ public struct SZAgentGraphPanel: View {
                          record: nil, agent: planAgent.id)
     }
 
+    /// A dispatch card's link: jump the Plan view to the target seat's item graph — the
+    /// graph the dispatched items actually traverse. Unknown seat = no-op (the pack gate
+    /// refuses those, so only an archived record could carry one).
+    private func navigate(toSeat seat: String) {
+        guard let target = planAgents.first(where: { $0.seat == seat }) else { return }
+        let itemGraph = target.graphs.first { $0.graph.kind == .item }
+        mode = .plan
+        selectedRunID = nil
+        selectedAgentID = target.id
+        selectedGraphName = (itemGraph ?? target.graphs.first)?.name
+    }
+
     /// One canvas's worth of values. The Plan view carries no record — its cards are the
     /// authored document, deliberately state-free.
     private struct Displayed {
@@ -188,6 +203,9 @@ public struct SZAgentGraphPanel: View {
                         }
                     }
                 }
+                // The chrome's header floats OVER the tile; the sidebar starts below it
+                // so the AGENTS section is never hidden underneath.
+                .padding(.top, SZPanelChromeView<EmptyView>.headerHeight + 4)
                 .padding(.bottom, 8)
             }
             .frame(width: 200)
@@ -301,8 +319,12 @@ public struct SZAgentGraphPanel: View {
     /// World space — the mode split and both renderers live in the content view.
     private func content(_ displayed: Displayed) -> some View {
         SZAgentGraphCanvasContent(graph: displayed.graph,
-                                  openSource: openStepSource.map { open in
-                                      { source in open(displayed.agent, source) }
+                                  openSource: { [self] source in
+                                      if case .dispatch(let target) = source {
+                                          navigate(toSeat: target)
+                                      } else {
+                                          openStepSource?(displayed.agent, source)
+                                      }
                                   },
                                   record: displayed.record,
                                   mode: effectiveMode,

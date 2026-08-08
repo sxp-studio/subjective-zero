@@ -196,6 +196,9 @@ extension SZHost {
             url = root.appending(path: "\(agent)/steps/\(name)/Step.swift")
         case .brief(let path):
             url = root.appending(path: "\(agent)/\(path)")
+        case .dispatch:
+            // The panel navigates dispatch links itself; nothing reaches the host.
+            return
         }
         guard FileManager.default.fileExists(atPath: url.path) else {
             status = "no source at \(url.path)"
