@@ -166,7 +166,9 @@ final class SZHost {
     /// user-editable materialized dir now, so the cache is invalidated wherever the tree can
     /// move — pack materialization and each run start — rather than held for the session.
     /// nil = not built yet.
-    var agentGraphPlanCache: [SZAgentGraphPlanAgent]?
+    /// Not observed: the panel fills this DURING body evaluation, and an observed write
+    /// there invalidates the view that just read it (a wasted render per invalidation).
+    @ObservationIgnored var agentGraphPlanCache: [SZAgentGraphPlanAgent]?
     /// The user's persisted Director run-graph VARIANT choice (graph name over the director
     /// pack's build-kind variants; `debug_set_orchestrator` writes it). Same app-state.json
     /// home + restore story as the prefs below. nil = the pack default; `SZ_RUN_GRAPH`

@@ -43,6 +43,9 @@ struct SZAgentGraphCardView: View {
     /// Open the card's authored source (the step's Swift, a turn's brief). nil = no host
     /// wired the affordance — the pill simply isn't drawn.
     var openSource: ((SZAgentGraphFace.Source) -> Void)? = nil
+    /// Whether a FILE source (step, brief) offers its pill — a dead pill promises an
+    /// editor that never opens. A dispatch link is drawn either way.
+    var drawsFileSources: Bool = true
     let state: SZAgentGraphCardState
     /// The Run view's per-visit label ("visit 2"), shown on the subheader line.
     var visitLabel: String? = nil
@@ -108,7 +111,8 @@ struct SZAgentGraphCardView: View {
     /// header. Only drawn when the face carries a source AND a host wired the opener.
     @ViewBuilder
     private var sourceButton: some View {
-        if let source = face.source, let openSource {
+        if let source = face.source, let openSource,
+           drawsFileSources || { if case .dispatch = source { true } else { false } }() {
             SZCardPillButton(
                 symbol: "doc.text",
                 help: {

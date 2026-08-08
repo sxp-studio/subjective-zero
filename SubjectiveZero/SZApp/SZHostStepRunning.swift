@@ -51,6 +51,11 @@ final class SZHostStepRunning: SZStepRunning {
 
     private func ensureScheduled(_ key: SZStepKey) {
         guard scheduled.insert(key).inserted else { return }
+        // A fresh adapter per chat turn and per run would otherwise re-compile every step
+        // it touches — swiftc + codesign before a Director reply's brief even renders.
+        // The runtime is host-lifetime and its watcher keeps live modules current on edit,
+        // so a module that is already loaded needs nothing done to it here.
+        guard !runtime.isLoaded(key: key) else { return }
         failures[key] = nil
         let root = Self.buildRoot(for: key)
         runtime.scheduleLoad(key: key, sourceURL: stepSource(key),

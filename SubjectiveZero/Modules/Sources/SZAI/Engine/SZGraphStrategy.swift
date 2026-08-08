@@ -270,6 +270,11 @@ extension SZGraphDirectorStrategy {
                         ending, dispatch: dispatchIntent(of: result)))
 
                 case .deliverItems(let setID, _, let orders):
+                    // The same guard `.startTraversal` carries: a stop can conclude the
+                    // thread while this command still sits in the queue, and delivering
+                    // then would grant entitlements (a system dialog AFTER Stop) and open
+                    // records that seal cancelled the instant they exist.
+                    guard case .awaitingFleet = machine.state else { continue }
                     // The target seat's one holder is the prebuilt coding role (the pack gate
                     // resolved the dispatch's seat and its item handling at load).
                     // A set is minted by the traversal that just concluded — remember its
@@ -369,6 +374,10 @@ extension SZGraphDirectorStrategy {
                         outcome: "defect: '\(node)' is not a node id"))
                 }
             }
+            // Nothing runnable (every order settled synchronously): the group would hold
+            // only the sleeping watchdog, and the drain loop cannot cancel it until it
+            // yields — a 17-minute stall for a set that already closed.
+            guard !runnable.isEmpty else { return followOn }
             let children = runnable
             let concluded = strategy.onConcluded
             await withTaskGroup(of: Land.self) { group in
@@ -397,12 +406,25 @@ extension SZGraphDirectorStrategy {
                     for steer in context.takeDirectorInbox() {
                         followOn += machine.handle(.absorbSteer(steer))
                     }
+                    let landed: [SZThreadMachine.Command]
                     switch land {
                     case .settled(let node, let outcome):
-                        followOn += machine.handle(.itemSettled(node: node, setID: setID,
-                                                                outcome: outcome))
+                        landed = machine.handle(.itemSettled(node: node, setID: setID,
+                                                             outcome: outcome))
                     case .watchdog:
-                        followOn += machine.handle(.watchdogFired(setID: setID))
+                        landed = machine.handle(.watchdogFired(setID: setID))
+                    }
+                    // Tallies are relayed HERE, as each item lands — the dispatch card
+                    // counts up while the fleet works. Draining them at the end (with the
+                    // rest of the follow-on queue) would jump the card from nothing to its
+                    // final value, which is what the live amend exists to avoid.
+                    for command in landed {
+                        if case .amendTally(let set, let settled, let total, let failed) = command,
+                           let sender = sendingBySet[set] {
+                            strategy.onTally(sender, settled, total, failed)
+                        } else {
+                            followOn.append(command)
+                        }
                     }
                     // The set closed (collected, synthesized, or stopped): cancel what remains —
                     // the stragglers the machine ordered cancelled and the sleeping watchdog.
@@ -444,17 +466,10 @@ extension SZGraphDirectorStrategy {
             return SZDispatchIntent(target: target, items: result.sent.map(\.node), notes: notes)
         }
 
-        /// Engine conclusion → the machine's traversal-ending vocabulary, class-preserving:
-        /// a refusal stays a refusal, a defect stays a defect. Nonisolated: the delivery's
-        /// off-actor children map their own conclusions.
+        /// Engine conclusion → the machine's traversal-ending vocabulary. One home:
+        /// `SZTraversalEnding.init(_:)`, so every caller maps identically.
         private nonisolated static func ending(of conclusion: SZTraversalConclusion) -> SZTraversalEnding {
-            switch conclusion {
-            case .ended: .ended
-            case .failed(_, let detail): .failed(reason: detail)
-            case .cancelled: .cancelled
-            case .declined(_, let reason): .declined(reason: reason ?? "no reason given")
-            case .defect(_, let detail): .defect(detail: detail)
-            }
+            SZTraversalEnding(conclusion)
         }
 
         /// An item traversal's conclusion as its terminal outcome string — the dispatch card's

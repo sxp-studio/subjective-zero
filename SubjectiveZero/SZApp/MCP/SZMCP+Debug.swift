@@ -172,7 +172,11 @@ extension SZHostBridge {
                                     : variants.joined(separator: ", ")))
         }
         host.setRunGraphVariant(strategy)
-        return SZJSONRPC.encode(["orchestrator": SZHost.orchestratorName, "variant": strategy])
+        // What will actually RUN — `SZ_RUN_GRAPH` still outranks the persisted choice, and a
+        // debug surface that answered with the request would lie to the closed-loop tests
+        // this tool exists for.
+        return SZJSONRPC.encode(["orchestrator": SZHost.orchestratorName,
+                                 "variant": host.activeRunGraphVariant() ?? strategy])
     }
 
     private func debugChatTranscript(_ arguments: [String: Any]) throws -> String {

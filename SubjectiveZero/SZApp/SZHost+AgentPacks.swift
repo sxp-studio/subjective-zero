@@ -61,16 +61,22 @@ extension SZHost {
                         try fm.copyItem(at: from, to: to)
                     }
                 }
-                // PRUNE files this agent's pack no longer ships — a renamed graph or brief
-                // would otherwise leave its old copy load-visible forever (a variant the
-                // pack never meant, a brief nothing renders). Only within agent folders the
-                // bundle ships: a top-level folder of the user's own is left alone — that is
-                // where user packs live.
+                // PRUNE what a PREVIOUS materialization wrote and this bundle no longer
+                // ships — a renamed graph or brief would otherwise stay load-visible forever
+                // (a variant the pack never meant, a brief nothing renders).
+                //
+                // Only that. A file the bundle never wrote is the USER'S — the authoring
+                // tutorial has them add a graph and a step folder INSIDE the shipped
+                // director pack, and deleting those at next launch would take their work
+                // and, if `agent.json` still named the variant, refuse every Build after.
+                // The manifest of what we wrote lives beside the copy for exactly this.
                 let shippedSet = Set(shipped)
-                for stale in (try? Self.relativeFilePaths(under: dest)) ?? []
-                where !shippedSet.contains(stale) {
+                let previous = Self.materializedManifest(for: agent)
+                for stale in previous.subtracting(shippedSet).sorted() {
                     try? fm.removeItem(at: dest.appending(path: stale))
+                    print("[SZHost] agent packs: removed \(agent)/\(stale) — the bundle no longer ships it")
                 }
+                Self.writeMaterializedManifest(shippedSet, for: agent)
             } catch {
                 print("[SZHost] agent pack \(agent): could not materialize — \(error)")
             }
@@ -213,5 +219,25 @@ extension SZHost {
             ?? URL(fileURLWithPath: "/System/Applications/TextEdit.app")
         NSWorkspace.shared.open([url], withApplicationAt: editor,
                                 configuration: NSWorkspace.OpenConfiguration())
+    }
+}
+
+extension SZHost {
+    /// What the last materialization wrote for one agent, so a prune can tell OUR stale
+    /// copies from the user's own additions. Absent (first run, or an older build) reads as
+    /// empty — the conservative direction: nothing of theirs is ever taken on a guess.
+    static func materializedManifest(for agent: String) -> Set<String> {
+        let url = materializedAgentPacksRoot.appending(path: ".materialized/\(agent).json")
+        guard let data = try? Data(contentsOf: url),
+              let paths = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return Set(paths)
+    }
+
+    static func writeMaterializedManifest(_ paths: Set<String>, for agent: String) {
+        let url = materializedAgentPacksRoot.appending(path: ".materialized/\(agent).json")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        guard let data = try? JSONEncoder().encode(paths.sorted()) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 }

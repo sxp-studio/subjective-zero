@@ -344,6 +344,11 @@ extension SZHost {
         // (process truth only), while performChatTurn needs the full run result back.
         final class TurnCapture { var result: SZAgentRunResult?; var error: Error? }
         let capture = TurnCapture()
+        // A chat reply is a traversal like any other: it gets its record, so the RUNS list
+        // and the panel's canvas show a routed reply the same way they show a build.
+        let sighting = SZTraversalSighting(id: UUID(), agent: pack.id,
+                                            graphName: graph.name, kind: .chat)
+        beginAgentGraphRun(sighting)
         let host = SZChatTraversalHost(
             message: message, resuming: existing != nil,
             renderer: renderer, graphName: graph.name, queries: queries,
@@ -369,10 +374,12 @@ extension SZHost {
                 } else {
                     await self.perform(effect: effect, kind: kind)
                 }
-            })
+            },
+            onNote: { [weak self] note in self?.noteAgentGraphRun(sighting.id, note) })
         let outcome = await SZGraphEngine(
             agent: pack.id, graph: graph, attachments: attachments,
             host: host, steps: steps, router: router).run(kind: .chat)
+        concludeAgentGraphRun(sighting.id, SZTraversalEnding(outcome.conclusion))
         // The turn's own throw (Stop, zombie claim, stale session) resumes performChatTurn's
         // existing catch handling untouched.
         if let error = capture.error { throw error }

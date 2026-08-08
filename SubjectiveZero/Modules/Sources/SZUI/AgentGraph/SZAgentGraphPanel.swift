@@ -165,6 +165,10 @@ public struct SZAgentGraphPanel: View {
         selectedRunID = nil
         selectedAgentID = target.id
         selectedGraphName = (itemGraph ?? target.graphs.first)?.name
+        // Show the destination in the outline too: a canvas that swaps under a collapsed
+        // AGENTS section leaves the user somewhere with no visible "here".
+        agentsSectionOpen = true
+        expandedAgents.insert(target.id)
     }
 
     /// One canvas's worth of values. The Plan view carries no record — its cards are the
@@ -323,6 +327,9 @@ public struct SZAgentGraphPanel: View {
     /// World space — the mode split and both renderers live in the content view.
     private func content(_ displayed: Displayed) -> some View {
         SZAgentGraphCanvasContent(graph: displayed.graph,
+                                  // A file pill is drawn only when a host can actually open
+                                  // it; dispatch LINKS are the panel's own business, so they
+                                  // stand whether or not one is wired.
                                   openSource: { [self] source in
                                       if case .dispatch(let target) = source {
                                           navigate(toSeat: target)
@@ -330,6 +337,7 @@ public struct SZAgentGraphPanel: View {
                                           openStepSource?(displayed.agent, source)
                                       }
                                   },
+                                  drawsFileSources: openStepSource != nil,
                                   record: displayed.record,
                                   mode: effectiveMode,
                                   zoom: camera.zoom, nudges: nudges,

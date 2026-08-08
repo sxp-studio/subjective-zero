@@ -12,6 +12,9 @@ struct SZAgentGraphCanvasContent: View {
     let graph: SZAgentGraph
     /// Opens a card's authored source; nil hides every source pill.
     var openSource: ((SZAgentGraphFace.Source) -> Void)? = nil
+    /// Whether FILE pills (step, brief) are offered — false when no host can open one.
+    /// Dispatch links are the panel's own navigation and stand regardless.
+    var drawsFileSources: Bool = true
     /// The record whose trace the Run view unrolls; nil = the Plan view (no live state).
     let record: SZAgentGraphRun?
     let mode: SZAgentGraphPanelMode
@@ -39,7 +42,8 @@ struct SZAgentGraphCanvasContent: View {
     private func card(_ face: SZAgentGraphFace, state: SZAgentGraphCardState, frame: CGRect,
                       visitLabel: String? = nil,
                       stats: SZAgentGraphCardStats? = nil) -> some View {
-        SZAgentGraphCardView(face: face, openSource: openSource, state: state,
+        SZAgentGraphCardView(face: face, openSource: openSource,
+                             drawsFileSources: drawsFileSources, state: state,
                              visitLabel: visitLabel, stats: stats)
             .frame(width: frame.width, height: frame.height)
             .offset(x: frame.minX, y: frame.minY)

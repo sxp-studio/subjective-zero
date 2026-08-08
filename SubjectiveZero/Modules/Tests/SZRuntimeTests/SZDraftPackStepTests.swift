@@ -82,7 +82,7 @@ struct SZDraftPackStepTests {
     /// costs NO query, pinned by an ask counter that must stay at zero — and only the
     /// ambiguous remainder asks for the typed ruling, whose three kinds map onto the three
     /// declared outcomes (`build` alone carries the effect).
-    @Test func theShippedRouteReplyStepSpendsNoQueryWhenWorkWasDrafted() async throws {
+    @Test func theShippedRouteReplyStepAlwaysRulesAndOnlyBuildCarriesTheEffect() async throws {
         let source = draftPacksRoot.appending(path: "director/steps/route-reply/Step.swift")
         let dir = FileManager.default.temporaryDirectory
             .appending(path: "sz-draft-route-reply-\(UUID().uuidString)")
@@ -100,13 +100,16 @@ struct SZDraftPackStepTests {
             { request in asked.withLock { $0.append(request) }; return reply }
         }
 
-        // Drafted work → the mechanical build, envelope bytes deterministic, ask NEVER called.
-        let mechanical = await loader.evaluate(factsJSON: facts(draftedWork: true),
-                                               ask: scriptedAsk(reply: "unreachable"))
-        #expect(mechanical == .outcome(#"{"effects":["requestBuild"],"outcome":"build"}"#))
-        #expect(asked.withLock { $0 }.isEmpty)
+        // Drafted work is EVIDENCE, never a bypass: the diff sees the graph grow but not WHO
+        // grew it, so a node the user dropped mid-turn must not start a run by itself. The
+        // ruling decides even here — and a ruling of `answer` stays an answer.
+        let drafted = await loader.evaluate(factsJSON: facts(draftedWork: true),
+                                            ask: scriptedAsk(reply: #"{"kind": "answer"}"#))
+        #expect(drafted == .outcome("answer"))
+        #expect(asked.withLock { $0 }.count == 1)
 
-        // No drafted work → ONE typed ruling per evaluation, naming the route-reply template.
+        // ONE typed ruling per evaluation, naming the route-reply template; `build` alone
+        // carries the effect that starts a run.
         let answer = await loader.evaluate(factsJSON: facts(draftedWork: false),
                                            ask: scriptedAsk(reply: #"{"kind": "answer"}"#))
         #expect(answer == .outcome("answer"))
@@ -117,7 +120,7 @@ struct SZDraftPackStepTests {
                                           ask: scriptedAsk(reply: #"{"kind": "build"}"#))
         #expect(build == .outcome(#"{"effects":["requestBuild"],"outcome":"build"}"#))
         let requests = asked.withLock { $0 }
-        #expect(requests.count == 3)
+        #expect(requests.count == 4)
         #expect(requests.allSatisfy { $0.contains(#""template":"route-reply""#) })
     }
 }

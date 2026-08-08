@@ -84,7 +84,10 @@ struct SZAgentGraphRunList: View {
         // newest-first, so `first` is the traversal that concluded (or is concluding) the
         // thread. Its ending is the thread's ending; a declined or failed decider must wear
         // its badge HERE, where the collapsed default shows it.
-        let director = entry.traversals.first { $0.kind == .build } ?? entry.traversals[0]
+        // NOT the build traversal: that one ended the moment it dispatched. The thread's
+        // verdict belongs to the newest DIRECTOR traversal — a settled re-entry, when the
+        // fleet came back and the graph ruled on what it found.
+        let director = entry.traversals.first { $0.kind != .item } ?? entry.traversals[0]
         let live = entry.traversals.contains(where: \.isLive)
         let began = entry.traversals.map(\.startedAt).min() ?? director.startedAt
         let ended = entry.traversals.compactMap(\.endedAt).max()

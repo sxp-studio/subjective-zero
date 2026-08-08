@@ -35,9 +35,12 @@ public enum SZQueryError: Error, CustomStringConvertible {
 /// Per-query budgets, tighter than a turn's: a step's ask is one small stateless completion,
 /// so two minutes of wall clock (or silence) means something is wrong — fail the ask and let
 /// the step's own error contract take over.
+/// A step's question is one small stateless completion, not a turn: it must never hold a
+/// scope's claim for a turn's patience. (The claim it rides is the delivery's — see the
+/// residual noted in the campaign wrap.)
 public enum SZQueryBudgets {
-    public static let timeout: TimeInterval = 120
-    public static let inactivityTimeout: TimeInterval = 120
+    public static let timeout: TimeInterval = 45
+    public static let inactivityTimeout: TimeInterval = 30
 }
 
 @MainActor
@@ -103,8 +106,11 @@ public final class SZQueryService {
         // re-rendered ask so the model sees the question and why its last answer failed.
         if request.attempt > 0, let repair = request.repair {
             prompt += "\n" + SZPromptTemplate.render(SZPrompts.askRepair, [
-                "error": repair.error,
-                "previousReply": repair.previousReply,
+                // Defused: these are MODEL-controlled text, and render walks an unordered
+                // dictionary — a live token inside a substituted value would expand or not
+                // depending on the process hash seed.
+                "error": SZPromptTemplate.defused(repair.error),
+                "previousReply": SZPromptTemplate.defused(repair.previousReply),
             ])
         }
 

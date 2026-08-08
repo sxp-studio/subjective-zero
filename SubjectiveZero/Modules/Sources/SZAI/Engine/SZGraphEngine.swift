@@ -226,3 +226,18 @@ public struct SZGraphEngine {
             notes: notes)
     }
 }
+
+extension SZTraversalEnding {
+    /// The engine's conclusion in the machine's vocabulary — class-preserving: a refusal
+    /// stays a refusal, a defect stays a defect, and only the node attribution is dropped
+    /// (the machine supervises threads; the record keeps the node).
+    public init(_ conclusion: SZTraversalConclusion) {
+        switch conclusion {
+        case .ended: self = .ended
+        case .failed(_, let detail): self = .failed(reason: detail)
+        case .cancelled: self = .cancelled
+        case .declined(_, let reason): self = .declined(reason: reason ?? "no reason given")
+        case .defect(_, let detail): self = .defect(detail: detail)
+        }
+    }
+}

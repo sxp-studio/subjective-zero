@@ -112,7 +112,18 @@ extension SZHost {
             agentGraphRuns = []
             return
         }
-        agentGraphRuns = SZAgentGraphRun.ordered(SZAgentGraphRunIO.load(projectURL: projectURL) ?? [])
+        // A record restored without an ending was truncated (nothing ever WRITES one that
+        // way): resurrect it sealed, not live. A phantom live record would sit at the head
+        // forever — exempt from eviction, pulsing, arming the follow-cam on a traversal
+        // that will never grow. The decoder stays tolerant; the list invariant wins here.
+        let restored = (SZAgentGraphRunIO.load(projectURL: projectURL) ?? []).map { record in
+            guard record.isLive else { return record }
+            var sealed = record
+            sealed.seal(conclusion: .defect(detail: "the record was truncated"),
+                        at: record.startedAt)
+            return sealed
+        }
+        agentGraphRuns = SZAgentGraphRun.ordered(restored)
     }
 
     // MARK: - What the panel reads
