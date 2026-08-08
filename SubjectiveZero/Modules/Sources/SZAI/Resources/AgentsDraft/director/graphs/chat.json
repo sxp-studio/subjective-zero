@@ -1,0 +1,16 @@
+{
+  "name": "chat",
+  "kind": "chat",
+  "label": "Chat",
+  "hint": "One conversational turn: a cold turn re-projects the whole world, a resumed turn re-projects only the live graph over its session's memory.",
+  "entry": "resuming",
+  "nodes": [
+    { "id": "resuming", "title": "Resuming?", "step": "resuming" },
+    { "id": "cold", "title": "Cold turn", "turn": { "brief": "prompts/chat.md.mustache" } },
+    { "id": "resumed", "title": "Resumed turn", "turn": { "brief": "prompts/chat-resumed.md.mustache", "session": "message" } }
+  ],
+  "edges": [
+    { "from": "resuming", "outcome": "no", "to": "cold" },
+    { "from": "resuming", "outcome": "yes", "to": "resumed" }
+  ]
+}

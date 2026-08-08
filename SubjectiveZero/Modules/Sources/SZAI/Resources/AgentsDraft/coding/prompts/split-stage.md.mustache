@@ -1,0 +1,14 @@
+You are implementing stage {{stage}} of {{count}} of a node that was split out of "{{original}}".
+
+What the whole node does:
+{{intent}}
+{{instruction}}
+The whole node's current source — divide its behavior across the {{count}} stages and implement ONLY this stage's part of the pipeline:
+{{source}}
+
+Honor the boundary contract exactly — these declared ports are the API the neighbouring stages and the rest of the graph depend on:
+{{boundary}}
+
+The stages are texture-connected in order: stage 1 takes the original external inputs and the final stage produces the original outputs. Keep your input/output port names and types as given.
+
+A split must PRESERVE BEHAVIOR: the stages chained together have to produce exactly what the original node produced. Work from the source above and carry its logic across — do NOT reach for the node library, and do not reinterpret, improve, or rewrite what the node does. You are dividing existing, working code, not authoring a new node.

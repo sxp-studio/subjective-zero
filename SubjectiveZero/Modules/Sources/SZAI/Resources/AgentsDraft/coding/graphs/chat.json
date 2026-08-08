@@ -1,0 +1,11 @@
+{
+  "name": "chat",
+  "kind": "chat",
+  "label": "Node chat",
+  "hint": "A cold chat turn editing an existing node from a user message; a resumed node chat rides the session raw and needs no brief.",
+  "entry": "chat",
+  "nodes": [
+    { "id": "chat", "title": "Chat turn", "turn": { "brief": "prompts/node-chat.md.mustache" } }
+  ],
+  "edges": []
+}

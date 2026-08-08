@@ -118,7 +118,8 @@ public enum SZGraphPrompts {
     }
 
     /// A fenced Swift block for a node's source, or a "no source yet" note for an un-implemented node.
-    private static func sourceBlock(_ source: String?) -> String {
+    /// Internal (not private): the new engine's brief renderer assembles the same value.
+    static func sourceBlock(_ source: String?) -> String {
         guard let source, !source.isEmpty else { return "_(no source yet — this node was not implemented)_" }
         return "```swift\n\(source)\n```"
     }
@@ -127,7 +128,8 @@ public enum SZGraphPrompts {
     /// token replacer with no conditional sections, so the empty case has to collapse to nothing here —
     /// the template puts `{{instruction}}` alone on a line, and "" leaves a clean paragraph break.
     /// Framed as HOW to perform the op, so an agent can't mistake it for the node's own intent.
-    private static func steerBlock(_ instruction: String?, verb: String) -> String {
+    /// Internal (not private): the new engine's brief renderer assembles the same value.
+    static func steerBlock(_ instruction: String?, verb: String) -> String {
         let steer = instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !steer.isEmpty else { return "" }
         // Defuse `{{…}}` in the steer. This is the only USER-authored value we hand to SZPromptTemplate,
@@ -218,11 +220,18 @@ public enum SZDirectorPrompt {
     public static func render(graph: SZGraph, instruction: String) -> String {
         SZPromptTemplate.render(SZPrompts.director, [
             "graph": graphSummary(graph),
-            "instruction": instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "(none — make the current graph as drawn ready to implement)"
-                : instruction,
+            "instruction": instructionLine(instruction),
             "toolbelt": SZPrompts.directorToolbelt,
         ])
+    }
+
+    /// The decompose brief's `{{instruction}}` value: the user's words verbatim, or the
+    /// explicit no-instruction fallback. One home — the legacy render above and the new
+    /// engine's brief renderer must produce the same bytes.
+    static func instructionLine(_ instruction: String) -> String {
+        instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "(none — make the current graph as drawn ready to implement)"
+            : instruction
     }
 
     /// The Director Agent's cold-start CHAT turn: the live graph + the user's (mention-expanded)
@@ -261,6 +270,22 @@ public enum SZDirectorPrompt {
         graph: SZGraph, unresolved: [SZNodeID], statuses: [SZNodeID: String],
         inbox: [String] = [], round: Int, cap: Int
     ) -> String {
+        SZPromptTemplate.render(SZPrompts.directorReconcile, [
+            "graph": graphSummary(graph),
+            "blockers": blockerLines(graph: graph, unresolved: unresolved, statuses: statuses),
+            // The coding agents' mid-run `ui_send_chat scope=director` messages — previously a
+            // silent black hole (appended to the tab, read by no LLM). FIFO, verbatim.
+            "inbox": inboxLines(inbox),
+            "round": String(round),
+            "cap": String(cap),
+        ])
+    }
+
+    /// The reconcile brief's `{{blockers}}` value: one block per unresolved node — its typed
+    /// boundary, its intent, and what its Coding Agent last reported (or the explicit
+    /// no-status fallback). One home for the legacy render above and the new brief renderer.
+    static func blockerLines(graph: SZGraph, unresolved: [SZNodeID],
+                             statuses: [SZNodeID: String]) -> String {
         let blocks = unresolved.map { id -> String in
             let node = graph.node(id: id)
             let title = node?.title ?? "node"
@@ -269,15 +294,12 @@ public enum SZDirectorPrompt {
             let status = statuses[id] ?? "(no status reported — it did not finish)"
             return "- `\(id.uuidString)` \"\(title)\" — \(io)\(intent)\n  reported: \(status)"
         }.joined(separator: "\n")
-        return SZPromptTemplate.render(SZPrompts.directorReconcile, [
-            "graph": graphSummary(graph),
-            "blockers": blocks.isEmpty ? "- (none)" : blocks,
-            // The coding agents' mid-run `ui_send_chat scope=director` messages — previously a
-            // silent black hole (appended to the tab, read by no LLM). FIFO, verbatim.
-            "inbox": inbox.isEmpty ? "- (none)" : inbox.map { "- \($0)" }.joined(separator: "\n"),
-            "round": String(round),
-            "cap": String(cap),
-        ])
+        return blocks.isEmpty ? "- (none)" : blocks
+    }
+
+    /// The reconcile brief's `{{inbox}}` value — the fleet's messages, FIFO, verbatim.
+    static func inboxLines(_ inbox: [String]) -> String {
+        inbox.isEmpty ? "- (none)" : inbox.map { "- \($0)" }.joined(separator: "\n")
     }
 
     /// A compact, agent-readable description of the graph: each node's id/title/kind/contract-state/prompt,
