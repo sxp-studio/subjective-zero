@@ -33,12 +33,40 @@ extension SZHost {
         agentGraphRuns[i].note(SZAgentGraphRun.Entry(note))
     }
 
-    /// The traversal concluded — seal, re-order (it just stopped being live), cap, persist.
+    /// The traversal concluded — seal, re-order (it just stopped being live), cap, persist,
+    /// and carry an ITEM traversal's bad news onto the node it served.
     func concludeAgentGraphRun(_ id: UUID, _ ending: SZTraversalEnding) {
         guard let i = agentGraphRuns.firstIndex(where: { $0.id == id }) else { return }
         agentGraphRuns[i].seal(conclusion: SZAgentGraphRun.Conclusion(ending))
+        surfaceItemFailure(agentGraphRuns[i], ending)
         agentGraphRuns = SZAgentGraphRun.capped(SZAgentGraphRun.ordered(agentGraphRuns))
         persistAgentGraphRuns()
+    }
+
+    /// A failed item traversal knows WHY it failed; without this the post-run sweep paints
+    /// the node with its generic "never compiled this node or reported a blocker" line and
+    /// the reason is lost. Keyed on the traversal's own conclusion, so it covers every
+    /// graph — a retryless variant that never delivers a settled reply included.
+    ///
+    /// An agent's OWN report always wins: a coding agent that said `needsInput` with its
+    /// question keeps saying that. Only a node whose agent never reported takes this word.
+    /// A cancelled item says nothing at all — a stopped run is not a failed node.
+    private func surfaceItemFailure(_ record: SZAgentGraphRun, _ ending: SZTraversalEnding) {
+        guard record.kind == .item, let id = record.item, let node = UUID(uuidString: id),
+              let message = Self.itemFailureMessage(ending) else { return }
+        let reported = nodeAgentState[node]?.phase
+        guard reported != .error, reported != .needsInput else { return }
+        recordNodeStatus(node: node, phase: .error, message: message)
+    }
+
+    /// The node-facing sentence for an item ending, or nil when the node should stay quiet.
+    nonisolated static func itemFailureMessage(_ ending: SZTraversalEnding) -> String? {
+        switch ending {
+        case .ended, .cancelled: nil
+        case .failed(let reason): reason
+        case .declined(let reason): "declined — \(reason)"
+        case .defect(let detail): detail
+        }
     }
 
     /// The machine's live settlement count for a dispatch set, amended onto the SENDING
