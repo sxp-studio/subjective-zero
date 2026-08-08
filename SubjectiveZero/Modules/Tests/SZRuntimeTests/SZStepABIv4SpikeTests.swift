@@ -57,15 +57,15 @@ private func eventually(within deadline: Duration = .seconds(15),
     }
 }
 
-// MARK: - Step sources
+// MARK: - Step sources and facts documents
 
 private let workLeftCondition = """
-let step = SZCondition { $0.project.hasWorkLeft }
+let step = SZBuildCondition { $0.hasWorkLeft }
 """
 
 private let classifyRouter = """
 struct Ruling: Codable { let kind: String }
-let step = SZRouter("answer", "build") { ctx in
+let step = SZChatRouter("answer", "build") { ctx in
     try await ctx.askModel(template: "classify-reply", as: Ruling.self).kind
 }
 """
@@ -73,7 +73,7 @@ let step = SZRouter("answer", "build") { ctx in
 /// Blocks inside an ask until the host's runner releases it — the in-flight body for the
 /// cancellation and drain tests.
 private let blockingAskStep = """
-let step = SZRouter("done") { ctx in
+let step = SZChatRouter("done") { ctx in
     _ = try await ctx.askModel(template: "block", as: [String: String].self)
     return "done"
 }
@@ -82,8 +82,8 @@ let step = SZRouter("done") { ctx in
 /// Reports the SDK-side layout of the request struct, interpolation-free.
 private let layoutProbeStep = """
 struct LayoutProbe: SZStep {
-    var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: ["layout"]) }
-    func evaluate(_ ctx: SZContext) async throws -> String {
+    var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: ["layout"], facts: SZChatFacts.kindName) }
+    func evaluate(_ ctx: SZContext<SZChatFacts>) async throws -> String {
         let parts = [
             MemoryLayout<SZStepEvalRequestRaw>.size,
             MemoryLayout<SZStepEvalRequestRaw>.alignment,
@@ -99,6 +99,14 @@ struct LayoutProbe: SZStep {
 let step = LayoutProbe()
 """
 
+/// A complete build-kind facts document — the snapshot is all-required by design (a silent
+/// nil was the old architecture's favorite way to lie), so tests send every field.
+private func buildFacts(workLeft: Int) -> String {
+    #"{"workLeft": \#(workLeft), "workSet": [], "nodeStatuses": {}, "buildErrors": {}, "round": 1, "roundCap": 2, "briefed": false, "projectLoaded": true, "graphJSON": "{}", "steers": []}"#
+}
+
+private let chatFacts = #"{"sentMessage": "hey", "resuming": false, "draftedWork": false}"#
+
 // MARK: - Tests
 
 /// Serialized: each test drives a real swiftc; parallel compile storms help nobody.
@@ -108,15 +116,21 @@ struct SZStepABIv4SpikeTests {
     @Test func aSyncConditionCompilesLoadsAndAnswers() async throws {
         let loader = try loadStep(workLeftCondition)
 
-        // The one-line authoring surface declares itself: yes/no, no sidecar JSON.
+        // The one-line authoring surface declares itself: yes/no + its kind, no sidecar.
         let declaration = try #require(loader.declaration)
         #expect(declaration.contains("\"yes\"") && declaration.contains("\"no\""))
+        #expect(declaration.contains(#""facts":"build""#))
 
         let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
-        #expect(await loader.evaluate(factsJSON: #"{"workLeft": 2}"#, ask: noAsk) == .outcome("yes"))
-        #expect(await loader.evaluate(factsJSON: #"{"workLeft": 0}"#, ask: noAsk) == .outcome("no"))
-        // A fact the snapshot omits reads as its neutral value, not a crash.
-        #expect(await loader.evaluate(factsJSON: #"{}"#, ask: noAsk) == .outcome("no"))
+        #expect(await loader.evaluate(factsJSON: buildFacts(workLeft: 2), ask: noAsk) == .outcome("yes"))
+        #expect(await loader.evaluate(factsJSON: buildFacts(workLeft: 0), ask: noAsk) == .outcome("no"))
+        // The snapshot is all-required: an incomplete document REFUSES to start rather
+        // than silently reading neutral values.
+        guard case .failed(let reason) = await loader.evaluate(factsJSON: chatFacts, ask: noAsk) else {
+            Issue.record("an incomplete facts document must refuse to start")
+            return
+        }
+        #expect(reason.contains("could not start"))
     }
 
     @Test func anAskModelStepGetsATypedRulingThroughProse() async throws {
@@ -124,7 +138,7 @@ struct SZStepABIv4SpikeTests {
         let seen = Mutex<[String]>([])
 
         // The reply arrives fenced in chatter — the tolerant extractor's whole point.
-        let result = await loader.evaluate(factsJSON: #"{}"#) { request in
+        let result = await loader.evaluate(factsJSON: chatFacts) { request in
             seen.withLock { $0.append(request) }
             return "Sure! Here's the ruling:\n```json\n{\"kind\": \"build\"}\n```\nLet me know!"
         }
@@ -142,7 +156,7 @@ struct SZStepABIv4SpikeTests {
         let loader = try loadStep(classifyRouter)
         let seen = Mutex<[String]>([])
 
-        let result = await loader.evaluate(factsJSON: #"{}"#) { request in
+        let result = await loader.evaluate(factsJSON: chatFacts) { request in
             let attempt = seen.withLock { $0.append(request); return $0.count }
             return attempt == 1 ? "I think the answer is probably fine." : #"{"kind": "answer"}"#
         }
@@ -160,7 +174,7 @@ struct SZStepABIv4SpikeTests {
     @Test func exhaustedRepairsFailWithTheTemplateNamed() async throws {
         let loader = try loadStep(classifyRouter)
         let calls = Mutex(0)
-        let result = await loader.evaluate(factsJSON: #"{}"#) { _ in
+        let result = await loader.evaluate(factsJSON: chatFacts) { _ in
             calls.withLock { $0 += 1 }
             return "still just prose, no JSON anywhere"
         }
@@ -178,13 +192,13 @@ struct SZStepABIv4SpikeTests {
         let loader = try loadStep(classifyRouter)
 
         // A brace inside a JSON string must not derail the balanced scan…
-        let inString = await loader.evaluate(factsJSON: #"{}"#) { _ in
+        let inString = await loader.evaluate(factsJSON: chatFacts) { _ in
             #"Sure: {"kind": "a}b"} hope that helps!"#
         }
         #expect(inString == .outcome("a}b"))
 
         // …and a prose restatement of the requested format must not eat the real answer.
-        let restated = await loader.evaluate(factsJSON: #"{}"#) { _ in
+        let restated = await loader.evaluate(factsJSON: chatFacts) { _ in
             #"Answer in the form {json}. Here you go: {"kind": "build"}"#
         }
         #expect(restated == .outcome("build"))
@@ -208,19 +222,19 @@ struct SZStepABIv4SpikeTests {
         #expect(throws: (any Error).self) {
             try loader.load(dylib: garbage, runtimeLoadsDir: dir.appending(path: "runtime-loads"))
         }
-        #expect(await loader.evaluate(factsJSON: #"{"workLeft": 1}"#, ask: noAsk) == .outcome("yes"))
+        #expect(await loader.evaluate(factsJSON: buildFacts(workLeft: 1), ask: noAsk) == .outcome("yes"))
     }
 
     @Test func aStepDeclaringNothingReadsAsNil() async throws {
         let loader = try loadStep("""
         struct Quiet: SZStep {
-            func evaluate(_ ctx: SZContext) async throws -> String { "spoke" }
+            func evaluate(_ ctx: SZContext<SZChatFacts>) async throws -> String { "spoke" }
         }
         let step = Quiet()
         """)
         #expect(loader.declaration == nil)
         let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
-        #expect(await loader.evaluate(factsJSON: #"{}"#, ask: noAsk) == .outcome("spoke"))
+        #expect(await loader.evaluate(factsJSON: chatFacts, ask: noAsk) == .outcome("spoke"))
     }
 
     @Test func cancellationMidAskSettlesAsCancelledNotDefect() async throws {
@@ -228,7 +242,7 @@ struct SZStepABIv4SpikeTests {
         let askEntered = Mutex(false)
 
         let evaluation = Task {
-            await loader.evaluate(factsJSON: #"{}"#) { _ in
+            await loader.evaluate(factsJSON: chatFacts) { _ in
                 askEntered.withLock { $0 = true }
                 try await Task.sleep(for: .seconds(300))   // parked until cancelled
                 return "{}"
@@ -239,7 +253,7 @@ struct SZStepABIv4SpikeTests {
         #expect(await evaluation.value == .cancelled)
 
         // The module settled cleanly: a fresh evaluation still runs on the same loader.
-        let after = await loader.evaluate(factsJSON: #"{}"#) { _ in #"{"kind": "x"}"# }
+        let after = await loader.evaluate(factsJSON: chatFacts) { _ in #"{"kind": "x"}"# }
         #expect(after == .outcome("done"))
     }
 
@@ -250,7 +264,7 @@ struct SZStepABIv4SpikeTests {
 
         // Park one evaluation on the OLD module.
         let inFlight = Task {
-            await loader.evaluate(factsJSON: #"{}"#) { _ in
+            await loader.evaluate(factsJSON: chatFacts) { _ in
                 askEntered.withLock { $0 = true }
                 while !released.withLock({ $0 }) {
                     try await Task.sleep(for: .milliseconds(25))
@@ -266,7 +280,7 @@ struct SZStepABIv4SpikeTests {
 
         // New evaluations run the NEW code while the old evaluation is still parked.
         let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
-        #expect(await loader.evaluate(factsJSON: #"{"workLeft": 1}"#, ask: noAsk) == .outcome("yes"))
+        #expect(await loader.evaluate(factsJSON: buildFacts(workLeft: 1), ask: noAsk) == .outcome("yes"))
 
         // Release the parked evaluation: it completes on the OLD code, then the old module closes.
         released.withLock { $0 = true }
@@ -283,7 +297,7 @@ struct SZStepABIv4SpikeTests {
             let askEntered = Mutex(false)
             let released = Mutex(false)
             let parked = Task {
-                await loader.evaluate(factsJSON: #"{}"#) { _ in
+                await loader.evaluate(factsJSON: chatFacts) { _ in
                     askEntered.withLock { $0 = true }
                     while !released.withLock({ $0 }) {
                         try await Task.sleep(for: .milliseconds(10))
@@ -301,7 +315,7 @@ struct SZStepABIv4SpikeTests {
             // The freshly swapped-in module answers sanely; re-park for the next round.
             if round.isMultiple(of: 2) {
                 let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
-                #expect(await loader.evaluate(factsJSON: #"{"workLeft": 3}"#, ask: noAsk) == .outcome("yes"))
+                #expect(await loader.evaluate(factsJSON: buildFacts(workLeft: 3), ask: noAsk) == .outcome("yes"))
                 _ = try loadStep(blockingAskStep, into: loader)
             }
         }
@@ -313,7 +327,7 @@ struct SZStepABIv4SpikeTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["SZ_P0_LIVE_ASK"] == "1"))
     func liveModelReturnsATypedRulingThroughACompiledStep() async throws {
         let loader = try loadStep(classifyRouter)
-        let result = await loader.evaluate(factsJSON: #"{}"#) { requestJSON in
+        let result = await loader.evaluate(factsJSON: chatFacts) { requestJSON in
             let ask = try decodeAsk(requestJSON)
             // Stand-in for the P2 QueryService: template name → a rendered prompt. The
             // repair loop rides `attempt`/`repair` exactly as production will.
@@ -340,7 +354,7 @@ struct SZStepABIv4SpikeTests {
     @Test func theRequestStructLayoutMatchesAcrossTheBoundary() async throws {
         let loader = try loadStep(layoutProbeStep)
         let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
-        let result = await loader.evaluate(factsJSON: #"{}"#, ask: noAsk)
+        let result = await loader.evaluate(factsJSON: chatFacts, ask: noAsk)
 
         let hostParts = [
             MemoryLayout<SZStepEvalRequestRaw>.size,
