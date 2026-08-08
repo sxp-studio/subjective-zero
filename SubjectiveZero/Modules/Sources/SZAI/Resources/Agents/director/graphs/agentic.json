@@ -1,7 +1,7 @@
 {
-  "name": "build",
+  "name": "agentic",
   "kind": "build",
-  "label": "Build",
+  "label": "Agentic",
   "hint": "Decompose the graph into typed contracts, dispatch the coding fleet over the work set, reconcile whatever stalls when the set settles.",
   "caps": { "rounds": 2 },
   "entry": { "build": "decompose", "settled": "work-left" },

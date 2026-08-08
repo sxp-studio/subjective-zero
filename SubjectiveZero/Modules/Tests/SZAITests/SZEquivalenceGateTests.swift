@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// THE EQUIVALENCE GATE: the render path — SZBriefRenderer over the DRAFT agent packs
-// (Sources/SZAI/Resources/AgentsDraft) — must reproduce, byte for byte, every prompt the
+// THE EQUIVALENCE GATE: the render path — SZBriefRenderer over the shipped agent packs
+// (Sources/SZAI/Resources/Agents) — must reproduce, byte for byte, every prompt the
 // previous orchestrator rendered, as pinned by the committed fixtures (recorded before that
 // orchestrator was deleted; the recording harness went with it). The fixtures are the gate
 // and are NEVER edited to make this pass; every render here uses the SAME fixed inputs the
@@ -36,7 +36,7 @@ private let fixturesDir = testsDir.appending(path: "Fixtures/Equivalence")
 private let draftPacksRoot = testsDir
     .deletingLastPathComponent()   // Tests
     .deletingLastPathComponent()   // Modules
-    .appending(path: "Sources/SZAI/Resources/AgentsDraft")
+    .appending(path: "Sources/SZAI/Resources/Agents")
 
 /// The sample's camera contract, read from the committed .subz exactly as the recorder does.
 private let cameraContract: SZNodeContract = {

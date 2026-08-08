@@ -1,0 +1,5 @@
+{
+  "id": "director",
+  "seat": "director",
+  "defaults": { "build": "agentic" }
+}

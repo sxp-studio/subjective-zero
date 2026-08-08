@@ -1075,7 +1075,7 @@ private let piRPCCatalogLoggedOut = """
         .deletingLastPathComponent()   // SZAITests
         .deletingLastPathComponent()   // Tests
         .deletingLastPathComponent()   // Modules
-        .appending(path: "Sources/SZAI/Resources/AgentsDraft")
+        .appending(path: "Sources/SZAI/Resources/Agents")
     let node = SZNodeID()
     let graph = SZGraph(nodes: [SZNode(id: node, kind: .prompt, title: "Blur", prompt: "blur it",
                                        position: SZPoint(x: 0, y: 0))])

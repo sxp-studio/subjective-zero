@@ -311,7 +311,7 @@ public struct SZAgentGraphPanel: View {
                     .multilineTextAlignment(.center)
             } else {
                 Text("No agent graph").font(.system(size: 13, weight: .semibold))
-                Text("No agent-pack library is loaded to browse (set SZ_AGENT_PACKS).")
+                Text("No agent-pack library is loaded to browse.")
                     .font(.system(size: 11))
                     .multilineTextAlignment(.center)
             }

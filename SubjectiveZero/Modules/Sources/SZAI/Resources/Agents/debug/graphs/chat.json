@@ -1,0 +1,11 @@
+{
+  "name": "chat",
+  "kind": "chat",
+  "label": "Chat",
+  "hint": "One read-only conversational turn: answer from the delivered graph projection, with no tools and no side effects.",
+  "entry": "answer",
+  "nodes": [
+    { "id": "answer", "title": "Answer", "turn": { "brief": "prompts/chat.md.mustache", "tools": [] } }
+  ],
+  "edges": []
+}

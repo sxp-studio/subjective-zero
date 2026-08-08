@@ -395,14 +395,21 @@ extension SZHost {
         guard isProviderReadyForNewWork(activeProviderID) else {
             surfaceProviderNotReady(); return
         }
-        // The graph orchestrator reads its agent packs from disk until packs ship in-bundle —
+        // The packs root: the materialized bundled packs, or the SZ_AGENT_PACKS override —
         // without a valid root the run refuses up front with one honest line, never deep in.
         guard let graphPacksRoot = Self.graphAgentPacksRoot() else {
-            status = "graph orchestrator needs SZ_AGENT_PACKS until packs ship in-bundle"
-            narrateDirector("Run not started — the graph orchestrator needs SZ_AGENT_PACKS "
-                + "(a pack root on disk) until packs ship in-bundle.")
+            status = "no agent packs — materialization failed and no SZ_AGENT_PACKS override"
+            narrateDirector("Run not started — no agent packs: the bundled packs did not "
+                + "materialize and no valid SZ_AGENT_PACKS override is set.")
             return
         }
+        // The run loads the packs fresh from disk; the Plan panel's cache follows suit so a
+        // pack edit shows in both places at once.
+        agentGraphPlanCache = nil
+        // The Director's run-graph variant, resolved NOW (env > persisted > pack default,
+        // with the one honest line when a stale choice falls back) — the strategy applies it
+        // to the build kind at load, where the variants are known.
+        let runGraphChoice = resolvedRunGraphVariant()
         let providerID = activeProviderID
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
         // This run's WORK SET: the prompt nodes dirty at start (`dirty`, computed above for the
@@ -476,7 +483,8 @@ extension SZHost {
                     projectURL: projectURL, cacheDirectory: cacheDirectory,
                     instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed,
                     claim: claim)
-                let sessions = try await makeGraphOrchestrator(packsRoot: graphPacksRoot).run(context)
+                let sessions = try await makeGraphOrchestrator(
+                    packsRoot: graphPacksRoot, variant: runGraphChoice).run(context)
                 // Remember each node's coding-agent session so a chat turn can resume it. A
                 // freshly-minted session replaces any disk-restored one → off probation.
                 for (node, sessionID) in sessions {
@@ -516,12 +524,17 @@ extension SZHost {
         }
     }
 
-    /// The graph orchestrator's pack root: `SZ_AGENT_PACKS`, an existing directory. nil = unset
-    /// or invalid — the run refuses with the status line in `startRun`.
+    /// The graph orchestrator's pack root: the `SZ_AGENT_PACKS` env override when set (an
+    /// existing directory — set-but-invalid refuses rather than silently falling back), else
+    /// the bundled packs' materialized, user-editable copy (SZHost+AgentPacks.swift). nil =
+    /// no packs anywhere; the run refuses with the status line in `startRun`.
     nonisolated static func graphAgentPacksRoot() -> URL? {
-        guard let path = ProcessInfo.processInfo.environment["SZ_AGENT_PACKS"], !path.isEmpty
-        else { return nil }
-        let url = URL(filePath: path)
+        let url: URL
+        if let path = ProcessInfo.processInfo.environment["SZ_AGENT_PACKS"], !path.isEmpty {
+            url = URL(filePath: path)
+        } else {
+            url = materializedAgentPacksRoot
+        }
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
               isDirectory.boolValue else { return nil }
@@ -542,9 +555,9 @@ extension SZHost {
     }
 
     /// Build the graph orchestrator for one run: the host's step runtime behind the evaluation
-    /// and declaration seams, and the identity router carrying the user's resolved generation
-    /// choices through the routing seam.
-    private func makeGraphOrchestrator(packsRoot: URL) -> SZGraphDirectorStrategy {
+    /// and declaration seams, the identity router carrying the user's resolved generation
+    /// choices through the routing seam, and the resolved run-graph variant for the build kind.
+    private func makeGraphOrchestrator(packsRoot: URL, variant: String?) -> SZGraphDirectorStrategy {
         let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
         let generation = resolvedGenerationSettings(for: activeProviderID)
         return SZGraphDirectorStrategy(
@@ -555,6 +568,7 @@ extension SZHost {
                 model: generation.model,
                 reasoningEffort: generation.reasoningEffort)),
             bounds: Self.graphOrchestratorBounds(),
+            variant: variant,
             declarations: { agent, step in try await steps.declaration(agent: agent, step: step) },
             // The observation hooks feed the RUNS records (SZHost+GraphRuns.swift) — the
             // primary evidence surface. `appendGraphTrace` rides beside the note/settled

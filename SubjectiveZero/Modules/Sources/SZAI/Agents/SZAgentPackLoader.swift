@@ -29,8 +29,11 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
     case misdeclared(file: String, detail: String)
     /// A graph-shape defect (`SZAgentGraph.defects()`), wrapped with its home.
     case graphShape(agent: String, graph: String, defect: SZAgentGraphDefect)
-    /// Two graphs of one agent handle the same message kind — delivery would be a coin toss.
-    case duplicateKindHandler(agent: String, kind: SZMessageKind, graphs: [String])
+    /// Several graphs handle one kind (variants) but `agent.json`'s `defaults` names none of
+    /// them for it — which one a plain delivery opens would be a coin toss.
+    case missingVariantDefault(agent: String, kind: SZMessageKind, graphs: [String])
+    /// `agent.json`'s `defaults` names a graph the kind's variants do not carry.
+    case unknownVariantDefault(agent: String, kind: SZMessageKind, named: String)
     /// A turn node's `brief` names no file in the pack's prompt inventory.
     case missingTemplate(agent: String, graph: String, node: String, path: String)
     /// A turn brief mentions a `{{token}}` the graph's kind can never substitute
@@ -75,8 +78,10 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
             "\(file) misdeclares itself: \(detail)"
         case .graphShape(let agent, let graph, let defect):
             "\(agent)/graphs/\(graph): \(defect)"
-        case .duplicateKindHandler(let agent, let kind, let graphs):
-            "\(agent): graphs \(graphs.joined(separator: ", ")) all handle '\(kind.rawValue)' — one kind, one handler"
+        case .missingVariantDefault(let agent, let kind, let graphs):
+            "\(agent): graphs \(graphs.joined(separator: ", ")) all handle '\(kind.rawValue)' — defaults must name one of them"
+        case .unknownVariantDefault(let agent, let kind, let named):
+            "\(agent): defaults names '\(named)' for '\(kind.rawValue)', a graph no variant of that kind carries"
         case .missingTemplate(let agent, let graph, let node, let path):
             "\(agent)/graphs/\(graph) node '\(node)': brief '\(path)' is not among the pack's prompts"
         case .unknownTemplateToken(let agent, let graph, let node, let template, let token):
@@ -126,6 +131,13 @@ public struct SZAgentPackLoadResult: Sendable {
 // MARK: - The loader
 
 public enum SZAgentPackLoader {
+    /// The pack root this module SHIPS (`Resources/Agents`, bundled whole via `.copy`).
+    /// nil only in a build whose bundle carries no resources. Callers that want the packs
+    /// user-editable materialize a copy and load that instead — the host owns that policy.
+    public static var bundledRoot: URL? {
+        Bundle.module.url(forResource: "Agents", withExtension: nil)
+    }
+
     /// Load every agent folder under `root`. Sorted everywhere a directory is traversed —
     /// filesystem enumeration order may not decide anything, including defect order.
     public static func load(root: URL) -> SZAgentPackLoadResult {
@@ -163,9 +175,12 @@ public enum SZAgentPackLoader {
 
     /// `agent.json` as the folder declares it. The id must equal the folder name — identity
     /// lives in the filesystem, and a second naming surface would have to be reconciled.
+    /// `defaults` (kind → graph name) stays raw strings here; the kind keys are resolved —
+    /// and refused when unknown — in `load(folder:)`.
     private struct Manifest: Codable {
         var id: String
         var seat: SZAgentSeat?
+        var defaults: [String: String]?
     }
 
     private static func load(folder: URL) -> Result<SZAgentPack, SZAgentPackDefect> {
@@ -180,6 +195,14 @@ public enum SZAgentPackLoader {
         guard manifest.id == folderName else {
             return .failure(.misdeclared(file: "\(folderName)/agent.json",
                 detail: "declares id '\(manifest.id)' — the id IS the folder name"))
+        }
+        var defaults: [SZMessageKind: String] = [:]
+        for (rawKind, graphName) in (manifest.defaults ?? [:]).sorted(by: { $0.key < $1.key }) {
+            guard let kind = SZMessageKind(rawValue: rawKind) else {
+                return .failure(.misdeclared(file: "\(folderName)/agent.json",
+                    detail: "defaults names unknown kind '\(rawKind)'"))
+            }
+            defaults[kind] = graphName
         }
 
         var graphs: [SZAgentGraph] = []
@@ -224,8 +247,9 @@ public enum SZAgentPackLoader {
                     hasSource: fm.fileExists(atPath: stepFolder.appending(path: "Step.swift").path))
             }
 
-        return .success(SZAgentPack(id: manifest.id, seat: manifest.seat, graphs: graphs,
-                                    prompts: prompts, promptSources: promptSources, steps: steps))
+        return .success(SZAgentPack(id: manifest.id, seat: manifest.seat, defaults: defaults,
+                                    graphs: graphs, prompts: prompts,
+                                    promptSources: promptSources, steps: steps))
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ url: URL,
@@ -259,12 +283,19 @@ public enum SZAgentPackLoader {
         let filledSeats = Set(packs.compactMap(\.seat))
 
         for pack in packs.sorted(by: { $0.id < $1.id }) {
-            // One kind, one handler — two graphs answering the same delivery is a coin toss.
+            // Variants: several graphs may handle one kind, but only under a named default —
+            // a plain delivery must never open a coin toss. A single-graph kind needs no
+            // entry (implicit default), and every named default must exist among the kind's
+            // variants.
             let byKind = Dictionary(grouping: pack.graphs, by: \.kind)
             for (kind, group) in byKind.sorted(by: { $0.key.rawValue < $1.key.rawValue })
-            where group.count > 1 {
-                defects.append(.duplicateKindHandler(agent: pack.id, kind: kind,
-                                                     graphs: group.map(\.name).sorted()))
+            where group.count > 1 && pack.defaults[kind] == nil {
+                defects.append(.missingVariantDefault(agent: pack.id, kind: kind,
+                                                      graphs: group.map(\.name).sorted()))
+            }
+            for (kind, named) in pack.defaults.sorted(by: { $0.key.rawValue < $1.key.rawValue })
+            where !(byKind[kind] ?? []).contains(where: { $0.name == named }) {
+                defects.append(.unknownVariantDefault(agent: pack.id, kind: kind, named: named))
             }
 
             for graph in pack.graphs.sorted(by: { $0.name < $1.name }) {

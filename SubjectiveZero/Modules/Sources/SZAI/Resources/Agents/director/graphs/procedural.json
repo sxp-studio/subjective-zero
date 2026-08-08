@@ -1,0 +1,14 @@
+{
+  "name": "procedural",
+  "kind": "build",
+  "label": "Procedural",
+  "hint": "Token-free and contract-first: dispatch the work the graph already declares — no decompose turn, no reconcile. The first settle concludes the run.",
+  "entry": { "build": "work-left" },
+  "nodes": [
+    { "id": "work-left", "title": "Work left?", "step": "work-left" },
+    { "id": "implement", "title": "Implement", "dispatch": { "to": "coding", "items": "workSet" } }
+  ],
+  "edges": [
+    { "from": "work-left", "outcome": "yes", "to": "implement" }
+  ]
+}

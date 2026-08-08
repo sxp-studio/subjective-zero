@@ -91,7 +91,8 @@ extension SZHost {
 
     /// The Plan view's agents: every pack in the graph orchestrator's library, director
     /// first, distilled to the plain values the panel may see (SZUI never imports SZAI).
-    /// Built once per launch — the packs root is env-static.
+    /// Cached because view bodies read it hot; the cache is dropped wherever the
+    /// user-editable materialized tree can move — pack materialization and each run start.
     func agentGraphPlanAgents() -> [SZAgentGraphPlanAgent] {
         if let cached = agentGraphPlanCache { return cached }
         var agents: [SZAgentGraphPlanAgent] = []

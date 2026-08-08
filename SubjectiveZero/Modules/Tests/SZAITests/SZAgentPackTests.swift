@@ -18,6 +18,7 @@ private struct ScratchPack {
     var folder: String
     var id: String? = nil            // manifest id; defaults to the folder name
     var seat: String? = nil
+    var defaults: [String: String]? = nil   // manifest `defaults` (kind → graph name)
     var agentJSON: String? = nil
     var graphs: [String: String] = [:]
     var prompts: [String] = []
@@ -32,8 +33,12 @@ private func makeRoot(_ packs: [ScratchPack]) throws -> URL {
     for pack in packs {
         let dir = root.appending(path: pack.folder)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let defaults = pack.defaults.map { entries in
+            ", \"defaults\": {" + entries.sorted(by: { $0.key < $1.key })
+                .map { "\"\($0.key)\": \"\($0.value)\"" }.joined(separator: ", ") + "}"
+        } ?? ""
         let manifest = pack.agentJSON
-            ?? "{\"id\": \"\(pack.id ?? pack.folder)\", \"seat\": \(pack.seat.map { "\"\($0)\"" } ?? "null")}"
+            ?? "{\"id\": \"\(pack.id ?? pack.folder)\", \"seat\": \(pack.seat.map { "\"\($0)\"" } ?? "null")\(defaults)}"
         try manifest.write(to: dir.appending(path: "agent.json"), atomically: true, encoding: .utf8)
         if !pack.graphs.isEmpty {
             let graphs = dir.appending(path: "graphs")
@@ -186,15 +191,58 @@ private func cleanup(_ root: URL) {
                                     defect: .danglingEdge(from: "plan", to: "ghost"))])
 }
 
-@Test func twoGraphsHandlingOneKindAreADefect() async throws {
+@Test func sameKindVariantsNeedANamedDefault() async throws {
     var director = directorPack(graph: turnGraph(name: "run"))
     director.graphs["alt"] = turnGraph(name: "alt")
     let root = try makeRoot([director, codingPack()])
     defer { cleanup(root) }
     let loaded = SZAgentPackLoader.load(root: root)
     let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
-    #expect(defects == [.duplicateKindHandler(agent: "director-a", kind: .build,
-                                              graphs: ["alt", "run"])])
+    #expect(defects == [.missingVariantDefault(agent: "director-a", kind: .build,
+                                               graphs: ["alt", "run"])])
+}
+
+@Test func aNamedDefaultLegalizesVariantsAndResolvesThem() async throws {
+    // The same two-variant pack, with agent.json naming one: legal — and the API resolves
+    // the default for a plain delivery while the other variant stays reachable by name.
+    var director = directorPack(graph: turnGraph(name: "run"))
+    director.graphs["alt"] = turnGraph(name: "alt")
+    director.defaults = ["build": "run"]
+    let root = try makeRoot([director, codingPack()])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
+    #expect(defects.isEmpty, "\(defects)")
+
+    let pack = try #require(loaded.packs.first { $0.id == "director-a" })
+    #expect(pack.variants(handling: .build).map(\.name) == ["alt", "run"])
+    #expect(pack.graph(handling: .build)?.name == "run")
+    #expect(pack.graph(handling: .build, variant: "alt")?.name == "alt")
+    #expect(pack.graph(handling: .build, variant: "ghost") == nil)
+}
+
+@Test func aDefaultNamingNoVariantIsADefect() async throws {
+    var director = directorPack()   // one build graph, "run"
+    director.defaults = ["build": "ghost"]
+    let root = try makeRoot([director, codingPack()])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
+    #expect(defects == [.unknownVariantDefault(agent: "director-a", kind: .build,
+                                               named: "ghost")])
+    // The single handler still resolves — an unknown default never orphans the kind.
+    let pack = try #require(loaded.packs.first { $0.id == "director-a" })
+    #expect(pack.graph(handling: .build)?.name == "run")
+}
+
+@Test func defaultsNamingAnUnknownKindIsMisdeclared() throws {
+    let root = try makeRoot([ScratchPack(folder: "alpha",
+        agentJSON: "{\"id\": \"alpha\", \"seat\": null, \"defaults\": {\"bogus\": \"g\"}}")])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    #expect(loaded.packs.isEmpty)
+    #expect(loaded.defects == [.misdeclared(file: "alpha/agent.json",
+        detail: "defaults names unknown kind 'bogus'")])
 }
 
 @Test func turnBriefMustBeAmongThePackPrompts() async throws {
@@ -417,16 +465,16 @@ private func cleanup(_ root: URL) {
     #expect(report.contains("step checks skipped"))
 }
 
-// MARK: - The shipping drafts
+// MARK: - The shipped packs
 
 private let draftPacksRoot = URL(filePath: #filePath)
     .deletingLastPathComponent()   // SZAITests
     .deletingLastPathComponent()   // Tests
     .deletingLastPathComponent()   // Modules
-    .appending(path: "Sources/SZAI/Resources/AgentsDraft")
+    .appending(path: "Sources/SZAI/Resources/Agents")
 
 /// CROSS-TARGET PIN, side A. These declarations are hand-written to match what each
-/// AgentsDraft `Step.swift` declares, because this target may not import SZRuntime to
+/// shipped-pack `Step.swift` declares, because this target may not import SZRuntime to
 /// compile them. Side B is SZRuntimeTests' `SZDraftPackStepTests`, which compiles the SAME
 /// sources through the real toolchain and asserts each module's declaration JSON equals
 /// these claims, field for field — edit a draft step and both sides move together.
@@ -439,18 +487,36 @@ private let draftPackSteps = StubSteps(infos: [
 
 /// The packs the app ships attain the FULL verdict: load clean, seats fill, and — with the
 /// step declarations attached — validate to zero defects, token and partial scans included.
+/// The `debug` pack rides along seatless: the pure-authoring proof (zero Swift anywhere).
 @Test func theShippedDraftPacksValidateZeroDefects() async throws {
     let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
     #expect(loaded.defects.isEmpty, "\(loaded.defects)")
-    #expect(loaded.packs.map(\.id) == ["coding", "director"])
+    #expect(loaded.packs.map(\.id) == ["coding", "debug", "director"])
     #expect(loaded.seats == SZSeatAssignment(director: "director", coding: "coding"))
 
     let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: draftPackSteps)
     #expect(defects.isEmpty, "\(defects)")
 
     let report = await SZAgentPackLoader.check(root: draftPacksRoot, steps: draftPackSteps)
-    #expect(report.contains("verdict: validates — 2 agents, zero defects"))
+    #expect(report.contains("verdict: validates — 3 agents, zero defects"))
     #expect(!report.contains("step checks skipped"))
+}
+
+/// The director ships two BUILD variants: `agentic` (the default a plain run opens) and the
+/// turn-less `procedural` — validated above as full graphs, resolved here through the
+/// variant API the host's selection rides on.
+@Test func theShippedDirectorPackCarriesTheBuildVariants() throws {
+    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+    let director = try #require(loaded.packs.first { $0.id == "director" })
+    #expect(director.variants(handling: .build).map(\.name) == ["agentic", "procedural"])
+    #expect(director.defaults == [.build: "agentic"])
+    #expect(director.graph(handling: .build)?.name == "agentic")
+    #expect(director.graph(handling: .build, variant: "procedural")?.name == "procedural")
+    // The procedural variant is turn-less by design — token-free, contract-first — and
+    // concludes at the first settle (no `settled` entry).
+    let procedural = try #require(director.graph(handling: .build, variant: "procedural"))
+    #expect(!procedural.nodes.contains { if case .turn = $0.form { true } else { false } })
+    #expect(procedural.entry[.settled] == nil)
 }
 
 /// The pin stub claims exactly the steps the draft packs carry — a new step folder cannot

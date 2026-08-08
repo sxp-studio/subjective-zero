@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // CROSS-TARGET PIN, side B, for the shipped draft packs' step declarations. Side A is
 // SZAITests' `draftPackSteps` stub (SZAgentPackTests): the pack gate over there validates
-// the AgentsDraft root with HAND-WRITTEN declarations, because SZAITests may not import
+// the shipped packs root with HAND-WRITTEN declarations, because SZAITests may not import
 // SZRuntime to compile the sources. This suite closes the loop with the real machinery —
 // every `steps/<name>/Step.swift` under the draft root goes through swiftc + dlopen, and
 // the declaration JSON its module exports must byte-match the pin below, which mirrors the
@@ -15,7 +15,7 @@ private let draftPacksRoot = URL(filePath: #filePath)
     .deletingLastPathComponent()   // SZRuntimeTests
     .deletingLastPathComponent()   // Tests
     .deletingLastPathComponent()   // Modules
-    .appending(path: "Sources/SZAI/Resources/AgentsDraft")
+    .appending(path: "Sources/SZAI/Resources/Agents")
 
 /// agent/step → the declaration JSON the compiled module must export (`SZStepDeclare`
 /// encodes with sorted keys). Mirrors SZAITests' `draftPackSteps` claims exactly.

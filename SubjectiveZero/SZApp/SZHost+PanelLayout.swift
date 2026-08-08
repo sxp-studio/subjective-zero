@@ -135,7 +135,8 @@ extension SZHost {
                                              telemetryEnabled: telemetryEnabled,
                                              showTurnBreakdown: showTurnBreakdown,
                                              poppedOutPanels: poppedOutPanels.isEmpty
-                                                ? nil : poppedOutPanels.values.sorted { $0.panel < $1.panel }))
+                                                ? nil : poppedOutPanels.values.sorted { $0.panel < $1.panel },
+                                             runGraphVariant: runGraphVariant))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

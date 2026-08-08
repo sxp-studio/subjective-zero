@@ -162,9 +162,19 @@ final class SZHost {
     /// which is exactly the order the Agent Graph panel draws. Live records exist only here;
     /// the sealed ones are mirrored to `<project>.subz/runs.json` (SZHost+GraphRuns.swift).
     var agentGraphRuns: [SZAgentGraphRun] = []
-    /// The Plan view's pack library, built once per launch from `SZ_AGENT_PACKS` (the packs
-    /// are session-static; a dev editing packs on disk relaunches). nil = not built yet.
+    /// The Plan view's pack library, cached (view bodies read it hot). The packs root is the
+    /// user-editable materialized dir now, so the cache is invalidated wherever the tree can
+    /// move — pack materialization and each run start — rather than held for the session.
+    /// nil = not built yet.
     var agentGraphPlanCache: [SZAgentGraphPlanAgent]?
+    /// The user's persisted Director run-graph VARIANT choice (graph name over the director
+    /// pack's build-kind variants; `debug_set_orchestrator` writes it). Same app-state.json
+    /// home + restore story as the prefs below. nil = the pack default; `SZ_RUN_GRAPH`
+    /// outranks it per launch (see `resolvedRunGraphVariant`).
+    internal(set) var runGraphVariant: String? = SZAppStateIO.load()?.runGraphVariant
+    /// Hot-reload watchers over the materialized packs' `steps/<name>/Step.swift`, keyed
+    /// `agent/step` — armed once at pack materialization (SZHost+AgentPacks.swift).
+    var stepWatchers: [String: SZSourceWatcher] = [:]
     /// The session's last `turnPromptCap` rendered prompts, keyed by turn id — the fast path for
     /// what was ACTUALLY sent to the CLI (`debug_turn_prompt`). The durable copy lives in the
     /// on-disk debug capture (`debug-turns/<turnID>/`, newest `debugTurnCaptureCap` turns), which
@@ -458,8 +468,9 @@ final class SZHost {
     private func warnIfRetiredOrchestratorRequested() {
         guard let value = ProcessInfo.processInfo.environment["SZ_ORCHESTRATOR"],
               value != Self.orchestratorName else { return }
-        print("[SZHost] SZ_ORCHESTRATOR=\(value): procedural/agentic retired — the graph "
-            + "orchestrator is the path; token-free runs use a turn-less pack root via SZ_AGENT_PACKS")
+        print("[SZHost] SZ_ORCHESTRATOR=\(value): strategy selection is retired — the graph "
+            + "orchestrator is the path; pick a run-graph VARIANT instead (SZ_RUN_GRAPH, or "
+            + "debug_set_orchestrator)")
     }
 
     /// Instantiate the runtime, vend the viewport render closure, open the launch project (env
@@ -470,6 +481,9 @@ final class SZHost {
         guard !started else { return }
         started = true
         warnIfRetiredOrchestratorRequested()
+        // The bundled agent packs become the writable, watched packs root — before anything
+        // (a run, the Plan panel, a debug tool) can ask for them.
+        materializeAgentPacks()
         installStoreFenceBackstop()   // the fence's debug tripwire (SZHost+Fence.swift)
         if SZTrace.isEnabled { loadHeldPromptIDs() }   // past sessions' captured prompts light up
         // The pump's wake signal: every ledger release (turn end, run end, cancel) retries queued

@@ -23,9 +23,9 @@ extension SZHostBridge {
                  properties: ["run": ["type": "string", "description": "a runID (or unique prefix) from debug_turn_timings; omit for the latest run"]]),
             tool("debug_turn_prompt", "The rendered prompt a turn ACTUALLY sent to its CLI, verbatim — inspect what the agent was briefed with. Survives relaunches via the on-disk debug capture (newest \(SZHost.debugTurnCaptureCap) turns; tool-result payloads live beside it in Application Support/SubjectiveZero/debug-turns/<turnID>/).",
                  properties: ["turn": ["type": "string", "description": "a turnID from debug_turn_timings; omit for the most recent turn"]]),
-            tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (a Director Agent run in flight), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `tabs` (chat tab order, left→right), `orchestrator` (always \"graph\" — strategy selection is retired), and `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
-            tool("debug_set_orchestrator", "Strategy selection is RETIRED: the agent-graph engine is the only orchestrator (needs SZ_AGENT_PACKS pointing at a pack root until packs ship in-bundle). `graph` is accepted as a no-op for compatibility; the retired values (`procedural`, `agentic`) return an error.",
-                 properties: ["strategy": ["type": "string", "enum": ["procedural", "agentic", "graph"]]]),
+            tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (a Director Agent run in flight), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `tabs` (chat tab order, left→right), `orchestrator` (always \"graph\"), `variant` (the run-graph variant the next run drives build with), and `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
+            tool("debug_set_orchestrator", "Select the Director's RUN-GRAPH VARIANT — which build-kind graph of the director pack a run drives (the packs declare the set; today `agentic` and `procedural`). Validated against the loaded variants at call time; persists across launches (`SZ_RUN_GRAPH` outranks it per launch). `graph` is accepted as a no-op ack for compatibility.",
+                 properties: ["strategy": ["type": "string", "description": "a variant name from the director pack's build-kind graphs (see the error for the valid set), or \"graph\" (no-op ack)"]]),
             tool("debug_fail_node_once", "Test affordance: force a node to fail its NEXT coding dispatch — report `needsInput` without running an agent — so the reconcile loop fires live & repeatably (the agents rarely fail on their own). Consumed once. Call before ui_run.",
                  properties: [
                     "node": ["type": "string", "description": "node id (UUID)"],
@@ -33,7 +33,7 @@ extension SZHostBridge {
                  ]),
             tool("debug_set_paused", "Freeze or resume the render clock (mirrors the HUD Pause/Play button). `paused:true` freezes time + frame index so successive `agent_view_frame`s render the same instant — the deterministic way to A/B an input (e.g. sweep a slider and compare frames without the camera/animation drifting between captures). `paused:false` resumes. Idempotent; returns the applied `paused`.",
                  properties: ["paused": ["type": "boolean", "description": "true = pause, false = resume"]]),
-            tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, kind handlers, seats, dispatch targets + items facts, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes and facts kind) compile every step folder a graph references through the real toolchain first — expect seconds, not milliseconds, on a pack with steps. Omit `path` for the bundled packs (none ship yet).",
+            tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, kind handlers, seats, dispatch targets + items facts, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes and facts kind) compile every step folder a graph references through the real toolchain first — expect seconds, not milliseconds, on a pack with steps. Omit `path` for the live packs root (the materialized bundled packs, or SZ_AGENT_PACKS).",
                  properties: ["path": ["type": "string", "description": "absolute path to a pack root (a directory of agent folders)"]]),
         ]
     }
@@ -73,10 +73,11 @@ extension SZHostBridge {
     /// joined here. Step-attached checks compile every step folder through the real runtime
     /// (one swiftc each) — a check with steps is seconds, not milliseconds, and honestly so.
     private func debugCheckPack(_ arguments: [String: Any]) -> String {
-        guard let path = arguments.string("path") else {
-            return "no bundled packs yet — pass `path` to a pack root (a directory of agent folders)"
+        guard let root = arguments.string("path").map({ URL(filePath: $0) })
+            ?? SZHost.graphAgentPacksRoot() else {
+            return "no packs root — the bundled packs did not materialize and no SZ_AGENT_PACKS "
+                + "override is set; pass `path` to a pack root (a directory of agent folders)"
         }
-        let root = URL(filePath: path)
         final class Box: @unchecked Sendable { var report = "" }
         let box = Box()
         let done = DispatchSemaphore(value: 0)
@@ -143,28 +144,35 @@ extension SZHostBridge {
             "sessions": Array(host.agentSessions.keys).sorted(),
             "chatting": host.nodeAgentState.filter(\.value.isChatting).keys.map(\.uuidString).sorted(),
             "tabs": host.chatTabs.map(\.key),       // chat tab order (left→right), Director first
-            "orchestrator": SZHost.orchestratorName,   // always "graph" — selection retired
+            "orchestrator": SZHost.orchestratorName,   // always "graph" — the engine is the orchestrator
+            // The run-graph variant the next run drives build with (env > persisted > default).
+            "variant": host.activeRunGraphVariant() ?? "unavailable",
             // node uuid → last reported status line (the reconcile signal).
             "statuses": Dictionary(uniqueKeysWithValues: host.nodeStatusLines.map { ($0.key.uuidString, $0.value) }),
         ])
     }
 
-    /// Strategy selection is retired — the tool survives so a scripted caller learns the truth
-    /// instead of hitting an unknown-tool error: `graph` acks as a no-op, a retired value
-    /// refuses with the remedy, anything else is unknown.
+    /// Run-graph variant selection. The valid values are DYNAMIC (the director pack's
+    /// build-kind graph names), so the argument stays an untyped string validated here at
+    /// call time — the error names the loaded set. A valid name persists (app-state.json,
+    /// same store as the other host prefs); `graph` acks as a no-op for compatibility with
+    /// callers from the strategy-selection era.
     private func debugSetOrchestrator(_ arguments: [String: Any]) throws -> String {
         guard let strategy = arguments.string("strategy") else {
             throw SZMCPError.message("debug_set_orchestrator needs `strategy`")
         }
-        switch strategy {
-        case SZHost.orchestratorName:
-            return SZJSONRPC.encode(["orchestrator": SZHost.orchestratorName])
-        case "procedural", "agentic":
-            throw SZMCPError.message("\(strategy) retired — the graph orchestrator is the path; "
-                + "token-free runs use a turn-less pack root via SZ_AGENT_PACKS")
-        default:
-            throw SZMCPError.message("unknown strategy \(strategy) — the orchestrator is \"graph\"")
+        if strategy == SZHost.orchestratorName {   // compat ack — the selection is untouched
+            return SZJSONRPC.encode(["orchestrator": SZHost.orchestratorName,
+                                     "variant": host.activeRunGraphVariant() ?? "unavailable"])
         }
+        let variants = host.directorBuildVariantNames()
+        guard variants.contains(strategy) else {
+            throw SZMCPError.message("unknown run-graph variant '\(strategy)' — valid: "
+                + (variants.isEmpty ? "(no agent-pack library is loaded)"
+                                    : variants.joined(separator: ", ")))
+        }
+        host.setRunGraphVariant(strategy)
+        return SZJSONRPC.encode(["orchestrator": SZHost.orchestratorName, "variant": strategy])
     }
 
     private func debugChatTranscript(_ arguments: [String: Any]) throws -> String {

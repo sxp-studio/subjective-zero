@@ -22,10 +22,8 @@ let package = Package(
         .target(
             name: "SZAI",
             dependencies: ["SZCore"],
-            exclude: [
-                "Resources/AgentsDraft",       // draft packs — tests read them via #filePath; ship at P4
-            ],
             resources: [
+                .copy("Resources/Agents"),     // the shipped agent packs (tests also read them via #filePath)
                 .copy("Resources/Prompts"),    // agent prompts as bundled .md.mustache files
                 .copy("Resources/Docs"),       // agent-fetchable reference docs (agent_docs_*)
                 .copy("Resources/Extensions"), // staged CLI extensions (pi's MCP bridge)

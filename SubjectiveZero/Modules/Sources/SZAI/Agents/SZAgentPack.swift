@@ -12,6 +12,11 @@ public struct SZAgentPack: Sendable, Equatable {
     /// The seat this pack claims, if any. Seat arithmetic (exactly one holder per seat over
     /// the loaded set) is the loader's, at the library level.
     public var seat: SZAgentSeat?
+    /// The default VARIANT per kind (`agent.json`'s `defaults`): where several graphs handle
+    /// one kind, this names the one a plain delivery opens. A single-graph kind needs no
+    /// entry (the graph is its own default); the loader enforces that a multi-variant kind
+    /// names exactly one of its graphs here.
+    public var defaults: [SZMessageKind: String]
     /// The pack's graphs, sorted by name.
     public var graphs: [SZAgentGraph]
     /// Prompt inventory: pack-relative paths (`prompts/<file>.md.mustache`), sorted — the
@@ -35,11 +40,13 @@ public struct SZAgentPack: Sendable, Equatable {
         }
     }
 
-    public init(id: String, seat: SZAgentSeat? = nil, graphs: [SZAgentGraph] = [],
+    public init(id: String, seat: SZAgentSeat? = nil, defaults: [SZMessageKind: String] = [:],
+                graphs: [SZAgentGraph] = [],
                 prompts: [String] = [], promptSources: [String: String] = [:],
                 steps: [StepFolder] = []) {
         self.id = id
         self.seat = seat
+        self.defaults = defaults
         self.graphs = graphs
         self.prompts = prompts
         self.promptSources = promptSources
@@ -50,7 +57,23 @@ public struct SZAgentPack: Sendable, Equatable {
         steps.first { $0.name == name }
     }
 
+    /// Every graph handling `kind` — the kind's VARIANTS, in the pack's name order.
+    public func variants(handling kind: SZMessageKind) -> [SZAgentGraph] {
+        graphs.filter { $0.kind == kind }
+    }
+
+    /// The kind's DEFAULT graph: the one `defaults` names when it names one, else the kind's
+    /// sole handler (a validated pack has a `defaults` entry wherever more than one exists).
     public func graph(handling kind: SZMessageKind) -> SZAgentGraph? {
-        graphs.first { $0.kind == kind }
+        let variants = variants(handling: kind)
+        if let named = defaults[kind], let match = variants.first(where: { $0.name == named }) {
+            return match
+        }
+        return variants.first
+    }
+
+    /// A specific variant of `kind`, by graph name. nil = no such variant.
+    public func graph(handling kind: SZMessageKind, variant name: String) -> SZAgentGraph? {
+        variants(handling: kind).first { $0.name == name }
     }
 }

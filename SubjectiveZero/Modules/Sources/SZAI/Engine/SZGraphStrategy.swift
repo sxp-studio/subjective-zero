@@ -57,6 +57,10 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
     let steps: any SZStepRunning
     let router: any SZModelRouting
     let bounds: SZThreadMachine.Bounds
+    /// The run-graph VARIANT this run drives the BUILD kind with, by graph name (chat/item/
+    /// request always take their packs' defaults). nil or an unknown name = the director
+    /// pack's default — resolution happens at load, where the variants are known.
+    let variant: String?
     let declarations: StepDeclarations
     let registry: SZProviderRegistry
     // The observation hooks — the host's RUNS-record feed, all defaulting to no-ops so
@@ -76,6 +80,7 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
         steps: any SZStepRunning,
         router: any SZModelRouting,
         bounds: SZThreadMachine.Bounds,
+        variant: String? = nil,
         declarations: @escaping StepDeclarations,
         registry: SZProviderRegistry = .shared,
         onTraversal: @escaping @MainActor @Sendable (SZTraversalSighting) -> Void = { _ in },
@@ -88,6 +93,7 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
         self.steps = steps
         self.router = router
         self.bounds = bounds
+        self.variant = variant
         self.declarations = declarations
         self.registry = registry
         self.onTraversal = onTraversal
@@ -117,7 +123,10 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
               let codingPack = loaded.packs.first(where: { $0.id == codingID }) else {
             throw SZGraphOrchestratorError.invalidPackLibrary(defects: ["the seats did not resolve"])
         }
-        guard let buildGraph = directorPack.graph(handling: .build) else {
+        // The build kind honors the caller's variant choice; an unknown name falls back to
+        // the pack's default (the host already told the user — see resolvedRunGraphVariant).
+        guard let buildGraph = variant.flatMap({ directorPack.graph(handling: .build, variant: $0) })
+                ?? directorPack.graph(handling: .build) else {
             throw SZGraphOrchestratorError.missingGraph(agent: directorPack.id, kind: .build)
         }
         guard let itemGraph = codingPack.graph(handling: .item) else {
