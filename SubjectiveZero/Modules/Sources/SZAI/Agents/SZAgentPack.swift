@@ -17,6 +17,9 @@ public struct SZAgentPack: Sendable, Equatable {
     /// Prompt inventory: pack-relative paths (`prompts/<file>.md.mustache`), sorted — the
     /// namespace a turn node's `brief` must resolve in.
     public var prompts: [String]
+    /// Each prompt's template text, keyed by its pack-relative path — read alongside the
+    /// inventory so validation can scan a brief's `{{tokens}}` without a second disk pass.
+    public var promptSources: [String: String]
     /// Step-folder inventory: every directory under `steps/`, sorted by name.
     public var steps: [StepFolder]
 
@@ -33,11 +36,13 @@ public struct SZAgentPack: Sendable, Equatable {
     }
 
     public init(id: String, seat: SZAgentSeat? = nil, graphs: [SZAgentGraph] = [],
-                prompts: [String] = [], steps: [StepFolder] = []) {
+                prompts: [String] = [], promptSources: [String: String] = [:],
+                steps: [StepFolder] = []) {
         self.id = id
         self.seat = seat
         self.graphs = graphs
         self.prompts = prompts
+        self.promptSources = promptSources
         self.steps = steps
     }
 

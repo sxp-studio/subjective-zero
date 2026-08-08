@@ -13,6 +13,27 @@ enum SZPromptTemplate {
         return out
     }
 
+    /// Every `{{token}}` mentioned in `template`, deduplicated, in order of first mention.
+    /// The dialect is flat — no sections, no inline includes — so whatever sits between the
+    /// braces IS the token name `render` would substitute; the pack gate scans briefs with
+    /// this so it judges exactly the spellings `render` acts on. Nesting braces and newlines
+    /// never appear in a token (`defused` output cannot match: `{ {` breaks the opener).
+    static func tokens(in template: String) -> [String] {
+        var found: [String] = []
+        var seen: Set<String> = []
+        var rest = Substring(template)
+        while let open = rest.range(of: "{{") {
+            rest = rest[open.upperBound...]
+            guard let close = rest.range(of: "}}") else { break }
+            let name = rest[..<close.lowerBound]
+            rest = rest[close.upperBound...]
+            guard !name.isEmpty, !name.contains(where: { "{}".contains($0) || $0.isNewline }),
+                  seen.insert(String(name)).inserted else { continue }
+            found.append(String(name))
+        }
+        return found
+    }
+
     /// Defuse `{{` in a NON-LITERAL value (user prose, fetched docs, assembled indexes) before it
     /// enters `render`: the loop above walks an unordered dictionary, so a live token inside a
     /// substituted value would be expanded — or left literal — depending on the process's hash

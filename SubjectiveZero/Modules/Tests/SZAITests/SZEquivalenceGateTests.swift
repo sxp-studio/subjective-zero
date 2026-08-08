@@ -316,27 +316,7 @@ struct SZEquivalenceGateTests {
         #expect(rendered.keys.allSatisfy { !Self.skipped.contains($0) })
     }
 
-    /// The draft packs themselves load and hold shape: no load defects, no graph-shape
-    /// defects, every turn brief resolves in its pack's prompt inventory, seats fill.
-    /// (Full library validation waits for the step sources, which land next phase — the
-    /// graphs name `work-left`/`resuming`/`retrying` steps whose folders do not exist yet.)
-    @Test func theDraftPacksLoadCleanAndTheirBriefsResolve() throws {
-        let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
-        #expect(loaded.defects.isEmpty, "\(loaded.defects)")
-        #expect(loaded.packs.map(\.id).sorted() == ["coding", "director"])
-        #expect(loaded.seats.director == "director")
-        #expect(loaded.seats.coding == "coding")
-
-        for pack in loaded.packs {
-            for graph in pack.graphs {
-                #expect(graph.defects().isEmpty, "\(pack.id)/\(graph.name): \(graph.defects())")
-                for node in graph.nodes {
-                    if case .turn(let turn) = node.form {
-                        #expect(pack.prompts.contains(turn.brief),
-                                "\(pack.id)/\(graph.name) node '\(node.id)': brief \(turn.brief) not in the pack")
-                    }
-                }
-            }
-        }
-    }
+    // The draft packs' own health — load, shape, briefs, seats, and full validation with
+    // the step declarations attached — is pinned in SZAgentPackTests
+    // (`theShippedDraftPacksValidateZeroDefects`), not here: this suite is about the bytes.
 }

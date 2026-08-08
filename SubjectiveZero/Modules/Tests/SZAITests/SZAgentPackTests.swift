@@ -12,7 +12,8 @@ import SZCore
 
 /// One agent folder to materialize: `agentJSON` overrides the derived manifest wholesale
 /// (for malformed-file tests); graphs are filename stem → raw JSON; steps are folder name →
-/// whether a `Step.swift` is written inside.
+/// whether a `Step.swift` is written inside. `prompts` entries write a fixed token-free
+/// body; `promptTexts` (name → template text) is for the token-scan tests.
 private struct ScratchPack {
     var folder: String
     var id: String? = nil            // manifest id; defaults to the folder name
@@ -20,6 +21,7 @@ private struct ScratchPack {
     var agentJSON: String? = nil
     var graphs: [String: String] = [:]
     var prompts: [String] = []
+    var promptTexts: [String: String] = [:]
     var steps: [String: Bool] = [:]
 }
 
@@ -41,12 +43,16 @@ private func makeRoot(_ packs: [ScratchPack]) throws -> URL {
                                atomically: true, encoding: .utf8)
             }
         }
-        if !pack.prompts.isEmpty {
+        if !pack.prompts.isEmpty || !pack.promptTexts.isEmpty {
             let prompts = dir.appending(path: "prompts")
             try fm.createDirectory(at: prompts, withIntermediateDirectories: true)
             for name in pack.prompts {
                 try "A brief.\n".write(to: prompts.appending(path: name),
                                        atomically: true, encoding: .utf8)
+            }
+            for (name, text) in pack.promptTexts {
+                try text.write(to: prompts.appending(path: name),
+                               atomically: true, encoding: .utf8)
             }
         }
         for (name, hasSource) in pack.steps {
@@ -201,6 +207,43 @@ private func cleanup(_ root: URL) {
     let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
     #expect(defects == [.missingTemplate(agent: "director-a", graph: "run", node: "plan",
                                          path: "prompts/missing.md.mustache")])
+}
+
+@Test func aBriefTokenOutsideTheKindNamespaceIsADefect() async throws {
+    // `{{graph}}` is a build token; `{{bogus}}` is nothing — it would ship to the model
+    // literal, so the gate names it.
+    var director = directorPack()
+    director.prompts = []
+    director.promptTexts = ["plan.md.mustache": "The graph:\n{{graph}}\n\nDo {{bogus}} now.\n"]
+    let root = try makeRoot([director, codingPack()])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
+    #expect(defects == [.unknownTemplateToken(agent: "director-a", graph: "run", node: "plan",
+                                              template: "prompts/plan.md.mustache",
+                                              token: "bogus")])
+}
+
+@Test func aMentionedTokenNeedsItsPartialsInThePack() async throws {
+    // `{{toolbelt}}` renders from the pack's toolbelt partial — mentioning it without
+    // shipping the file is a defect; shipping it validates clean.
+    var director = directorPack()
+    director.prompts = []
+    director.promptTexts = ["plan.md.mustache": "{{graph}}\n\n{{toolbelt}}\n"]
+    let root = try makeRoot([director, codingPack()])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
+    #expect(defects == [.missingPartial(agent: "director-a", graph: "run", node: "plan",
+                                        token: "toolbelt",
+                                        partial: "prompts/toolbelt.md.mustache")])
+
+    director.promptTexts["toolbelt.md.mustache"] = "## Tools\nUse them well.\n"
+    let repaired = try makeRoot([director, codingPack()])
+    defer { cleanup(repaired) }
+    let loadedRepaired = SZAgentPackLoader.load(root: repaired)
+    let clean = await SZAgentPackLoader.validate(packs: loadedRepaired.packs, steps: healthySteps)
+    #expect(clean.isEmpty, "\(clean)")
 }
 
 @Test func stepNodeNeedsAFolderWithSource() async throws {
@@ -372,4 +415,51 @@ private func cleanup(_ root: URL) {
     let report = await SZAgentPackLoader.check(root: root, steps: nil)
     #expect(report.contains("verdict: does not load"))
     #expect(report.contains("step checks skipped"))
+}
+
+// MARK: - The shipping drafts
+
+private let draftPacksRoot = URL(filePath: #filePath)
+    .deletingLastPathComponent()   // SZAITests
+    .deletingLastPathComponent()   // Tests
+    .deletingLastPathComponent()   // Modules
+    .appending(path: "Sources/SZAI/Resources/AgentsDraft")
+
+/// CROSS-TARGET PIN, side A. These declarations are hand-written to match what each
+/// AgentsDraft `Step.swift` declares, because this target may not import SZRuntime to
+/// compile them. Side B is SZRuntimeTests' `SZDraftPackStepTests`, which compiles the SAME
+/// sources through the real toolchain and asserts each module's declaration JSON equals
+/// these claims, field for field — edit a draft step and both sides move together.
+private let draftPackSteps = StubSteps(infos: [
+    "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
+    "director/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
+    "coding/retrying": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "item"),
+    "coding/request-op": SZStepDeclarationInfo(outcomes: ["split", "merge"], facts: "request"),
+])
+
+/// The packs the app ships attain the FULL verdict: load clean, seats fill, and — with the
+/// step declarations attached — validate to zero defects, token and partial scans included.
+@Test func theShippedDraftPacksValidateZeroDefects() async throws {
+    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+    #expect(loaded.defects.isEmpty, "\(loaded.defects)")
+    #expect(loaded.packs.map(\.id) == ["coding", "director"])
+    #expect(loaded.seats == SZSeatAssignment(director: "director", coding: "coding"))
+
+    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: draftPackSteps)
+    #expect(defects.isEmpty, "\(defects)")
+
+    let report = await SZAgentPackLoader.check(root: draftPacksRoot, steps: draftPackSteps)
+    #expect(report.contains("verdict: validates — 2 agents, zero defects"))
+    #expect(!report.contains("step checks skipped"))
+}
+
+/// The pin stub claims exactly the steps the draft packs carry — a new step folder cannot
+/// ship unclaimed (validation would skip it silently through the stub's nil), and a stale
+/// claim cannot outlive its folder.
+@Test func theDraftStepPinCoversExactlyTheShippedStepFolders() throws {
+    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+    let shipped = Set(loaded.packs.flatMap { pack in
+        pack.steps.filter(\.hasSource).map { "\(pack.id)/\($0.name)" }
+    })
+    #expect(shipped == Set(draftPackSteps.infos.keys))
 }

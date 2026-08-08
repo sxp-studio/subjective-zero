@@ -154,6 +154,56 @@ public struct SZBriefRenderer: Sendable {
         }
     }
 
+    // MARK: - The authoring namespaces (the check tool's ground truth)
+
+    /// The partial paths the assembly below pulls — named ONCE, used by both the `render`
+    /// switch and the `requiredPartials` table, so the two cannot disagree.
+    static let toolbeltPartial = "prompts/toolbelt.md.mustache"
+    static let referencePreservePartial = "prompts/reference-preserve.md.mustache"
+    static let referenceInlinePartial = "prompts/reference-inline.md.mustache"
+    static let referenceLibraryPartial = "prompts/reference-library.md.mustache"
+    static let schemaInlinePartial = "prompts/schema-inline.md.mustache"
+    static let schemaFetchPartial = "prompts/schema-fetch.md.mustache"
+
+    /// Every `{{token}}` the `kind` assembly in `render` can substitute — the namespace the
+    /// pack gate checks turn briefs against. Kept here, beside the assembly, and tied to it:
+    /// `add` asserts each token it computes is listed, so a token added to the switch without
+    /// a table entry fails the first debug render that computes it (the whole test suite).
+    static func knownTokens(kind: SZMessageKind) -> Set<String> {
+        switch kind {
+        case .build:
+            ["graph", "instruction", "toolbelt", "round", "cap", "blockers", "inbox"]
+        case .chat:
+            ["graph", "message", "toolbelt", "node", "contract", "source"]
+        case .item:
+            ["node", "prompt", "inputs", "outputs", "boundary", "abi", "reference", "schema",
+             "blocker", "director_message"]
+        case .request:
+            ["original", "intent", "stage", "count", "source", "boundary", "instruction",
+             "constituents"]
+        case .settled, .steer:
+            []   // no brief renders for these kinds (`unrenderableKind`)
+        }
+    }
+
+    /// The pack partials the `kind` assembly renders when a brief mentions `token` — keyed by
+    /// token, because a partial is only REQUIRED of a pack whose briefs actually pull it (the
+    /// coding pack's chat brief never mentions `{{toolbelt}}`, so it owes no toolbelt file).
+    /// A token lists every variant its section can select: which one a delivery picks is
+    /// runtime state, so a valid pack carries them all.
+    static func requiredPartials(kind: SZMessageKind) -> [String: [String]] {
+        switch kind {
+        case .build, .chat:
+            ["toolbelt": [toolbeltPartial]]
+        case .item:
+            ["reference": [referencePreservePartial, referenceInlinePartial,
+                           referenceLibraryPartial],
+             "schema": [schemaInlinePartial, schemaFetchPartial]]
+        case .request, .settled, .steer:
+            [:]
+        }
+    }
+
     // MARK: - Rendering
 
     /// Render one turn's brief: the pack template at `path`, against `kind`'s facts document
@@ -167,6 +217,8 @@ public struct SZBriefRenderer: Sendable {
         // Compute a token only when the template mentions it — briefs never fail on context
         // they do not use.
         func add(_ token: String, _ make: () throws -> String) rethrows {
+            assert(Self.knownTokens(kind: kind).contains(token),
+                   "'\(token)' is computed by the \(kind.rawValue) assembly but missing from knownTokens — the pack gate would misreport it")
             guard text.contains("{{\(token)}}") else { return }
             values[token] = try make()
         }
@@ -175,7 +227,7 @@ public struct SZBriefRenderer: Sendable {
         case .build:
             try add("graph") { try graphSummary(facts) }
             try add("instruction") { SZDirectorPrompt.instructionLine(delivery.instruction ?? "") }
-            try add("toolbelt") { try template(agent, "prompts/toolbelt.md.mustache") }
+            try add("toolbelt") { try template(agent, Self.toolbeltPartial) }
             try add("round") { String(try require(facts.round, fact: "round")) }
             try add("cap") { String(try require(facts.roundCap, fact: "roundCap")) }
             try add("blockers") {
@@ -183,18 +235,18 @@ public struct SZBriefRenderer: Sendable {
                 let unresolved = try require(facts.workSet, fact: "workSet")
                     .compactMap(SZNodeID.init(uuidString:))
                 var statuses: [SZNodeID: String] = [:]
-                for (key, status) in facts.nodeStatuses ?? [:] {
+                for (key, status) in try require(facts.nodeStatuses, fact: "nodeStatuses") {
                     if let id = SZNodeID(uuidString: key) { statuses[id] = status }
                 }
                 return SZDirectorPrompt.blockerLines(graph: graph, unresolved: unresolved,
                                                      statuses: statuses)
             }
-            try add("inbox") { SZDirectorPrompt.inboxLines(facts.steers ?? []) }
+            try add("inbox") { SZDirectorPrompt.inboxLines(try require(facts.steers, fact: "steers")) }
 
         case .chat:
             try add("graph") { try graphSummary(facts) }
             try add("message") { try require(facts.sentMessage, fact: "sentMessage") }
-            try add("toolbelt") { try template(agent, "prompts/toolbelt.md.mustache") }
+            try add("toolbelt") { try template(agent, Self.toolbeltPartial) }
             try add("node") { try require(facts.nodeSeed, fact: "nodeSeed") }
             try add("contract") { try require(delivery.nodeContract, delivery: "nodeContract") }
             try add("source") { try require(delivery.nodeSource, delivery: "nodeSource") }
@@ -216,22 +268,22 @@ public struct SZBriefRenderer: Sendable {
             // variants; otherwise the tiered library framing + the fetch schema.
             try add("reference") {
                 if delivery.preserveBehavior {
-                    return try template(agent, "prompts/reference-preserve.md.mustache")
+                    return try template(agent, Self.referencePreservePartial)
                 }
                 if let index = delivery.libraryIndex {
                     return SZPromptTemplate.render(
-                        try template(agent, "prompts/reference-inline.md.mustache"),
+                        try template(agent, Self.referenceInlinePartial),
                         ["library_index": SZPromptTemplate.defused(index)])
                 }
-                return try template(agent, "prompts/reference-library.md.mustache")
+                return try template(agent, Self.referenceLibraryPartial)
             }
             try add("schema") {
                 if !delivery.preserveBehavior, delivery.libraryIndex != nil {
                     return SZPromptTemplate.render(
-                        try template(agent, "prompts/schema-inline.md.mustache"),
+                        try template(agent, Self.schemaInlinePartial),
                         ["contract_doc": SZPromptTemplate.defused(SZAgentDocs.contractReference)])
                 }
-                return try template(agent, "prompts/schema-fetch.md.mustache")
+                return try template(agent, Self.schemaFetchPartial)
             }
             add("blocker") { SZPromptTemplate.defused(facts.blocker ?? Self.fallbackBlocker) }
             add("director_message") {

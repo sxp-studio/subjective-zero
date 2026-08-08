@@ -7,7 +7,9 @@
 // The split of labor, stated once:
 //   SZAgentGraph.defects()  — graph SHAPE, from the graph file alone (SZCore)
 //   validate(packs:steps:)  — everything needing pack or library context: kind handlers,
-//                             briefs, step folders, seats, dispatch targets and facts, and —
+//                             briefs (existence, their `{{token}}` namespace, the partials
+//                             a mentioned token renders from — the renderer owns both
+//                             namespaces), step folders, seats, dispatch targets and facts, and —
 //                             through the injected `SZStepProviding` seam — the compiled
 //                             steps' declared outcomes. With no provider those step-attached
 //                             checks are SKIPPED and the report says so; they never pass
@@ -31,6 +33,14 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
     case duplicateKindHandler(agent: String, kind: SZMessageKind, graphs: [String])
     /// A turn node's `brief` names no file in the pack's prompt inventory.
     case missingTemplate(agent: String, graph: String, node: String, path: String)
+    /// A turn brief mentions a `{{token}}` the graph's kind can never substitute
+    /// (`SZBriefRenderer.knownTokens` is the namespace) — it would ship to the model literal.
+    case unknownTemplateToken(agent: String, graph: String, node: String, template: String,
+                              token: String)
+    /// A turn brief mentions a token whose section renders from a pack partial the prompt
+    /// inventory does not carry (`SZBriefRenderer.requiredPartials` names them).
+    case missingPartial(agent: String, graph: String, node: String, token: String,
+                        partial: String)
     /// A step node names a folder with no `Step.swift` (or no folder at all).
     case missingStepSource(agent: String, graph: String, node: String, step: String)
     /// Library level: no loaded agent holds this seat.
@@ -69,6 +79,10 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
             "\(agent): graphs \(graphs.joined(separator: ", ")) all handle '\(kind.rawValue)' — one kind, one handler"
         case .missingTemplate(let agent, let graph, let node, let path):
             "\(agent)/graphs/\(graph) node '\(node)': brief '\(path)' is not among the pack's prompts"
+        case .unknownTemplateToken(let agent, let graph, let node, let template, let token):
+            "\(agent)/graphs/\(graph) node '\(node)': \(template) mentions '{{\(token)}}', a token nothing substitutes for this kind"
+        case .missingPartial(let agent, let graph, let node, let token, let partial):
+            "\(agent)/graphs/\(graph) node '\(node)': '{{\(token)}}' renders from '\(partial)', which is not among the pack's prompts"
         case .missingStepSource(let agent, let graph, let node, let step):
             "\(agent)/graphs/\(graph) node '\(node)': steps/\(step) has no Step.swift"
         case .seatUnfilled(let seat):
@@ -193,6 +207,12 @@ public enum SZAgentPackLoader {
             .filter { $0.hasSuffix(".md.mustache") }
             .map { "prompts/\($0)" }
             .sorted()
+        // The templates' text rides along for validation's token scan. A file that lists but
+        // will not read scans as empty — its tokens cannot be judged, and the read failure
+        // will surface loudly the moment a render asks for it.
+        let promptSources = Dictionary(uniqueKeysWithValues: prompts.map { path in
+            (path, (try? String(contentsOf: folder.appending(path: path), encoding: .utf8)) ?? "")
+        })
 
         let steps = ((try? fm.contentsOfDirectory(
             at: folder.appending(path: "steps"), includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
@@ -205,7 +225,7 @@ public enum SZAgentPackLoader {
             }
 
         return .success(SZAgentPack(id: manifest.id, seat: manifest.seat, graphs: graphs,
-                                    prompts: prompts, steps: steps))
+                                    prompts: prompts, promptSources: promptSources, steps: steps))
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ url: URL,
@@ -273,6 +293,27 @@ public enum SZAgentPackLoader {
                 if !pack.prompts.contains(turn.brief) {
                     defects.append(.missingTemplate(agent: pack.id, graph: graph.name,
                                                     node: node.id, path: turn.brief))
+                } else if let text = pack.promptSources[turn.brief] {
+                    // The brief exists — every `{{token}}` it mentions must be one the
+                    // kind's assembly substitutes, and every partial a mentioned token
+                    // renders from must be in the pack. The renderer owns both namespaces;
+                    // this only reads them.
+                    let known = SZBriefRenderer.knownTokens(kind: graph.kind)
+                    let partials = SZBriefRenderer.requiredPartials(kind: graph.kind)
+                    for token in SZPromptTemplate.tokens(in: text) {
+                        guard known.contains(token) else {
+                            defects.append(.unknownTemplateToken(
+                                agent: pack.id, graph: graph.name, node: node.id,
+                                template: turn.brief, token: token))
+                            continue
+                        }
+                        for partial in partials[token] ?? []
+                        where !pack.prompts.contains(partial) {
+                            defects.append(.missingPartial(
+                                agent: pack.id, graph: graph.name, node: node.id,
+                                token: token, partial: partial))
+                        }
+                    }
                 }
 
             case .dispatch(let dispatch):
