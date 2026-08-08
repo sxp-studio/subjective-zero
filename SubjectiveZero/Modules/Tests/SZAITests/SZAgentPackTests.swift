@@ -509,6 +509,7 @@ private let draftPackSteps = StubSteps(infos: [
     "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
     "director/nodes-failing": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
     "director/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
+    "director/route-reply": SZStepDeclarationInfo(outcomes: ["answer", "build", "plan"], facts: "chat"),
     "coding/retrying": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "item"),
     "coding/request-op": SZStepDeclarationInfo(outcomes: ["split", "merge"], facts: "request"),
 ])
@@ -563,6 +564,24 @@ private let draftPackSteps = StubSteps(infos: [
     #expect(recovery.edge(from: "reconcile", outcome: "ok")?.to == "implement")
     // A plain delivery still opens agentic — the recovery variant never usurps the default.
     #expect(director.graph(handling: .build)?.name == "agentic")
+}
+
+/// The chat graph: the cold/resumed fork feeds the `route-reply` ruling, whose outcomes all
+/// END the traversal — `build`'s work is the `requestBuild` EFFECT (performed before edge
+/// routing), so no outcome needs an edge.
+@Test func theShippedChatGraphRoutesBothTurnsIntoRouteReply() throws {
+    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+    let director = try #require(loaded.packs.first { $0.id == "director" })
+    let chat = try #require(director.graph(handling: .chat))
+    #expect(chat.entry[.chat] == "resuming")
+    #expect(chat.edge(from: "resuming", outcome: "no")?.to == "cold")
+    #expect(chat.edge(from: "resuming", outcome: "yes")?.to == "resumed")
+    #expect(chat.edge(from: "cold", outcome: "ok")?.to == "route-reply")
+    #expect(chat.edge(from: "resumed", outcome: "ok")?.to == "route-reply")
+    #expect(chat.node("route-reply")?.form == .step(name: "route-reply"))
+    for outcome in ["answer", "build", "plan"] {
+        #expect(chat.edge(from: "route-reply", outcome: outcome) == nil)
+    }
 }
 
 /// docs/AUTHORING.md's "Your own pack, from scratch" recipe, followed literally: the exact

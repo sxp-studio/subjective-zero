@@ -348,13 +348,11 @@ extension SZHost {
     /// validated against the kind's effect set.
     func perform(effect: String, kind: SZMessageKind) async {
         if effect == SZChatEffect.requestBuild.rawValue {
-            // The same entry `ui_run` uses, minus the double-run ambition: a run already
-            // in flight makes a second start a skip worth one honest line, not a queue.
-            if isRunning {
-                narrateDirector("Effect 'requestBuild' skipped — a run is already active.")
-            } else {
-                startRun()
-            }
+            // Queued on the `pendingDirectorRun` lane (`queueChatRequestedBuild`): a chat
+            // effect fires while its own delivery still holds the Director transcript, so a
+            // direct start would refuse against our own claim. A bare effect name carries no
+            // instruction; the chat adapter's effect closure passes the user's message.
+            queueChatRequestedBuild(instruction: "")
             return
         }
         // captureStatuses / split / merge: their lanes aren't graph-routed yet — say so

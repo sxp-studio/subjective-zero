@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The graph strategy's two SZTraversalHost adapters — how the engine's seams read the live
-// `SZOrchestrationContext` the host builds at `startRun`. One adapter per
-// ROLE: the DIRECTOR-bound host projects the build facts and runs Director turns through the
-// host's injected runner; an ITEM-bound host (one per dispatched order) projects that order's
-// item facts and assembles each coding turn's request exactly as the previous dispatch did.
+// The engine's SZTraversalHost adapters, one per ROLE. The DIRECTOR- and ITEM-bound hosts
+// read the live `SZOrchestrationContext` the host builds at `startRun`: the director host
+// projects the build facts and runs Director turns through the host's injected runner; an
+// item host (one per dispatched order) projects that order's item facts and assembles each
+// coding turn's request exactly as the previous dispatch did. The CHAT-bound host serves a
+// single delivered chat turn instead — closure-injected (no run, no context), because the
+// app builds it per delivery.
 //
 // Facts documents follow the SZFacts spec field names (SZCore/AgentFacts) and are encoded with
 // deterministic `.sortedKeys` bytes. They are LOCAL Encodable documents rather than the spec
@@ -173,6 +175,112 @@ final class SZDirectorTraversalHost: SZTraversalHost {
             graphJSON: SZGraphFactsEncoding.graphJSON(graph),
             steers: steers)
     }
+}
+
+// MARK: - The CHAT-bound host
+
+/// One DIRECTOR chat turn's traversal host. A chat is ONE traversal — the resuming fork, the
+/// turn, the route-reply ruling — so the app runs it straight through `SZGraphEngine`,
+/// WITHOUT the thread machine: the machine owns THREADS (dispatch sets, one settled reply,
+/// rounds), and a chat graph dispatches nothing, so a machine here would wrap a single
+/// `startTraversal` in commands nothing consumes. Public because the app constructs it at
+/// delivery time (unlike the run hosts, which only the strategy's motor builds).
+///
+/// The `draftedWork` fact is the delivery-time mechanism restated: the needs-implementation
+/// node set is SNAPSHOTTED here, at construction (before the turn), and every `factsJSON`
+/// read diffs the live graph against it — so route-reply, evaluating AFTER the turn with its
+/// own freshly-pinned snapshot, sees exactly what THIS turn drafted. Pre-existing drafts
+/// never read as this turn's work.
+@MainActor
+public final class SZChatTraversalHost: SZTraversalHost {
+    private let message: String
+    private let resuming: Bool
+    private let nodeSeed: String?
+    private let renderer: SZBriefRenderer
+    private let graphName: String
+    private let queries: SZQueryService
+    private let liveGraph: @MainActor () -> SZGraph?
+    private let turn: @MainActor (SZTurnOrder) async -> SZTurnReport
+    private let effect: @MainActor (String, SZMessageKind) async -> Void
+    private let onNote: @MainActor (SZTraversalNote) -> Void
+    /// The node ids needing implementation at DELIVERY — what `draftedWork` diffs against.
+    private let draftSnapshot: Set<SZNodeID>
+
+    public init(message: String, resuming: Bool, nodeSeed: String? = nil,
+                renderer: SZBriefRenderer, graphName: String, queries: SZQueryService,
+                liveGraph: @escaping @MainActor () -> SZGraph?,
+                turn: @escaping @MainActor (SZTurnOrder) async -> SZTurnReport,
+                effect: @escaping @MainActor (String, SZMessageKind) async -> Void,
+                onNote: @escaping @MainActor (SZTraversalNote) -> Void = { _ in }) {
+        self.message = message
+        self.resuming = resuming
+        self.nodeSeed = nodeSeed
+        self.renderer = renderer
+        self.graphName = graphName
+        self.queries = queries
+        self.liveGraph = liveGraph
+        self.turn = turn
+        self.effect = effect
+        self.onNote = onNote
+        self.draftSnapshot = Self.needingImplementation(liveGraph())
+    }
+
+    private static func needingImplementation(_ graph: SZGraph?) -> Set<SZNodeID> {
+        Set((graph?.nodes ?? []).filter(\.needsImplementation).map(\.id))
+    }
+
+    /// The chat projection, spec-shaped plus `graphJSON` (the chat briefs re-project the
+    /// live graph — see the file header for why the document is local).
+    private struct ChatFactsDocument: Encodable {
+        var sentMessage: String
+        var resuming: Bool
+        var draftedWork: Bool
+        var nodeSeed: String?
+        var graphJSON: String
+    }
+
+    public func factsJSON(kind: SZMessageKind) -> String {
+        let graph = liveGraph()
+        return SZGraphFactsEncoding.json(ChatFactsDocument(
+            sentMessage: message,
+            resuming: resuming,
+            // Growth since delivery = THIS turn drafted (or re-briefed) work.
+            draftedWork: !Self.needingImplementation(graph).subtracting(draftSnapshot).isEmpty,
+            nodeSeed: nodeSeed,
+            graphJSON: SZGraphFactsEncoding.graphJSON(graph)))
+    }
+
+    public func itemsFact(named name: String, kind: SZMessageKind) -> [String] {
+        []   // no [String]-typed chat fact exists; the pack gate keeps dispatches off chat graphs
+    }
+
+    /// The chat briefs through the SAME renderer path the equivalence gate pins — the pack's
+    /// chat templates against the live projection, byte-identical to the retired direct
+    /// render calls.
+    public func renderBrief(agent: String, template: String, kind: SZMessageKind) throws -> String {
+        try renderer.render(agent: agent, template: template, kind: kind,
+                            factsJSON: factsJSON(kind: kind))
+    }
+
+    /// One chat turn through the injected runner — the app's delivery machinery (recap,
+    /// attachments, session resume, streaming, claims) all lives behind this closure.
+    public func runTurn(_ order: SZTurnOrder) async -> SZTurnReport {
+        await turn(order)
+    }
+
+    /// One step ask, served through the query service (render → route → complete → journal).
+    public func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
+                         requestJSON: String) async throws -> String {
+        try await queries.serve(agent: agent, graph: graphName, step: step, kind: kind,
+                                factsJSON: factsJSON, requestJSON: requestJSON)
+    }
+
+    /// One validated step effect (`requestBuild`), relayed to the app's lane.
+    public func perform(effect name: String, kind: SZMessageKind) async {
+        await effect(name, kind)
+    }
+
+    public func note(_ note: SZTraversalNote) { onNote(note) }
 }
 
 // MARK: - The ITEM-bound host

@@ -1,0 +1,10 @@
+A Director Agent chat turn just finished replying to the user message below. Classify what that
+turn WAS, so the host can decide what happens next. Answer ONLY with one JSON object, no prose
+and no code fences: {"kind": "answer"} or {"kind": "build"} or {"kind": "plan"}.
+
+- "answer" — the turn answered a question or conversed; nothing was asked to be built.
+- "build" — the user asked for the graph (or part of it) to be implemented NOW.
+- "plan" — work was drafted or shaped, but the user did not ask for it to be built yet.
+
+## The user's message
+{{message}}

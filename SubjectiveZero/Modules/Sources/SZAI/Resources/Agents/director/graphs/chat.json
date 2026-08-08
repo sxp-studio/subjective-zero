@@ -2,15 +2,18 @@
   "name": "chat",
   "kind": "chat",
   "label": "Chat",
-  "hint": "One conversational turn: a cold turn re-projects the whole world, a resumed turn re-projects only the live graph over its session's memory.",
+  "hint": "One conversational turn: a cold turn re-projects the whole world, a resumed turn re-projects only the live graph over its session's memory. The route-reply ruling then decides what the turn WAS — answer, build (the requestBuild effect), or plan.",
   "entry": "resuming",
   "nodes": [
     { "id": "resuming", "title": "Resuming?", "step": "resuming" },
     { "id": "cold", "title": "Cold turn", "turn": { "brief": "prompts/chat.md.mustache" } },
-    { "id": "resumed", "title": "Resumed turn", "turn": { "brief": "prompts/chat-resumed.md.mustache", "session": "message" } }
+    { "id": "resumed", "title": "Resumed turn", "turn": { "brief": "prompts/chat-resumed.md.mustache", "session": "message" } },
+    { "id": "route-reply", "title": "Route the reply", "step": "route-reply" }
   ],
   "edges": [
     { "from": "resuming", "outcome": "no", "to": "cold" },
-    { "from": "resuming", "outcome": "yes", "to": "resumed" }
+    { "from": "resuming", "outcome": "yes", "to": "resumed" },
+    { "from": "cold", "outcome": "ok", "to": "route-reply" },
+    { "from": "resumed", "outcome": "ok", "to": "route-reply" }
   ]
 }

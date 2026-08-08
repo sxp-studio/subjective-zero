@@ -23,6 +23,7 @@ private let pinnedDeclarations: [String: String] = [
     "director/work-left": #"{"facts":"build","outcomes":["yes","no"]}"#,
     "director/nodes-failing": #"{"facts":"build","outcomes":["yes","no"]}"#,
     "director/resuming": #"{"facts":"chat","outcomes":["yes","no"]}"#,
+    "director/route-reply": #"{"facts":"chat","outcomes":["answer","build","plan"]}"#,
     "coding/retrying": #"{"facts":"item","outcomes":["yes","no"]}"#,
     "coding/request-op": #"{"facts":"request","outcomes":["split","merge"]}"#,
 ]
@@ -74,5 +75,49 @@ struct SZDraftPackStepTests {
             try? FileManager.default.removeItem(at: dir)
         }
         #expect(failures.withLock { $0 }.isEmpty, "\(failures.withLock { $0 })")
+    }
+
+    /// The SHIPPED `route-reply` step's honesty contract, on the real compiled module:
+    /// `draftedWork` wins mechanically — the build answer (with its `requestBuild` effect)
+    /// costs NO query, pinned by an ask counter that must stay at zero — and only the
+    /// ambiguous remainder asks for the typed ruling, whose three kinds map onto the three
+    /// declared outcomes (`build` alone carries the effect).
+    @Test func theShippedRouteReplyStepSpendsNoQueryWhenWorkWasDrafted() async throws {
+        let source = draftPacksRoot.appending(path: "director/steps/route-reply/Step.swift")
+        let dir = FileManager.default.temporaryDirectory
+            .appending(path: "sz-draft-route-reply-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let dylib = try SZToolchain().compile(stepSource: source,
+                                              into: dir.appending(path: "build"))
+        let loader = SZStepLoader()
+        try loader.load(dylib: dylib, runtimeLoadsDir: dir.appending(path: "runtime-loads"))
+
+        func facts(draftedWork: Bool) -> String {
+            #"{"sentMessage": "make it warmer", "resuming": false, "draftedWork": \#(draftedWork)}"#
+        }
+        let asked = Mutex<[String]>([])
+        func scriptedAsk(reply: String) -> SZStepAskRunner {
+            { request in asked.withLock { $0.append(request) }; return reply }
+        }
+
+        // Drafted work → the mechanical build, envelope bytes deterministic, ask NEVER called.
+        let mechanical = await loader.evaluate(factsJSON: facts(draftedWork: true),
+                                               ask: scriptedAsk(reply: "unreachable"))
+        #expect(mechanical == .outcome(#"{"effects":["requestBuild"],"outcome":"build"}"#))
+        #expect(asked.withLock { $0 }.isEmpty)
+
+        // No drafted work → ONE typed ruling per evaluation, naming the route-reply template.
+        let answer = await loader.evaluate(factsJSON: facts(draftedWork: false),
+                                           ask: scriptedAsk(reply: #"{"kind": "answer"}"#))
+        #expect(answer == .outcome("answer"))
+        let plan = await loader.evaluate(factsJSON: facts(draftedWork: false),
+                                         ask: scriptedAsk(reply: #"{"kind": "plan"}"#))
+        #expect(plan == .outcome("plan"))
+        let build = await loader.evaluate(factsJSON: facts(draftedWork: false),
+                                          ask: scriptedAsk(reply: #"{"kind": "build"}"#))
+        #expect(build == .outcome(#"{"effects":["requestBuild"],"outcome":"build"}"#))
+        let requests = asked.withLock { $0 }
+        #expect(requests.count == 3)
+        #expect(requests.allSatisfy { $0.contains(#""template":"route-reply""#) })
     }
 }
