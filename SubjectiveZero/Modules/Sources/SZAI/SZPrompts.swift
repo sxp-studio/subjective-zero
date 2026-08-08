@@ -32,6 +32,10 @@ enum SZPrompts {
     /// injected as the `{{toolbelt}}` token so decompose and chat can't drift apart.
     static let directorToolbelt = load("director/toolbelt.md.mustache")
 
+    /// The repair wrapper the query service appends to a step ask's retry prompt (attempt > 0):
+    /// the decode error + the previous reply, as `{{error}}` / `{{previousReply}}` tokens.
+    static let askRepair = load("ask-repair.md.mustache")
+
     /// Load a prompt by its path under `Resources/Prompts/` (e.g. "coding/node-chat.md.mustache").
     private static func load(_ relativePath: String) -> String {
         let parts = relativePath.split(separator: "/")

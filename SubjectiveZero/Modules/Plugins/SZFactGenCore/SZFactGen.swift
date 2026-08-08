@@ -264,6 +264,25 @@ public enum SZFactGen {
             ]
         }
 
+        /// Effect case names per kind, in spec order — what the traversal engine validates a
+        /// step's requested effects against. A kind with no effect enum is absent.
+        public enum SZEffectCatalog {
+            public static let byKind: [String: [String]] = [
+
+        """
+        for effect in spec.effects {
+            out += "        \(literal(effect.kind)): [\(effect.cases.map(literal).joined(separator: ", "))],\n"
+        }
+        if spec.effects.isEmpty { out += "        :\n" }   // the empty-dictionary spelling
+        out += """
+            ]
+
+            /// The effect set for one kind name; empty for a kind that declares none.
+            public static func cases(kind: String) -> [String] {
+                byKind[kind] ?? []
+            }
+        }
+
         """
         return out
     }

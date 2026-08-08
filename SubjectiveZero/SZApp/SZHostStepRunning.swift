@@ -65,10 +65,27 @@ final class SZHostStepRunning: SZStepRunning {
         let key = SZStepKey(agent: agent, step: step)
         ensureScheduled(key)
         switch await runtime.evaluate(key: key, factsJSON: factsJSON, ask: ask) {
-        case .outcome(let outcome): return SZStepReport(outcome: outcome)
+        case .outcome(let payload): return Self.report(payload: payload)
         case .cancelled: return SZStepReport(cancelled: true)
         case .failed(let detail): return SZStepReport(failure: detail)
         }
+    }
+
+    /// The SDK's success payload, split: a bare outcome string rides through untouched
+    /// (byte-for-byte — the loader stays dumb and so does this for effect-less steps); an
+    /// answer that requested effects arrives as the `{"effects": […], "outcome": "…"}`
+    /// envelope, which no bare outcome can be mistaken for (outcomes are names, not JSON
+    /// objects — and the decode demands BOTH keys).
+    static func report(payload: String) -> SZStepReport {
+        struct Envelope: Decodable {
+            var outcome: String
+            var effects: [String]
+        }
+        if payload.hasPrefix("{"),
+           let envelope = try? JSONDecoder().decode(Envelope.self, from: Data(payload.utf8)) {
+            return SZStepReport(outcome: envelope.outcome, effects: envelope.effects)
+        }
+        return SZStepReport(outcome: payload)
     }
 
     // MARK: - Declarations (the pack gate's seam)

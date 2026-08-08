@@ -104,10 +104,15 @@ public struct SZGraphEngine {
             var turnFailure: String?
             switch node.form {
             case .step(let name):
+                // The facts snapshot is pinned HERE: the evaluation and every ask it makes
+                // see the same document, however long the step runs.
+                let facts = host.factsJSON(kind: kind)
+                let graphKind = graph.kind
                 let report = await steps.evaluate(
-                    agent: agent, step: name, factsJSON: host.factsJSON(kind: kind),
+                    agent: agent, step: name, factsJSON: facts,
                     ask: { [host, agent] request in
-                        try await host.serveAsk(agent: agent, step: name, requestJSON: request)
+                        try await host.serveAsk(agent: agent, step: name, kind: graphKind,
+                                                factsJSON: facts, requestJSON: request)
                     })
                 if report.cancelled {
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done, outcome: nil))
@@ -125,6 +130,23 @@ public struct SZGraphEngine {
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
                     conclusion = .defect(node: id, detail: detail)
                     continue
+                }
+                // EFFECTS: host actions the step requested with its outcome. Validated
+                // against the graph kind's catalogued effect set — an unknown name is a
+                // traversal defect naming it, and nothing performs. Performed in the step's
+                // own order, AFTER the step returned and BEFORE edge routing.
+                if !report.effects.isEmpty {
+                    let declared = SZEffectCatalog.cases(kind: graphKind.rawValue)
+                    if let unknown = report.effects.first(where: { !declared.contains($0) }) {
+                        let detail = "step '\(name)' requested effect '\(unknown)', outside "
+                            + "the '\(graphKind.rawValue)' effect set"
+                        note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
+                        conclusion = .defect(node: id, detail: detail)
+                        continue
+                    }
+                    for effect in report.effects {
+                        await host.perform(effect: effect, kind: graphKind)
+                    }
                 }
                 outcome = answered
 

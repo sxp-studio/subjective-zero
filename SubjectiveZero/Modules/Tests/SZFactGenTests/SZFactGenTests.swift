@@ -70,6 +70,19 @@ private func specSource() throws -> String {
     #expect(byKind["item"] == nil)   // item has facts but no effect enum — legal
 }
 
+@Test func effectCatalogMatchesTheSpecEnumForEnum() throws {
+    // The generated catalog compiled into SZCore mirrors the spec's effect enums exactly —
+    // what the traversal engine validates a step's requested effects against.
+    let spec = try SZFactGen.parse(try specSource())
+    #expect(SZEffectCatalog.byKind.count == spec.effects.count)
+    for effect in spec.effects {
+        #expect(SZEffectCatalog.byKind[effect.kind] == effect.cases)
+        #expect(SZEffectCatalog.cases(kind: effect.kind) == effect.cases)
+    }
+    // A kind with no effect enum answers the empty set, never nil-crashes.
+    #expect(SZEffectCatalog.cases(kind: "item") == [])
+}
+
 // MARK: - The runtime constant vs. the spec
 
 @Test func runtimeFactsSectionIsVerbatimSpecRegion() throws {

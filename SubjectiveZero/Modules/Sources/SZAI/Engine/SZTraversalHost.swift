@@ -47,13 +47,18 @@ public struct SZItemOrder: Sendable, Equatable {
 }
 
 /// How one step evaluation settled, mirrored across the SZAI/SZRuntime module boundary
-/// (SZAI may not import SZRuntime; the host's adapter translates).
+/// (SZAI may not import SZRuntime; the host's adapter translates). `effects` are the host
+/// actions the step requested alongside its outcome — the adapter splits them out of the
+/// wire envelope; a bare outcome carries none.
 public struct SZStepReport: Sendable {
     public var outcome: String?
+    public var effects: [String]
     public var cancelled: Bool
     public var failure: String?
-    public init(outcome: String? = nil, cancelled: Bool = false, failure: String? = nil) {
+    public init(outcome: String? = nil, effects: [String] = [], cancelled: Bool = false,
+                failure: String? = nil) {
         self.outcome = outcome
+        self.effects = effects
         self.cancelled = cancelled
         self.failure = failure
     }
@@ -124,8 +129,17 @@ public protocol SZTraversalHost: AnyObject, Sendable {
     /// Run one full agent turn (session, tools, streaming — all host business).
     func runTurn(_ order: SZTurnOrder) async -> SZTurnReport
     /// Serve one step's `askModel` request (render its template, route, complete, journal).
-    /// Throwing `CancellationError` answers the ask as cancelled; other errors as failed.
-    func serveAsk(agent: String, step: String, requestJSON: String) async throws -> String
+    /// The ENGINE supplies `kind` (the graph's own — a settled re-entry renders as its
+    /// build graph's kind by construction) and `factsJSON` (the SAME pinned document the
+    /// evaluation was handed, so an ask never sees a world its step didn't). Throwing
+    /// `CancellationError` answers the ask as cancelled; other errors as failed.
+    func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
+                  requestJSON: String) async throws -> String
+    /// Perform one EFFECT a step requested with its outcome. The engine calls this AFTER
+    /// the step returned and BEFORE edge routing, in the step's own order, and only with
+    /// names it validated against the kind's effect set (an unknown name is a traversal
+    /// defect, never a perform).
+    func perform(effect: String, kind: SZMessageKind) async
     /// Trace push for the panel/RUNS record.
     func note(_ note: SZTraversalNote)
 }

@@ -74,6 +74,9 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
     let onConcluded: @MainActor @Sendable (UUID, SZTraversalEnding) -> Void
     let onTally: @MainActor @Sendable (UUID, _ settled: Int, _ total: Int, _ failed: Int) -> Void
     let onSettled: @MainActor @Sendable (SZSettledSummary) -> Void
+    /// One record per served step ask — the query service's journal, exposed live (the
+    /// service also keeps the run's full list in memory; the host can persist from here).
+    let onQuery: @MainActor @Sendable (SZQueryRecord) -> Void
 
     public init(
         packsRoot: URL,
@@ -87,7 +90,8 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
         onNote: @escaping @MainActor @Sendable (UUID, SZTraversalNote) -> Void = { _, _ in },
         onConcluded: @escaping @MainActor @Sendable (UUID, SZTraversalEnding) -> Void = { _, _ in },
         onTally: @escaping @MainActor @Sendable (UUID, Int, Int, Int) -> Void = { _, _, _, _ in },
-        onSettled: @escaping @MainActor @Sendable (SZSettledSummary) -> Void = { _ in }
+        onSettled: @escaping @MainActor @Sendable (SZSettledSummary) -> Void = { _ in },
+        onQuery: @escaping @MainActor @Sendable (SZQueryRecord) -> Void = { _ in }
     ) {
         self.packsRoot = packsRoot
         self.steps = steps
@@ -101,6 +105,7 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
         self.onConcluded = onConcluded
         self.onTally = onTally
         self.onSettled = onSettled
+        self.onQuery = onQuery
     }
 
     @MainActor
@@ -186,6 +191,7 @@ extension SZGraphDirectorStrategy {
         private let director: Role
         private let coding: Role
         private let renderer: SZBriefRenderer
+        private let queries: SZQueryService
         private let sessions = SZGraphRunSessions()
         private let directorHost: SZDirectorTraversalHost
         private var machine: SZThreadMachine
@@ -207,6 +213,13 @@ extension SZGraphDirectorStrategy {
             self.director = director
             self.coding = coding
             self.renderer = SZBriefRenderer(packRoot: strategy.packsRoot)
+            // ONE query service per run: every host's `serveAsk` funnels through it, so the
+            // journal is the run's whole ask history. The context's executor (tests) wins;
+            // nil runs the routed provider directly — production's path.
+            self.queries = SZQueryService(
+                renderer: renderer, router: strategy.router, registry: strategy.registry,
+                cacheDirectory: context.cacheDirectory, runner: context.runner,
+                executor: context.queryExecutor, onRecord: strategy.onQuery)
             self.machine = SZThreadMachine(bounds: strategy.bounds)
             // The same resolution the machine performs at `opened`, restated for the facts'
             // roundCap (the machine keeps its own private).
@@ -216,6 +229,7 @@ extension SZGraphDirectorStrategy {
             let note = strategy.onNote
             self.directorHost = SZDirectorTraversalHost(
                 context: context, renderer: renderer, roundCap: roundCap,
+                graphName: director.graph.name, queries: queries,
                 onNote: { note(box.id, $0) })
         }
 
@@ -327,6 +341,7 @@ extension SZGraphDirectorStrategy {
                 let host = SZItemTraversalHost(
                     context: context, renderer: renderer, order: order, nodeID: nodeID,
                     sessions: sessions, registry: strategy.registry,
+                    graphName: coding.graph.name, queries: queries,
                     onNote: { note(sighting, $0) })
                 deliveries.append((order, SZGraphEngine(
                     agent: coding.agent, graph: coding.graph, attachments: coding.attachments,

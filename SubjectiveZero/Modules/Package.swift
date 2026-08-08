@@ -51,7 +51,10 @@ let package = Package(
         .testTarget(name: "SZCoreTests", dependencies: ["SZCore"]),
         .testTarget(name: "SZFactGenTests", dependencies: ["SZFactGenCore", "SZCore", "SZRuntime"]),
         .testTarget(name: "SZAITests", dependencies: ["SZAI"]),
-        .testTarget(name: "SZRuntimeTests", dependencies: ["SZRuntime"]),
+        // SZRuntimeTests also links SZAI (tests only — the library siblings stay
+        // independent): the step-tier integration proofs drive a REAL compiled step's
+        // `askModel` through the real SZAI query service as its ask runner.
+        .testTarget(name: "SZRuntimeTests", dependencies: ["SZRuntime", "SZAI"]),
         .testTarget(name: "SZUITests", dependencies: ["SZUI"])
     ],
     swiftLanguageModes: [.v6]
