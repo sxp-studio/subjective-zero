@@ -26,25 +26,43 @@ struct SZToolchain {
     }
 
     /// Compile `nodeSource` into `Node.dylib` inside `buildDir` (created if needed) and ad-hoc sign it.
-    /// Returns the dylib URL. A fresh, unique Swift module name per build keeps mangled type metadata
-    /// from colliding when an old + new dylib are briefly co-resident during hot reload.
     func compile(nodeSource: URL, into buildDir: URL) throws -> URL {
+        try compile(source: nodeSource, into: buildDir,
+                    supportFileName: SZRuntimeSupport.fileName, supportSource: SZRuntimeSupport.source,
+                    modulePrefix: "SZNode_", product: "Node.dylib")
+    }
+
+    /// Compile a decision step's `Step.swift` into `Step.dylib` — same pipeline, the step
+    /// SDK as the support blob, its own module prefix.
+    func compile(stepSource: URL, into buildDir: URL) throws -> URL {
+        try compile(source: stepSource, into: buildDir,
+                    supportFileName: SZStepSDK.fileName, supportSource: SZStepSDK.source,
+                    modulePrefix: "SZStep_", product: "Step.dylib")
+    }
+
+    /// The one pipeline both tiers share: write the host-owned support source beside the
+    /// authored file, `swiftc -emit-library`, then `codesign -s -` (ad-hoc signing is
+    /// REQUIRED for `dlopen` on macOS). Returns the dylib URL. A fresh, unique Swift module
+    /// name per build keeps mangled type metadata from colliding when an old + new dylib are
+    /// briefly co-resident during hot reload.
+    private func compile(source: URL, into buildDir: URL, supportFileName: String,
+                         supportSource: String, modulePrefix: String, product: String) throws -> URL {
         let fm = FileManager.default
         try fm.createDirectory(at: buildDir, withIntermediateDirectories: true)
 
-        let supportURL = buildDir.appending(path: SZRuntimeSupport.fileName)
-        try SZRuntimeSupport.source.write(to: supportURL, atomically: true, encoding: .utf8)
+        let supportURL = buildDir.appending(path: supportFileName)
+        try supportSource.write(to: supportURL, atomically: true, encoding: .utf8)
 
         let sdk = try sdkPath()
-        let dylib = buildDir.appending(path: "Node.dylib")
-        let moduleName = "SZNode_" + UUID().uuidString.prefix(8)
+        let dylib = buildDir.appending(path: product)
+        let moduleName = modulePrefix + UUID().uuidString.prefix(8)
 
         let build = try run("/usr/bin/xcrun", [
             "swiftc", "-emit-library",
             "-module-name", String(moduleName),
             "-sdk", sdk,
             "-o", dylib.path,
-            supportURL.path, nodeSource.path,
+            supportURL.path, source.path,
         ])
         guard build.status == 0 else { throw CompileError.compileFailed(log: build.combined) }
 
