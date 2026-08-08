@@ -304,9 +304,8 @@ public struct SZThreadMachine: Sendable {
             guard case .awaitingFleet = state, var set = openSet, set.id == setID
             else { return [] }
             let stragglers = set.outstanding.sorted()
-            let seconds = bounds.dispatchDeadline.components.seconds
             for node in stragglers {
-                set.outcomes[node] = "timedOut: no terminal report within \(seconds)s"
+                set.outcomes[node] = "timedOut: no terminal report within \(deadlineText)"
             }
             set.outstanding = []
             openSet = set
@@ -368,6 +367,17 @@ public struct SZThreadMachine: Sendable {
     }
 
     // MARK: - Small pieces
+
+    /// The dispatch deadline as the synthesized outcome states it — millisecond precision,
+    /// so a sub-second bound reads "250ms", a fractional one "1.5s", never a truncated "0s".
+    private var deadlineText: String {
+        let components = bounds.dispatchDeadline.components
+        let milliseconds = components.seconds * 1000
+            + components.attoseconds / 1_000_000_000_000_000
+        if milliseconds % 1000 == 0 { return "\(milliseconds / 1000)s" }
+        if milliseconds < 1000 { return "\(milliseconds)ms" }
+        return "\(Double(milliseconds) / 1000)s"
+    }
 
     private func tally(of set: DispatchSet) -> Command {
         .amendTally(setID: set.id,

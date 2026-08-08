@@ -121,6 +121,39 @@ private func spec(_ body: String) -> String {
     }
 }
 
+@Test func aSentinelInsideTheRegionFailsLoudlyInsteadOfTruncating() {
+    // The author meant the region to span both structs; the stray end sentinel between them
+    // would silently truncate the spec at line 6 — the second struct drifting out of the
+    // catalog while still compiling everywhere. The duplicate must be loud, never quiet.
+    let truncated = """
+    // SZFactGen:begin
+    public struct SZBuildFacts: Codable, Sendable {
+        /// Fine.
+        public var round: Int
+    }
+    // SZFactGen:end
+    public struct SZChatFacts: Codable, Sendable {
+        /// Silently lost without the stray-sentinel check.
+        public var resuming: Bool
+    }
+    // SZFactGen:end
+    """
+    #expect(throws: SZFactGenFailure.straySentinel(line: 11, sentinel: "// SZFactGen:end")) {
+        try SZFactGen.parse(truncated)
+    }
+
+    // A second BEGIN below the region is the same mistake in the other spelling.
+    let doubledBegin = spec("""
+    public struct SZBuildFacts: Codable, Sendable {
+        /// Fine.
+        public var round: Int
+    }
+    """) + "// SZFactGen:begin\n"
+    #expect(throws: SZFactGenFailure.straySentinel(line: 7, sentinel: "// SZFactGen:begin")) {
+        try SZFactGen.parse(doubledBegin)
+    }
+}
+
 @Test func unclassifiableLinesAreErrors() {
     let bad = spec("""
     public struct SZBuildFacts: Codable, Sendable {

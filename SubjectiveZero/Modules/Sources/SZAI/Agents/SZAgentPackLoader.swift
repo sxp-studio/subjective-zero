@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Loads a ROOT of agent packs and validates the library as a whole. Loading is per-folder
-// Result: one unreadable pack becomes a defect while its healthy siblings still load — a
-// pack root is user content, never a reason to crash. Validation is collect-everything: the
-// author fixes a pack in one round, not twenty.
+// Loads a ROOT of agent packs and validates the library as a whole. Loading collects
+// per-folder: an unreadable pack becomes a defect while its healthy siblings still load,
+// and INSIDE a folder a graph file that will not decode (or lies about its name) becomes a
+// defect while the folder's healthy graphs — and its seat — still load. Only a broken
+// `agent.json` drops a pack: without its manifest a folder has no identity to load under.
+// A pack root is user content, never a reason to crash. Validation is collect-everything:
+// the author fixes a pack in one round, not twenty.
 //
 // The split of labor, stated once:
 //   SZAgentGraph.defects()  — graph SHAPE, from the graph file alone (SZCore)
@@ -20,7 +23,7 @@ import SZCore
 // MARK: - Defects
 
 /// Everything pack loading + library validation can refuse, one case per category.
-/// (`Error` so a per-folder load can carry one as a `Result` failure.)
+/// (`Error` so a file-level decode can carry one as a `Result` failure.)
 public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertible {
     /// A file that would not read or decode; `detail` carries the underlying error.
     case unreadable(file: String, detail: String)
@@ -154,10 +157,9 @@ public enum SZAgentPackLoader {
                                        detail: "no agent folders inside"))
         }
         for folder in folders {
-            switch load(folder: folder) {
-            case .success(let pack): packs.append(pack)
-            case .failure(let defect): defects.append(defect)
-            }
+            let loaded = load(folder: folder)
+            if let pack = loaded.pack { packs.append(pack) }
+            defects += loaded.defects
         }
         return SZAgentPackLoadResult(packs: packs, defects: defects, seats: seats(of: packs))
     }
@@ -183,28 +185,34 @@ public enum SZAgentPackLoader {
         var defaults: [String: String]?
     }
 
-    private static func load(folder: URL) -> Result<SZAgentPack, SZAgentPackDefect> {
+    /// One folder's load: the pack (nil only when `agent.json` itself is broken — a folder
+    /// without a decodable, truthful manifest has no identity to load under) plus EVERY
+    /// defect the folder shows. Collecting, not first-error: one graph file that will not
+    /// decode is a defect beside its healthy siblings, never a reason to drop the pack —
+    /// dropping it would silently vacate the pack's seat and hide the siblings' defects.
+    private static func load(folder: URL) -> (pack: SZAgentPack?, defects: [SZAgentPackDefect]) {
         let fm = FileManager.default
         let folderName = folder.lastPathComponent
 
         let manifest: Manifest
         switch decode(Manifest.self, folder.appending(path: "agent.json"), in: folderName) {
         case .success(let decoded): manifest = decoded
-        case .failure(let defect): return .failure(defect)
+        case .failure(let defect): return (nil, [defect])
         }
         guard manifest.id == folderName else {
-            return .failure(.misdeclared(file: "\(folderName)/agent.json",
-                detail: "declares id '\(manifest.id)' — the id IS the folder name"))
+            return (nil, [.misdeclared(file: "\(folderName)/agent.json",
+                detail: "declares id '\(manifest.id)' — the id IS the folder name")])
         }
         var defaults: [SZMessageKind: String] = [:]
         for (rawKind, graphName) in (manifest.defaults ?? [:]).sorted(by: { $0.key < $1.key }) {
             guard let kind = SZMessageKind(rawValue: rawKind) else {
-                return .failure(.misdeclared(file: "\(folderName)/agent.json",
-                    detail: "defaults names unknown kind '\(rawKind)'"))
+                return (nil, [.misdeclared(file: "\(folderName)/agent.json",
+                    detail: "defaults names unknown kind '\(rawKind)'")])
             }
             defaults[kind] = graphName
         }
 
+        var defects: [SZAgentPackDefect] = []
         var graphs: [SZAgentGraph] = []
         let graphFiles = ((try? fm.contentsOfDirectory(
             at: folder.appending(path: "graphs"), includingPropertiesForKeys: nil)) ?? [])
@@ -214,12 +222,15 @@ public enum SZAgentPackLoader {
             let graph: SZAgentGraph
             switch decode(SZAgentGraph.self, file, in: "\(folderName)/graphs") {
             case .success(let decoded): graph = decoded
-            case .failure(let defect): return .failure(defect)
+            case .failure(let defect):
+                defects.append(defect)
+                continue
             }
             let stem = file.deletingPathExtension().lastPathComponent
             guard graph.name == stem else {
-                return .failure(.misdeclared(file: "\(folderName)/graphs/\(file.lastPathComponent)",
+                defects.append(.misdeclared(file: "\(folderName)/graphs/\(file.lastPathComponent)",
                     detail: "names itself '\(graph.name)' — the name IS the filename"))
+                continue
             }
             graphs.append(graph)
         }
@@ -247,9 +258,9 @@ public enum SZAgentPackLoader {
                     hasSource: fm.fileExists(atPath: stepFolder.appending(path: "Step.swift").path))
             }
 
-        return .success(SZAgentPack(id: manifest.id, seat: manifest.seat, defaults: defaults,
-                                    graphs: graphs, prompts: prompts,
-                                    promptSources: promptSources, steps: steps))
+        return (SZAgentPack(id: manifest.id, seat: manifest.seat, defaults: defaults,
+                            graphs: graphs, prompts: prompts,
+                            promptSources: promptSources, steps: steps), defects)
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ url: URL,

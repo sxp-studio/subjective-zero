@@ -123,6 +123,26 @@ private func settledSummary(in commands: [SZThreadMachine.Command]) -> SZSettled
     #expect(machine.handle(.itemSettled(node: "b", setID: setID, outcome: "ok")).isEmpty)
 }
 
+/// The synthesized outcome states the deadline with millisecond precision: a sub-second
+/// bound must never truncate to "0s" — the straggler's record would claim it was given no
+/// time at all — and a fractional bound keeps its fraction.
+@Test func theTimeoutOutcomeCarriesMillisecondPrecision() {
+    func timedOutText(deadline: Duration) -> String? {
+        var machine = SZThreadMachine(bounds: .init(roundCeiling: 8,
+                                                    dispatchDeadline: deadline,
+                                                    defaultRounds: 4))
+        _ = machine.handle(.opened(kind: .build, graphRounds: nil, handlesSettled: true))
+        let setID = dispatch(&machine, items: ["n"])
+        return settledSummary(in: machine.handle(.watchdogFired(setID: setID)))?.outcomes["n"]
+    }
+    #expect(timedOutText(deadline: .milliseconds(250))
+        == "timedOut: no terminal report within 250ms")
+    #expect(timedOutText(deadline: .milliseconds(1500))
+        == "timedOut: no terminal report within 1.5s")
+    #expect(timedOutText(deadline: .seconds(900))
+        == "timedOut: no terminal report within 900s")
+}
+
 /// Scenario: an undeliverable item still settles, instantly and with the real diagnosis —
 /// the dispatcher never waits out the watchdog to learn what the host knew at delivery
 /// time. The machine's spelling: a settle needs no prior delivery, and the outcome string

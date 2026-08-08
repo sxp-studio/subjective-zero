@@ -21,6 +21,7 @@ private let draftPacksRoot = URL(filePath: #filePath)
 /// encodes with sorted keys). Mirrors SZAITests' `draftPackSteps` claims exactly.
 private let pinnedDeclarations: [String: String] = [
     "director/work-left": #"{"facts":"build","outcomes":["yes","no"]}"#,
+    "director/nodes-failing": #"{"facts":"build","outcomes":["yes","no"]}"#,
     "director/resuming": #"{"facts":"chat","outcomes":["yes","no"]}"#,
     "coding/retrying": #"{"facts":"item","outcomes":["yes","no"]}"#,
     "coding/request-op": #"{"facts":"request","outcomes":["split","merge"]}"#,

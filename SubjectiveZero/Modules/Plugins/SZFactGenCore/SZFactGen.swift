@@ -52,6 +52,12 @@ public struct SZFactSpec: Equatable, Sendable {
 /// the tool can print `path:line: error: …` and the build fails loudly at the right spot.
 public enum SZFactGenFailure: Error, Equatable, CustomStringConvertible {
     case missingSentinel(String)
+    /// A begin/end sentinel line appears AGAIN after the region closed. The classic cause is
+    /// an end sentinel accidentally landing inside the intended region: the region would
+    /// silently truncate at the stray line and everything below it — facts structs included —
+    /// would drift into the ungoverned tail, embedded in the step SDK but absent from the
+    /// catalog. A spec carries exactly one begin/end pair, loudly.
+    case straySentinel(line: Int, sentinel: String)
     case unclassifiableLine(line: Int, text: String)
     case docOutsideStruct(line: Int)
     case danglingDoc(line: Int)
@@ -68,6 +74,7 @@ public enum SZFactGenFailure: Error, Equatable, CustomStringConvertible {
     public var line: Int? {
         switch self {
         case .missingSentinel, .unterminatedDeclaration: return nil
+        case .straySentinel(let line, _): return line
         case .unclassifiableLine(let line, _), .docOutsideStruct(let line),
              .danglingDoc(let line), .varWithoutDoc(let line, _), .doubledDoc(let line),
              .unsupportedType(let line, _), .malformedVar(let line, _),
@@ -81,6 +88,10 @@ public enum SZFactGenFailure: Error, Equatable, CustomStringConvertible {
         switch self {
         case .missingSentinel(let sentinel):
             return "SZFactGen: spec sentinel '\(sentinel)' not found"
+        case .straySentinel(_, let sentinel):
+            return "SZFactGen: '\(sentinel)' appears again after the region closed — the region "
+                + "ends at the FIRST end sentinel, so everything between the two silently left "
+                + "the spec; a file carries exactly one begin/end pair"
         case .unclassifiableLine(_, let text):
             return "SZFactGen: cannot classify this line inside the spec region: '\(text)'"
         case .docOutsideStruct:
@@ -130,6 +141,15 @@ public enum SZFactGen {
         }
         guard let end = lines[(begin + 1)...].firstIndex(where: { $0.trimmed == endSentinel }) else {
             throw SZFactGenFailure.missingSentinel(endSentinel)
+        }
+        // No sentinel may appear again below the region. An exact end-sentinel line INSIDE
+        // the intended region would otherwise truncate it silently — the real end sentinel
+        // reads as a duplicate down here, which is the loud symptom of that mistake.
+        for index in (end + 1)..<lines.count {
+            let trimmed = lines[index].trimmed
+            if trimmed == endSentinel || trimmed == beginSentinel {
+                throw SZFactGenFailure.straySentinel(line: index + 1, sentinel: trimmed)
+            }
         }
         let regionText = lines[begin...end].joined(separator: "\n")
         var tailLines = Array(lines[(end + 1)...])

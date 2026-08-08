@@ -111,6 +111,7 @@ ownership rules, then [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) for the canonic
 ABI, and MCP surface. The rest of `docs/` goes a level deeper on one area each:
 [CORE_LOOP](docs/CORE_LOOP.md), [STATE](docs/STATE.md), [RUNTIME](docs/RUNTIME.md),
 [GRAPH_AND_NODES](docs/GRAPH_AND_NODES.md), [AGENT_ORCHESTRATION](docs/AGENT_ORCHESTRATION.md),
+[AGENT_GRAPHS](docs/AGENT_GRAPHS.md) (with the [AUTHORING](docs/AUTHORING.md) tutorial),
 [AI_PROVIDERS](docs/AI_PROVIDERS.md), [MCP](docs/MCP.md), [NODE_LIBRARY](docs/NODE_LIBRARY.md),
 [UI](docs/UI.md).
 

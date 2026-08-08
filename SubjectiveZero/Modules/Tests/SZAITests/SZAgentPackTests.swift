@@ -178,6 +178,33 @@ private func cleanup(_ root: URL) {
         detail: "declares id 'beta' — the id IS the folder name")])
 }
 
+/// A graph file that will not decode is a defect BESIDE the folder's healthy graphs, never
+/// a reason to drop the pack: the pack keeps its seat, its healthy graphs, and its steps —
+/// and two bad graph files report two defects, not first-error.
+@Test func badGraphFilesReportWhileThePackKeepsItsSeatAndSiblings() throws {
+    var director = directorPack()
+    director.graphs["junk"] = "not json"
+    director.graphs["liar"] = turnGraph(name: "other")   // names itself unlike its file
+    let root = try makeRoot([director, codingPack()])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+
+    // The pack survives with exactly its healthy graphs, and the seat stays filled.
+    let pack = try #require(loaded.packs.first { $0.id == "director-a" })
+    #expect(pack.graphs.map(\.name) == ["run"])
+    #expect(pack.steps == [SZAgentPack.StepFolder(name: "route", hasSource: true)])
+    #expect(loaded.seats == SZSeatAssignment(director: "director-a", coding: "coding-b"))
+
+    // BOTH defects report — one bad graph never hides another.
+    #expect(loaded.defects.count == 2)
+    #expect(loaded.defects.contains { defect in
+        if case .unreadable(let file, _) = defect { return file == "director-a/graphs/junk.json" }
+        return false
+    })
+    #expect(loaded.defects.contains(.misdeclared(file: "director-a/graphs/liar.json",
+        detail: "names itself 'other' — the name IS the filename")))
+}
+
 // MARK: - Validation categories
 
 @Test func graphShapeDefectsAreWrappedWithTheGraphName() async throws {
@@ -480,6 +507,7 @@ private let draftPacksRoot = URL(filePath: #filePath)
 /// these claims, field for field — edit a draft step and both sides move together.
 private let draftPackSteps = StubSteps(infos: [
     "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
+    "director/nodes-failing": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
     "director/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
     "coding/retrying": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "item"),
     "coding/request-op": SZStepDeclarationInfo(outcomes: ["split", "merge"], facts: "request"),
@@ -502,13 +530,13 @@ private let draftPackSteps = StubSteps(infos: [
     #expect(!report.contains("step checks skipped"))
 }
 
-/// The director ships two BUILD variants: `agentic` (the default a plain run opens) and the
-/// turn-less `procedural` — validated above as full graphs, resolved here through the
-/// variant API the host's selection rides on.
+/// The director ships three BUILD variants: `agentic` (the default a plain run opens), the
+/// turn-less `procedural`, and the condition-gated `recovery` — validated above as full
+/// graphs, resolved here through the variant API the host's selection rides on.
 @Test func theShippedDirectorPackCarriesTheBuildVariants() throws {
     let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
     let director = try #require(loaded.packs.first { $0.id == "director" })
-    #expect(director.variants(handling: .build).map(\.name) == ["agentic", "procedural"])
+    #expect(director.variants(handling: .build).map(\.name) == ["agentic", "procedural", "recovery"])
     #expect(director.defaults == [.build: "agentic"])
     #expect(director.graph(handling: .build)?.name == "agentic")
     #expect(director.graph(handling: .build, variant: "procedural")?.name == "procedural")
@@ -517,6 +545,86 @@ private let draftPackSteps = StubSteps(infos: [
     let procedural = try #require(director.graph(handling: .build, variant: "procedural"))
     #expect(!procedural.nodes.contains { if case .turn = $0.form { true } else { false } })
     #expect(procedural.entry[.settled] == nil)
+}
+
+/// The recovery variant: entry — build AND settled — at the `nodes-failing` step, whose
+/// "yes" routes to a reconcile turn and then the dispatch, and whose unwired "no" ends the
+/// run untouched. One recovery round (`caps.rounds: 1`); the pack default stays `agentic`.
+@Test func theShippedRecoveryVariantGatesOnTheFailingFleet() throws {
+    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+    let director = try #require(loaded.packs.first { $0.id == "director" })
+    let recovery = try #require(director.graph(handling: .build, variant: "recovery"))
+    #expect(recovery.caps?.rounds == 1)
+    #expect(recovery.entry[.build] == "nodes-failing")
+    #expect(recovery.entry[.settled] == "nodes-failing")
+    #expect(recovery.node("nodes-failing")?.form == .step(name: "nodes-failing"))
+    #expect(recovery.edge(from: "nodes-failing", outcome: "yes")?.to == "reconcile")
+    #expect(recovery.edge(from: "nodes-failing", outcome: "no") == nil)   // healthy fleet → end
+    #expect(recovery.edge(from: "reconcile", outcome: "ok")?.to == "implement")
+    // A plain delivery still opens agentic — the recovery variant never usurps the default.
+    #expect(director.graph(handling: .build)?.name == "agentic")
+}
+
+/// docs/AUTHORING.md's "Your own pack, from scratch" recipe, followed literally: the exact
+/// six files the tutorial lists must load and validate to ZERO defects through the real
+/// loader. The tutorial was proven by following it; this pin keeps it true — if a loader
+/// rule drifts, this test fails before a reader does. (The recipe has no step nodes, so a
+/// bare stub provider exercises the full validation honestly.)
+@Test func theAuthoringTutorialsMinimalPackValidates() async throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appending(path: "sz-authoring-recipe-\(UUID().uuidString)")
+    defer { cleanup(root) }
+    let files: [String: String] = [
+        "director/agent.json": #"{ "id": "director", "seat": "director" }"#,
+        "director/graphs/build.json": """
+        {
+          "name": "build",
+          "kind": "build",
+          "entry": "plan",
+          "nodes": [
+            { "id": "plan", "turn": { "brief": "prompts/plan.md.mustache" } },
+            { "id": "implement", "dispatch": { "to": "coding", "items": "workSet" } }
+          ],
+          "edges": [ { "from": "plan", "outcome": "ok", "to": "implement" } ]
+        }
+        """,
+        "director/prompts/plan.md.mustache": """
+        Look at the graph and sharpen each unimplemented node's prompt.
+
+        {{graph}}
+
+        {{instruction}}
+        """,
+        "coding/agent.json": #"{ "id": "coding", "seat": "coding" }"#,
+        "coding/graphs/item.json": """
+        {
+          "name": "item",
+          "kind": "item",
+          "entry": "implement",
+          "nodes": [ { "id": "implement", "turn": { "brief": "prompts/implement.md.mustache" } } ],
+          "edges": []
+        }
+        """,
+        "coding/prompts/implement.md.mustache": """
+        Implement node {{node}}: {{prompt}}
+
+        {{boundary}}
+        """,
+    ]
+    for (path, text) in files {
+        let url = root.appending(path: path)
+        try fm.createDirectory(at: url.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    let loaded = SZAgentPackLoader.load(root: root)
+    #expect(loaded.defects.isEmpty, "\(loaded.defects)")
+    #expect(loaded.seats == SZSeatAssignment(director: "director", coding: "coding"))
+    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: StubSteps())
+    #expect(defects.isEmpty, "\(defects)")
+    let report = await SZAgentPackLoader.check(root: root, steps: StubSteps())
+    #expect(report.contains("verdict: validates — 2 agents, zero defects"))
 }
 
 /// The pin stub claims exactly the steps the draft packs carry — a new step folder cannot

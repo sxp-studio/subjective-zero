@@ -1,0 +1,17 @@
+{
+  "name": "recovery",
+  "kind": "build",
+  "label": "Recovery",
+  "hint": "No planning turn: if the fleet is failing, one reconcile turn unblocks the stuck nodes and redispatches the work set; a healthy fleet ends the run untouched.",
+  "caps": { "rounds": 1 },
+  "entry": { "build": "nodes-failing", "settled": "nodes-failing" },
+  "nodes": [
+    { "id": "nodes-failing", "title": "Nodes failing?", "step": "nodes-failing" },
+    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "prompts/reconcile.md.mustache", "session": "message" } },
+    { "id": "implement", "title": "Implement", "dispatch": { "to": "coding", "items": "workSet" } }
+  ],
+  "edges": [
+    { "from": "nodes-failing", "outcome": "yes", "to": "reconcile" },
+    { "from": "reconcile", "outcome": "ok", "to": "implement" }
+  ]
+}
