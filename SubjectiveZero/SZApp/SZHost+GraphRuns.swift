@@ -105,7 +105,7 @@ extension SZHost {
                 SZAgentGraphPlanAgent(
                     id: pack.id,
                     title: pack.id.isEmpty ? pack.id : pack.id.prefix(1).uppercased() + pack.id.dropFirst(),
-                    symbol: Self.agentGraphSymbol(for: pack.seat),
+                    symbol: Self.agentGraphSymbol(for: pack),
                     graphs: pack.graphs.map { .init(name: $0.name, graph: $0) },
                     // The front door each seat mostly exists for: the Director's build
                     // graph, the coding seat's item graph, else whatever comes first.
@@ -126,11 +126,13 @@ extension SZHost {
     }
 
     /// The seats' glyphs — the panel's one display fact the pack file doesn't carry.
-    nonisolated private static func agentGraphSymbol(for seat: SZAgentSeat?) -> String {
-        switch seat {
-        case .director: "person.badge.shield.checkmark"
+    /// The app's established agent glyphs, matched to the chat surface: the Director's
+    /// eyeglasses, the debug agent's ladybug — one identity per agent everywhere it appears.
+    nonisolated private static func agentGraphSymbol(for pack: SZAgentPack) -> String {
+        switch pack.seat {
+        case .director: "eyeglasses"
         case .coding: "hammer"
-        case nil: "person"
+        case nil: pack.id == "debug" ? "ladybug.fill" : "person"
         }
     }
 }
