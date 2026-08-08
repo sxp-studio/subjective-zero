@@ -1,0 +1,25 @@
+<!-- equivalence-class: byte-identical to main @ 75bd1e4; never edit by hand; regen: SZ_WRITE_FIXTURES=Modules/Tests/SZAITests/Fixtures/Equivalence swift test --filter SZPromptEquivalence -->
+<!-- normalized: -p prompt elided (bytes pinned by the coding-*.md fixtures); --session-id/--resume per-process UUIDs replaced by placeholders; project/cache paths are the fixed inputs /sz-equivalence/{project,cache} -->
+claude
+-p
+<prompt — bytes pinned by the coding-*.md fixtures>
+--model
+claude-opus-5
+--effort
+high
+--mcp-config
+{"mcpServers":{"subz":{"command":"/usr/bin/nc","args":["127.0.0.1","42100"]}}}
+--strict-mcp-config
+--setting-sources
+
+--add-dir
+/sz-equivalence/project
+--allowedTools
+Read,Write,Edit,mcp__subz__agent_write_node_staged,mcp__subz__agent_compile_node,mcp__subz__agent_report_status
+--permission-mode
+acceptEdits
+--output-format
+stream-json
+--verbose
+--resume
+<the node's prior session id>
