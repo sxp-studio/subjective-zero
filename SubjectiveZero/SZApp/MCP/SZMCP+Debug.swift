@@ -3,6 +3,7 @@
 // graph, freeze the clock. One extension per surface (BUILD_SPEC.md MCP+*.swift pattern); `agent_*`
 // and `ui_*` live in their own sibling files. (Frame capture is `agent_view_frame` in SZMCP+Agent.swift.)
 import Foundation
+import SZAI
 import SZCore
 
 extension SZHostBridge {
@@ -30,6 +31,8 @@ extension SZHostBridge {
                  ]),
             tool("debug_set_paused", "Freeze or resume the render clock (mirrors the HUD Pause/Play button). `paused:true` freezes time + frame index so successive `agent_view_frame`s render the same instant — the deterministic way to A/B an input (e.g. sweep a slider and compare frames without the camera/animation drifting between captures). `paused:false` resumes. Idempotent; returns the applied `paused`.",
                  properties: ["paused": ["type": "boolean", "description": "true = pause, false = resume"]]),
+            tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, kind handlers, seats, dispatch targets + items facts, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes and facts kind) require compiling every step folder first — a real per-step swiftc cost when wired; this build wires no step provider yet, so those checks report as skipped rather than passed. Omit `path` for the bundled packs (none ship yet).",
+                 properties: ["path": ["type": "string", "description": "absolute path to a pack root (a directory of agent folders)"]]),
         ]
     }
 
@@ -47,6 +50,7 @@ extension SZHostBridge {
         case "debug_set_orchestrator": return try debugSetOrchestrator(arguments)
         case "debug_fail_node_once":   return try debugFailNodeOnce(arguments)
         case "debug_set_paused":       return try debugSetPaused(arguments)
+        case "debug_check_pack":       return debugCheckPack(arguments)
         default: return nil
         }
     }
@@ -60,6 +64,30 @@ extension SZHostBridge {
         }
         if host.isPaused != paused { host.togglePlayback() }
         return SZJSONRPC.encode(["paused": host.isPaused])
+    }
+
+    /// The pack pre-flight, rendered by the same loader path the host will use. The tool
+    /// handler is synchronous, so the loader's async report is awaited on a detached task and
+    /// joined here — file reads only, well within a debug tool's budget.
+    ///
+    /// No step provider is wired yet: the runtime's step compile surface is not public this
+    /// phase, so the report marks step-attached checks skipped. When it opens up, the
+    /// `SZStepProviding` implementation belongs here (compile each `steps/<name>/Step.swift`
+    /// to a temp build dir, load the dylib, read its declaration) and replaces the nil below.
+    private func debugCheckPack(_ arguments: [String: Any]) -> String {
+        guard let path = arguments.string("path") else {
+            return "no bundled packs yet — pass `path` to a pack root (a directory of agent folders)"
+        }
+        let root = URL(filePath: path)
+        final class Box: @unchecked Sendable { var report = "" }
+        let box = Box()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            box.report = await SZAgentPackLoader.check(root: root, steps: nil)
+            done.signal()
+        }
+        done.wait()
+        return box.report
     }
 
     private func debugFailNodeOnce(_ arguments: [String: Any]) throws -> String {
