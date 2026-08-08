@@ -21,7 +21,10 @@
 import Foundation
 
 /// dylib → host, once per evaluation: `(completionCtx, status, payloadUTF8, payloadLen)`.
-/// status 0 = ok (payload is the outcome string), 1 = cancelled (payload empty),
+/// status 0 = ok (payload is the outcome string — or, when the step requested effects, the
+/// `{"effects": […], "outcome": "…"}` JSON envelope; an additive payload convention, not an
+/// ABI change: the loader relays the string either way and the host adapter splits it),
+/// 1 = cancelled (payload empty),
 /// 2 = failed (payload is a human-readable reason). The payload pointer is owned by the
 /// dylib and valid only inside the callback frame — the host copies. May fire on any thread,
 /// possibly before `SZStepEvaluate` returns.

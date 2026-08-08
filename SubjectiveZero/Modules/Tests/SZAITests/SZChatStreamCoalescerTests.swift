@@ -59,7 +59,14 @@ struct SZChatStreamCoalescerTests {
         coalescer.addReply("opening")           // immediate (backdated first flush)
         coalescer.addReply(" tail")             // buffered; trailing flush armed
         #expect(sink.reply == "opening")
-        try await Task.sleep(for: .milliseconds(200))
+        // Poll to a generous deadline rather than one fixed sleep: under a loaded machine
+        // (parallel suites driving real swiftc) the 20ms trailing task can be scheduled
+        // late, and the assertion is "it paints without finish()", not "it paints fast".
+        let clock = ContinuousClock()
+        let start = clock.now
+        while sink.reply != "opening tail", clock.now - start < .seconds(10) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(sink.reply == "opening tail")   // painted by the trailing flush, no finish() needed
     }
 

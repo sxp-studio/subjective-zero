@@ -25,17 +25,6 @@ final class SZGraphRunSessions {
     func session(for node: SZNodeID) -> String? { byNode[node] }
 }
 
-/// `askModel` has no provider wiring yet — the steps this phase ships are pure conditions that
-/// never ask, so an ask reaching a host is a defect and must read honestly in the trace.
-struct SZAskUnwiredError: Error, CustomStringConvertible {
-    let agent: String
-    let step: String
-    var description: String {
-        "askModel is not wired to a provider yet — this phase ships condition steps only "
-            + "(step '\(step)' of '\(agent)' asked)"
-    }
-}
-
 /// Deterministic facts bytes: `.sortedKeys`, so the same world always projects the same
 /// document (steps and briefs must never see hash-order jitter).
 enum SZGraphFactsEncoding {
@@ -62,15 +51,20 @@ final class SZDirectorTraversalHost: SZTraversalHost {
     private let context: SZOrchestrationContext
     private let renderer: SZBriefRenderer
     private let roundCap: Int
+    private let graphName: String
+    private let queries: SZQueryService
     private let onNote: @MainActor @Sendable (SZTraversalNote) -> Void
     private var round = 0
     private var steers: [String] = []
 
     init(context: SZOrchestrationContext, renderer: SZBriefRenderer, roundCap: Int,
+         graphName: String, queries: SZQueryService,
          onNote: @escaping @MainActor @Sendable (SZTraversalNote) -> Void) {
         self.context = context
         self.renderer = renderer
         self.roundCap = roundCap
+        self.graphName = graphName
+        self.queries = queries
         self.onNote = onNote
     }
 
@@ -123,8 +117,16 @@ final class SZDirectorTraversalHost: SZTraversalHost {
         }
     }
 
-    func serveAsk(agent: String, step: String, requestJSON: String) async throws -> String {
-        throw SZAskUnwiredError(agent: agent, step: step)
+    /// One step ask, served through the query service (render → route → complete → journal).
+    func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
+                  requestJSON: String) async throws -> String {
+        try await queries.serve(agent: agent, graph: graphName, step: step, kind: kind,
+                                factsJSON: factsJSON, requestJSON: requestJSON)
+    }
+
+    /// One validated step effect, relayed to the host's lane.
+    func perform(effect: String, kind: SZMessageKind) async {
+        await context.performEffect(effect, kind)
     }
 
     func note(_ note: SZTraversalNote) { onNote(note) }
@@ -187,10 +189,13 @@ final class SZItemTraversalHost: SZTraversalHost {
     private let nodeID: SZNodeID
     private let sessions: SZGraphRunSessions
     private let registry: SZProviderRegistry
+    private let graphName: String
+    private let queries: SZQueryService
     private let onNote: @MainActor @Sendable (SZTraversalNote) -> Void
 
     init(context: SZOrchestrationContext, renderer: SZBriefRenderer, order: SZDispatchOrder,
          nodeID: SZNodeID, sessions: SZGraphRunSessions, registry: SZProviderRegistry,
+         graphName: String, queries: SZQueryService,
          onNote: @escaping @MainActor @Sendable (SZTraversalNote) -> Void) {
         self.context = context
         self.renderer = renderer
@@ -198,6 +203,8 @@ final class SZItemTraversalHost: SZTraversalHost {
         self.nodeID = nodeID
         self.sessions = sessions
         self.registry = registry
+        self.graphName = graphName
+        self.queries = queries
         self.onNote = onNote
     }
 
@@ -282,8 +289,16 @@ final class SZItemTraversalHost: SZTraversalHost {
         }
     }
 
-    func serveAsk(agent: String, step: String, requestJSON: String) async throws -> String {
-        throw SZAskUnwiredError(agent: agent, step: step)
+    /// One step ask, served through the query service (render → route → complete → journal).
+    func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
+                  requestJSON: String) async throws -> String {
+        try await queries.serve(agent: agent, graph: graphName, step: step, kind: kind,
+                                factsJSON: factsJSON, requestJSON: requestJSON)
+    }
+
+    /// One validated step effect, relayed to the host's lane.
+    func perform(effect: String, kind: SZMessageKind) async {
+        await context.performEffect(effect, kind)
     }
 
     func note(_ note: SZTraversalNote) { onNote(note) }

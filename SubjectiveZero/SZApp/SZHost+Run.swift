@@ -334,7 +334,32 @@ extension SZHost {
             // whole context, which costs more than the payload. `SZ_BRIEF_PREFETCH=0` reverts to
             // the call-the-tool framing without a build.
             libraryIndexText: ProcessInfo.processInfo.environment["SZ_BRIEF_PREFETCH"] == "0"
-                ? nil : SZHostBridge.libraryCategoriesBlock())
+                ? nil : SZHostBridge.libraryCategoriesBlock(),
+            // Step-requested effects land on the host's own lane switch. (`queryExecutor`
+            // stays nil: production asks run the routed provider through the query
+            // service's own path.)
+            performEffect: { [weak self] effect, kind in
+                await self?.perform(effect: effect, kind: kind)
+            })
+    }
+
+    /// One step-requested EFFECT, landed on its host lane. Called through the engine's
+    /// perform seam — after the step returned, before edge routing, the name already
+    /// validated against the kind's effect set.
+    func perform(effect: String, kind: SZMessageKind) async {
+        if effect == SZChatEffect.requestBuild.rawValue {
+            // The same entry `ui_run` uses, minus the double-run ambition: a run already
+            // in flight makes a second start a skip worth one honest line, not a queue.
+            if isRunning {
+                narrateDirector("Effect 'requestBuild' skipped — a run is already active.")
+            } else {
+                startRun()
+            }
+            return
+        }
+        // captureStatuses / split / merge: their lanes aren't graph-routed yet — say so
+        // rather than swallow the request.
+        status = "effect '\(effect)' lands with its lane"
     }
 
     /// Start a Director run over the current graph with the active provider (the `ui_run` entry point).

@@ -17,6 +17,12 @@ private final class StubHost: SZTraversalHost {
     var turnsSeen: [SZTurnOrder] = []
     var notes: [SZTraversalNote] = []
     var briefPrefix = "rendered:"
+    var askReply = "scripted-reply"
+    var asksSeen: [(step: String, kind: SZMessageKind, facts: String, request: String)] = []
+    var performed: [(effect: String, kind: SZMessageKind)] = []
+    /// Everything the host was asked to DO, in arrival order — what pins effects-before-
+    /// edge-routing (a perform must land before the next node's turn).
+    var events: [String] = []
 
     func factsJSON(kind: SZMessageKind) -> String { facts }
     func itemsFact(named name: String, kind: SZMessageKind) -> [String] { items }
@@ -25,20 +31,49 @@ private final class StubHost: SZTraversalHost {
     }
     func runTurn(_ order: SZTurnOrder) async -> SZTurnReport {
         turnsSeen.append(order)
+        events.append("turn:\(order.brief)")
         return turnReports.isEmpty ? SZTurnReport(failed: false) : turnReports.removeFirst()
     }
-    func serveAsk(agent: String, step: String, requestJSON: String) async throws -> String {
-        throw CancellationError()
+    func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
+                  requestJSON: String) async throws -> String {
+        asksSeen.append((step, kind, factsJSON, requestJSON))
+        return askReply
+    }
+    func perform(effect: String, kind: SZMessageKind) async {
+        performed.append((effect, kind))
+        events.append("perform:\(effect)")
     }
     func note(_ note: SZTraversalNote) { notes.append(note) }
 }
 
-/// Scripted step answers, keyed by step name; missing key = a failure report.
+/// Scripted step answers, keyed by step name; missing key = a failure report. A step whose
+/// key maps to `.ask` invokes the engine-provided ask closure and answers with its reply.
 private struct StubSteps: SZStepRunning {
-    let answers: [String: SZStepReport]
+    enum Script: Sendable {
+        case report(SZStepReport)
+        /// Call the ask closure with `request` and answer with whatever comes back.
+        case ask(request: String)
+    }
+
+    let scripts: [String: Script]
+
+    init(answers: [String: SZStepReport]) {
+        scripts = answers.mapValues { .report($0) }
+    }
+
+    init(scripts: [String: Script]) {
+        self.scripts = scripts
+    }
+
     func evaluate(agent: String, step: String, factsJSON: String,
                   ask: @escaping @Sendable (String) async throws -> String) async -> SZStepReport {
-        answers[step] ?? SZStepReport(failure: "no scripted answer for \(step)")
+        switch scripts[step] {
+        case .report(let report): return report
+        case .ask(let request):
+            do { return SZStepReport(outcome: try await ask(request)) }
+            catch { return SZStepReport(failure: String(describing: error)) }
+        case nil: return SZStepReport(failure: "no scripted answer for \(step)")
+        }
     }
 }
 
@@ -243,7 +278,9 @@ struct SZGraphEngineTests {
             func itemsFact(named name: String, kind: SZMessageKind) -> [String] { [] }
             func renderBrief(agent: String, template: String, kind: SZMessageKind) throws -> String { throw Broken() }
             func runTurn(_ order: SZTurnOrder) async -> SZTurnReport { SZTurnReport(failed: false) }
-            func serveAsk(agent: String, step: String, requestJSON: String) async throws -> String { throw CancellationError() }
+            func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
+                          requestJSON: String) async throws -> String { throw CancellationError() }
+            func perform(effect: String, kind: SZMessageKind) async {}
             func note(_ note: SZTraversalNote) {}
         }
         let engine = SZGraphEngine(agent: "director", graph: makeBuildGraph(),
@@ -256,6 +293,82 @@ struct SZGraphEngineTests {
         }
         #expect(node == "plan")
         #expect(detail.contains("decompose.md.mustache"))
+    }
+
+    @Test func anAskingStepGetsTheGraphKindAndThePinnedFacts() async throws {
+        let host = StubHost()
+        host.askReply = "yes"
+        // Entered as `.settled`, the ask still carries the GRAPH's own kind (build) and the
+        // exact facts bytes the evaluation was handed — the pinned-snapshot contract.
+        let engine = makeEngine(host: host,
+                                steps: StubSteps(scripts: ["work-left": .ask(request: #"{"template": "classify"}"#)]))
+        let result = await engine.run(kind: .settled)
+        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
+        #expect(host.asksSeen.count == 1)
+        let ask = try #require(host.asksSeen.first)
+        #expect(ask.step == "work-left")
+        #expect(ask.kind == .build)
+        #expect(ask.facts == host.facts)
+        #expect(ask.request == #"{"template": "classify"}"#)
+    }
+
+    @Test func stepEffectsPerformBeforeEdgeRouting() async throws {
+        var graph = makeBuildGraph()
+        // Route the effect-emitting step onward to a TURN, so the order pin has an
+        // observable "next node" to land after.
+        graph.nodes.append(.init(id: "gate", form: .step(name: "gate")))
+        graph.entry[.build] = "gate"
+        graph.edges.append(.init(from: "gate", outcome: "go", to: "plan"))
+        let host = StubHost()
+        host.items = ["node-a"]
+        let engine = makeEngine(
+            graph: graph,
+            attachments: workLeftAttachment.merging(["gate": SZStepAttachment(outcomes: ["go"])]) { a, _ in a },
+            host: host,
+            steps: StubSteps(scripts: [
+                "gate": .report(SZStepReport(outcome: "go", effects: ["captureStatuses"])),
+                "work-left": .report(SZStepReport(outcome: "yes")),
+            ]))
+        let result = await engine.run(kind: .build)
+        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
+        #expect(host.performed.map(\.effect) == ["captureStatuses"])
+        #expect(host.performed.first?.kind == .build)
+        // The pinned order: the effect performed BEFORE anything routed onward ran.
+        #expect(host.events == ["perform:captureStatuses", "turn:rendered:prompts/decompose.md.mustache"])
+    }
+
+    @Test func anUnknownEffectIsADefectNamingItAndNothingPerforms() async throws {
+        let host = StubHost()
+        let engine = makeEngine(host: host,
+                                steps: StubSteps(scripts: [
+                                    "work-left": .report(SZStepReport(outcome: "yes", effects: ["explode"])),
+                                ]))
+        let result = await engine.run(kind: .settled)
+        guard case .defect(let node, let detail) = result.conclusion else {
+            Issue.record("expected a defect, got \(result.conclusion)")
+            return
+        }
+        #expect(node == "work-left")
+        #expect(detail.contains("explode"))
+        #expect(host.performed.isEmpty)
+    }
+
+    @Test func anEffectFromAnotherKindsSetIsADefect() async throws {
+        // `requestBuild` is a CHAT effect — declared, but not in the build kind's set, so a
+        // build-graph step requesting it is a defect, not a perform.
+        let host = StubHost()
+        let engine = makeEngine(host: host,
+                                steps: StubSteps(scripts: [
+                                    "work-left": .report(SZStepReport(outcome: "yes", effects: ["requestBuild"])),
+                                ]))
+        let result = await engine.run(kind: .settled)
+        guard case .defect(_, let detail) = result.conclusion else {
+            Issue.record("expected a defect, got \(result.conclusion)")
+            return
+        }
+        #expect(detail.contains("requestBuild"))
+        #expect(detail.contains("build"))
+        #expect(host.performed.isEmpty)
     }
 
     @Test func cancellationAtANodeBoundaryConcludesCancelled() async throws {

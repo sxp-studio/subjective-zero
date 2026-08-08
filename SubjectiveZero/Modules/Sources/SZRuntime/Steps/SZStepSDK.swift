@@ -249,18 +249,45 @@ enum SZStepSDK {
         }
     }
 
+    /// A step's full answer: the outcome the graph routes on, plus EFFECTS — named host
+    /// actions the step requests. The host runs them AFTER the step returns and BEFORE edge
+    /// routing; an effect outside the kind's declared set is a traversal defect. A bare
+    /// string is a plain effect-less outcome, so today's spellings need no ceremony.
+    public struct SZAnswer: Sendable, ExpressibleByStringLiteral {
+        public var outcome: String
+        public var effects: [String]
+
+        public init(outcome: String, effects: [String] = []) {
+            self.outcome = outcome
+            self.effects = effects
+        }
+
+        public init(stringLiteral value: String) { self.init(outcome: value) }
+
+        /// The spelled-out factory: `return .outcome("build", effects: ["requestBuild"])`.
+        public static func outcome(_ outcome: String, effects: [String] = []) -> SZAnswer {
+            SZAnswer(outcome: outcome, effects: effects)
+        }
+    }
+
     /// The step contract: one kind's facts in, one declared outcome out. A body may
     /// `await` — and may `askModel` — but it cannot mutate the host; anything it wants
-    /// done travels back as its outcome.
+    /// done travels back as its outcome (and, for a host action, as a requested effect).
     public protocol SZStep: Sendable {
         associatedtype Facts: SZFactsKind
         var declaration: SZStepDeclaration { get }
         func evaluate(_ ctx: SZContext<Facts>) async throws -> String
+        /// The full answer, effects included. Defaulted onto `evaluate`, so a plain step
+        /// never spells it; `SZRouter` forwards its closure's whole answer through here.
+        func answer(_ ctx: SZContext<Facts>) async throws -> SZAnswer
         func teardown()
     }
     public extension SZStep {
         func teardown() {}
         var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: [], facts: Facts.kindName) }
+        func answer(_ ctx: SZContext<Facts>) async throws -> SZAnswer {
+            SZAnswer(outcome: try await evaluate(ctx))
+        }
     }
 
     /// A yes/no question — the ordinary step, still one line, typed to its kind:
@@ -283,13 +310,28 @@ enum SZStepSDK {
     ///     }
     public struct SZRouter<Facts: SZFactsKind>: SZStep {
         let outcomes: [String]
-        let body: @Sendable (SZContext<Facts>) async throws -> String
+        let body: @Sendable (SZContext<Facts>) async throws -> SZAnswer
         public init(_ outcomes: String..., answer: @escaping @Sendable (SZContext<Facts>) async throws -> String) {
+            self.outcomes = outcomes
+            self.body = { SZAnswer(outcome: try await answer($0)) }
+        }
+        /// The effect-emitting spelling, still one line:
+        ///
+        ///     let step = SZChatRouter("answer", "build") { _ in
+        ///         .outcome("build", effects: ["requestBuild"])
+        ///     }
+        ///
+        /// Disfavored so a body that answers plain strings keeps resolving to the String
+        /// overload (bit-stable wire for every existing step); this one wins exactly when
+        /// the body actually speaks `SZAnswer`.
+        @_disfavoredOverload
+        public init(_ outcomes: String..., answer: @escaping @Sendable (SZContext<Facts>) async throws -> SZAnswer) {
             self.outcomes = outcomes
             self.body = answer
         }
         public var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: outcomes, facts: Facts.kindName) }
-        public func evaluate(_ ctx: SZContext<Facts>) async throws -> String { try await body(ctx) }
+        public func evaluate(_ ctx: SZContext<Facts>) async throws -> String { try await body(ctx).outcome }
+        public func answer(_ ctx: SZContext<Facts>) async throws -> SZAnswer { try await body(ctx) }
     }
 
     /// One spelling per kind — the graph kind is part of the step's name, nothing else.
@@ -331,6 +373,24 @@ enum SZStepSDK {
         payload.withCString { done(ctx, status, $0, Int32(payload.utf8.count)) }
     }
 
+    /// The success payload on the wire, ADDITIVE by construction: an effect-less answer is
+    /// the bare outcome string exactly as it always was; only an answer carrying effects
+    /// rides the JSON envelope (which no bare outcome can be mistaken for — outcomes are
+    /// names, not JSON objects).
+    private func szWirePayload(_ answer: SZAnswer) -> String {
+        guard !answer.effects.isEmpty else { return answer.outcome }
+        struct Envelope: Encodable {
+            var outcome: String
+            var effects: [String]
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(Envelope(outcome: answer.outcome, effects: answer.effects)) else {
+            return answer.outcome
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     /// Generic over the authored step's kind, so the facts document decodes into exactly
     /// the struct the body was compiled against — an off-kind document fails to start.
     private func szStartEvaluation<S: SZStep>(_ authored: S, _ request: SZStepEvalRequestRaw,
@@ -345,7 +405,7 @@ enum SZStepSDK {
         let task = Task {
             var status: Int32 = 0
             var payload = ""
-            do { payload = try await authored.evaluate(ctx) }
+            do { payload = szWirePayload(try await authored.answer(ctx)) }
             catch is CancellationError { status = 1 }
             catch { status = 2; payload = String(describing: error) }
             // The table entry dies BEFORE the completion: once done() fires the host may

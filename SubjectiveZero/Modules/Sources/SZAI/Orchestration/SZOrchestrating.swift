@@ -99,6 +99,16 @@ public struct SZOrchestrationContext {
     /// both payloads. nil (the default; tests, or the host's env override) keeps the
     /// call-the-tool framing.
     public let libraryIndexText: String?
+    /// Serve one step-query completion (the assembled request + the routed provider → the
+    /// raw reply text). nil — the default, and production's — lets the query service run
+    /// the provider directly through `runner`; tests script this seam to answer asks
+    /// without a CLI.
+    public let queryExecutor: SZQueryExecutor?
+    /// Perform one step-requested EFFECT (`"requestBuild"`, …). The host owns each lane;
+    /// the engine decides when — after the step returns, before edge routing, names
+    /// already validated against the kind's effect set. Default no-op (tests observe
+    /// through their stub hosts instead).
+    public let performEffect: @MainActor @Sendable (String, SZMessageKind) async -> Void
 
     public init(
         providerID: String,
@@ -119,7 +129,9 @@ public struct SZOrchestrationContext {
         takeDirectorInbox: @escaping @MainActor @Sendable () -> [String] = { [] },
         workSet: @escaping @MainActor @Sendable () -> Set<SZNodeID>? = { nil },
         stagedPieces: @escaping @MainActor @Sendable () -> Set<SZNodeID> = { [] },
-        libraryIndexText: String? = nil
+        libraryIndexText: String? = nil,
+        queryExecutor: SZQueryExecutor? = nil,
+        performEffect: @escaping @MainActor @Sendable (String, SZMessageKind) async -> Void = { _, _ in }
     ) {
         self.providerID = providerID
         self.generationSettings = generationSettings
@@ -140,6 +152,8 @@ public struct SZOrchestrationContext {
         self.workSet = workSet
         self.stagedPieces = stagedPieces
         self.libraryIndexText = libraryIndexText
+        self.queryExecutor = queryExecutor
+        self.performEffect = performEffect
     }
 }
 
