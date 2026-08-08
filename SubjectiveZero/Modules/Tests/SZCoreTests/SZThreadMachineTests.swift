@@ -335,7 +335,7 @@ private func settledSummary(in commands: [SZThreadMachine.Command]) -> SZSettled
 /// outstanding IS the ending — mapped from the traversal's own conclusion, with a refusal
 /// kept as its own class (never a failure, never "complete").
 @Test func aTraversalConcludingWithNoOrdersEndsTheThreadStructurally() {
-    let mappings: [(SZTraversalConclusion, SZThreadConclusion)] = [
+    let mappings: [(SZTraversalEnding, SZThreadConclusion)] = [
         (.ended, .ended),
         (.declined(reason: "nothing to build"), .declined(reason: "nothing to build")),
         (.failed(reason: "step threw"), .failed(reason: "step threw")),

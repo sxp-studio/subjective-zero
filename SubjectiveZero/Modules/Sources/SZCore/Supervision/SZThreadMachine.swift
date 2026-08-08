@@ -77,7 +77,7 @@ public struct SZSettledSummary: Sendable, Equatable {
 
 /// How one graph traversal ended, as the motor reports it — the machine's own dumb
 /// vocabulary; the engine's conclusion type adapts to this at the host seam.
-public enum SZTraversalConclusion: Sendable, Equatable {
+public enum SZTraversalEnding: Sendable, Equatable {
     case ended
     case failed(reason: String)
     case cancelled
@@ -146,7 +146,7 @@ public struct SZThreadMachine: Sendable {
         /// The in-flight traversal ended, with the dispatch its graph decided on
         /// (nil or empty items = none). Send-and-conclude: orders arrive WITH the
         /// conclusion, which is what makes one-set-at-a-time structural.
-        case traversalConcluded(SZTraversalConclusion, dispatch: SZDispatchIntent?)
+        case traversalConcluded(SZTraversalEnding, dispatch: SZDispatchIntent?)
         /// One item's work actually began (its member traversal opened).
         case itemDelivered(node: String, setID: Int)
         /// One item's terminal outcome, keyed to ITS OWN set — never matched by node
@@ -202,7 +202,7 @@ public struct SZThreadMachine: Sendable {
     private var maxRounds = 0
     private var handlesSettled = true
     /// The last traversal's conclusion — what a retry-less thread's ending maps from.
-    private var lastConclusion: SZTraversalConclusion?
+    private var lastConclusion: SZTraversalEnding?
     private var openSet: DispatchSet?
     private var nextSetID = 1
     private var pendingSteers: [String] = []
@@ -373,7 +373,7 @@ public struct SZThreadMachine: Sendable {
                     failed: set.outcomes.values.count { !$0.hasPrefix("ok") })
     }
 
-    private func threadEnding(of conclusion: SZTraversalConclusion) -> SZThreadConclusion {
+    private func threadEnding(of conclusion: SZTraversalEnding) -> SZThreadConclusion {
         switch conclusion {
         case .ended: .ended
         case .failed(let reason): .failed(reason: reason)
