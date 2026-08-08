@@ -41,6 +41,16 @@ struct SZAgentGraphTests {
         #expect(decoded == graph)
     }
 
+    @Test func anOmittedSessionMeansSpawn() throws {
+        let json = #"{"name": "x", "kind": "build", "entry": "a", "nodes": [{"id": "a", "turn": {"brief": "b.md.mustache"}}]}"#
+        let graph = try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
+        guard case .turn(let turn) = graph.nodes[0].form else {
+            Issue.record("expected a turn node")
+            return
+        }
+        #expect(turn.session == .spawn)
+    }
+
     @Test func bareEntryStringMeansTheGraphsOwnKind() throws {
         let json = #"{"name": "chat", "kind": "chat", "entry": "reply", "nodes": [{"id": "reply", "turn": {"brief": "prompts/chat.md.mustache", "session": "message"}}]}"#
         let graph = try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))

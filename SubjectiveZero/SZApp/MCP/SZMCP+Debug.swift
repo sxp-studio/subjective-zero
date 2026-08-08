@@ -5,6 +5,8 @@
 import Foundation
 import SZAI
 import SZCore
+import SZRuntime
+import Synchronization
 
 extension SZHostBridge {
     nonisolated static var debugToolDefinitions: [[String: Any]] {
@@ -31,7 +33,7 @@ extension SZHostBridge {
                  ]),
             tool("debug_set_paused", "Freeze or resume the render clock (mirrors the HUD Pause/Play button). `paused:true` freezes time + frame index so successive `agent_view_frame`s render the same instant — the deterministic way to A/B an input (e.g. sweep a slider and compare frames without the camera/animation drifting between captures). `paused:false` resumes. Idempotent; returns the applied `paused`.",
                  properties: ["paused": ["type": "boolean", "description": "true = pause, false = resume"]]),
-            tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, kind handlers, seats, dispatch targets + items facts, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes and facts kind) require compiling every step folder first — a real per-step swiftc cost when wired; this build wires no step provider yet, so those checks report as skipped rather than passed. Omit `path` for the bundled packs (none ship yet).",
+            tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, kind handlers, seats, dispatch targets + items facts, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes and facts kind) compile every step folder through the real toolchain first — expect seconds, not milliseconds, on a pack with steps. Omit `path` for the bundled packs (none ship yet).",
                  properties: ["path": ["type": "string", "description": "absolute path to a pack root (a directory of agent folders)"]]),
         ]
     }
@@ -68,12 +70,8 @@ extension SZHostBridge {
 
     /// The pack pre-flight, rendered by the same loader path the host will use. The tool
     /// handler is synchronous, so the loader's async report is awaited on a detached task and
-    /// joined here — file reads only, well within a debug tool's budget.
-    ///
-    /// No step provider is wired yet: the runtime's step compile surface is not public this
-    /// phase, so the report marks step-attached checks skipped. When it opens up, the
-    /// `SZStepProviding` implementation belongs here (compile each `steps/<name>/Step.swift`
-    /// to a temp build dir, load the dylib, read its declaration) and replaces the nil below.
+    /// joined here. Step-attached checks compile every step folder through the real runtime
+    /// (one swiftc each) — a check with steps is seconds, not milliseconds, and honestly so.
     private func debugCheckPack(_ arguments: [String: Any]) -> String {
         guard let path = arguments.string("path") else {
             return "no bundled packs yet — pass `path` to a pack root (a directory of agent folders)"
@@ -83,11 +81,36 @@ extension SZHostBridge {
         let box = Box()
         let done = DispatchSemaphore(value: 0)
         Task.detached {
-            box.report = await SZAgentPackLoader.check(root: root, steps: nil)
+            box.report = await SZAgentPackLoader.check(root: root, steps: SZPackStepProvider(root: root))
             done.signal()
         }
         done.wait()
         return box.report
+    }
+
+    /// The check tool's step seam: each step folder compiles through the real toolchain —
+    /// the same swiftc → codesign → dlopen → declaration read launch will use — into
+    /// throwaway build dirs, entirely OFF the main actor (the tool handler blocks the
+    /// bridge thread while waiting, so nothing here may hop to it). nil = no `Step.swift`
+    /// or a step that declares nothing; throw = the compile went red, with the compiler's
+    /// message as the defect detail.
+    private struct SZPackStepProvider: SZStepProviding {
+        let root: URL
+
+        func declaration(agent: String, step: String) async throws -> SZStepDeclarationInfo? {
+            let source = root.appending(path: "\(agent)/steps/\(step)/Step.swift")
+            guard FileManager.default.fileExists(atPath: source.path) else { return nil }
+            let scratch = FileManager.default.temporaryDirectory
+                .appending(path: "sz-check-pack-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: scratch) }
+
+            let dylib = try SZToolchain().compile(stepSource: source,
+                                                  into: scratch.appending(path: "build"))
+            let loader = SZStepLoader()
+            try loader.load(dylib: dylib, runtimeLoadsDir: scratch.appending(path: "runtime-loads"))
+            guard let json = loader.declaration else { return nil }
+            return try JSONDecoder().decode(SZStepDeclarationInfo.self, from: Data(json.utf8))
+        }
     }
 
     private func debugFailNodeOnce(_ arguments: [String: Any]) throws -> String {

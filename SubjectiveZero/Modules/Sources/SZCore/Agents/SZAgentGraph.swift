@@ -64,6 +64,13 @@ public struct SZAgentGraph: Sendable, Equatable {
             self.session = session
             self.tools = tools
         }
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            brief = try container.decode(String.self, forKey: .brief)
+            // An omitted session means spawn — the wire default matches the init's.
+            session = try container.decodeIfPresent(Session.self, forKey: .session) ?? .spawn
+            tools = try container.decodeIfPresent([String].self, forKey: .tools)
+        }
         public enum Session: String, Codable, Sendable {
             /// Fresh conversation — the brief re-renders the world every time.
             case spawn

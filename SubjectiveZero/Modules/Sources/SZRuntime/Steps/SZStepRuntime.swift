@@ -202,6 +202,15 @@ public final class SZStepRuntime {
         entries[key]?.loader.declaration
     }
 
+    /// The declaration for `key`, awaiting any in-flight compile first — the pack gate's
+    /// read: schedule a step's source, then ask; the answer must never race the build.
+    public func declarationAwaitingCompile(key: SZStepKey) async -> String? {
+        while let inFlight = entries[key]?.compileTask {
+            await inFlight.value
+        }
+        return declaration(key: key)
+    }
+
     public func isLoaded(key: SZStepKey) -> Bool {
         entries[key]?.loader.isLoaded == true
     }

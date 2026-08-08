@@ -12,7 +12,9 @@
 // fine for the current graph sizes).
 import Foundation
 
-struct SZToolchain {
+public struct SZToolchain {
+    public init() {}
+
     enum CompileError: Error, CustomStringConvertible {
         case sdkNotFound(log: String)
         case compileFailed(log: String)
@@ -36,7 +38,7 @@ struct SZToolchain {
 
     /// Compile a decision step's `Step.swift` into `Step.dylib` — same pipeline, the step
     /// SDK as the support blob, its own module prefix.
-    func compile(stepSource: URL, into buildDir: URL) throws -> URL {
+    public func compile(stepSource: URL, into buildDir: URL) throws -> URL {
         try compile(source: stepSource, into: buildDir,
                     supportFileName: SZStepSDK.fileName, supportSource: SZStepSDK.source,
                     modulePrefix: "SZStep_", product: "Step.dylib")
