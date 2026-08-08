@@ -77,7 +77,9 @@ struct SZStepEvalRequestRaw {
     /// The kind-gated facts document, UTF-8 JSON. Copied by the SDK during the call.
     var factsJSON: UnsafePointer<CChar>?
     var factsLen: Int32 = 0
-    /// Opaque host-side evaluation state; retained by the host until the completion fires.
+    /// Opaque host-side evaluation identity, passed back verbatim on every ask. (Host-side
+    /// it is a registry ID, never a live pointer — a stray ask after settle must be
+    /// rejectable, not a memory hazard.)
     var hostContext: UnsafeMutableRawPointer?
     /// The one outbound capability. nil ⇒ `askModel` throws `.modelUnavailable`.
     var askFn: SZStepAskFn?

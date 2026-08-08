@@ -127,7 +127,7 @@ enum SZStepSDK {
                 box.continuation = continuation
                 let boxPtr = Unmanaged.passRetained(box).toOpaque()
                 let callID = json.withCString { bytes in
-                    askFn(host, bytes, Int32(json.utf8.count), szReplyTrampoline, boxPtr)
+                    askFn(host, bytes, Int32(json.utf8.count), szReplyRelay, boxPtr)
                 }
                 if callID == 0 {
                     // Rejected: the reply will never fire; release our retain and settle.
@@ -150,32 +150,63 @@ enum SZStepSDK {
         public var previousReply: String
     }
 
-    /// Tolerant decoding for CLI-shaped replies: try the bytes as-is, then the first
-    /// balanced JSON object/array inside them (fences, preambles, trailing prose).
+    /// Tolerant decoding for CLI-shaped replies: try the bytes as-is, then every balanced
+    /// JSON object/array inside them (fences, preambles, trailing prose), string-literal
+    /// aware — a brace inside a quoted value neither closes nor opens anything. A candidate
+    /// that fails keeps the scan moving to the next opener: models love restating the
+    /// requested format ("answer in the form {json}") before the real answer.
     enum SZJSONExtract {
         static func decode<T: Decodable>(_ type: T.Type, from reply: String) throws -> T {
             let decoder = JSONDecoder()
-            if let direct = try? decoder.decode(type, from: Data(reply.utf8)) { return direct }
-            for opener: Character in ["{", "["] {
-                let closer: Character = opener == "{" ? "}" : "]"
-                guard let start = reply.firstIndex(of: opener) else { continue }
-                var depth = 0
-                var index = start
-                while index < reply.endIndex {
-                    let ch = reply[index]
-                    if ch == opener { depth += 1 }
-                    if ch == closer {
-                        depth -= 1
-                        if depth == 0 {
-                            let slice = reply[start...index]
-                            if let found = try? decoder.decode(type, from: Data(slice.utf8)) { return found }
-                            break
+            let whole = try? decoder.decode(type, from: Data(reply.utf8))
+            if let whole { return whole }
+            var bestError: Error?
+            var searchStart = reply.startIndex
+            while let start = reply[searchStart...].firstIndex(where: { $0 == "{" || $0 == "[" }) {
+                if let end = balancedEnd(in: reply, from: start) {
+                    let slice = Data(reply[start...end].utf8)
+                    do { return try decoder.decode(type, from: slice) }
+                    catch {
+                        // A slice that PARSED as JSON but mismatched the shape is the useful
+                        // diagnosis — prefer it over any prose-level parse error.
+                        if bestError == nil,
+                           (try? JSONSerialization.jsonObject(with: slice, options: [.fragmentsAllowed])) != nil {
+                            bestError = error
                         }
                     }
-                    index = reply.index(after: index)
                 }
+                searchStart = reply.index(after: start)
             }
+            if let bestError { throw bestError }
             return try decoder.decode(type, from: Data(reply.utf8))   // throw the real error
+        }
+
+        /// The index of the closer balancing the opener at `start`, skipping string
+        /// literals (with escape handling). nil if the reply never balances.
+        static func balancedEnd(in reply: String, from start: String.Index) -> String.Index? {
+            let opener = reply[start]
+            let closer: Character = opener == "{" ? "}" : "]"
+            var depth = 0
+            var inString = false
+            var escaped = false
+            var index = start
+            while index < reply.endIndex {
+                let ch = reply[index]
+                if inString {
+                    if escaped { escaped = false }
+                    else if ch == "\\\\" { escaped = true }
+                    else if ch == "\\"" { inString = false }
+                } else if ch == "\\"" {
+                    inString = true
+                } else if ch == opener {
+                    depth += 1
+                } else if ch == closer {
+                    depth -= 1
+                    if depth == 0 { return index }
+                }
+                index = reply.index(after: index)
+            }
+            return nil
         }
     }
 
@@ -190,7 +221,7 @@ enum SZStepSDK {
         }
     }
 
-    private let szReplyTrampoline: SZStepAskReplyFn = { replyCtx, status, bytes, len in
+    private let szReplyRelay: SZStepAskReplyFn = { replyCtx, status, bytes, len in
         guard let replyCtx else { return }
         let box = Unmanaged<SZReplyBox>.fromOpaque(replyCtx).takeRetainedValue()
         let payload = bytes.map { String(decoding: UnsafeRawBufferPointer(start: $0, count: Int(len)), as: UTF8.self) } ?? ""
@@ -257,10 +288,22 @@ enum SZStepSDK {
     private final class SZEvalTable: @unchecked Sendable {
         let lock = NSLock()
         var tasks: [UInt64: Task<Void, Never>] = [:]
+        /// Tokens whose remove() beat their set() — a body that finished before
+        /// SZStepEvaluate stored it. set() consumes the tombstone instead of resurrecting
+        /// a finished entry, so the set stays ~empty.
+        var orphaned: Set<UInt64> = []
         var nextToken: UInt64 = 1
         func mint() -> UInt64 { lock.lock(); defer { lock.unlock() }; let t = nextToken; nextToken += 1; return t }
-        func set(_ token: UInt64, _ task: Task<Void, Never>) { lock.lock(); tasks[token] = task; lock.unlock() }
-        func remove(_ token: UInt64) { lock.lock(); tasks[token] = nil; lock.unlock() }
+        func set(_ token: UInt64, _ task: Task<Void, Never>) {
+            lock.lock()
+            if orphaned.remove(token) == nil { tasks[token] = task }
+            lock.unlock()
+        }
+        func remove(_ token: UInt64) {
+            lock.lock()
+            if tasks.removeValue(forKey: token) == nil { orphaned.insert(token) }
+            lock.unlock()
+        }
         func cancel(_ token: UInt64) { lock.lock(); let task = tasks[token]; lock.unlock(); task?.cancel() }
     }
     private let szEvalTable = SZEvalTable()
@@ -283,15 +326,15 @@ enum SZStepSDK {
         let ctx = SZContext(facts: facts, host: request.hostContext, askFn: request.askFn)
         let token = szEvalTable.mint()
         let task = Task {
-            defer { szEvalTable.remove(token) }
-            do {
-                let outcome = try await step.evaluate(ctx)
-                szDeliver(done, doneCtx, status: 0, outcome)          // exactly once, by construction
-            } catch is CancellationError {
-                szDeliver(done, doneCtx, status: 1, "")
-            } catch {
-                szDeliver(done, doneCtx, status: 2, String(describing: error))
-            }
+            var status: Int32 = 0
+            var payload = ""
+            do { payload = try await step.evaluate(ctx) }
+            catch is CancellationError { status = 1 }
+            catch { status = 2; payload = String(describing: error) }
+            // The table entry dies BEFORE the completion: once done() fires the host may
+            // begin tearing this module down, so delivery is the body's last act.
+            szEvalTable.remove(token)
+            szDeliver(done, doneCtx, status: status, payload)         // exactly once, by construction
         }
         szEvalTable.set(token, task)
         return token

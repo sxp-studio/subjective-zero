@@ -40,6 +40,10 @@ private func decodeAsk(_ json: String) throws -> AskRequest {
     try JSONDecoder().decode(AskRequest.self, from: Data(json.utf8))
 }
 
+private struct EventuallyTimeout: Error {}
+
+/// Throws on timeout so a stuck precondition fails the test THERE, instead of letting it
+/// run on and drown the real failure in secondary ones.
 private func eventually(within deadline: Duration = .seconds(15),
                         _ condition: @Sendable () -> Bool) async throws {
     let clock = ContinuousClock()
@@ -47,7 +51,7 @@ private func eventually(within deadline: Duration = .seconds(15),
     while !condition() {
         if clock.now - start > deadline {
             Issue.record("condition never became true within \(deadline)")
-            return
+            throw EventuallyTimeout()
         }
         try await Task.sleep(for: .milliseconds(25))
     }
@@ -155,8 +159,10 @@ struct SZStepABIv4SpikeTests {
 
     @Test func exhaustedRepairsFailWithTheTemplateNamed() async throws {
         let loader = try loadStep(classifyRouter)
+        let calls = Mutex(0)
         let result = await loader.evaluate(factsJSON: #"{}"#) { _ in
-            "still just prose, no JSON anywhere"
+            calls.withLock { $0 += 1 }
+            return "still just prose, no JSON anywhere"
         }
         guard case .failed(let reason) = result else {
             Issue.record("expected .failed, got \(result)")
@@ -164,6 +170,57 @@ struct SZStepABIv4SpikeTests {
         }
         #expect(reason.contains("classify-reply"))
         #expect(reason.contains("never matched"))
+        // The default retries: 1 means exactly two attempts — the exhaustion half of the contract.
+        #expect(calls.withLock { $0 } == 2)
+    }
+
+    @Test func braceyRepliesStillYieldTheirRuling() async throws {
+        let loader = try loadStep(classifyRouter)
+
+        // A brace inside a JSON string must not derail the balanced scan…
+        let inString = await loader.evaluate(factsJSON: #"{}"#) { _ in
+            #"Sure: {"kind": "a}b"} hope that helps!"#
+        }
+        #expect(inString == .outcome("a}b"))
+
+        // …and a prose restatement of the requested format must not eat the real answer.
+        let restated = await loader.evaluate(factsJSON: #"{}"#) { _ in
+            #"Answer in the form {json}. Here you go: {"kind": "build"}"#
+        }
+        #expect(restated == .outcome("build"))
+    }
+
+    @Test func aRedReloadNeverCostsTheGreenModule() async throws {
+        let loader = try loadStep(workLeftCondition)
+        let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
+
+        // A step source that does not compile: the toolchain throws, the loader is untouched.
+        let dir = try makeTempDir()
+        let broken = dir.appending(path: "Step.swift")
+        try "let step = SZCondition {".write(to: broken, atomically: true, encoding: .utf8)
+        #expect(throws: (any Error).self) {
+            try SZToolchain().compile(stepSource: broken, into: dir.appending(path: "build"))
+        }
+
+        // A dylib that cannot be mapped: load() throws and the old module keeps answering.
+        let garbage = dir.appending(path: "garbage.dylib")
+        try Data("not a mach-o".utf8).write(to: garbage)
+        #expect(throws: (any Error).self) {
+            try loader.load(dylib: garbage, runtimeLoadsDir: dir.appending(path: "runtime-loads"))
+        }
+        #expect(await loader.evaluate(factsJSON: #"{"workLeft": 1}"#, ask: noAsk) == .outcome("yes"))
+    }
+
+    @Test func aStepDeclaringNothingReadsAsNil() async throws {
+        let loader = try loadStep("""
+        struct Quiet: SZStep {
+            func evaluate(_ ctx: SZContext) async throws -> String { "spoke" }
+        }
+        let step = Quiet()
+        """)
+        #expect(loader.declaration == nil)
+        let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
+        #expect(await loader.evaluate(factsJSON: #"{}"#, ask: noAsk) == .outcome("spoke"))
     }
 
     @Test func cancellationMidAskSettlesAsCancelledNotDefect() async throws {

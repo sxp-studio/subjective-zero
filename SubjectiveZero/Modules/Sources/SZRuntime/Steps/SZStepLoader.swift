@@ -11,8 +11,15 @@
 //   evaluation runner that guarantees every accepted ask is answered exactly once.
 // - SWAP-WITH-DRAIN: a newly verified module takes over new evaluations immediately, while
 //   the old module keeps running its in-flight evaluations to completion; only when its
-//   count reaches zero is it torn down and dlclosed. An evaluation never has its code
-//   unloaded from under it.
+//   count reaches zero is it retired for good. An evaluation never has its code unloaded
+//   from under it.
+//
+// A retired module is NEVER dlclosed — by decision, not omission. Darwin pins images
+// containing Swift/ObjC metadata (dlclose would be a no-op unmap at best), and the drain's
+// last completion necessarily fires with dylib frames still on the stack, so a real unmap
+// there could never be sound. The handle is deliberately leaked (one small mapping per hot
+// reload); teardown + deleting the on-disk copy are what retirement actually does, and
+// co-residency safety comes from the unique module name per build, not from unloading.
 import Foundation
 
 /// How one evaluation settled. `failed` carries a human-readable reason (a thrown body, a
@@ -51,8 +58,13 @@ final class SZStepModule: @unchecked Sendable {
         self.copy = copy
     }
 
-    func begin() {
-        lock.lock(); inFlight += 1; lock.unlock()
+    /// Admit one evaluation — refused once the module is retired, so the loader's
+    /// read-current-then-begin path can never enter a module that is already draining out.
+    func begin() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !retired else { return false }
+        inFlight += 1
+        return true
     }
 
     /// Called exactly once per begun evaluation, when its completion fires (or when it could
@@ -63,7 +75,7 @@ final class SZStepModule: @unchecked Sendable {
         let shouldClose = retired && inFlight == 0 && !closed
         if shouldClose { closed = true }
         lock.unlock()
-        if shouldClose { close() }
+        if shouldClose { scheduleClose() }
     }
 
     /// The old module's path out during a hot swap: new evaluations already go to the new
@@ -74,7 +86,16 @@ final class SZStepModule: @unchecked Sendable {
         let shouldClose = inFlight == 0 && !closed
         if shouldClose { closed = true }
         lock.unlock()
-        if shouldClose { close() }
+        if shouldClose { scheduleClose() }
+    }
+
+    /// Forward a cancel if the module is still open. After close, teardown has run and the
+    /// evaluation this token named has settled — dropping the cancel is the correct answer.
+    func cancelIfOpen(_ token: UInt64) {
+        lock.lock()
+        let fn = closed ? nil : cancelFn as SZStepABI.CancelFn?
+        lock.unlock()
+        fn?(token)
     }
 
     var isDraining: Bool {
@@ -82,9 +103,16 @@ final class SZStepModule: @unchecked Sendable {
         return retired && !closed
     }
 
+    /// Close OFF the caller's stack: the drain's last completion arrives on a frame that is
+    /// still inside the dylib, and teardown must not run under it.
+    private func scheduleClose() {
+        Task.detached { [self] in close() }
+    }
+
     private func close() {
         teardownFn?()
-        dlclose(handle)
+        // NO dlclose — see the header. The handle is leaked by design; the on-disk copy goes.
+        _ = handle
         try? FileManager.default.removeItem(at: copy)
     }
 }
@@ -140,7 +168,9 @@ public final class SZStepLoader: @unchecked Sendable {
 
         guard let handle = dlopen(copy.path, RTLD_NOW | RTLD_LOCAL) else {
             try? fm.removeItem(at: copy)
-            throw LoadError.dlopenFailed(String(cString: dlerror()))
+            // dlerror() is nullable — another subsystem's dl-call can clear it between our
+            // failure and this read.
+            throw LoadError.dlopenFailed(dlerror().map { String(cString: $0) } ?? "unknown dlopen error")
         }
         func discard(_ error: LoadError) -> LoadError {
             dlclose(handle)
@@ -180,8 +210,10 @@ public final class SZStepLoader: @unchecked Sendable {
         let old = current
         current = module
         declaration = declared
-        // Pruning of settled modules happens lazily in `drainingCount`: the old module only
-        // reads as draining AFTER `retire()` below, so pruning here would drop it early.
+        // Prune modules that finished draining on EARLIER swaps, then append the outgoing
+        // one. The fresh appendee must not be pruned here — it only reads as draining
+        // AFTER `retire()` below — which is why the prune comes first.
+        draining.removeAll { !$0.isDraining }
         if let old { draining.append(old) }
         lock.unlock()
         old?.retire()
@@ -203,16 +235,30 @@ public final class SZStepLoader: @unchecked Sendable {
     /// snapshot, serve its `askModel` calls through `ask`, and settle when its completion
     /// fires. Swift task cancellation propagates as `SZStepCancel` + cancellation of every
     /// in-flight ask; the result is then `.cancelled`, never a defect.
-    private func currentModule() -> SZStepModule? {
-        lock.lock(); defer { lock.unlock() }
-        return current
+    /// Read the current module and admit one evaluation, atomically enough: a module that
+    /// retires between the read and the admit refuses `begin()`, and the swap that retired
+    /// it has already published its successor — so retry against the new current.
+    private func beginCurrentModule() -> SZStepModule? {
+        while true {
+            lock.lock()
+            let module = current
+            lock.unlock()
+            guard let module else { return nil }
+            if module.begin() { return module }
+        }
     }
 
     public func evaluate(factsJSON: String, ask: @escaping SZStepAskRunner) async -> SZStepEvalResult {
-        guard let module = currentModule() else { return .failed("no step is loaded") }
+        guard let module = beginCurrentModule() else { return .failed("no step is loaded") }
 
-        module.begin()
         let box = SZHostEvalBox(ask: ask, module: module)
+        // Asks reach the box through a registry ID, never a raw pointer: a step that lets
+        // its context escape the evaluation (a detached task asking after the body
+        // returned) gets a clean rejection instead of handing the host freed memory. The
+        // box learns its ID before any dylib code runs, so even a synchronous completion
+        // can unregister it.
+        let askID = SZHostEvalRegistry.shared.register(box)
+        box.noteAskID(askID)
         return await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<SZStepEvalResult, Never>) in
                 box.arm(continuation)
@@ -221,16 +267,17 @@ public final class SZStepLoader: @unchecked Sendable {
                     var request = SZStepEvalRequestRaw(
                         factsJSON: factsPtr,
                         factsLen: Int32(factsJSON.utf8.count),
-                        hostContext: Unmanaged.passUnretained(box).toOpaque(),
-                        askFn: szStepAskTrampoline)
+                        hostContext: UnsafeMutableRawPointer(bitPattern: askID),
+                        askFn: szStepAskRelay)
                     return withUnsafePointer(to: &request) {
-                        module.evaluateFn(UnsafeRawPointer($0), szStepCompletionTrampoline, retained)
+                        module.evaluateFn(UnsafeRawPointer($0), szStepCompletionRelay, retained)
                     }
                 }
                 if token == 0 {
                     // Could not start: the completion will never fire. Undo its retain and
-                    // settle here, through the same idempotent path the trampoline uses.
+                    // settle here, through the same idempotent path the relay uses.
                     Unmanaged<SZHostEvalBox>.fromOpaque(retained).release()
+                    SZHostEvalRegistry.shared.unregister(askID)
                     box.settle(.failed("the step could not start (facts rejected)"))
                     module.end()
                 } else {
@@ -245,15 +292,43 @@ public final class SZStepLoader: @unchecked Sendable {
 
 // MARK: - Per-evaluation host state
 
+/// The indirection between the dylib's `hostContext` and live evaluation state: asks name a
+/// registry ID, so a stray ask after settle — an author's escaped context — is REJECTED
+/// (lookup fails, `askFn` returns 0) instead of dereferencing freed memory.
+final class SZHostEvalRegistry: @unchecked Sendable {
+    static let shared = SZHostEvalRegistry()
+    private let lock = NSLock()
+    private var boxes: [UInt: SZHostEvalBox] = [:]
+    private var nextID: UInt = 1
+
+    func register(_ box: SZHostEvalBox) -> UInt {
+        lock.lock(); defer { lock.unlock() }
+        let id = nextID
+        nextID += 1
+        boxes[id] = box
+        return id
+    }
+
+    func box(for id: UInt) -> SZHostEvalBox? {
+        lock.lock(); defer { lock.unlock() }
+        return boxes[id]
+    }
+
+    func unregister(_ id: UInt) {
+        lock.lock(); boxes[id] = nil; lock.unlock()
+    }
+}
+
 /// Everything the host holds open for one evaluation: the parked continuation, the ask
 /// runner and its in-flight tasks, and the cancel token. Retained by the completion callback
-/// (exactly-once), reachable un-retained by ask callbacks (which the completion outlives).
+/// (exactly-once); ask callbacks reach it through the registry.
 final class SZHostEvalBox: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<SZStepEvalResult, Never>?
     private var askTasks: [UInt64: Task<Void, Never>] = [:]
     private var nextCallID: UInt64 = 1
     private var token: UInt64 = 0
+    private(set) var askID: UInt = 0
     private var cancelRequested = false
     private let ask: SZStepAskRunner
     let module: SZStepModule
@@ -261,6 +336,10 @@ final class SZHostEvalBox: @unchecked Sendable {
     init(ask: @escaping SZStepAskRunner, module: SZStepModule) {
         self.ask = ask
         self.module = module
+    }
+
+    func noteAskID(_ id: UInt) {
+        lock.lock(); askID = id; lock.unlock()
     }
 
     func arm(_ continuation: CheckedContinuation<SZStepEvalResult, Never>) {
@@ -282,7 +361,7 @@ final class SZHostEvalBox: @unchecked Sendable {
         let alreadyCancelled = cancelRequested
         lock.unlock()
         // Cancellation raced ahead of the token: forward it now that we can.
-        if alreadyCancelled { module.cancelFn(token) }
+        if alreadyCancelled { module.cancelIfOpen(token) }
     }
 
     /// Swift task cancellation, forwarded: cancel the dylib's task and answer every ask.
@@ -292,7 +371,7 @@ final class SZHostEvalBox: @unchecked Sendable {
         let knownToken = token
         let tasks = askTasks
         lock.unlock()
-        if knownToken != 0 { module.cancelFn(knownToken) }
+        if knownToken != 0 { module.cancelIfOpen(knownToken) }
         for task in tasks.values { task.cancel() }
     }
 
@@ -340,7 +419,11 @@ final class SZHostEvalBox: @unchecked Sendable {
         // A task that already finished gets removed by its own endAsk; tracking it briefly
         // is harmless (cancelling a finished task is a no-op), and the box dies at settle.
         askTasks[id] = task
+        let cancelledMeanwhile = cancelRequested
         lock.unlock()
+        // requestCancel may have swept between our first read and this insert — its snapshot
+        // missed this task, so honor the sweep ourselves. Double-cancel is benign.
+        if cancelledMeanwhile { task.cancel() }
         return id
     }
 
@@ -358,7 +441,7 @@ final class SZHostEvalBox: @unchecked Sendable {
 }
 
 /// dylib → host, exactly once per started evaluation. Balances `passRetained` in `evaluate`.
-private let szStepCompletionTrampoline: SZStepCompletionFn = { ctxPtr, status, bytes, len in
+private let szStepCompletionRelay: SZStepCompletionFn = { ctxPtr, status, bytes, len in
     guard let ctxPtr else { return }
     let box = Unmanaged<SZHostEvalBox>.fromOpaque(ctxPtr).takeRetainedValue()
     let payload = bytes.map { String(decoding: UnsafeRawBufferPointer(start: $0, count: Int(len)), as: UTF8.self) } ?? ""
@@ -368,16 +451,17 @@ private let szStepCompletionTrampoline: SZStepCompletionFn = { ctxPtr, status, b
     case 1: result = .cancelled
     default: result = .failed(payload.isEmpty ? "the step failed without a reason" : payload)
     }
+    SZHostEvalRegistry.shared.unregister(box.askID)
     box.cancelRemainingAsks()
     box.settle(result)
     box.module.end()
 }
 
-/// dylib → host: one `askModel` call. The box is reached un-retained: the completion callback
-/// still holds its retain, and the ABI orders every ask before that completion.
-private let szStepAskTrampoline: SZStepAskFn = { hostCtx, bytes, len, replyFn, replyCtx in
+/// dylib → host: one `askModel` call. `hostCtx` is a registry ID, not a pointer — a settled
+/// or never-started evaluation reads as absent and the ask is rejected (returns 0).
+private let szStepAskRelay: SZStepAskFn = { hostCtx, bytes, len, replyFn, replyCtx in
     guard let hostCtx, let bytes, len > 0, let replyFn else { return 0 }
-    let box = Unmanaged<SZHostEvalBox>.fromOpaque(hostCtx).takeUnretainedValue()
+    guard let box = SZHostEvalRegistry.shared.box(for: UInt(bitPattern: hostCtx)) else { return 0 }
     let request = String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(len)), as: UTF8.self)
     return box.beginAsk(request, replyFn, replyCtx)
 }

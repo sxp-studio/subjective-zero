@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Compiles a node's `Node.swift` into a signed, loadable dylib.
+// Compiles an authored Swift file — a node's `Node.swift` or a decision step's `Step.swift` —
+// into a signed, loadable dylib. One pipeline, two tiers: they differ only in the host-owned
+// support source compiled alongside, the module-name prefix, and the product name.
 //
 // The essential compile pipeline: write the
 // host-owned RuntimeSupport beside the node, `swiftc -emit-library`, then `codesign -s -` (ad-hoc
