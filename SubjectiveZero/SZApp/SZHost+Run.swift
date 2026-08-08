@@ -432,6 +432,7 @@ extension SZHost {
         runStartedMono = ContinuousClock.now
         runTurnLog = []
         runID = UUID()          // the run's trace identity (stamped into run-owned turns' events)
+        let graphRunThread = runID   // captured: the RUNS records' thread id, for the drain sweep below
         status = "running \(providerID)…"
         showChat(.director)                                  // a run narrates into the Director Agent tab
         let dirtyCount = runWorkSet.count
@@ -462,6 +463,10 @@ extension SZHost {
                     runID = nil
                     dispatchPrompts = dispatchPrompts.filter { hiddenPieces.contains($0.key) }
                 }
+                // This run's RUNS records: every traversal seals itself as its engine
+                // returns, so this sweep is a no-op on healthy paths — the belt for an
+                // abnormal unwind, thread-scoped so a zombie can't touch a newer run's.
+                sealLeakedAgentGraphRuns(thread: graphRunThread)
                 flushAllTranscripts()      // run end = flush point (success, throw, or cancel)
                 persistAgentSessions()
             }
@@ -551,15 +556,26 @@ extension SZHost {
                 reasoningEffort: generation.reasoningEffort)),
             bounds: Self.graphOrchestratorBounds(),
             declarations: { agent, step in try await steps.declaration(agent: agent, step: step) },
-            // Every traversal note and settled summary, appended as one JSON line each —
-            // the debug capture that makes a graph run inspectable before the RUNS records
-            // land. Same Application Support home as the turn captures.
-            onNote: { note in
+            // The observation hooks feed the RUNS records (SZHost+GraphRuns.swift) — the
+            // primary evidence surface. `appendGraphTrace` rides beside the note/settled
+            // hooks as a debug shadow, gated behind SZ_GRAPH_TRACE=1.
+            onTraversal: { [weak self] sighting in
+                self?.beginAgentGraphRun(sighting)
+            },
+            onNote: { [weak self] id, note in
+                self?.noteAgentGraphRun(id, note)
                 Self.appendGraphTrace([
-                    "note": ["ordinal": note.ordinal, "node": note.node,
-                             "phase": "\(note.phase)", "outcome": note.outcome ?? "",
+                    "note": ["traversal": id.uuidString, "ordinal": note.ordinal,
+                             "node": note.node, "phase": "\(note.phase)",
+                             "outcome": note.outcome ?? "",
                              "detail": note.detail ?? ""] as [String: Any],
                 ])
+            },
+            onConcluded: { [weak self] id, ending in
+                self?.concludeAgentGraphRun(id, ending)
+            },
+            onTally: { [weak self] id, settled, total, failed in
+                self?.amendAgentGraphRunTally(id, settled: settled, total: total, failed: failed)
             },
             onSettled: { summary in
                 Self.appendGraphTrace([
@@ -570,8 +586,10 @@ extension SZHost {
     }
 
     /// One JSON line per graph-run event, under Application Support beside debug-turns —
-    /// truncated at launch is fine (each run appends; the file is a debugging aid, not a record).
+    /// the RUNS records' debug shadow, off unless SZ_GRAPH_TRACE=1 (each run appends; the
+    /// file is a debugging aid, the records are the record).
     static func appendGraphTrace(_ payload: [String: Any]) {
+        guard ProcessInfo.processInfo.environment["SZ_GRAPH_TRACE"] == "1" else { return }
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
               let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         else { return }

@@ -68,6 +68,27 @@ public protocol SZStepRunning: Sendable {
                   ask: @escaping @Sendable (String) async throws -> String) async -> SZStepReport
 }
 
+/// One traversal's identity, as the strategy announces it to observers the moment it
+/// starts: who entered which graph on which kind — and, for a dispatched item, the work
+/// item it handles. The id keys every later observation (notes, the conclusion, the
+/// dispatch tally) back to this traversal's record.
+public struct SZTraversalSighting: Sendable, Equatable {
+    public var id: UUID
+    public var agent: String
+    public var graphName: String
+    public var kind: SZMessageKind
+    /// The dispatched work item (a node id) for an `.item` traversal; nil for a director's.
+    public var item: String?
+    public init(id: UUID, agent: String, graphName: String, kind: SZMessageKind,
+                item: String? = nil) {
+        self.id = id
+        self.agent = agent
+        self.graphName = graphName
+        self.kind = kind
+        self.item = item
+    }
+}
+
 /// One step of a traversal as the panel/RUNS record sees it advance. Reported repeatedly
 /// per node — running, then settled — consumers replace by (ordinal, node).
 public struct SZTraversalNote: Sendable, Equatable {
