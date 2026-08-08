@@ -102,7 +102,8 @@ let step = LayoutProbe()
 /// A complete build-kind facts document — the snapshot is all-required by design (a silent
 /// nil was the old architecture's favorite way to lie), so tests send every field.
 private func buildFacts(workLeft: Int) -> String {
-    #"{"workLeft": \#(workLeft), "workSet": [], "nodeStatuses": {}, "buildErrors": {}, "round": 1, "roundCap": 2, "briefed": false, "projectLoaded": true, "graphJSON": "{}", "steers": []}"#
+    let ids = "[" + (0..<workLeft).map { _ in "\"node-\(UUID().uuidString.prefix(8))\"" }.joined(separator: ", ") + "]"
+    return #"{"unimplemented": \#(ids), "workSet": \#(ids), "nodeStatuses": {}, "buildErrors": {}, "round": 1, "roundCap": 2, "briefed": false, "projectLoaded": true, "graphJSON": "{}", "steers": []}"#
 }
 
 private let chatFacts = #"{"sentMessage": "hey", "resuming": false, "draftedWork": false}"#

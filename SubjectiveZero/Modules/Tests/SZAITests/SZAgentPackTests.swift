@@ -309,13 +309,13 @@ private func cleanup(_ root: URL) {
                                            fact: "nope",
                                            detail: "no 'build' fact by that name")])
 
-    // `workLeft` IS a build fact — but an Int one, and a dispatch fans out over [String].
-    let wrongType = try makeRoot([directorPack(graph: runGraph(items: "workLeft")), codingPack()])
+    // `round` IS a build fact — but an Int one, and a dispatch fans out over [String].
+    let wrongType = try makeRoot([directorPack(graph: runGraph(items: "round")), codingPack()])
     defer { cleanup(wrongType) }
     let loaded2 = SZAgentPackLoader.load(root: wrongType)
     let defects2 = await SZAgentPackLoader.validate(packs: loaded2.packs, steps: healthySteps)
     #expect(defects2 == [.dispatchItemsFact(agent: "director-a", graph: "run", node: "send",
-                                            fact: "workLeft",
+                                            fact: "round",
                                             detail: "typed Int, a dispatch needs [String]")])
 }
 

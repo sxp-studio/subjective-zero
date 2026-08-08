@@ -51,7 +51,7 @@ private func specSource() throws -> String {
     func record(_ name: String, _ kind: String) -> SZFactRecord? {
         all.first { $0.name == name && $0.kind == kind }
     }
-    #expect(record("workLeft", "build")?.swiftType == "Int")
+    #expect(record("unimplemented", "build")?.swiftType == "[String]")
     #expect(record("workSet", "build")?.swiftType == "[String]")
     #expect(record("nodeStatuses", "build")?.swiftType == "[String: String]")
     #expect(record("nodeSeed", "chat")?.swiftType == "String?")
@@ -255,13 +255,13 @@ private func spec(_ body: String) -> String {
 
 @Test func derivedConveniencesReadTheFacts() throws {
     var facts = SZBuildFacts(
-        workLeft: 2, workSet: ["a", "b"], nodeStatuses: ["a": "implementing"],
+        unimplemented: ["a", "b"], workSet: ["a", "b"], nodeStatuses: ["a": "implementing"],
         buildErrors: [:], round: 1, roundCap: 3, briefed: true, projectLoaded: true,
         graphJSON: "{}", steers: []
     )
     #expect(facts.hasWorkLeft)
     #expect(!facts.fleetIsFailing)
-    facts.workLeft = 0
+    facts.unimplemented = []
     facts.nodeStatuses["a"] = "stuck"
     #expect(!facts.hasWorkLeft)
     #expect(facts.fleetIsFailing)

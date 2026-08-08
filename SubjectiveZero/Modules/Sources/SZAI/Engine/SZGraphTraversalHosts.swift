@@ -133,7 +133,7 @@ final class SZDirectorTraversalHost: SZTraversalHost {
 
     /// The build projection, spec-shaped (see the header for why it is a local document).
     private struct BuildFactsDocument: Encodable {
-        var workLeft: Int
+        var unimplemented: [String]
         var workSet: [String]
         var nodeStatuses: [String: String]
         var buildErrors: [String: String]
@@ -156,7 +156,10 @@ final class SZDirectorTraversalHost: SZTraversalHost {
         var statuses: [String: String] = [:]
         for (node, status) in context.nodeStatus() { statuses[node.uuidString] = status }
         return BuildFactsDocument(
-            workLeft: scoped.count,
+            // Today the evidence list IS the scoped work set (needsImplementation covers
+            // unimplemented-or-broken source; empty prompts never enter the set). The two
+            // facts diverge when compile diagnostics join the projection.
+            unimplemented: scoped.map(\.uuidString),
             workSet: scoped.map(\.uuidString),
             nodeStatuses: statuses,
             buildErrors: [:],   // compile diagnostics join the projection with the record work (next phase)

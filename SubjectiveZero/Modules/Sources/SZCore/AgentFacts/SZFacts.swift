@@ -22,8 +22,8 @@ import Foundation
 // SZFactGen:begin
 
 public struct SZBuildFacts: Codable, Sendable {
-    /// How many work-set nodes still need implementation.
-    public var workLeft: Int
+    /// The work-set node ids still needing a healthy implementation (unimplemented or broken source; empty prompts excluded), graph order.
+    public var unimplemented: [String]
     /// The dispatchable node ids of this run's work set.
     public var workSet: [String]
     /// Per-node lifecycle status, keyed by node id.
@@ -91,8 +91,9 @@ public enum SZRequestEffect: String, Codable, Sendable {
 // SZFactGen:end
 
 extension SZBuildFacts {
-    /// Whether any work-set node still needs implementation.
-    public var hasWorkLeft: Bool { workLeft > 0 }
+    /// Whether any work-set node still needs implementation. The predicate-named spelling
+    /// steps route on; `unimplemented` is its evidence.
+    public var hasWorkLeft: Bool { !unimplemented.isEmpty }
 }
 
 extension SZBuildFacts {
