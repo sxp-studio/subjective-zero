@@ -33,25 +33,31 @@ private func schedule(_ runtime: SZStepRuntime, key: SZStepKey, source: String) 
 private func fixedOutcomeStep(_ outcome: String) -> String {
     """
     struct Fixed: SZStep {
-        func evaluate(_ ctx: SZContext) async throws -> String { "\(outcome)" }
+        func evaluate(_ ctx: SZContext<SZChatFacts>) async throws -> String { "\(outcome)" }
     }
     let step = Fixed()
     """
 }
 
 private let workLeftCondition = """
-let step = SZCondition { $0.project.hasWorkLeft }
+let step = SZBuildCondition { $0.hasWorkLeft }
 """
 
 /// Parks inside an ask until the host's runner settles it — the watchdog's prey.
 private let blockingAskStep = """
-let step = SZRouter("done") { ctx in
+let step = SZChatRouter("done") { ctx in
     _ = try await ctx.askModel(template: "block", as: [String: String].self)
     return "done"
 }
 """
 
 private let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
+
+/// Complete facts documents — the snapshot is all-required by design.
+private func runtimeBuildFacts(workLeft: Int) -> String {
+    #"{"workLeft": \#(workLeft), "workSet": [], "nodeStatuses": {}, "buildErrors": {}, "round": 1, "roundCap": 2, "briefed": false, "projectLoaded": true, "graphJSON": "{}", "steers": []}"#
+}
+private let runtimeChatFacts = #"{"sentMessage": "hey", "resuming": false, "draftedWork": false}"#
 
 // MARK: - Tests
 
@@ -68,8 +74,8 @@ struct SZStepRuntimeTests {
 
         // No manual wait between schedule and evaluate — the await-the-compile contract IS
         // what makes this deterministic.
-        #expect(await runtime.evaluate(key: key, factsJSON: #"{"workLeft": 2}"#, ask: noAsk) == .outcome("yes"))
-        #expect(await runtime.evaluate(key: key, factsJSON: #"{"workLeft": 0}"#, ask: noAsk) == .outcome("no"))
+        #expect(await runtime.evaluate(key: key, factsJSON: runtimeBuildFacts(workLeft: 2), ask: noAsk) == .outcome("yes"))
+        #expect(await runtime.evaluate(key: key, factsJSON: runtimeBuildFacts(workLeft: 0), ask: noAsk) == .outcome("no"))
 
         // The table reads agree, and the declaration is the step's own (yes/no).
         #expect(runtime.isLoaded(key: key))
@@ -79,7 +85,7 @@ struct SZStepRuntimeTests {
 
         // A key nothing was ever scheduled for fails, loudly and by name.
         let missing = await runtime.evaluate(
-            key: SZStepKey(agent: "director", step: "absent"), factsJSON: "{}", ask: noAsk)
+            key: SZStepKey(agent: "director", step: "absent"), factsJSON: runtimeChatFacts, ask: noAsk)
         #expect(missing == .failed("no step is loaded for director/absent"))
 
         // Unload drops the runtime's handle: the key stops answering.
@@ -96,12 +102,12 @@ struct SZStepRuntimeTests {
         runtime.onRedCompile = { key, message in reports.withLock { $0.append((key, message)) } }
 
         try schedule(runtime, key: key, source: workLeftCondition)
-        #expect(await runtime.evaluate(key: key, factsJSON: #"{"workLeft": 1}"#, ask: noAsk) == .outcome("yes"))
+        #expect(await runtime.evaluate(key: key, factsJSON: runtimeBuildFacts(workLeft: 1), ask: noAsk) == .outcome("yes"))
 
         // A source that cannot compile: the old module keeps answering, and the failure is
         // reported exactly once, key attached.
         try schedule(runtime, key: key, source: "let step = SZCondition {")
-        #expect(await runtime.evaluate(key: key, factsJSON: #"{"workLeft": 1}"#, ask: noAsk) == .outcome("yes"))
+        #expect(await runtime.evaluate(key: key, factsJSON: runtimeBuildFacts(workLeft: 1), ask: noAsk) == .outcome("yes"))
         let seen = reports.withLock { $0 }
         #expect(seen.count == 1)
         #expect(seen.first?.0 == key)
@@ -115,7 +121,7 @@ struct SZStepRuntimeTests {
         runtime.evaluationDeadline = .seconds(1)
 
         // The runner never answers on its own; only the watchdog's cancellation frees it.
-        let result = await runtime.evaluate(key: key, factsJSON: "{}") { _ in
+        let result = await runtime.evaluate(key: key, factsJSON: runtimeChatFacts) { _ in
             try await Task.sleep(for: .seconds(3600))
             return "{}"
         }
@@ -129,7 +135,7 @@ struct SZStepRuntimeTests {
 
         // The module settled cleanly: a fresh evaluation on the same key still answers.
         runtime.evaluationDeadline = .seconds(120)
-        #expect(await runtime.evaluate(key: key, factsJSON: "{}") { _ in "{}" } == .outcome("done"))
+        #expect(await runtime.evaluate(key: key, factsJSON: runtimeChatFacts) { _ in "{}" } == .outcome("done"))
     }
 
     @Test func aCallersOwnCancellationStaysCancelledNotATimeout() async throws {
@@ -139,7 +145,7 @@ struct SZStepRuntimeTests {
 
         let askEntered = Mutex(false)
         let evaluation = Task {
-            await runtime.evaluate(key: key, factsJSON: "{}") { _ in
+            await runtime.evaluate(key: key, factsJSON: runtimeChatFacts) { _ in
                 askEntered.withLock { $0 = true }
                 try await Task.sleep(for: .seconds(3600))
                 return "{}"
@@ -166,6 +172,6 @@ struct SZStepRuntimeTests {
         try schedule(runtime, key: key, source: fixedOutcomeStep("v2"))
         try schedule(runtime, key: key, source: fixedOutcomeStep("v3"))
 
-        #expect(await runtime.evaluate(key: key, factsJSON: "{}", ask: noAsk) == .outcome("v3"))
+        #expect(await runtime.evaluate(key: key, factsJSON: runtimeChatFacts, ask: noAsk) == .outcome("v3"))
     }
 }
