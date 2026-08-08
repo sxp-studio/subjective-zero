@@ -158,6 +158,13 @@ final class SZHost {
     /// Runs recorded this session the user hasn't opened in the Profiler yet — its unread dots.
     /// Session-scoped on purpose (an old transcript's runs aren't news).
     var unreadRunIDs: Set<UUID> = []
+    /// The agent-graph RUNS records — live first, then newest (`SZAgentGraphRun.ordered`),
+    /// which is exactly the order the Agent Graph panel draws. Live records exist only here;
+    /// the sealed ones are mirrored to `<project>.subz/runs.json` (SZHost+GraphRuns.swift).
+    var agentGraphRuns: [SZAgentGraphRun] = []
+    /// The Plan view's pack library, built once per launch from `SZ_AGENT_PACKS` (the packs
+    /// are session-static; a dev editing packs on disk relaunches). nil = not built yet.
+    var agentGraphPlanCache: [SZAgentGraphPlanAgent]?
     /// The session's last `turnPromptCap` rendered prompts, keyed by turn id — the fast path for
     /// what was ACTUALLY sent to the CLI (`debug_turn_prompt`). The durable copy lives in the
     /// on-disk debug capture (`debug-turns/<turnID>/`, newest `debugTurnCaptureCap` turns), which
@@ -604,6 +611,7 @@ final class SZHost {
         loadedProjectURL = newURL
         store.setProject(project)
         restoreTranscripts()            // chat history + resumable sessions (replaces the old map)
+        restoreAgentGraphRuns()         // the RUNS panel's history sidecar (SZHost+GraphRuns.swift)
         if !repairedEdges.isEmpty {
             let title: (SZNodeID) -> String = { [store] in store.project?.graph.node(id: $0)?.title ?? $0.uuidString }
             let edges = repairedEdges.map { "\(title($0.from.node)) → \(title($0.to.node))" }.joined(separator: ", ")
@@ -712,6 +720,9 @@ final class SZHost {
         assert(!ledger.anyWaiting && !mailbox.anyAwaiting,
                "project teardown with a parked wait — a continuation would leak")
         forcedFailNodes = [:]
+        // IN-MEMORY reset only, like the mailbox: the OLD project's runs.json was written at
+        // each seal; the new project's history is restored right after the swap.
+        agentGraphRuns = []
         graphOpStatus = [:]
         hiddenPieces = []
         pendingGraphOp = nil

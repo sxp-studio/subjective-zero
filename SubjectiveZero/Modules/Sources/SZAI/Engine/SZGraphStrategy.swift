@@ -60,9 +60,16 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
     let bounds: SZThreadMachine.Bounds
     let declarations: StepDeclarations
     let registry: SZProviderRegistry
-    /// The trace hook — the host's future run-record feed; default no-op.
-    let onNote: @MainActor @Sendable (SZTraversalNote) -> Void
-    /// The settled-reply hook — the dispatch card's tally source when the record work lands.
+    // The observation hooks — the host's RUNS-record feed, all defaulting to no-ops so
+    // headless callers construct nothing. One traversal's life reaches its observer as
+    // `onTraversal` (it began, with its identity), a stream of `onNote`s keyed by the
+    // sighting's id, and exactly one `onConcluded`; `onTally` amends a dispatching
+    // traversal's settlement counts as its set's items land (the machine's own numbers),
+    // and `onSettled` hands over each set's one settled reply verbatim.
+    let onTraversal: @MainActor @Sendable (SZTraversalSighting) -> Void
+    let onNote: @MainActor @Sendable (UUID, SZTraversalNote) -> Void
+    let onConcluded: @MainActor @Sendable (UUID, SZTraversalEnding) -> Void
+    let onTally: @MainActor @Sendable (UUID, _ settled: Int, _ total: Int, _ failed: Int) -> Void
     let onSettled: @MainActor @Sendable (SZSettledSummary) -> Void
 
     public init(
@@ -72,7 +79,10 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
         bounds: SZThreadMachine.Bounds,
         declarations: @escaping StepDeclarations,
         registry: SZProviderRegistry = .shared,
-        onNote: @escaping @MainActor @Sendable (SZTraversalNote) -> Void = { _ in },
+        onTraversal: @escaping @MainActor @Sendable (SZTraversalSighting) -> Void = { _ in },
+        onNote: @escaping @MainActor @Sendable (UUID, SZTraversalNote) -> Void = { _, _ in },
+        onConcluded: @escaping @MainActor @Sendable (UUID, SZTraversalEnding) -> Void = { _, _ in },
+        onTally: @escaping @MainActor @Sendable (UUID, Int, Int, Int) -> Void = { _, _, _, _ in },
         onSettled: @escaping @MainActor @Sendable (SZSettledSummary) -> Void = { _ in }
     ) {
         self.packsRoot = packsRoot
@@ -81,7 +91,10 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
         self.bounds = bounds
         self.declarations = declarations
         self.registry = registry
+        self.onTraversal = onTraversal
         self.onNote = onNote
+        self.onConcluded = onConcluded
+        self.onTally = onTally
         self.onSettled = onSettled
     }
 
@@ -168,6 +181,16 @@ extension SZGraphDirectorStrategy {
         private let sessions = SZGraphRunSessions()
         private let directorHost: SZDirectorTraversalHost
         private var machine: SZThreadMachine
+        /// The CURRENT director traversal's sighting id, boxed: the director host is built
+        /// once in `init` (before `self` exists) but observed per traversal, so its note
+        /// closure reads the box the motor restamps at each `startTraversal`.
+        private let directorSighting = SightingBox()
+        /// Dispatch set → the sighting of the traversal that SENT it, so a tally amendment
+        /// lands on the record of the sender (which sealed long before the set settles).
+        private var sendingBySet: [Int: UUID] = [:]
+
+        @MainActor
+        private final class SightingBox { var id = UUID() }
 
         init(strategy: SZGraphDirectorStrategy, context: SZOrchestrationContext,
              director: Role, coding: Role) {
@@ -181,8 +204,11 @@ extension SZGraphDirectorStrategy {
             // roundCap (the machine keeps its own private).
             let roundCap = min(director.graph.caps?.rounds ?? strategy.bounds.defaultRounds,
                                strategy.bounds.roundCeiling)
+            let box = directorSighting
+            let note = strategy.onNote
             self.directorHost = SZDirectorTraversalHost(
-                context: context, renderer: renderer, roundCap: roundCap, onNote: strategy.onNote)
+                context: context, renderer: renderer, roundCap: roundCap,
+                onNote: { note(box.id, $0) })
         }
 
         func run() async throws -> [SZNodeID: String] {
@@ -206,17 +232,27 @@ extension SZGraphDirectorStrategy {
                     // machine already shipped the ending with the stop's commands.
                     guard case .traversing = machine.state else { continue }
                     directorHost.begin(round: round, steers: steers)
+                    // Announce the traversal before it runs — its notes key to this id.
+                    directorSighting.id = UUID()
+                    strategy.onTraversal(SZTraversalSighting(
+                        id: directorSighting.id, agent: director.agent,
+                        graphName: director.graph.name, kind: kind))
                     let engine = SZGraphEngine(
                         agent: director.agent, graph: director.graph,
                         attachments: director.attachments, host: directorHost,
                         steps: strategy.steps, router: strategy.router)
                     let result = await engine.run(kind: kind)
+                    let ending = Self.ending(of: result.conclusion)
+                    strategy.onConcluded(directorSighting.id, ending)
                     queue += machine.handle(.traversalConcluded(
-                        Self.ending(of: result.conclusion), dispatch: dispatchIntent(of: result)))
+                        ending, dispatch: dispatchIntent(of: result)))
 
                 case .deliverItems(let setID, _, let orders):
                     // The target seat's one holder is the prebuilt coding role (the pack gate
                     // resolved the dispatch's seat and its item handling at load).
+                    // A set is minted by the traversal that just concluded — remember its
+                    // sighting so the set's later tally amendments land on that record.
+                    sendingBySet[setID] = directorSighting.id
                     // The set's watchdog rides the same command list — pick it up here so it
                     // races the delivery instead of waiting behind it.
                     let deadline = queue[index...].lazy.compactMap { command -> Duration? in
@@ -231,8 +267,13 @@ extension SZGraphDirectorStrategy {
                     continue   // consumed by `deliverItems` above (raced inside the delivery)
                 case .cancelItems:
                     continue   // items are children of the delivery's task group — cancelled there
-                case .amendTally:
-                    continue   // the run record consumes tallies next phase; the arm stays explicit
+                case .amendTally(let setID, let settled, let total, let failed):
+                    // The machine's live count for the set — on every settle and timeout —
+                    // relayed to the SENDING traversal's record (the sanctioned post-seal
+                    // amend: the sender concluded long before its set settles).
+                    if let sender = sendingBySet[setID] {
+                        strategy.onTally(sender, settled, total, failed)
+                    }
                 case .deliverSettled(let summary):
                     // The settled re-entry reads LIVE context (build facts by design), so the
                     // reply itself only feeds the observer hook here.
@@ -264,18 +305,24 @@ extension SZGraphDirectorStrategy {
             await context.grantPermissions()
             var followOn: [SZThreadMachine.Command] = []
             // Engines are built on the actor; the group's children capture only Sendable values.
-            var deliveries: [(order: SZDispatchOrder, engine: SZGraphEngine?)] = []
+            var deliveries: [(order: SZDispatchOrder, engine: SZGraphEngine?, sighting: UUID)] = []
             for order in orders {
+                let sighting = UUID()
                 guard let nodeID = SZNodeID(uuidString: order.node) else {
-                    deliveries.append((order, nil))
+                    deliveries.append((order, nil, sighting))
                     continue
                 }
+                // Each item traversal announces itself and keys its notes to its own
+                // sighting — parallel items interleave on the main actor, and the id is
+                // what un-shuffles them into per-record traces.
+                let note = strategy.onNote
                 let host = SZItemTraversalHost(
                     context: context, renderer: renderer, order: order, nodeID: nodeID,
-                    sessions: sessions, registry: strategy.registry, onNote: strategy.onNote)
+                    sessions: sessions, registry: strategy.registry,
+                    onNote: { note(sighting, $0) })
                 deliveries.append((order, SZGraphEngine(
                     agent: coding.agent, graph: coding.graph, attachments: coding.attachments,
-                    host: host, steps: strategy.steps, router: strategy.router)))
+                    host: host, steps: strategy.steps, router: strategy.router), sighting))
             }
             enum Land: Sendable {
                 case settled(node: String, outcome: String)
@@ -284,12 +331,15 @@ extension SZGraphDirectorStrategy {
             // Split the deliveries on the actor BEFORE the group: an order naming a non-node
             // settles instantly with the real reason (never waits out the watchdog to say what
             // is known now); the rest become the group's children.
-            var runnable: [(node: String, engine: SZGraphEngine)] = []
+            var runnable: [(node: String, sighting: UUID, engine: SZGraphEngine)] = []
             for delivery in deliveries {
                 let node = delivery.order.node
                 followOn += machine.handle(.itemDelivered(node: node, setID: setID))
                 if let engine = delivery.engine {
-                    runnable.append((node, engine))
+                    strategy.onTraversal(SZTraversalSighting(
+                        id: delivery.sighting, agent: coding.agent,
+                        graphName: coding.graph.name, kind: .item, item: node))
+                    runnable.append((node, delivery.sighting, engine))
                 } else {
                     followOn += machine.handle(.itemSettled(
                         node: node, setID: setID,
@@ -297,12 +347,14 @@ extension SZGraphDirectorStrategy {
                 }
             }
             let children = runnable
+            let concluded = strategy.onConcluded
             await withTaskGroup(of: Land.self) { group in
                 for child in children {
                     group.addTask {
                         // The engine is MainActor-isolated; the child hops for each node step
                         // and parks off-actor for the long awaits (the provider subprocess).
                         let result = await child.engine.run(kind: .item)
+                        await concluded(child.sighting, Self.ending(of: result.conclusion))
                         return .settled(node: child.node,
                                         outcome: Self.itemOutcome(of: result.conclusion))
                     }
@@ -370,8 +422,9 @@ extension SZGraphDirectorStrategy {
         }
 
         /// Engine conclusion → the machine's traversal-ending vocabulary, class-preserving:
-        /// a refusal stays a refusal, a defect stays a defect.
-        private static func ending(of conclusion: SZTraversalConclusion) -> SZTraversalEnding {
+        /// a refusal stays a refusal, a defect stays a defect. Nonisolated: the delivery's
+        /// off-actor children map their own conclusions.
+        private nonisolated static func ending(of conclusion: SZTraversalConclusion) -> SZTraversalEnding {
             switch conclusion {
             case .ended: .ended
             case .failed(_, let detail): .failed(reason: detail)

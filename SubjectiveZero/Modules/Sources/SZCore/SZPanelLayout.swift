@@ -12,12 +12,14 @@
 import Foundation
 
 /// A top-level panel of the app window. The raw value is the persisted key.
-/// `.profiler` is LAST in `allCases` so the production panels' ⌘⌥1/2/3 shortcuts never shift.
+/// The debug-only panels (`.profiler`, `.agentGraph`) are LAST in `allCases` so the
+/// production panels' ⌘⌥1/2/3 shortcuts never shift.
 public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
     case viewport
     case nodeEditor
     case chat
     case profiler
+    case agentGraph
 
     /// The name shown in the panel's header (its drag handle). Instance-qualified tiles append
     /// their display ordinal via `SZPanelID.displayName` ("Viewport 2").
@@ -27,6 +29,7 @@ public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
         case .nodeEditor: "Node Editor"
         case .chat: "Chat"
         case .profiler: "Profiler"
+        case .agentGraph: "Agent Graph"
         }
     }
 
@@ -49,9 +52,16 @@ public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
         #endif
     }
 
+    /// Debug-only surfaces, gated together: the Profiler and the Agent Graph panel (the
+    /// graph orchestrator's observability twin) ship their CASES everywhere for Codable
+    /// tolerance, their SURFACES only where `profilerPanelAvailable` says so.
+    public var isDebugOnly: Bool {
+        self == .profiler || self == .agentGraph
+    }
+
     /// The kinds this build offers in menus/layouts.
     public static var availableCases: [SZPanelKind] {
-        allCases.filter { $0 != .profiler || profilerPanelAvailable }
+        allCases.filter { !$0.isDebugOnly || profilerPanelAvailable }
     }
 
     /// The persisted-string decode shared by the kind's own Codable and the SZPanelID token
@@ -107,6 +117,7 @@ public struct SZPanelID: Hashable, Codable, Sendable, Comparable {
     public static let nodeEditor = SZPanelID(.nodeEditor)
     public static let chat = SZPanelID(.chat)
     public static let profiler = SZPanelID(.profiler)
+    public static let agentGraph = SZPanelID(.agentGraph)
 
     /// The persisted/MCP token. The primary collapses to the bare kind string — that collapse is
     /// what keeps legacy app-state files and this model wire-compatible in both directions.
@@ -345,7 +356,7 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
         // A layout saved by a DEBUG build may carry the Profiler into a build without the
         // surface — drop the leaves (collapse to their siblings) rather than render empty tiles.
         // Out-of-cap instances degrade the same way: one bad leaf, not the whole state.
-        let hostable: (SZPanelID) -> Bool = { $0.isWithinInstanceCap && (allowingProfiler || $0.kind != .profiler) }
+        let hostable: (SZPanelID) -> Bool = { $0.isWithinInstanceCap && (allowingProfiler || !$0.kind.isDebugOnly) }
         while let bad = root.leafIDs.first(where: { !hostable($0) }) {
             if let removal = root.removingLeaf(bad) {
                 root = removal.remaining
@@ -399,6 +410,7 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
         case .nodeEditor: SZPanelRestorePosition(neighbor: .viewport, zone: .bottom, share: 0.4)
         case .chat: SZPanelRestorePosition(neighbor: .viewport, zone: .right, share: 0.25)
         case .profiler: SZPanelRestorePosition(neighbor: .chat, zone: .bottom, share: 0.4)
+        case .agentGraph: SZPanelRestorePosition(neighbor: .nodeEditor, zone: .right, share: 0.5)
         }
     }
 }
