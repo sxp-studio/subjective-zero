@@ -599,7 +599,41 @@ extension SZHost {
                 model: generation.model,
                 reasoningEffort: generation.reasoningEffort)),
             bounds: Self.graphOrchestratorBounds(),
-            declarations: { agent, step in try await steps.declaration(agent: agent, step: step) })
+            declarations: { agent, step in try await steps.declaration(agent: agent, step: step) },
+            // Every traversal note and settled summary, appended as one JSON line each —
+            // the debug capture that makes a graph run inspectable before the RUNS records
+            // land. Same Application Support home as the turn captures.
+            onNote: { note in
+                Self.appendGraphTrace([
+                    "note": ["ordinal": note.ordinal, "node": note.node,
+                             "phase": "\(note.phase)", "outcome": note.outcome ?? "",
+                             "detail": note.detail ?? ""] as [String: Any],
+                ])
+            },
+            onSettled: { summary in
+                Self.appendGraphTrace([
+                    "settled": ["set": summary.setID, "round": summary.round,
+                                "outcomes": summary.outcomes] as [String: Any],
+                ])
+            })
+    }
+
+    /// One JSON line per graph-run event, under Application Support beside debug-turns —
+    /// truncated at launch is fine (each run appends; the file is a debugging aid, not a record).
+    static func appendGraphTrace(_ payload: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        else { return }
+        let url = base.appending(path: "SubjectiveZero/graph-trace.jsonl")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data + Data("\n".utf8))
+        } else {
+            try? (data + Data("\n".utf8)).write(to: url)
+        }
     }
 
     /// Cancel the in-flight Director run (the `Stop` HUD action). Task cancellation propagates into the
