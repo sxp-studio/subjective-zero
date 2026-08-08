@@ -1,0 +1,7 @@
+<!-- equivalence-class: byte-identical to main @ 75bd1e4; never edit by hand; regen: SZ_WRITE_FIXTURES=Modules/Tests/SZAITests/Fixtures/Equivalence swift test --filter SZPromptEquivalence -->
+<!-- normalized: -p prompt elided (bytes pinned by the coding-*.md fixtures); --session-id/--resume per-process UUIDs replaced by placeholders; project/cache paths are the fixed inputs /sz-equivalence/{project,cache} -->
+coding agent cold
+director reconcile round 1
+coding agent resume
+director reconcile round 2
+coding agent resume
