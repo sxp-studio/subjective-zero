@@ -87,7 +87,7 @@ struct SZGraphEngineTests {
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes")]))
         let result = await engine.run(kind: .build)
 
-        #expect(result.conclusion == .ended(step: "implement", outcome: "sent"))
+        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
         #expect(result.sent == [SZItemOrder(node: "node-a"), SZItemOrder(node: "node-b")])
         // The turn went out rendered, with the router's choice attached.
         #expect(host.turnsSeen.count == 1)
@@ -103,16 +103,63 @@ struct SZGraphEngineTests {
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes")]))
         let result = await engine.run(kind: .settled)
         // Entry at work-left, straight to dispatch — no decompose turn on a re-entry.
-        #expect(result.conclusion == .ended(step: "implement", outcome: "sent"))
+        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
         #expect(host.turnsSeen.isEmpty)
     }
 
-    @Test func aForeignKindEndsUnhandledBeforeAnyNodeRuns() async throws {
+    @Test func aForeignKindIsARoutingDefectBeforeAnyNodeRuns() async throws {
         let host = StubHost()
         let engine = makeEngine(host: host, steps: StubSteps(answers: [:]))
         let result = await engine.run(kind: .chat)
-        #expect(result.conclusion == .ended(step: "", outcome: "unhandled"))
+        guard case .defect(_, let detail) = result.conclusion else {
+            Issue.record("expected a defect, got \(result.conclusion)")
+            return
+        }
+        #expect(detail.contains("chat"))
         #expect(host.notes.isEmpty)
+    }
+
+    @Test func anExhaustedErrorLeashStillFailsTheTraversal() async throws {
+        var graph = makeBuildGraph()
+        graph.edges.append(.init(from: "plan", outcome: "error", to: "plan", maxTraversals: 2))
+        let host = StubHost()
+        host.turnReports = [
+            SZTurnReport(failed: true, detail: "attempt 1 died"),
+            SZTurnReport(failed: true, detail: "attempt 2 died"),
+            SZTurnReport(failed: true, detail: "attempt 3 died"),
+        ]
+        let engine = makeEngine(graph: graph, host: host, steps: StubSteps(answers: [:]))
+        let result = await engine.run(kind: .build)
+        // Two retries ride the leash; the third failure must stay a FAILURE — an exhausted
+        // error edge cannot launder it into a successful ending.
+        #expect(result.conclusion == .failed(node: "plan", detail: "attempt 3 died"))
+        #expect(host.turnsSeen.count == 3)
+    }
+
+    @Test func anExhaustedDeclinedLeashStaysARefusal() async throws {
+        var graph = makeBuildGraph()
+        graph.nodes.append(.init(id: "gate", form: .step(name: "gate")))
+        graph.nodes.append(.init(id: "clarify", form: .turn(.init(brief: "prompts/clarify.md.mustache"))))
+        graph.entry[.request] = "gate"
+        graph.edges.append(.init(from: "gate", outcome: "declined", to: "clarify", maxTraversals: 1))
+        graph.edges.append(.init(from: "clarify", outcome: "ok", to: "gate"))
+        let host = StubHost()
+        let engine = makeEngine(
+            graph: graph,
+            attachments: ["gate": SZStepAttachment(outcomes: ["declined", "ok"])],
+            host: host,
+            steps: StubSteps(answers: ["gate": SZStepReport(outcome: "declined")]))
+        let result = await engine.run(kind: .request)
+        #expect(result.conclusion == .declined(node: "gate", reason: nil))
+    }
+
+    @Test func aDispatchReportsItsTargetInTheResult() async throws {
+        let host = StubHost()
+        host.items = ["node-a"]
+        let engine = makeEngine(host: host,
+                                steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes")]))
+        let result = await engine.run(kind: .build)
+        #expect(result.sentTarget == "coding")
     }
 
     @Test func aFailedTurnWithNoErrorEdgeFailsTheTraversalWithItsDetail() async throws {
@@ -120,7 +167,7 @@ struct SZGraphEngineTests {
         host.turnReports = [SZTurnReport(failed: true, detail: "the provider died")]
         let engine = makeEngine(host: host, steps: StubSteps(answers: [:]))
         let result = await engine.run(kind: .build)
-        #expect(result.conclusion == .failed(step: "plan", detail: "the provider died"))
+        #expect(result.conclusion == .failed(node: "plan", detail: "the provider died"))
     }
 
     @Test func aFailedTurnWithAnErrorEdgeRoutesRecovery() async throws {
@@ -131,7 +178,7 @@ struct SZGraphEngineTests {
         let engine = makeEngine(graph: graph, host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes")]))
         let result = await engine.run(kind: .build)
-        #expect(result.conclusion == .ended(step: "implement", outcome: "sent"))
+        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
     }
 
     @Test func aBoundedEdgeLeashesItsLoopThenEndsOnTheOutcome() async throws {
@@ -141,7 +188,7 @@ struct SZGraphEngineTests {
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "no")]))
         let result = await engine.run(kind: .build)
-        #expect(result.conclusion == .ended(step: "work-left", outcome: "no"))
+        #expect(result.conclusion == .ended(node: "work-left", outcome: "no"))
         #expect(host.turnsSeen.count == 3)   // plan + unblock ×2
     }
 
@@ -150,11 +197,11 @@ struct SZGraphEngineTests {
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "perhaps")]))
         let result = await engine.run(kind: .settled)
-        guard case .defect(let step, let detail) = result.conclusion else {
+        guard case .defect(let node, let detail) = result.conclusion else {
             Issue.record("expected a defect, got \(result.conclusion)")
             return
         }
-        #expect(step == "work-left")
+        #expect(node == "work-left")
         #expect(detail.contains("perhaps"))
     }
 
@@ -163,7 +210,7 @@ struct SZGraphEngineTests {
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(failure: "swiftc missing")]))
         let result = await engine.run(kind: .settled)
-        #expect(result.conclusion == .defect(step: "work-left", detail: "swiftc missing"))
+        #expect(result.conclusion == .defect(node: "work-left", detail: "swiftc missing"))
     }
 
     @Test func aCancelledStepConcludesCancelledNotDefect() async throws {
@@ -171,7 +218,7 @@ struct SZGraphEngineTests {
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(cancelled: true)]))
         let result = await engine.run(kind: .settled)
-        #expect(result.conclusion == .cancelled(step: "work-left"))
+        #expect(result.conclusion == .cancelled(node: "work-left"))
     }
 
     @Test func declinedWithNoEdgeIsARefusalNotAFailure() async throws {
@@ -185,7 +232,7 @@ struct SZGraphEngineTests {
             host: host,
             steps: StubSteps(answers: ["gate": SZStepReport(outcome: "declined")]))
         let result = await engine.run(kind: .request)
-        #expect(result.conclusion == .declined(step: "gate", reason: nil))
+        #expect(result.conclusion == .declined(node: "gate", reason: nil))
     }
 
     @Test func anUnrenderableBriefIsADefectNamingTheTemplate() async throws {
@@ -203,11 +250,11 @@ struct SZGraphEngineTests {
                                    attachments: workLeftAttachment, host: ThrowingHost(),
                                    steps: StubSteps(answers: [:]), router: identityRouter)
         let result = await engine.run(kind: .build)
-        guard case .defect(let step, let detail) = result.conclusion else {
+        guard case .defect(let node, let detail) = result.conclusion else {
             Issue.record("expected a defect, got \(result.conclusion)")
             return
         }
-        #expect(step == "plan")
+        #expect(node == "plan")
         #expect(detail.contains("decompose.md.mustache"))
     }
 

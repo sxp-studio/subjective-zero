@@ -33,7 +33,7 @@ extension SZHostBridge {
                  ]),
             tool("debug_set_paused", "Freeze or resume the render clock (mirrors the HUD Pause/Play button). `paused:true` freezes time + frame index so successive `agent_view_frame`s render the same instant — the deterministic way to A/B an input (e.g. sweep a slider and compare frames without the camera/animation drifting between captures). `paused:false` resumes. Idempotent; returns the applied `paused`.",
                  properties: ["paused": ["type": "boolean", "description": "true = pause, false = resume"]]),
-            tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, kind handlers, seats, dispatch targets + items facts, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes and facts kind) compile every step folder through the real toolchain first — expect seconds, not milliseconds, on a pack with steps. Omit `path` for the bundled packs (none ship yet).",
+            tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, kind handlers, seats, dispatch targets + items facts, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes and facts kind) compile every step folder a graph references through the real toolchain first — expect seconds, not milliseconds, on a pack with steps. Omit `path` for the bundled packs (none ship yet).",
                  properties: ["path": ["type": "string", "description": "absolute path to a pack root (a directory of agent folders)"]]),
         ]
     }
@@ -84,7 +84,11 @@ extension SZHostBridge {
             box.report = await SZAgentPackLoader.check(root: root, steps: SZPackStepProvider(root: root))
             done.signal()
         }
-        done.wait()
+        // A deadline, because this thread is the bridge: a pathological Step.swift can hang
+        // swiftc, and a hung check must degrade to one honest sentence, not stall the bus.
+        guard done.wait(timeout: .now() + 300) == .success else {
+            return "check timed out after 300s — a step compile is likely wedged; the report was abandoned"
+        }
         return box.report
     }
 
@@ -94,10 +98,23 @@ extension SZHostBridge {
     /// bridge thread while waiting, so nothing here may hop to it). nil = no `Step.swift`
     /// or a step that declares nothing; throw = the compile went red, with the compiler's
     /// message as the defect detail.
-    private struct SZPackStepProvider: SZStepProviding {
+    private final class SZPackStepProvider: SZStepProviding, @unchecked Sendable {
         let root: URL
+        /// One compile per step folder, however many graph nodes reference it.
+        private let cache = Mutex<[String: Result<SZStepDeclarationInfo?, any Error>]>([:])
+        init(root: URL) { self.root = root }
 
         func declaration(agent: String, step: String) async throws -> SZStepDeclarationInfo? {
+            let key = "\(agent)/\(step)"
+            if let cached = cache.withLock({ $0[key] }) { return try cached.get() }
+            let fresh: Result<SZStepDeclarationInfo?, any Error>
+            do { fresh = .success(try await compileAndDeclare(agent: agent, step: step)) }
+            catch { fresh = .failure(error) }
+            cache.withLock { $0[key] = fresh }
+            return try fresh.get()
+        }
+
+        private func compileAndDeclare(agent: String, step: String) async throws -> SZStepDeclarationInfo? {
             let source = root.appending(path: "\(agent)/steps/\(step)/Step.swift")
             guard FileManager.default.fileExists(atPath: source.path) else { return nil }
             let scratch = FileManager.default.temporaryDirectory

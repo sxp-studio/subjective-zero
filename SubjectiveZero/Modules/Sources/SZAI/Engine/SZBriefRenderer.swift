@@ -289,10 +289,10 @@ public struct SZBriefRenderer: Sendable {
             throw SZBriefRenderError.unknownItemNode(item)
         }
         let inputs = node.contract?.inputs
-            ?? SZProceduralDirectorStrategy.dataInputs(of: id, graph)
+            ?? graph.derivedDataInputPorts(of: id)
                 .map { SZPort(name: $0, type: .texture) }
         let outputs = node.contract?.outputs
-            ?? SZProceduralDirectorStrategy.outputs(of: id, graph)
+            ?? graph.derivedOutputPorts(of: id)
                 .map { SZPort(name: $0, type: .texture) }
         return (node, inputs, outputs, node.contract?.requiredPermissions ?? [])
     }

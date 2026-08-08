@@ -39,6 +39,10 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
     case seatContested(seat: SZAgentSeat, holders: [String])
     /// A dispatch's `to` names no seat any loaded agent holds.
     case unknownDispatchSeat(agent: String, graph: String, node: String, seat: String)
+    /// The dispatch target exists but has no graph handling `.item` — every sent item
+    /// would arrive unhandled.
+    case dispatchTargetCannotHandleItems(agent: String, graph: String, node: String,
+                                         seat: String, holder: String)
     /// A dispatch's `items` fact is unknown for the graph's kind, or not `[String]`-typed.
     case dispatchItemsFact(agent: String, graph: String, node: String, fact: String,
                            detail: String)
@@ -73,6 +77,8 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
             "the \(seat.rawValue) seat is contested: \(holders.joined(separator: ", "))"
         case .unknownDispatchSeat(let agent, let graph, let node, let seat):
             "\(agent)/graphs/\(graph) node '\(node)': dispatches to '\(seat)', a seat no loaded agent holds"
+        case .dispatchTargetCannotHandleItems(let agent, let graph, let node, let seat, let holder):
+            "\(agent)/graphs/\(graph) node '\(node)': dispatches to '\(seat)' (\(holder)), which has no graph handling 'item'"
         case .dispatchItemsFact(let agent, let graph, let node, let fact, let detail):
             "\(agent)/graphs/\(graph) node '\(node)': items fact '\(fact)' — \(detail)"
         case .undeclaredStepOutcome(let agent, let graph, let node, let outcome, let declared):
@@ -246,6 +252,7 @@ public enum SZAgentPackLoader {
                     .graphShape(agent: pack.id, graph: graph.name, defect: $0)
                 }
                 defects += await nodeDefects(pack: pack, graph: graph,
+                                             allPacks: packs,
                                              filledSeats: filledSeats, steps: steps)
             }
         }
@@ -256,6 +263,7 @@ public enum SZAgentPackLoader {
     /// name held seats and `[String]`-typed facts — and, with a provider, the compiled
     /// steps' declarations agree with the wiring.
     private static func nodeDefects(pack: SZAgentPack, graph: SZAgentGraph,
+                                    allPacks: [SZAgentPack],
                                     filledSeats: Set<SZAgentSeat>,
                                     steps: (any SZStepProviding)?) async -> [SZAgentPackDefect] {
         var defects: [SZAgentPackDefect] = []
@@ -268,9 +276,16 @@ public enum SZAgentPackLoader {
                 }
 
             case .dispatch(let dispatch):
-                if SZAgentSeat(rawValue: dispatch.to).map(filledSeats.contains) != true {
+                let targetSeat = SZAgentSeat(rawValue: dispatch.to)
+                let holder = targetSeat.flatMap { seat in allPacks.first { $0.seat == seat } }
+                if targetSeat.map(filledSeats.contains) != true {
                     defects.append(.unknownDispatchSeat(agent: pack.id, graph: graph.name,
                                                         node: node.id, seat: dispatch.to))
+                } else if let holder, holder.graph(handling: .item) == nil {
+                    // A seat that cannot receive items makes every dispatch a dead letter.
+                    defects.append(.dispatchTargetCannotHandleItems(
+                        agent: pack.id, graph: graph.name, node: node.id,
+                        seat: dispatch.to, holder: holder.id))
                 }
                 // The `items` fact must exist for THIS graph's kind and be `[String]`-typed —
                 // it names the node ids a dispatch fans out over.
@@ -307,12 +322,13 @@ public enum SZAgentPackLoader {
                                 agent: pack.id, graph: graph.name, node: node.id,
                                 outcome: edge.outcome, declared: declaration.outcomes))
                         }
-                        // nil facts tolerated for now — a declaration may predate the field.
-                        if let declaredKind = declaration.facts,
-                           declaredKind != graph.kind.rawValue {
+                        // Strict: every SDK path stamps the kind, so a declaration without
+                        // one is hand-rolled — and a hand-rolled declaration is exactly the
+                        // case the kind gate exists for.
+                        if declaration.facts != graph.kind.rawValue {
                             defects.append(.stepFactsMismatch(
                                 agent: pack.id, graph: graph.name, node: node.id,
-                                step: name, declared: declaredKind))
+                                step: name, declared: declaration.facts ?? "(none)"))
                         }
                     } else if !outgoing.isEmpty {
                         defects.append(.stepDeclaresNothing(agent: pack.id, graph: graph.name,

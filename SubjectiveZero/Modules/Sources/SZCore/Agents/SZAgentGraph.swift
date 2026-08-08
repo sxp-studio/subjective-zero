@@ -226,9 +226,11 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
     case entryKindNotEnterable(SZMessageKind)
     case missingOwnEntry(SZMessageKind)
     case danglingEdge(from: String, to: String)
+    case duplicateEdge(from: String, outcome: String)
     case edgeFromDispatch(node: String)
     case undeclaredOutcome(node: String, outcome: String)
     case nonPositiveBound(from: String, outcome: String)
+    case nonPositiveRounds(Int)
     case unboundedCycle(nodes: [String])
 
     public var description: String {
@@ -243,12 +245,16 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
             "the graph handles '\(kind.rawValue)' but declares no entry for it"
         case .danglingEdge(let from, let to):
             "edge \(from) → \(to) names an unknown node"
+        case .duplicateEdge(let from, let outcome):
+            "two edges leave '\(from)' on '\(outcome)' — the second can never route"
         case .edgeFromDispatch(let node):
             "dispatch '\(node)' sends and concludes — it cannot have an out-edge"
         case .undeclaredOutcome(let node, let outcome):
             "'\(node)' never produces outcome '\(outcome)'"
         case .nonPositiveBound(let from, let outcome):
             "edge \(from) on '\(outcome)' declares a bound below 1"
+        case .nonPositiveRounds(let rounds):
+            "caps.rounds is \(rounds) — 'no re-entries' is spelled by omitting the settled entry"
         case .unboundedCycle(let nodes):
             "cycle \(nodes.joined(separator: " → ")) never crosses a bounded edge"
         }
@@ -281,7 +287,15 @@ extension SZAgentGraph {
             defects.append(.missingOwnEntry(kind))
         }
 
+        if let rounds = caps?.rounds, rounds < 1 {
+            defects.append(.nonPositiveRounds(rounds))
+        }
+
+        var routes: Set<String> = []
         for edge in edges {
+            if !routes.insert("\(edge.from)\u{0}\(edge.outcome)").inserted {
+                defects.append(.duplicateEdge(from: edge.from, outcome: edge.outcome))
+            }
             if !ids.contains(edge.from) || !ids.contains(edge.to) {
                 defects.append(.danglingEdge(from: edge.from, to: edge.to))
                 continue

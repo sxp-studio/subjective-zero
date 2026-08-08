@@ -10,6 +10,31 @@ import Foundation
 
 private let deadline: Duration = .seconds(900)
 
+@Suite struct SZThreadMachineReviewHardening {
+    /// A dispatch riding anything but an .ended conclusion is refused: only a traversal
+    /// that actually concluded its work may park the thread awaiting a fleet.
+    @Test func aDispatchRidingAFailureNeverOpensASet() {
+        var machine = openedMachine()
+        let commands = machine.handle(.traversalConcluded(
+            .failed(reason: "the turn died"),
+            dispatch: .init(target: "coding", items: ["a", "b"], notes: [:])))
+        #expect(commands.contains(.conclude(.failed(reason: "the turn died"), unconsumedSteers: [])))
+        #expect(!commands.contains { if case .deliverItems = $0 { return true } else { return false } })
+        #expect(!commands.contains { if case .armWatchdog = $0 { return true } else { return false } })
+    }
+
+    /// "okay" is not "ok": only the exact outcome or its detailed form counts as success
+    /// on the dispatch tally.
+    @Test func theFailedTallyCountsPrefixImpostorsAsFailed() {
+        var machine = openedMachine()
+        let setID = dispatch(&machine, items: ["a", "b", "c"])
+        _ = machine.handle(.itemSettled(node: "a", setID: setID, outcome: "okay-ish"))
+        _ = machine.handle(.itemSettled(node: "b", setID: setID, outcome: "ok: clean"))
+        let commands = machine.handle(.itemSettled(node: "c", setID: setID, outcome: "ok"))
+        #expect(commands.contains(.amendTally(setID: setID, settled: 3, total: 3, failed: 1)))
+    }
+}
+
 private func makeBounds(roundCeiling: Int = 8, defaultRounds: Int = 4) -> SZThreadMachine.Bounds {
     .init(roundCeiling: roundCeiling, dispatchDeadline: deadline, defaultRounds: defaultRounds)
 }

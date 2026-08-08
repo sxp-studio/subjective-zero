@@ -18,11 +18,11 @@ import SZCore
 /// refusal is not failure. `defect` is the engine refusing to guess (unknown node, an
 /// outcome outside the declared set, a step that would not start).
 public enum SZTraversalConclusion: Sendable, Equatable {
-    case ended(step: String, outcome: String)
-    case failed(step: String, detail: String)
-    case cancelled(step: String)
-    case declined(step: String, reason: String?)
-    case defect(step: String, detail: String)
+    case ended(node: String, outcome: String)
+    case failed(node: String, detail: String)
+    case cancelled(node: String)
+    case declined(node: String, reason: String?)
+    case defect(node: String, detail: String)
 }
 
 /// A step node's attached declaration, resolved at pack load (outcomes from the compiled
@@ -36,6 +36,8 @@ public struct SZTraversalResult: Sendable {
     public var conclusion: SZTraversalConclusion
     /// Item orders a dispatch sent (empty otherwise) — the machine opens a set from these.
     public var sent: [SZItemOrder]
+    /// The seat those orders address, straight off the dispatch node.
+    public var sentTarget: String?
     public var notes: [SZTraversalNote]
 }
 
@@ -64,8 +66,10 @@ public struct SZGraphEngine {
     public func run(kind: SZMessageKind) async -> SZTraversalResult {
         var notes: [SZTraversalNote] = []
         var sent: [SZItemOrder] = []
+        var sentTarget: String?
         var ordinal = 0
-        var boundsSpent: [String: Int] = [:]   // "from|outcome" → traversals taken
+        struct EdgeKey: Hashable { let from: String; let outcome: String }
+        var boundsSpent: [EdgeKey: Int] = [:]
 
         func note(_ value: SZTraversalNote) {
             notes.append(value)
@@ -73,10 +77,12 @@ public struct SZGraphEngine {
         }
 
         guard let entry = graph.entry[kind] else {
-            // An undeclared entry ends the traversal before it begins — the pack gate
-            // refuses graphs missing their OWN kind's entry, so this is a foreign kind.
+            // The pack gate guarantees a graph enters on its own kind, so a missing entry
+            // means the host delivered a kind this graph never declared — a routing bug,
+            // and the engine refuses to guess.
             return SZTraversalResult(
-                conclusion: .ended(step: "", outcome: "unhandled"), sent: [], notes: [])
+                conclusion: .defect(node: "", detail: "no entry declared for '\(kind.rawValue)'"),
+                sent: [], sentTarget: nil, notes: [])
         }
 
         var current: String? = entry
@@ -84,39 +90,40 @@ public struct SZGraphEngine {
 
         while let id = current, conclusion == nil {
             guard !Task.isCancelled else {
-                conclusion = .cancelled(step: id)
+                conclusion = .cancelled(node: id)
                 break
             }
             guard let node = graph.node(id) else {
-                conclusion = .defect(step: id, detail: "the graph names no node '\(id)'")
+                conclusion = .defect(node: id, detail: "the graph names no node '\(id)'")
                 break
             }
             ordinal += 1
             note(SZTraversalNote(ordinal: ordinal, node: id, phase: .running))
 
             let outcome: String
+            var turnFailure: String?
             switch node.form {
             case .step(let name):
                 let report = await steps.evaluate(
-                    agent: agent, step: name, factsJSON: host.factsJSON(kind: graph.kind),
+                    agent: agent, step: name, factsJSON: host.factsJSON(kind: kind),
                     ask: { [host, agent] request in
                         try await host.serveAsk(agent: agent, step: name, requestJSON: request)
                     })
                 if report.cancelled {
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done, outcome: nil))
-                    conclusion = .cancelled(step: id)
+                    conclusion = .cancelled(node: id)
                     continue
                 }
                 if let failure = report.failure {
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: failure))
-                    conclusion = .defect(step: id, detail: failure)
+                    conclusion = .defect(node: id, detail: failure)
                     continue
                 }
                 guard let answered = report.outcome,
                       attachments[id]?.outcomes.contains(answered) == true else {
                     let detail = "step '\(name)' answered '\(report.outcome ?? "nothing")', outside its declared outcomes"
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
-                    conclusion = .defect(step: id, detail: detail)
+                    conclusion = .defect(node: id, detail: detail)
                     continue
                 }
                 outcome = answered
@@ -124,11 +131,11 @@ public struct SZGraphEngine {
             case .turn(let turn):
                 let rendered: String
                 do {
-                    rendered = try host.renderBrief(agent: agent, template: turn.brief, kind: graph.kind)
+                    rendered = try host.renderBrief(agent: agent, template: turn.brief, kind: kind)
                 } catch {
                     let detail = "brief '\(turn.brief)' would not render: \(error)"
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
-                    conclusion = .defect(step: id, detail: detail)
+                    conclusion = .defect(node: id, detail: detail)
                     continue
                 }
                 let choice = router.resolve(SZModelCall(
@@ -138,45 +145,51 @@ public struct SZGraphEngine {
                     tools: turn.tools, choice: choice))
                 if Task.isCancelled {
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done))
-                    conclusion = .cancelled(step: id)
+                    conclusion = .cancelled(node: id)
                     continue
                 }
                 // Process truth only. A failed turn is `error` — a wired error edge may
                 // route recovery; an unwired one ends the traversal as failed below.
                 outcome = report.failed ? "error" : "ok"
-                if report.failed, graph.edge(from: id, outcome: "error") == nil {
-                    note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: report.detail))
-                    conclusion = .failed(step: id, detail: report.detail ?? "the turn failed")
-                    continue
-                }
+                if report.failed { turnFailure = report.detail ?? "the turn failed" }
 
             case .dispatch(let dispatch):
-                let items = host.itemsFact(named: dispatch.items, kind: graph.kind)
+                let items = host.itemsFact(named: dispatch.items, kind: kind)
                 sent = items.map { SZItemOrder(node: $0) }
+                sentTarget = dispatch.to
                 outcome = "sent"
                 note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done, outcome: outcome,
                                      detail: "\(sent.count) item(s) to \(dispatch.to)"))
                 // Send-and-conclude: the shape gate refused any out-edge, so the loop ends
                 // here and the settled reply re-enters via the machine.
-                conclusion = .ended(step: id, outcome: outcome)
+                conclusion = .ended(node: id, outcome: outcome)
                 continue
             }
 
-            note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done, outcome: outcome))
+            note(SZTraversalNote(ordinal: ordinal, node: id,
+                                 phase: turnFailure == nil ? .done : .failed,
+                                 outcome: outcome, detail: turnFailure))
+
+            // How this traversal ends when nothing routes onward from `outcome` — shared
+            // by the edge-less exit and the spent leash, so neither can launder a failed
+            // turn into success nor a refusal into completion.
+            func ending() -> SZTraversalConclusion {
+                if let turnFailure { return .failed(node: id, detail: turnFailure) }
+                if outcome == "declined" { return .declined(node: id, reason: nil) }
+                return .ended(node: id, outcome: outcome)
+            }
 
             guard let edge = graph.edge(from: id, outcome: outcome) else {
-                conclusion = outcome == "declined"
-                    ? .declined(step: id, reason: nil)
-                    : .ended(step: id, outcome: outcome)
+                conclusion = ending()
                 continue
             }
             if let bound = edge.maxTraversals {
-                let key = "\(edge.from)|\(edge.outcome)"
+                let key = EdgeKey(from: edge.from, outcome: edge.outcome)
                 let spent = boundsSpent[key, default: 0]
                 guard spent < bound else {
                     // The leash ran out: the traversal ends where it stands, on its own
-                    // outcome — bounded edges limit repetition, they do not fail it.
-                    conclusion = .ended(step: id, outcome: outcome)
+                    // ending class — bounded edges limit repetition, nothing more.
+                    conclusion = ending()
                     continue
                 }
                 boundsSpent[key] = spent + 1
@@ -185,8 +198,9 @@ public struct SZGraphEngine {
         }
 
         return SZTraversalResult(
-            conclusion: conclusion ?? .defect(step: current ?? "", detail: "the traversal never concluded"),
+            conclusion: conclusion ?? .defect(node: current ?? "", detail: "the traversal never concluded"),
             sent: sent,
+            sentTarget: sentTarget,
             notes: notes)
     }
 }

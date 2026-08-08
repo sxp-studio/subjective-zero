@@ -298,12 +298,14 @@ private func cleanup(_ root: URL) {
     #expect(defects == [.stepFactsMismatch(agent: "director-a", graph: "run", node: "route",
                                            step: "route", declared: "chat")])
 
-    // And a declaration WITHOUT a facts kind is tolerated (nil = predates the field).
+    // A declaration WITHOUT a facts kind is refused too: every SDK path stamps the kind,
+    // so an unstamped declaration is hand-rolled — the very case the gate exists for.
     let untyped = StubSteps(infos: [
         "director-a/route": SZStepDeclarationInfo(outcomes: ["yes", "no"]),
     ])
-    let tolerated = await SZAgentPackLoader.validate(packs: loaded.packs, steps: untyped)
-    #expect(tolerated.isEmpty)
+    let refused = await SZAgentPackLoader.validate(packs: loaded.packs, steps: untyped)
+    #expect(refused == [.stepFactsMismatch(agent: "director-a", graph: "run", node: "route",
+                                           step: "route", declared: "(none)")])
 }
 
 @Test func stepDeclaringNothingUnderWiredEdgesIsADefect() async throws {

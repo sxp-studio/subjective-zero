@@ -22,6 +22,9 @@ let package = Package(
         .target(
             name: "SZAI",
             dependencies: ["SZCore"],
+            exclude: [
+                "Resources/AgentsDraft",       // draft packs — tests read them via #filePath; ship at P4
+            ],
             resources: [
                 .copy("Resources/Prompts"),    // agent prompts as bundled .md.mustache files
                 .copy("Resources/Docs"),       // agent-fetchable reference docs (agent_docs_*)

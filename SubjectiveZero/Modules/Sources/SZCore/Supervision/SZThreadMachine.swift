@@ -249,9 +249,12 @@ public struct SZThreadMachine: Sendable {
             case .traversing:
                 lastConclusion = conclusion
                 let members = dedupe(dispatch?.items ?? [])
-                guard let dispatch, !members.isEmpty else {
-                    // No orders, nothing outstanding (structural: a set never overlaps
-                    // a traversal) — this conclusion IS the thread's ending.
+                guard let dispatch, !members.isEmpty, case .ended = conclusion else {
+                    // No orders, nothing outstanding (structural: a set never overlaps a
+                    // traversal) — this conclusion IS the thread's ending. A dispatch
+                    // riding a failed/cancelled conclusion is refused the same way: only
+                    // an .ended traversal opens a set, so a failure can never park the
+                    // thread awaiting a fleet it should not have sent.
                     return concludeNow(threadEnding(of: conclusion))
                 }
                 let set = DispatchSet(id: nextSetID, target: dispatch.target,
@@ -370,7 +373,7 @@ public struct SZThreadMachine: Sendable {
         .amendTally(setID: set.id,
                     settled: set.outcomes.count,
                     total: set.members.count,
-                    failed: set.outcomes.values.count { !$0.hasPrefix("ok") })
+                    failed: set.outcomes.values.count { !($0 == "ok" || $0.hasPrefix("ok:")) })
     }
 
     private func threadEnding(of conclusion: SZTraversalEnding) -> SZThreadConclusion {

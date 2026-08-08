@@ -133,6 +133,18 @@ struct SZAgentGraphTests {
         #expect(graph.defects().contains(.nonPositiveBound(from: "work-left", outcome: "no")))
     }
 
+    @Test func aSecondEdgeOnTheSameOutcomeIsRefused() {
+        var graph = makeBuildGraph()
+        graph.edges.append(.init(from: "work-left", outcome: "yes", to: "unblock"))
+        #expect(graph.defects().contains(.duplicateEdge(from: "work-left", outcome: "yes")))
+    }
+
+    @Test func roundsBelowOneAreRefused() {
+        var graph = makeBuildGraph()
+        graph.caps = .init(rounds: 0)
+        #expect(graph.defects().contains(.nonPositiveRounds(0)))
+    }
+
     @Test func aCycleMustCrossABoundedEdge() {
         var graph = makeBuildGraph()
         graph.edges[2].maxTraversals = nil   // work-left → unblock → work-left, now leashless
