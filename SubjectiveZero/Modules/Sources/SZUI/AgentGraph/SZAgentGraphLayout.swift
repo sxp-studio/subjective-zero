@@ -24,17 +24,26 @@ public struct SZAgentGraphFace: Equatable, Sendable {
     /// The three forms, re-stated flat so renderers can switch without pattern-matching
     /// payloads they don't read.
     public enum Form: Equatable, Sendable { case step, turn, dispatch }
+    /// What the card's source affordance opens: the step's authored Swift, or the brief
+    /// template that IS a turn's body. A value, not an action — the host resolves the file.
+    public enum Source: Equatable, Sendable {
+        case step(name: String)
+        case brief(path: String)
+    }
     public var form: Form
     public var title: String
     public var symbol: String
     /// The rows the card draws, in display order.
     public var outcomes: [String]
+    public var source: Source?
 
-    public init(form: Form, title: String, symbol: String, outcomes: [String]) {
+    public init(form: Form, title: String, symbol: String, outcomes: [String],
+                source: Source? = nil) {
         self.form = form
         self.title = title
         self.symbol = symbol
         self.outcomes = outcomes
+        self.source = source
     }
 
     /// The face with `outcome` guaranteed a row — a Run entry may produce an outcome the
@@ -79,11 +88,13 @@ public enum SZAgentGraphLayout {
             let wired = wiredOutcomes(of: node.id, in: graph)
             return SZAgentGraphFace(form: .step, title: node.title ?? name,
                                     symbol: "curlybraces",
-                                    outcomes: wired.isEmpty ? ["done"] : wired)
+                                    outcomes: wired.isEmpty ? ["done"] : wired,
+                                    source: .step(name: name))
         case .turn(let turn):
             // Fixed process-truth rows, in the reading order the model documents.
             return SZAgentGraphFace(form: .turn, title: node.title ?? briefName(turn.brief),
-                                    symbol: "text.bubble", outcomes: ["ok", "error"])
+                                    symbol: "text.bubble", outcomes: ["ok", "error"],
+                                    source: .brief(path: turn.brief))
         case .dispatch(let dispatch):
             // Send-and-conclude: one outcome, no out-edges.
             return SZAgentGraphFace(form: .dispatch, title: node.title ?? "→ \(dispatch.to)",

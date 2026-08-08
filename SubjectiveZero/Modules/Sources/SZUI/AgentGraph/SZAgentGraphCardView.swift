@@ -40,6 +40,9 @@ struct SZAgentGraphCardStats: Equatable {
 
 struct SZAgentGraphCardView: View {
     let face: SZAgentGraphFace
+    /// Open the card's authored source (the step's Swift, a turn's brief). nil = no host
+    /// wired the affordance — the pill simply isn't drawn.
+    var openSource: ((SZAgentGraphFace.Source) -> Void)? = nil
     let state: SZAgentGraphCardState
     /// The Run view's per-visit label ("visit 2"), shown on the subheader line.
     var visitLabel: String? = nil
@@ -93,10 +96,28 @@ struct SZAgentGraphCardView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer(minLength: 0)
+            sourcePill
             finishedGlyph
         }
         .padding(.horizontal, 12)
         .frame(height: SZNodeLayout.headerHeight)
+    }
+
+    /// The implementation door: what this card actually does, one click away. Only drawn
+    /// when the face carries a source AND a host wired the opener.
+    @ViewBuilder
+    private var sourcePill: some View {
+        if let source = face.source, let openSource {
+            Button {
+                openSource(source)
+            } label: {
+                Image(systemName: face.form == .step ? "curlybraces" : "doc.text")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .help(face.form == .step ? "Open the step's Step.swift" : "Open the brief template")
+        }
     }
 
     /// The Run view's second line, under the title: the re-entry mark (the only thing

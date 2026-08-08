@@ -794,7 +794,8 @@ struct SZApp: App {
             // and the RUNS records, all plain values + closures (SZUI never sees SZAI).
             SZAgentGraphPanel(planAgents: host.agentGraphPlanAgents(),
                               runs: host.agentGraphRuns,
-                              resolveGraph: { [weak host] in host?.agentGraphResolve($0) })
+                              resolveGraph: { [weak host] in host?.agentGraphResolve($0) },
+                              openStepSource: { [weak host] in host?.openPackSource(agent: $0, source: $1) })
         }
     }
 }

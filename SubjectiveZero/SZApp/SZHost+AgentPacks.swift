@@ -11,10 +11,13 @@
 // Prompt templates need no watcher: SZBriefRenderer reads them from disk per render, so a
 // saved edit reaches the very next turn. Step sources DO need one — a step is compiled
 // code, and the step runtime swaps modules on green.
+import AppKit
 import Foundation
 import SZAI
 import SZCore
 import SZRuntime
+import SZUI
+import UniformTypeIdentifiers
 
 extension SZHost {
     /// `~/Library/Application Support/SubjectiveZero/agents` — where the bundled packs
@@ -177,5 +180,34 @@ extension SZHost {
     func setRunGraphVariant(_ name: String?) {
         runGraphVariant = name
         persistAppState()
+    }
+}
+
+extension SZHost {
+    /// The panel's source affordance: resolve a card's authored file inside the ACTIVE
+    /// packs root and open it in the user's editor. `.md.mustache` claims no default app,
+    /// so unopenable files fall through to the plain-text editor, then TextEdit — never
+    /// a shrug.
+    func openPackSource(agent: String, source: SZAgentGraphFace.Source) {
+        let root = SZHost.graphAgentPacksRoot() ?? Self.materializedAgentPacksRoot
+        let url: URL
+        switch source {
+        case .step(let name):
+            url = root.appending(path: "\(agent)/steps/\(name)/Step.swift")
+        case .brief(let path):
+            url = root.appending(path: "\(agent)/\(path)")
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            status = "no source at \(url.path)"
+            return
+        }
+        if NSWorkspace.shared.urlForApplication(toOpen: url) != nil {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        let editor = NSWorkspace.shared.urlForApplication(toOpen: UTType.plainText)
+            ?? URL(fileURLWithPath: "/System/Applications/TextEdit.app")
+        NSWorkspace.shared.open([url], withApplicationAt: editor,
+                                configuration: NSWorkspace.OpenConfiguration())
     }
 }

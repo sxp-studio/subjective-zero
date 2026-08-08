@@ -10,6 +10,8 @@ import SZCore
 /// where the frames come from (the plan's ranked layout vs the record's unrolled chain).
 struct SZAgentGraphCanvasContent: View {
     let graph: SZAgentGraph
+    /// Opens a card's authored source; nil hides every source pill.
+    var openSource: ((SZAgentGraphFace.Source) -> Void)? = nil
     /// The record whose trace the Run view unrolls; nil = the Plan view (no live state).
     let record: SZAgentGraphRun?
     let mode: SZAgentGraphPanelMode
@@ -37,7 +39,8 @@ struct SZAgentGraphCanvasContent: View {
     private func card(_ face: SZAgentGraphFace, state: SZAgentGraphCardState, frame: CGRect,
                       visitLabel: String? = nil,
                       stats: SZAgentGraphCardStats? = nil) -> some View {
-        SZAgentGraphCardView(face: face, state: state, visitLabel: visitLabel, stats: stats)
+        SZAgentGraphCardView(face: face, openSource: openSource, state: state,
+                             visitLabel: visitLabel, stats: stats)
             .frame(width: frame.width, height: frame.height)
             .offset(x: frame.minX, y: frame.minY)
     }

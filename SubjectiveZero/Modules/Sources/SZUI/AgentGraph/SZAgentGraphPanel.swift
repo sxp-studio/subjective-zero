@@ -61,6 +61,9 @@ public struct SZAgentGraphPanel: View {
     private let planAgents: [SZAgentGraphPlanAgent]
     /// The recorded runs, live first then newest — the host keeps the order, this draws it.
     private let runs: [SZAgentGraphRun]
+    /// Open a card's authored source in the user's editor, agent-qualified — the host
+    /// resolves the materialized file. nil = the affordance is absent (tests, previews).
+    private let openStepSource: ((String, SZAgentGraphFace.Source) -> Void)?
     /// A record's OWN graph. nil = the pack library no longer carries it (an archive from a
     /// build whose agents have since changed) — the canvas says so and stops.
     private let resolveGraph: (SZAgentGraphRun) -> SZAgentGraph?
@@ -102,10 +105,12 @@ public struct SZAgentGraphPanel: View {
 
     public init(planAgents: [SZAgentGraphPlanAgent],
                 runs: [SZAgentGraphRun] = [],
-                resolveGraph: @escaping (SZAgentGraphRun) -> SZAgentGraph? = { _ in nil }) {
+                resolveGraph: @escaping (SZAgentGraphRun) -> SZAgentGraph? = { _ in nil },
+                openStepSource: ((String, SZAgentGraphFace.Source) -> Void)? = nil) {
         self.planAgents = planAgents
         self.runs = runs
         self.resolveGraph = resolveGraph
+        self.openStepSource = openStepSource
     }
 
     /// No runs, nothing to list — force Plan rather than a Run view with no canvas.
@@ -135,11 +140,12 @@ public struct SZAgentGraphPanel: View {
     private var displayed: Displayed? {
         if effectiveMode == .run {
             guard let shown, let graph = resolveGraph(shown) else { return nil }
-            return Displayed(key: shown.id.uuidString, graph: graph, record: shown)
+            return Displayed(key: shown.id.uuidString, graph: graph, record: shown,
+                             agent: shown.agent)
         }
         guard let planAgent, let planGraph else { return nil }
         return Displayed(key: "\(planAgent.id)/\(planGraph.name)", graph: planGraph.graph,
-                         record: nil)
+                         record: nil, agent: planAgent.id)
     }
 
     /// One canvas's worth of values. The Plan view carries no record — its cards are the
@@ -151,6 +157,8 @@ public struct SZAgentGraphPanel: View {
         var key: String
         var graph: SZAgentGraph
         var record: SZAgentGraphRun?
+        /// Whose pack the drawn graph belongs to — what the source affordance opens under.
+        var agent: String
     }
 
     public var body: some View {
@@ -292,7 +300,11 @@ public struct SZAgentGraphPanel: View {
 
     /// World space — the mode split and both renderers live in the content view.
     private func content(_ displayed: Displayed) -> some View {
-        SZAgentGraphCanvasContent(graph: displayed.graph, record: displayed.record,
+        SZAgentGraphCanvasContent(graph: displayed.graph,
+                                  openSource: openStepSource.map { open in
+                                      { source in open(displayed.agent, source) }
+                                  },
+                                  record: displayed.record,
                                   mode: effectiveMode,
                                   zoom: camera.zoom, nudges: nudges,
                                   onNudge: { id, delta in nudges[id, default: .zero] = delta })
