@@ -789,9 +789,8 @@ struct SZApp: App {
                 .environment(\.szHeldPromptTurnIDs, host.heldPromptIDs)
                 .environment(\.szViewTurnTokens, viewTurnTokensAction)
         case .agentGraph:
-            // The graph orchestrator's observability twin (DEBUG builds, gated with the
-            // Profiler — normalize() strips the leaf elsewhere): the pack library's plans
-            // and the RUNS records, all plain values + closures (SZUI never sees SZAI).
+            // How you read what the agents actually did: the pack library's plans and the
+            // RUNS records, all plain values + closures (SZUI never sees SZAI).
             SZAgentGraphPanel(planAgents: host.agentGraphPlanAgents(),
                               runs: host.agentGraphRuns,
                               resolveGraph: { [weak host] in host?.agentGraphResolve($0) },

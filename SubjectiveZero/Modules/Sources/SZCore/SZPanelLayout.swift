@@ -52,11 +52,11 @@ public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
         #endif
     }
 
-    /// Debug-only surfaces, gated together: the Profiler and the Agent Graph panel (the
-    /// graph orchestrator's observability twin) ship their CASES everywhere for Codable
-    /// tolerance, their SURFACES only where `profilerPanelAvailable` says so.
+    /// Debug-only surfaces. The Profiler is one — its numbers only mean something next to a
+    /// trace. The Agent Graph panel is NOT: what an agent does is authored content now, and
+    /// the panel is how you read it, so it ships everywhere the packs do.
     public var isDebugOnly: Bool {
-        self == .profiler || self == .agentGraph
+        self == .profiler
     }
 
     /// The kinds this build offers in menus/layouts.
