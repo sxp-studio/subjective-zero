@@ -95,6 +95,12 @@ public struct SZAgentGraphPanel: View {
     @State private var camera = SZCanvasCamera(zoom: 1, offset: CGSize(width: 60, height: 0))
     @State private var pinchAnchor: SZCanvasCamera?
     @State private var viewSize: CGSize = .zero
+    /// Where the cursor is over THIS canvas, nil when it is elsewhere. The scroll-wheel
+    /// monitor is a window-wide `NSEvent` monitor with no hit-testing of its own, so every
+    /// canvas must decide for itself whether a scroll was meant for it — without this, two
+    /// open canvases pan together and neither obeys the cursor (the node editor's rule,
+    /// applied here).
+    @State private var cursor: CGPoint?
     @State private var centred = false
     /// Per-node nudges, in world points. Session-only and deliberately NOT persisted: the
     /// layout is computed, and these exist so a graph can be pulled apart to read it, not
@@ -268,11 +274,19 @@ public struct SZAgentGraphPanel: View {
             .clipped()
             .coordinateSpace(name: Self.space)
             .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point): cursor = point
+                case .ended: cursor = nil
+                }
+            }
             .monitorCanvasScrollWheel { scroll in
+                // Only when the cursor is over THIS canvas: the monitor sees every scroll
+                // in the window, including the ones panning the node editor next door.
+                guard let cursor else { return }
                 if scroll.commandHeld {
                     let target = camera.zoom * (1 + scroll.deltaY * 0.01)
-                    camera.applyZoom(target, pivot: CGPoint(x: viewSize.width / 2, y: viewSize.height / 2),
-                                     from: camera)
+                    camera.applyZoom(target, pivot: cursor, from: camera)
                 } else {
                     following = false
                     camera.pan(by: CGSize(width: scroll.deltaX, height: scroll.deltaY))
