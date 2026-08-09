@@ -45,7 +45,7 @@ enum SZStepABI {
     /// Bumped on a breaking ABI change. The loader rejects a mismatch.
     /// v4: async evaluation (completion callback + cancel token), eager facts snapshot in
     /// the request, and the single `ask` outbound capability. (v3 was synchronous with a
-    /// lazy per-fact resolver; its history lives on the archived mailbox-agents branch.)
+    /// lazy per-fact resolver.)
     static let version: Int32 = 4
 
     static let apiVersionSymbol = "SZStepAPIVersion"

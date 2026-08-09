@@ -33,7 +33,7 @@ private let grayPrompt = "Convert the incoming camera texture to grayscale (per-
 
 private let testsDir = URL(filePath: #filePath).deletingLastPathComponent()
 private let fixturesDir = testsDir.appending(path: "Fixtures/Equivalence")
-private let draftPacksRoot = testsDir
+private let shippedPacksRoot = testsDir
     .deletingLastPathComponent()   // Tests
     .deletingLastPathComponent()   // Modules
     .appending(path: "Sources/SZAI/Resources/Agents")
@@ -136,9 +136,9 @@ private let libraryIndexText = "## Sources\n- `camera.macos` — the live camera
 
 struct SZEquivalenceGateTests {
 
-    /// Every *.md fixture, rendered through the living path: SZBriefRenderer + the draft packs.
+    /// Every *.md fixture, rendered through the living path: SZBriefRenderer + the shipped packs.
     private static func renderAll() throws -> [String: String] {
-        let renderer = SZBriefRenderer(packRoot: draftPacksRoot)
+        let renderer = SZBriefRenderer(packRoot: shippedPacksRoot)
         let base = try encoded(fixtureGraph())
         var out: [String: String] = [:]
 
@@ -298,7 +298,7 @@ struct SZEquivalenceGateTests {
         }
     }
 
-    // The draft packs' own health — load, shape, briefs, seats, and full validation with
+    // The shipped packs' own health — load, shape, briefs, seats, and full validation with
     // the step declarations attached — is pinned in SZAgentPackTests
-    // (`theShippedDraftPacksValidateZeroDefects`), not here: this suite is about the bytes.
+    // (`theShippedPacksValidateZeroDefects`), not here: this suite is about the bytes.
 }

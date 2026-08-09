@@ -5,7 +5,7 @@
 // injected runner, and the route-reply ruling ends the traversal — answer/plan bare,
 // build with the requestBuild effect. The step SEAM is scripted to mirror the shipped
 // step's contract (the compiled step itself is pinned in SZRuntimeTests'
-// `SZDraftPackStepTests`); what THIS suite pins is the wiring around it — above all that
+// `SZShippedPackStepTests`); what THIS suite pins is the wiring around it — above all that
 // the `draftedWork` fact is diffed LIVE at route-reply's own post-turn evaluation, and
 // that the mechanical build spends no query while the typed ruling spends exactly one,
 // served through the real query service over the pack's route-reply template.
@@ -15,7 +15,7 @@ import Testing
 @testable import SZAI
 @testable import SZCore
 
-private let draftPacksRoot = URL(filePath: #filePath)
+private let shippedPacksRoot = URL(filePath: #filePath)
     .deletingLastPathComponent()   // SZAITests
     .deletingLastPathComponent()   // Tests
     .deletingLastPathComponent()   // Modules
@@ -107,14 +107,14 @@ private final class ChatWorld {
     /// makes the TURN add a fresh prompt node to the live graph (the drafted-work case).
     init(resuming: Bool, rulingReply: String = #"{"kind": "answer"}"#,
          turnDrafts: Bool = false) throws {
-        let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+        let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
         let director = try #require(loaded.packs.first { $0.id == "director" })
         let graph = try #require(director.graph(handling: .chat))
         let attachments = [
             "resuming": SZStepAttachment(outcomes: ["yes", "no"]),
             "route-reply": SZStepAttachment(outcomes: ["answer", "build", "plan"]),
         ]
-        let renderer = SZBriefRenderer(packRoot: draftPacksRoot)
+        let renderer = SZBriefRenderer(packRoot: shippedPacksRoot)
         let router = SZIdentityRouter(choice: SZModelChoice(providerID: "claude",
                                                             model: nil, reasoningEffort: nil))
         let box = GraphBox(fixtureGraph())

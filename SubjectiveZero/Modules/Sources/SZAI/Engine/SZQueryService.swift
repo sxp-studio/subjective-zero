@@ -37,7 +37,7 @@ public enum SZQueryError: Error, CustomStringConvertible {
 /// the step's own error contract take over.
 /// A step's question is one small stateless completion, not a turn: it must never hold a
 /// scope's claim for a turn's patience. (The claim it rides is the delivery's — see the
-/// residual noted in the campaign wrap.)
+/// delivery's, so a slow ruling delays the next message on that scope.)
 public enum SZQueryBudgets {
     public static let timeout: TimeInterval = 45
     public static let inactivityTimeout: TimeInterval = 30

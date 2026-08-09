@@ -19,7 +19,7 @@
 // A token is only computed when the template mentions it, so a brief never fails on context
 // it does not use, and a substituted value can never leak into a template that has no slot
 // for it. Facts field names follow the SZFacts spec (SZCore/AgentFacts); the document is
-// read leniently because each kind's host projection grows next phase — a missing field is
+// read leniently because a kind's host projection may carry more than a template needs — a missing field is
 // an error only when a template actually needs it.
 import Foundation
 import SZCore

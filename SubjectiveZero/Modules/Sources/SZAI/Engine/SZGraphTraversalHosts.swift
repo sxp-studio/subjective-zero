@@ -165,7 +165,7 @@ final class SZDirectorTraversalHost: SZTraversalHost {
             unimplemented: scoped.map(\.uuidString),
             workSet: scoped.map(\.uuidString),
             nodeStatuses: statuses,
-            buildErrors: [:],   // compile diagnostics join the projection with the record work (next phase)
+            buildErrors: [:],   // not projected: no host surface publishes per-node diagnostics yet
             round: round,
             roundCap: roundCap,
             // Round 0 carries the host's flag (a chat-triggered run was already briefed by that

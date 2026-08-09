@@ -494,7 +494,7 @@ private func cleanup(_ root: URL) {
 
 // MARK: - The shipped packs
 
-private let draftPacksRoot = URL(filePath: #filePath)
+private let shippedPacksRoot = URL(filePath: #filePath)
     .deletingLastPathComponent()   // SZAITests
     .deletingLastPathComponent()   // Tests
     .deletingLastPathComponent()   // Modules
@@ -502,10 +502,10 @@ private let draftPacksRoot = URL(filePath: #filePath)
 
 /// CROSS-TARGET PIN, side A. These declarations are hand-written to match what each
 /// shipped-pack `Step.swift` declares, because this target may not import SZRuntime to
-/// compile them. Side B is SZRuntimeTests' `SZDraftPackStepTests`, which compiles the SAME
+/// compile them. Side B is SZRuntimeTests' `SZShippedPackStepTests`, which compiles the SAME
 /// sources through the real toolchain and asserts each module's declaration JSON equals
-/// these claims, field for field — edit a draft step and both sides move together.
-private let draftPackSteps = StubSteps(infos: [
+/// these claims, field for field — edit a shipped step and both sides move together.
+private let shippedPackSteps = StubSteps(infos: [
     "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
     "director/nodes-failing": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
     "director/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
@@ -517,16 +517,16 @@ private let draftPackSteps = StubSteps(infos: [
 /// The packs the app ships attain the FULL verdict: load clean, seats fill, and — with the
 /// step declarations attached — validate to zero defects, token and partial scans included.
 /// The `debug` pack rides along seatless: the pure-authoring proof (zero Swift anywhere).
-@Test func theShippedDraftPacksValidateZeroDefects() async throws {
-    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+@Test func theShippedPacksValidateZeroDefects() async throws {
+    let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     #expect(loaded.defects.isEmpty, "\(loaded.defects)")
     #expect(loaded.packs.map(\.id) == ["coding", "debug", "director"])
     #expect(loaded.seats == SZSeatAssignment(director: "director", coding: "coding"))
 
-    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: draftPackSteps)
+    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: shippedPackSteps)
     #expect(defects.isEmpty, "\(defects)")
 
-    let report = await SZAgentPackLoader.check(root: draftPacksRoot, steps: draftPackSteps)
+    let report = await SZAgentPackLoader.check(root: shippedPacksRoot, steps: shippedPackSteps)
     #expect(report.contains("verdict: validates — 3 agents, zero defects"))
     #expect(!report.contains("step checks skipped"))
 }
@@ -535,7 +535,7 @@ private let draftPackSteps = StubSteps(infos: [
 /// turn-less `procedural`, and the condition-gated `recovery` — validated above as full
 /// graphs, resolved here through the variant API the host's selection rides on.
 @Test func theShippedDirectorPackCarriesTheBuildVariants() throws {
-    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+    let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     let director = try #require(loaded.packs.first { $0.id == "director" })
     #expect(director.variants(handling: .build).map(\.name) == ["agentic", "procedural", "recovery"])
     #expect(director.defaults == [.build: "agentic"])
@@ -552,7 +552,7 @@ private let draftPackSteps = StubSteps(infos: [
 /// "yes" routes to a reconcile turn and then the dispatch, and whose unwired "no" ends the
 /// run untouched. One recovery round (`caps.rounds: 1`); the pack default stays `agentic`.
 @Test func theShippedRecoveryVariantGatesOnTheFailingFleet() throws {
-    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+    let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     let director = try #require(loaded.packs.first { $0.id == "director" })
     let recovery = try #require(director.graph(handling: .build, variant: "recovery"))
     #expect(recovery.caps?.rounds == 1)
@@ -570,7 +570,7 @@ private let draftPackSteps = StubSteps(infos: [
 /// END the traversal — `build`'s work is the `requestBuild` EFFECT (performed before edge
 /// routing), so no outcome needs an edge.
 @Test func theShippedChatGraphRoutesBothTurnsIntoRouteReply() throws {
-    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+    let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     let director = try #require(loaded.packs.first { $0.id == "director" })
     let chat = try #require(director.graph(handling: .chat))
     #expect(chat.entry[.chat] == "resuming")
@@ -646,13 +646,13 @@ private let draftPackSteps = StubSteps(infos: [
     #expect(report.contains("verdict: validates — 2 agents, zero defects"))
 }
 
-/// The pin stub claims exactly the steps the draft packs carry — a new step folder cannot
+/// The pin stub claims exactly the steps the shipped packs carry — a new step folder cannot
 /// ship unclaimed (validation would skip it silently through the stub's nil), and a stale
 /// claim cannot outlive its folder.
-@Test func theDraftStepPinCoversExactlyTheShippedStepFolders() throws {
-    let loaded = SZAgentPackLoader.load(root: draftPacksRoot)
+@Test func theStepPinCoversExactlyTheShippedStepFolders() throws {
+    let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     let shipped = Set(loaded.packs.flatMap { pack in
         pack.steps.filter(\.hasSource).map { "\(pack.id)/\($0.name)" }
     })
-    #expect(shipped == Set(draftPackSteps.infos.keys))
+    #expect(shipped == Set(shippedPackSteps.infos.keys))
 }
