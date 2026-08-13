@@ -24,7 +24,9 @@ private let pinnedDeclarations: [String: String] = [
     "director/nodes-failing": #"{"facts":"build","outcomes":["yes","no"]}"#,
     "director/resuming": #"{"facts":"chat","outcomes":["yes","no"]}"#,
     "director/route-reply": #"{"facts":"chat","outcomes":["answer","build","plan"]}"#,
+    "director/strategy": #"{"facts":"build","outcomes":["agentic","procedural","recovery"]}"#,
     "coding/retrying": #"{"facts":"item","outcomes":["yes","no"]}"#,
+    "coding/resuming": #"{"facts":"chat","outcomes":["yes","no"]}"#,
     "coding/request-op": #"{"facts":"request","outcomes":["split","merge"]}"#,
 ]
 

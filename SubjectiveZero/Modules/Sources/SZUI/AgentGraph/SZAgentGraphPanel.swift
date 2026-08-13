@@ -47,19 +47,21 @@ public struct SZAgentGraphPlanAgent: Identifiable, Equatable, Sendable {
     public var defaultGraphName: String
     /// The seat this agent holds — what a dispatch's `to` resolves against. nil = seatless.
     public var seat: String?
-    /// The graph a delivery ACTUALLY runs when variants exist (env > persisted choice >
-    /// pack default, resolved by the host). nil = no variant dimension for this agent.
-    public var activeGraphName: String?
+    /// The build STRATEGY the next run asks for (env > the persisted choice), when this
+    /// agent is the one that opens builds. Not a graph name any more — the strategies are
+    /// routes inside one document — so it marks the AGENT'S graph row rather than picking
+    /// between rows. nil = this agent has no strategy dimension, or none was requested.
+    public var activeStrategy: String?
 
     public init(id: String, title: String, symbol: String, graphs: [Graph],
-                defaultGraphName: String, seat: String? = nil, activeGraphName: String? = nil) {
+                defaultGraphName: String, seat: String? = nil, activeStrategy: String? = nil) {
         self.id = id
         self.title = title
         self.symbol = symbol
         self.graphs = graphs
         self.defaultGraphName = defaultGraphName
         self.seat = seat
-        self.activeGraphName = activeGraphName
+        self.activeStrategy = activeStrategy
     }
 }
 
@@ -156,12 +158,23 @@ public struct SZAgentGraphPanel: View {
                          record: nil, agent: planAgent.id)
     }
 
+    /// The sub-agent traversals a shown record dispatched: the ITEM records sharing its
+    /// thread. They are already in `runs` — the sidebar nests them under the same thread —
+    /// so showing the fleet on the canvas is a filter, not new plumbing.
+    private func subagents(of record: SZAgentGraphRun?) -> [SZAgentGraphRun] {
+        guard let record, let thread = record.thread, record.kind != .item else { return [] }
+        // Oldest first: the band should not reshuffle as items settle, and `runs` is
+        // ordered live-first for the sidebar's benefit, not this one's.
+        return runs.filter { $0.thread == thread && $0.kind == .item }
+            .sorted { $0.startedAt < $1.startedAt }
+    }
+
     /// A dispatch card's link: jump the Plan view to the target seat's item graph — the
     /// graph the dispatched items actually traverse. Unknown seat = no-op (the pack gate
     /// refuses those, so only an archived record could carry one).
     private func navigate(toSeat seat: String) {
         guard let target = planAgents.first(where: { $0.seat == seat }) else { return }
-        let itemGraph = target.graphs.first { $0.graph.kind == .item }
+        let itemGraph = target.graphs.first { $0.graph.handles(.item) }
         mode = .plan
         selectedRunID = nil
         selectedAgentID = target.id
@@ -202,6 +215,7 @@ public struct SZAgentGraphPanel: View {
                         sectionHeader("RUNS", open: $runsSectionOpen)
                         if runsSectionOpen {
                             SZAgentGraphRunList(runs: runs,
+                                                names: SZAgentGraphNaming(agents: planAgents),
                                                 shownID: effectiveMode == .run ? shown?.id : nil) { run in
                                 selectedRunID = run.id
                                 mode = .run           // picking a traversal shows it
@@ -250,18 +264,10 @@ public struct SZAgentGraphPanel: View {
                     empty
                 }
 
-                // The item graph rarely runs standalone — say where its traces land, where
-                // it is browsed, rather than leaving the RUNS list looking incomplete.
-                if effectiveMode == .plan, planGraph?.graph.kind == .item {
-                    Text("traversed once per dispatched item — its runs nest under the "
-                         + "thread that sent the work")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: 300, alignment: .leading)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .padding(10)
-                        .allowsHitTesting(false)
-                }
+                // (The "this graph only runs when dispatched to" note lived here while a
+                // graph handled exactly one kind. A document now routes several, so the
+                // statement belongs to a PORT, not a canvas — the message card's ports say
+                // which kinds arrive, and the RUNS list shows where each one's traces land.)
             }
             // The world is unbounded and the camera pans it anywhere: without this the
             // chain draws straight over the sidebar sitting beside it (the canvas is the
@@ -341,6 +347,7 @@ public struct SZAgentGraphPanel: View {
                                   },
                                   drawsFileSources: openStepSource != nil,
                                   record: displayed.record,
+                                  items: subagents(of: displayed.record),
                                   mode: effectiveMode,
                                   zoom: camera.zoom, nudges: nudges,
                                   onNudge: { id, delta in nudges[id, default: .zero] = delta })
@@ -439,14 +446,17 @@ public struct SZAgentGraphPanel: View {
                 Capsule()
                     .fill(selected ? SZChatPanel.directorColor.opacity(0.8) : .clear)
                     .frame(width: 2)
-                Text(entry.name)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                // The authored label, matching the RUNS rows; the stem stays in the tooltip.
+                Text(entry.graph.label ?? entry.name)
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(selected ? .primary : .secondary)
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
-                // The variant a Build actually runs, marked where the variants are listed.
-                if entry.name == agent.activeGraphName {
-                    Text("active")
+                // The strategy a Build will actually take. It used to mark WHICH VARIANT
+                // ROW ran; with one document per agent it names the route instead, so the
+                // chip carries the strategy's own name rather than the word "active".
+                if let strategy = agent.activeStrategy, entry.graph.handles(.build) {
+                    Text(strategy)
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(SZChatPanel.directorColor.opacity(0.9))
                         .padding(.horizontal, 4).padding(.vertical, 1)

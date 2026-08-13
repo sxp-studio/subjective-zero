@@ -23,7 +23,7 @@ import SZCore
 public struct SZAgentGraphFace: Equatable, Sendable {
     /// The three forms, re-stated flat so renderers can switch without pattern-matching
     /// payloads they don't read.
-    public enum Form: Equatable, Sendable { case step, turn, dispatch }
+    public enum Form: Equatable, Sendable { case message, step, turn, dispatch }
     /// What the card's source affordance opens: the step's authored Swift, or the brief
     /// template that IS a turn's body. A value, not an action — the host resolves the file.
     public enum Source: Equatable, Sendable {
@@ -87,6 +87,17 @@ public enum SZAgentGraphLayout {
     /// The card face of one node: derived from its form + its own title, nothing stored.
     public static func face(of node: SZAgentGraph.Node, in graph: SZAgentGraph) -> SZAgentGraphFace {
         switch node.form {
+        case .message:
+            // One port per kind the agent accepts, in CAUSE order — a build or request
+            // opens a thread, an item is its work, a settled reply answers it. Ordering
+            // lives here because the ports are the card's rows; the canvas used to own it
+            // when the doors were separate stubs.
+            let ports = graph.routes.keys
+                .sorted { messageRank($0) < messageRank($1) }
+                .map(\.rawValue)
+            return SZAgentGraphFace(form: .message, title: node.title ?? "On message",
+                                    symbol: "tray.and.arrow.down",
+                                    outcomes: ports.isEmpty ? ["chat"] : ports)
         case .step(let name):
             let wired = wiredOutcomes(of: node.id, in: graph)
             return SZAgentGraphFace(form: .step, title: node.title ?? name,
@@ -103,6 +114,20 @@ public enum SZAgentGraphLayout {
             return SZAgentGraphFace(form: .dispatch, title: node.title ?? "→ \(dispatch.to)",
                                     symbol: "arrow.triangle.branch", outcomes: ["sent"],
                                     source: .dispatch(target: dispatch.to))
+        }
+    }
+
+    /// CAUSE order for the door's ports, not alphabetical: a `build`/`request` starts a
+    /// thread, `item` is its work, `settled` answers — in that order the ports face their
+    /// lanes.
+    static func messageRank(_ kind: SZMessageKind) -> Int {
+        switch kind {
+        case .build: 0
+        case .request: 1
+        case .chat: 2
+        case .item: 3
+        case .settled: 4
+        case .steer: 5
         }
     }
 
@@ -198,7 +223,14 @@ public enum SZAgentGraphLayout {
     }
 
     public static func lay(out graph: SZAgentGraph) -> Placement {
-        let ranks = ranks(of: graph)
+        lay(out: graph, from: entryNode(of: graph))
+    }
+
+    /// Laid out from an explicit seed — what the Run view's forecast needs, since a
+    /// projection is a fragment of a traversal already past its door and carries no message
+    /// node to seed from.
+    public static func lay(out graph: SZAgentGraph, from seed: String) -> Placement {
+        let ranks = ranks(of: graph, from: seed)
         // Within a rank, order by DECLARATION order in the file. Stable, and it hands the
         // author a real lever: reordering the `nodes` array reorders the column.
         var byRank: [Int: [SZAgentGraph.Node]] = [:]
@@ -224,6 +256,28 @@ public enum SZAgentGraphLayout {
         return Placement(frames: frames, bounds: frames.values.reduce(.null) { $0.union($1) })
     }
 
+    // MARK: - The call band
+
+    /// One sub-agent lane's height, and the gap between the dispatch card and its band.
+    public static let laneHeight: CGFloat = 30
+    public static let laneGap: CGFloat = 4
+    static let bandGap: CGFloat = 10
+
+    /// Where a dispatch's sub-agents are drawn: a stack of lanes in the VERTICAL AIR under
+    /// the dispatch card, one per dispatched item. Under, not inline between ranks — an
+    /// inline sub-graph would have to reserve horizontal room, reflowing every downstream
+    /// rank and making the return wire's geometry depend on the callee's width.
+    ///
+    /// Pure geometry: the caller supplies how many lanes, this says where they sit.
+    public static func callBand(under dispatch: CGRect, lanes: Int) -> [CGRect] {
+        guard lanes > 0 else { return [] }
+        let top = dispatch.maxY + bandGap
+        return (0..<lanes).map { index in
+            CGRect(x: dispatch.minX, y: top + CGFloat(index) * (laneHeight + laneGap),
+                   width: dispatch.width, height: laneHeight)
+        }
+    }
+
     /// How far a bypassed rank lifts off the main line. One card height plus a gap — enough
     /// that a wire passing underneath is unambiguous.
     static let bypassLift: CGFloat = SZNodeLayout.headerHeight + 2 * SZNodeLayout.rowHeight + nodeGap
@@ -239,15 +293,15 @@ public enum SZAgentGraphLayout {
         return skipped
     }
 
-    /// The rank seed: the graph's own-kind entry (every graph owns one by validation), with
-    /// a total fallback so layout never crashes on a hand-broken file.
+    /// The rank seed: the message node — the graph's one door, guaranteed by validation.
+    /// The fallback keeps layout total on a hand-broken file rather than crashing on it.
     static func entryNode(of graph: SZAgentGraph) -> String {
-        graph.entry[graph.kind] ?? graph.entry.values.sorted().first ?? graph.nodes.first?.id ?? ""
+        graph.messageNode?.id ?? graph.nodes.first?.id ?? ""
     }
 
-    /// Longest-path depth from the entry, over forward edges only. Longest rather than
+    /// Longest-path depth from the seed, over forward edges only. Longest rather than
     /// shortest so a node never sits left of something that feeds it.
-    private static func ranks(of graph: SZAgentGraph) -> [String: Int] {
+    private static func ranks(of graph: SZAgentGraph, from seed: String) -> [String: Int] {
         let forward = graph.edges.filter { $0.maxTraversals == nil }
         var indegree: [String: Int] = [:]
         var outgoing: [String: [String]] = [:]
@@ -262,7 +316,7 @@ public enum SZAgentGraphLayout {
         // have a forward edge INTO its entry (a settled lane), and re-enqueueing it when its
         // indegree drains would double-decrement its successors.
         var rank: [String: Int] = [:]
-        let entry = entryNode(of: graph)
+        let entry = seed
         var queue = [entry] + graph.nodes.map(\.id).filter { $0 != entry && indegree[$0] == 0 }
         var enqueued = Set(queue)
         for id in queue { rank[id] = 0 }
@@ -341,7 +395,9 @@ public enum SZAgentGraphLayout {
             }
         }
         guard reach.count > 1 else { return nil }
-        return SZAgentGraph(name: graph.name, kind: graph.kind, entry: [graph.kind: id],
+        // Re-rooted at `id`, so the forecast carries NO message node — it is a fragment of
+        // a traversal already past its door, laid out from `id` by `lay(out:from:)`.
+        return SZAgentGraph(name: graph.name,
                             nodes: graph.nodes.filter { reach.contains($0.id) },
                             edges: graph.edges.filter {
                                 $0.maxTraversals == nil

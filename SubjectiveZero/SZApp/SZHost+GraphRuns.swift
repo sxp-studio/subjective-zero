@@ -19,10 +19,16 @@ extension SZHost {
     /// A traversal began — open its live record. The THREAD is the host's run identity: one
     /// Build press and every traversal it causes share `runID`, which is what groups them
     /// in the RUNS list.
+    ///
+    /// A CHAT is never part of a build thread, even one delivered mid-run: a node outside
+    /// the work set can be chatted while the fleet works, and the list's thread header
+    /// picks the newest non-item traversal as the thread's DECIDER — so a chat joining the
+    /// group would paint its own ending as the build's.
     func beginAgentGraphRun(_ sighting: SZTraversalSighting) {
         let record = SZAgentGraphRun(id: sighting.id, agent: sighting.agent,
                                      graphName: sighting.graphName, kind: sighting.kind,
-                                     thread: runID, item: sighting.item)
+                                     thread: sighting.kind == .chat ? nil : runID,
+                                     item: sighting.item)
         agentGraphRuns = SZAgentGraphRun.ordered(agentGraphRuns + [record])
     }
 
@@ -148,13 +154,12 @@ extension SZHost {
                     graphs: pack.graphs.map { .init(name: $0.name, graph: $0) },
                     // The front door each seat mostly exists for: the Director's build
                     // graph, the coding seat's item graph, else whatever comes first.
-                    defaultGraphName: (pack.graph(handling: .build) ?? pack.graph(handling: .item)
+                    defaultGraphName: (pack.graph(routing: .build) ?? pack.graph(routing: .item)
                         ?? pack.graphs.first)?.name ?? "",
                     seat: pack.seat?.rawValue,
-                    // Only the seat with variants carries an active mark today; a pack
-                    // with a single handler per kind marks nothing.
-                    activeGraphName: pack.seat == .director && pack.variants(handling: .build).count > 1
-                        ? activeRunGraphVariant() : nil)
+                    // Only the agent that opens builds carries a strategy chip, and only
+                    // when one was actually requested — an unasked run says nothing.
+                    activeStrategy: pack.seat == .director ? activeRunGraphVariant() : nil)
             }
         }
         agentGraphPlanCache = agents

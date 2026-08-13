@@ -15,10 +15,35 @@
 import SwiftUI
 import SZCore
 
+/// What a record is CALLED, resolved against the live pack library. The record itself
+/// denormalizes no display facts (see `SZAgentGraphRunRow.glyph`), so a row that wants to
+/// say "Director · Agentic" joins back through the same `planAgents` the Plan view browses
+/// — the join `agentGraphResolve` already does host-side, done here where the agents are.
+///
+/// A value rather than closures so the rule is constructible in tests. Both lookups degrade
+/// to the raw string: an agent the library dropped reads as its pack id, a graph with no
+/// authored `label` as its file stem — the same honesty the canvas shows a vanished pack.
+struct SZAgentGraphNaming: Equatable {
+    var agents: [SZAgentGraphPlanAgent]
+
+    /// The traversing agent's display name — "Director", not "director".
+    func agentTitle(_ run: SZAgentGraphRun) -> String {
+        agents.first { $0.id == run.agent }?.title ?? run.agent
+    }
+
+    /// The traversed graph's authored label — "Agentic", "Implement one node".
+    func graphLabel(_ run: SZAgentGraphRun) -> String {
+        agents.first { $0.id == run.agent }?
+            .graphs.first { $0.name == run.graphName }?
+            .graph.label ?? run.graphName
+    }
+}
+
 /// The RUNS section: thread groups and standalone traversals, the live one first (see
 /// `SZAgentGraphRun.ordered`).
 struct SZAgentGraphRunList: View {
     let runs: [SZAgentGraphRun]
+    let names: SZAgentGraphNaming
     /// The record the canvas is drawing — which row reads as selected. nil = the Plan view
     /// has the canvas, and no run row should claim selection.
     let shownID: UUID?
@@ -63,12 +88,14 @@ struct SZAgentGraphRunList: View {
                                  selected: entry.traversals.contains { $0.id == shownID })
                     if expandedThreads.contains(entry.id) {
                         ForEach(entry.traversals) { traversal in
-                            SZAgentGraphRunRow(run: traversal, selected: traversal.id == shownID,
+                            SZAgentGraphRunRow(run: traversal, names: names,
+                                               selected: traversal.id == shownID,
                                                indented: true) { onPick(traversal) }
                         }
                     }
                 } else if let traversal = entry.traversals.first {
-                    SZAgentGraphRunRow(run: traversal, selected: traversal.id == shownID,
+                    SZAgentGraphRunRow(run: traversal, names: names,
+                                       selected: traversal.id == shownID,
                                        indented: false) { onPick(traversal) }
                 }
             }
@@ -122,8 +149,11 @@ struct SZAgentGraphRunList: View {
                                 Image(systemName: SZAgentGraphRunRow.glyph(for: director))
                                     .font(.system(size: 9))
                                     .foregroundStyle(.secondary)
-                                Text(director.graphName)
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                // WHO, not which file: the agent leads the row and the
+                                // graph it traversed rides the line below. A name is not
+                                // an identifier, so it is not set in monospace.
+                                Text(names.agentTitle(director))
+                                    .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
                                 Text("· \(entry.traversals.count)")
@@ -137,6 +167,10 @@ struct SZAgentGraphRunList: View {
                                 }
                             }
                             HStack(spacing: 5) {
+                                Text(names.graphLabel(director) + " ·")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
                                 Text(live || ended == nil
                                     ? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(began))
                                     : SZTurnBreakdown.format(ended!.timeIntervalSince(began)))
@@ -213,6 +247,7 @@ struct SZRunBadge: View {
 /// member, nested under its header.
 struct SZAgentGraphRunRow: View {
     let run: SZAgentGraphRun
+    let names: SZAgentGraphNaming
     let selected: Bool
     var indented = false
     let action: () -> Void
@@ -246,8 +281,8 @@ struct SZAgentGraphRunRow: View {
                             Image(systemName: Self.glyph(for: run))
                                 .font(.system(size: 9))
                                 .foregroundStyle(selected ? .primary : .secondary)
-                            Text(run.graphName)
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            Text(names.agentTitle(run))
+                                .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(selected ? .primary : .secondary)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
@@ -260,6 +295,12 @@ struct SZAgentGraphRunRow: View {
                             }
                         }
                         HStack(spacing: 5) {
+                            // WHAT it traversed, demoted off the title line — the authored
+                            // label ("Node chat"), not the file stem the tooltip keeps.
+                            Text(names.graphLabel(run) + " ·")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
                             // Ticking while it traverses, measured once it has ended — the
                             // row's clock and its cards' clocks read in the same units.
                             Text(run.endedAt.map { SZTurnBreakdown.format($0.timeIntervalSince(run.startedAt)) }
@@ -285,8 +326,9 @@ struct SZAgentGraphRunRow: View {
         .padding(.leading, indented ? 16 : 4)
         .padding(.trailing, 4)
         // The absolute clock (and an item's work-node id) live in the hover tooltip — the
-        // row itself stays relative.
-        .help("\(run.agent) · \(run.kind.rawValue)"
+        // row itself stays relative. The raw pack id and graph STEM live here too, so the
+        // strings the row displays as names stay reachable in their authored spelling.
+        .help("\(run.agent)/\(run.graphName) · \(run.kind.rawValue)"
               + (run.item.map { " · \($0.prefix(8))" } ?? "")
               + " · \(run.startedAt.formatted(date: .abbreviated, time: .standard))")
     }

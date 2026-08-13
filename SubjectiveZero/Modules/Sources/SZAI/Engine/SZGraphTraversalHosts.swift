@@ -56,17 +56,22 @@ final class SZDirectorTraversalHost: SZTraversalHost {
     private let graphName: String
     private let queries: SZQueryService
     private let onNote: @MainActor @Sendable (SZTraversalNote) -> Void
+    /// The strategy the run asked for, passed through to the facts verbatim. The HOST does
+    /// not validate it — the graph's strategy step decides what a name means, so an unknown
+    /// one falls back in the pack rather than being refused here.
+    private let runVariant: String
     private var round = 0
     private var steers: [String] = []
 
     init(context: SZOrchestrationContext, renderer: SZBriefRenderer, roundCap: Int,
-         graphName: String, queries: SZQueryService,
+         graphName: String, queries: SZQueryService, runVariant: String = "",
          onNote: @escaping @MainActor @Sendable (SZTraversalNote) -> Void) {
         self.context = context
         self.renderer = renderer
         self.roundCap = roundCap
         self.graphName = graphName
         self.queries = queries
+        self.runVariant = runVariant
         self.onNote = onNote
     }
 
@@ -77,9 +82,9 @@ final class SZDirectorTraversalHost: SZTraversalHost {
         self.steers = steers
     }
 
-    /// The kind-gated facts document. A `.settled` re-entry serves the BUILD facts BY DESIGN:
-    /// the facts spec declares no settled struct — a settled re-entry reasons over the same
-    /// live build picture, one round later (`round` carries the difference).
+    /// The facts document. Always the BUILD facts: this host serves the build lane, and a
+    /// settled re-entry reasons over the same live picture one round later (`round` carries
+    /// the difference) — which is exactly what `SZMessageKind.lane` folds.
     func factsJSON(kind: SZMessageKind) -> String {
         SZGraphFactsEncoding.json(buildFacts())
     }
@@ -96,10 +101,9 @@ final class SZDirectorTraversalHost: SZTraversalHost {
     }
 
     func renderBrief(agent: String, template: String, kind: SZMessageKind) throws -> String {
-        // A settled re-entry renders under the graph's own kind — the renderer's stated
-        // contract ("`settled` re-enters under its graph's own kind").
-        try renderer.render(agent: agent, template: template,
-                            kind: kind == .settled ? .build : kind,
+        // No settled fold here any more: the engine hands every seam the LANE, and
+        // `SZMessageKind.lane` is its one home.
+        try renderer.render(agent: agent, template: template, kind: kind,
                             factsJSON: factsJSON(kind: kind),
                             delivery: SZBriefDelivery(instruction: context.instruction))
     }
@@ -147,6 +151,7 @@ final class SZDirectorTraversalHost: SZTraversalHost {
         var projectLoaded: Bool
         var graphJSON: String
         var steers: [String]
+        var runVariant: String
     }
 
     private func buildFacts() -> BuildFactsDocument {
@@ -173,7 +178,8 @@ final class SZDirectorTraversalHost: SZTraversalHost {
             briefed: round == 0 ? context.directorAlreadyBriefed : true,
             projectLoaded: context.store.project != nil,
             graphJSON: SZGraphFactsEncoding.graphJSON(graph),
-            steers: steers)
+            steers: steers,
+            runVariant: runVariant)
     }
 }
 
@@ -196,6 +202,10 @@ public final class SZChatTraversalHost: SZTraversalHost {
     private let message: String
     private let resuming: Bool
     private let nodeSeed: String?
+    /// Delivery context the FACTS cannot carry: a node-anchored chat's current contract and
+    /// source, which the host reads off disk per delivery. Without this the coding pack's
+    /// node-chat brief throws `missingDelivery` on `{{contract}}`/`{{source}}`.
+    private let delivery: SZBriefDelivery
     private let renderer: SZBriefRenderer
     private let graphName: String
     private let queries: SZQueryService
@@ -207,6 +217,7 @@ public final class SZChatTraversalHost: SZTraversalHost {
     private let draftSnapshot: Set<SZNodeID>
 
     public init(message: String, resuming: Bool, nodeSeed: String? = nil,
+                delivery: SZBriefDelivery = SZBriefDelivery(),
                 renderer: SZBriefRenderer, graphName: String, queries: SZQueryService,
                 liveGraph: @escaping @MainActor () -> SZGraph?,
                 turn: @escaping @MainActor (SZTurnOrder) async -> SZTurnReport,
@@ -215,6 +226,7 @@ public final class SZChatTraversalHost: SZTraversalHost {
         self.message = message
         self.resuming = resuming
         self.nodeSeed = nodeSeed
+        self.delivery = delivery
         self.renderer = renderer
         self.graphName = graphName
         self.queries = queries
@@ -259,7 +271,7 @@ public final class SZChatTraversalHost: SZTraversalHost {
     /// render calls.
     public func renderBrief(agent: String, template: String, kind: SZMessageKind) throws -> String {
         try renderer.render(agent: agent, template: template, kind: kind,
-                            factsJSON: factsJSON(kind: kind))
+                            factsJSON: factsJSON(kind: kind), delivery: delivery)
     }
 
     /// One chat turn through the injected runner — the app's delivery machinery (recap,

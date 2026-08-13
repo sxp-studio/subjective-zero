@@ -57,9 +57,10 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
     let steps: any SZStepRunning
     let router: any SZModelRouting
     let bounds: SZThreadMachine.Bounds
-    /// The run-graph VARIANT this run drives the BUILD kind with, by graph name (chat/item/
-    /// request always take their packs' defaults). nil or an unknown name = the director
-    /// pack's default — resolution happens at load, where the variants are known.
+    /// The build STRATEGY this run asked for, verbatim (env > the persisted choice). It is
+    /// no longer a graph name: it rides into the build facts as `runVariant`, and the
+    /// director's own strategy step decides what it means — so an unknown name falls back
+    /// inside the pack rather than being second-guessed here.
     let variant: String?
     let declarations: StepDeclarations
     let registry: SZProviderRegistry
@@ -128,13 +129,10 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
               let codingPack = loaded.packs.first(where: { $0.id == codingID }) else {
             throw SZGraphOrchestratorError.invalidPackLibrary(defects: ["the seats did not resolve"])
         }
-        // The build kind honors the caller's variant choice; an unknown name falls back to
-        // the pack's default (the host already told the user — see resolvedRunGraphVariant).
-        guard let buildGraph = variant.flatMap({ directorPack.graph(handling: .build, variant: $0) })
-                ?? directorPack.graph(handling: .build) else {
+        guard let buildGraph = directorPack.graph(routing: .build) else {
             throw SZGraphOrchestratorError.missingGraph(agent: directorPack.id, kind: .build)
         }
-        guard let itemGraph = codingPack.graph(handling: .item) else {
+        guard let itemGraph = codingPack.graph(routing: .item) else {
             throw SZGraphOrchestratorError.missingGraph(agent: codingPack.id, kind: .item)
         }
         let motor = Motor(
@@ -230,6 +228,7 @@ extension SZGraphDirectorStrategy {
             self.directorHost = SZDirectorTraversalHost(
                 context: context, renderer: renderer, roundCap: roundCap,
                 graphName: director.graph.name, queries: queries,
+                runVariant: strategy.variant ?? "",
                 onNote: { note(box.id, $0) })
         }
 
@@ -237,7 +236,7 @@ extension SZGraphDirectorStrategy {
             var queue = machine.handle(.opened(
                 kind: .build,
                 graphRounds: director.graph.caps?.rounds,
-                handlesSettled: director.graph.entry[.settled] != nil))
+                handlesSettled: director.graph.handles(.settled)))
             var index = 0
             while index < queue.count {
                 // The Stop path: cancelling the run task becomes a `stopRequested` event, so

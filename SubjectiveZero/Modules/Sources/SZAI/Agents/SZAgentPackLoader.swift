@@ -32,11 +32,11 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
     case misdeclared(file: String, detail: String)
     /// A graph-shape defect (`SZAgentGraph.defects()`), wrapped with its home.
     case graphShape(agent: String, graph: String, defect: SZAgentGraphDefect)
-    /// Several graphs handle one kind (variants) but `agent.json`'s `defaults` names none of
-    /// them for it — which one a plain delivery opens would be a coin toss.
-    case missingVariantDefault(agent: String, kind: SZMessageKind, graphs: [String])
-    /// `agent.json`'s `defaults` names a graph the kind's variants do not carry.
-    case unknownVariantDefault(agent: String, kind: SZMessageKind, named: String)
+    /// Two of an agent's graphs route the same kind — which one a delivery opens would be a
+    /// coin toss. Replaces the variant/`defaults` machinery: a strategy is now a route
+    /// INSIDE a graph (a step choosing a lane), so two documents claiming one kind has no
+    /// legitimate reading left.
+    case kindRoutedTwice(agent: String, kind: SZMessageKind, graphs: [String])
     /// A turn node's `brief` names no file in the pack's prompt inventory.
     case missingTemplate(agent: String, graph: String, node: String, path: String)
     /// A turn brief mentions a `{{token}}` the graph's kind can never substitute
@@ -81,10 +81,9 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
             "\(file) misdeclares itself: \(detail)"
         case .graphShape(let agent, let graph, let defect):
             "\(agent)/graphs/\(graph): \(defect)"
-        case .missingVariantDefault(let agent, let kind, let graphs):
-            "\(agent): graphs \(graphs.joined(separator: ", ")) all handle '\(kind.rawValue)' — defaults must name one of them"
-        case .unknownVariantDefault(let agent, let kind, let named):
-            "\(agent): defaults names '\(named)' for '\(kind.rawValue)', a graph no variant of that kind carries"
+        case .kindRoutedTwice(let agent, let kind, let graphs):
+            "\(agent): graphs \(graphs.joined(separator: ", ")) both route '\(kind.rawValue)' — "
+                + "a delivery must have one destination"
         case .missingTemplate(let agent, let graph, let node, let path):
             "\(agent)/graphs/\(graph) node '\(node)': brief '\(path)' is not among the pack's prompts"
         case .unknownTemplateToken(let agent, let graph, let node, let template, let token):
@@ -180,12 +179,31 @@ public enum SZAgentPackLoader {
 
     /// `agent.json` as the folder declares it. The id must equal the folder name — identity
     /// lives in the filesystem, and a second naming surface would have to be reconciled.
-    /// `defaults` (kind → graph name) stays raw strings here; the kind keys are resolved —
-    /// and refused when unknown — in `load(folder:)`.
-    private struct Manifest: Codable {
+    /// Two fields, and no third: which graph answers which kind is said by the graphs' own
+    /// message nodes, so the manifest has nothing left to arbitrate.
+    private struct Manifest: Decodable {
         var id: String
         var seat: SZAgentSeat?
-        var defaults: [String: String]?
+
+        enum CodingKeys: String, CodingKey {
+            case id, seat
+            /// Retired, decoded only to refuse it by name — a silently-ignored `defaults`
+            /// would leave an author believing they still steer which graph answers what.
+            case defaults
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            guard !c.contains(.defaults) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .defaults, in: c,
+                    debugDescription: "'defaults' is retired — a kind has one destination "
+                        + "(its graph's message-node port), and a build strategy is a step "
+                        + "inside the graph, not a choice of file")
+            }
+            id = try c.decode(String.self, forKey: .id)
+            seat = try c.decodeIfPresent(SZAgentSeat.self, forKey: .seat)
+        }
     }
 
     /// One folder's load: the pack (nil only when `agent.json` itself is broken — a folder
@@ -205,14 +223,6 @@ public enum SZAgentPackLoader {
         guard manifest.id == folderName else {
             return (nil, [.misdeclared(file: "\(folderName)/agent.json",
                 detail: "declares id '\(manifest.id)' — the id IS the folder name")])
-        }
-        var defaults: [SZMessageKind: String] = [:]
-        for (rawKind, graphName) in (manifest.defaults ?? [:]).sorted(by: { $0.key < $1.key }) {
-            guard let kind = SZMessageKind(rawValue: rawKind) else {
-                return (nil, [.misdeclared(file: "\(folderName)/agent.json",
-                    detail: "defaults names unknown kind '\(rawKind)'")])
-            }
-            defaults[kind] = graphName
         }
 
         var defects: [SZAgentPackDefect] = []
@@ -264,7 +274,7 @@ public enum SZAgentPackLoader {
                     hasSource: fm.fileExists(atPath: stepFolder.appending(path: "Step.swift").path))
             }
 
-        return (SZAgentPack(id: manifest.id, seat: manifest.seat, defaults: defaults,
+        return (SZAgentPack(id: manifest.id, seat: manifest.seat,
                             graphs: graphs, prompts: prompts,
                             promptSources: promptSources, steps: steps), defects)
     }
@@ -300,19 +310,17 @@ public enum SZAgentPackLoader {
         let filledSeats = Set(packs.compactMap(\.seat))
 
         for pack in packs.sorted(by: { $0.id < $1.id }) {
-            // Variants: several graphs may handle one kind, but only under a named default —
-            // a plain delivery must never open a coin toss. A single-graph kind needs no
-            // entry (implicit default), and every named default must exist among the kind's
-            // variants.
-            let byKind = Dictionary(grouping: pack.graphs, by: \.kind)
-            for (kind, group) in byKind.sorted(by: { $0.key.rawValue < $1.key.rawValue })
-            where group.count > 1 && pack.defaults[kind] == nil {
-                defects.append(.missingVariantDefault(agent: pack.id, kind: kind,
-                                                      graphs: group.map(\.name).sorted()))
+            // One destination per kind, over the whole pack: a delivery must never open a
+            // coin toss. An agent may still carry several documents — they just have to
+            // route DISJOINT kinds.
+            var routedBy: [SZMessageKind: [String]] = [:]
+            for graph in pack.graphs {
+                for kind in graph.routes.keys { routedBy[kind, default: []].append(graph.name) }
             }
-            for (kind, named) in pack.defaults.sorted(by: { $0.key.rawValue < $1.key.rawValue })
-            where !(byKind[kind] ?? []).contains(where: { $0.name == named }) {
-                defects.append(.unknownVariantDefault(agent: pack.id, kind: kind, named: named))
+            for (kind, claimants) in routedBy.sorted(by: { $0.key.rawValue < $1.key.rawValue })
+            where claimants.count > 1 {
+                defects.append(.kindRoutedTwice(agent: pack.id, kind: kind,
+                                                graphs: claimants.sorted()))
             }
 
             for graph in pack.graphs.sorted(by: { $0.name < $1.name }) {
@@ -336,7 +344,17 @@ public enum SZAgentPackLoader {
                                     steps: (any SZStepProviding)?) async -> [SZAgentPackDefect] {
         var defects: [SZAgentPackDefect] = []
         for node in graph.nodes {
+            // WHICH kind's facts and tokens this node reasons in, proven by reachability
+            // from the message node's ports rather than declared once for the whole file.
+            // Not exactly one lane means the shape gate already reported `laneImpure` or
+            // `unreachable`; running kind-typed checks against an ambiguous lane would pile
+            // noise on top of the defect that explains it.
+            let lanes = graph.lanes(reaching: node.id)
+            guard let lane = lanes.count == 1 ? lanes.first : nil else { continue }
             switch node.form {
+            case .message:
+                break   // the door declares nothing a pack can get wrong; shape covers it
+
             case .turn(let turn):
                 if !pack.prompts.contains(turn.brief) {
                     defects.append(.missingTemplate(agent: pack.id, graph: graph.name,
@@ -346,8 +364,8 @@ public enum SZAgentPackLoader {
                     // kind's assembly substitutes, and every partial a mentioned token
                     // renders from must be in the pack. The renderer owns both namespaces;
                     // this only reads them.
-                    let known = SZBriefRenderer.knownTokens(kind: graph.kind)
-                    let partials = SZBriefRenderer.requiredPartials(kind: graph.kind)
+                    let known = SZBriefRenderer.knownTokens(kind: lane)
+                    let partials = SZBriefRenderer.requiredPartials(kind: lane)
                     for token in SZPromptTemplate.tokens(in: text) {
                         guard known.contains(token) else {
                             defects.append(.unknownTemplateToken(
@@ -370,7 +388,7 @@ public enum SZAgentPackLoader {
                 if targetSeat.map(filledSeats.contains) != true {
                     defects.append(.unknownDispatchSeat(agent: pack.id, graph: graph.name,
                                                         node: node.id, seat: dispatch.to))
-                } else if let holder, holder.graph(handling: .item) == nil {
+                } else if let holder, holder.graph(routing: .item) == nil {
                     // A seat that cannot receive items makes every dispatch a dead letter.
                     defects.append(.dispatchTargetCannotHandleItems(
                         agent: pack.id, graph: graph.name, node: node.id,
@@ -379,7 +397,7 @@ public enum SZAgentPackLoader {
                 // The `items` fact must exist for THIS graph's kind and be `[String]`-typed —
                 // it names the node ids a dispatch fans out over.
                 let record = SZFactCatalog.all.first {
-                    $0.kind == graph.kind.rawValue && $0.name == dispatch.items
+                    $0.kind == lane.rawValue && $0.name == dispatch.items
                 }
                 if let record {
                     if record.swiftType != "[String]" {
@@ -392,7 +410,7 @@ public enum SZAgentPackLoader {
                     defects.append(.dispatchItemsFact(
                         agent: pack.id, graph: graph.name, node: node.id,
                         fact: dispatch.items,
-                        detail: "no '\(graph.kind.rawValue)' fact by that name"))
+                        detail: "no '\(lane.rawValue)' fact by that name"))
                 }
 
             case .step(let name):
@@ -414,7 +432,7 @@ public enum SZAgentPackLoader {
                         // Strict: every SDK path stamps the kind, so a declaration without
                         // one is hand-rolled — and a hand-rolled declaration is exactly the
                         // case the kind gate exists for.
-                        if declaration.facts != graph.kind.rawValue {
+                        if declaration.facts != lane.rawValue {
                             defects.append(.stepFactsMismatch(
                                 agent: pack.id, graph: graph.name, node: node.id,
                                 step: name, declared: declaration.facts ?? "(none)"))
@@ -452,7 +470,9 @@ public enum SZAgentPackLoader {
                 + (compiled != pack.steps.count ? " (\(compiled) with source)" : "")
                 + " · \(pack.prompts.count) prompt\(pack.prompts.count == 1 ? "" : "s")")
             for graph in pack.graphs.sorted(by: { $0.name < $1.name }) {
-                var facts = [graph.kind.rawValue]
+                // The routed kinds ARE the graph's summary now — a merged document says
+                // "chat · build · settled", which is what a reader wants to know.
+                var facts = [graph.routes.keys.map(\.rawValue).sorted().joined(separator: " · ")]
                 if let rounds = graph.caps?.rounds { facts.append("rounds: \(rounds)") }
                 facts.append("\(graph.nodes.count) node\(graph.nodes.count == 1 ? "" : "s")")
                 lines.append("  graph \(graph.name) · " + facts.joined(separator: " · "))

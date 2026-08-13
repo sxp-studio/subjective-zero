@@ -10,7 +10,8 @@ host's MCP server ([MCP.md](MCP.md)).
 > selected by a debug toggle behind `SZOrchestrating` — are **deleted**. A run is a
 > traversal of an agent's declared graph: JSON topology wiring runtime-compiled Swift
 > steps, with prose in `.md.mustache` briefs. The words *procedural* and *agentic* survive
-> as the names of two shipped **graph variants**, not as strategies.
+> as two of the shipped **strategy ports** the director's build lane routes on, not as
+> strategies in Swift.
 >
 > What remains true here, and what the source headers cite this file for: the **roles**
 > (Director and Coding agents), **cross-agent messaging**, and how work is **routed** to a

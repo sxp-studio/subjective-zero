@@ -130,3 +130,41 @@ import SZCore
     host.sealLeakedAgentGraphRuns(thread: nil)
     #expect(host.agentGraphRuns.allSatisfy { !$0.isLive })
 }
+
+/// A CHAT record never joins a build's thread, even when delivered while one runs. The list
+/// groups by `thread` and picks the newest non-item traversal as the thread's DECIDER — so a
+/// chat that joined would paint its own ending as the build's.
+@Test @MainActor func aChatRecordStaysStandaloneEvenDuringARun() throws {
+    let host = SZHost()
+    host.runID = UUID()
+    let build = UUID(), chat = UUID(), item = UUID()
+
+    host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director",
+                                                graphName: "director", kind: .build))
+    host.beginAgentGraphRun(SZTraversalSighting(id: item, agent: "coding",
+                                                graphName: "coding", kind: .item, item: "n1"))
+    host.beginAgentGraphRun(SZTraversalSighting(id: chat, agent: "coding",
+                                                graphName: "coding", kind: .chat))
+
+    func record(_ id: UUID) throws -> SZAgentGraphRun {
+        try #require(host.agentGraphRuns.first { $0.id == id })
+    }
+    // The build and its fleet share the run's identity; the conversation is its own thing.
+    #expect(try record(build).thread == host.runID)
+    #expect(try record(item).thread == host.runID)
+    #expect(try record(chat).thread == nil)
+}
+
+/// Which agent answers which chat scope — a map over the SEAT vocabulary, so replacing the
+/// folder that holds `coding` moves node chats with it. The one place that map can rot.
+@Test func everyChatScopeResolvesToAnAgent() {
+    let seats = SZSeatAssignment(director: "director", coding: "coding")
+    #expect(SZHost.chatAgentID(for: .director, seats: seats) == "director")
+    #expect(SZHost.chatAgentID(for: .node(SZNodeID()), seats: seats) == "coding")
+    // Seatless: a scope's key IS its agent id.
+    #expect(SZHost.chatAgentID(for: .debug, seats: seats) == "debug")
+    // An unfilled seat resolves to nothing rather than guessing — the delivery then fails
+    // with an honest line instead of opening some other agent's graph.
+    #expect(SZHost.chatAgentID(for: .node(SZNodeID()),
+                               seats: SZSeatAssignment(director: "director", coding: nil)) == nil)
+}

@@ -9,7 +9,6 @@ import SZCore
 enum SZPrompts {
     /// Cold-start chat prompt: a Coding Agent edits an EXISTING node from a user message. Leans on the
     /// node's current source as the ABI reference (no ABI re-statement), so it can't drift from the ABI.
-    static let nodeChat = load("coding/node-chat.md.mustache")
 
     /// Seed prompt for one piece of a split node. Carries the original intent + this stage's boundary
     /// contract so the Coding Agent implements only its slice of the pipeline.
@@ -295,16 +294,3 @@ public enum SZDirectorPrompt {
     }
 }
 
-/// Public prompt builders the host (SZApp) uses to seed agent turns it spawns directly (chat).
-public enum SZChatPrompts {
-    /// Seed a fresh Coding Agent turn to edit an existing node from a user message — used when a node
-    /// is chatted but has no resumable session yet (e.g. a hand-authored node, no prior run).
-    public static func nodeColdStart(node: String, userMessage: String, currentContract: String, currentSource: String) -> String {
-        SZPromptTemplate.render(SZPrompts.nodeChat, [
-            "node": node,
-            "message": userMessage,
-            "contract": currentContract,
-            "source": currentSource,
-        ])
-    }
-}

@@ -42,6 +42,8 @@ public struct SZBuildFacts: Codable, Sendable {
     public var graphJSON: String // lazy
     /// Steering messages that arrived since the run began, oldest first.
     public var steers: [String]
+    /// The build strategy this run asked for, verbatim as the host resolved it (env > the persisted choice > ""). The graph decides what the name means.
+    public var runVariant: String
 }
 
 public struct SZChatFacts: Codable, Sendable {

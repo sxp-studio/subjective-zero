@@ -10,14 +10,17 @@ import SZCore
 @testable import SZUI
 
 private let graph = SZAgentGraph(
-    name: "build", kind: .build, entry: [.build: "check", .settled: "retry"],
+    name: "build",
     nodes: [
+        SZAgentGraph.Node(id: "message", title: "On message", form: .message(.init())),
         SZAgentGraph.Node(id: "check", title: "Work left?", form: .step(name: "work-left")),
         SZAgentGraph.Node(id: "retry", form: .step(name: "retrying")),
         SZAgentGraph.Node(id: "implement", form: .turn(.init(brief: "prompts/implement.md.mustache"))),
         SZAgentGraph.Node(id: "send", form: .dispatch(.init(to: "coding", items: "workSet"))),
     ],
     edges: [
+        SZAgentGraph.Edge(from: "message", outcome: "build", to: "check"),
+        SZAgentGraph.Edge(from: "message", outcome: "settled", to: "retry"),
         SZAgentGraph.Edge(from: "check", outcome: "yes", to: "implement"),
         SZAgentGraph.Edge(from: "check", outcome: "no", to: "retry"),
         SZAgentGraph.Edge(from: "implement", outcome: "ok", to: "send"),
@@ -199,14 +202,27 @@ private func record(_ entries: [SZAgentGraphRun.Entry],
 
 // MARK: - The plan's placement
 
-@Test func thePlanRanksFromTheOwnKindEntryOverForwardEdgesOnly() {
+@Test func thePlanRanksFromTheMessageNodeOverForwardEdgesOnly() {
     let placement = SZAgentGraphLayout.lay(out: graph)
     let x = { (id: String) in placement.frames[id]!.minX }
+    // The door leads: every lane hangs off it, so nothing may sit left of the message node
+    // — that is the whole reason the entry map became a card.
+    #expect(x("message") < x("check"))
+    #expect(x("message") < x("retry"))
     // check → implement → send march right; the bounded back edge never drags `check`
-    // rightward, and the settled entry (`retry`) keeps its own honest rank.
+    // rightward, and the settled lane (`retry`) keeps its own honest rank.
     #expect(x("check") < x("implement"))
     #expect(x("implement") < x("send"))
     #expect(!placement.bounds.isNull)
+}
+
+@Test func theDoorDrawsOnePortPerRoutedKindInCauseOrder() {
+    let face = SZAgentGraphLayout.face(of: graph.node("message")!, in: graph)
+    #expect(face.form == .message)
+    // A build opens the thread, its settled reply answers it — cause order, not alphabet.
+    #expect(face.outcomes == ["build", "settled"])
+    // The door costs nothing, so it never carries a wall-time strip.
+    #expect(!SZAgentGraphLayout.spends(.message))
 }
 
 // MARK: - The projected future (the ghost wires)
@@ -256,7 +272,9 @@ private func record(_ entries: [SZAgentGraphRun.Entry],
     // already states, so it is dropped from the reachable set AND from the projection's
     // own edges.
     let future = SZAgentGraphLayout.projectedPlan(of: graph, from: "implement")
-    #expect(future?.entry[.build] == "implement")
+    // A forecast is a fragment PAST the door, so it carries no message node at all — it is
+    // laid out from an explicit seed instead.
+    #expect(future?.messageNode == nil)
     // `check` is only reachable back through the bounded edge — so neither it nor `retry`
     // behind it is drawn, and the forecast is the one stage that genuinely follows.
     #expect(future?.nodes.map(\.id) == ["implement", "send"])

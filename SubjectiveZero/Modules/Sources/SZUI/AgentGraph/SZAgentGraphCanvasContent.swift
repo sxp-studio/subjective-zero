@@ -17,6 +17,11 @@ struct SZAgentGraphCanvasContent: View {
     var drawsFileSources: Bool = true
     /// The record whose trace the Run view unrolls; nil = the Plan view (no live state).
     let record: SZAgentGraphRun?
+    /// The sub-agent traversals this record's dispatch sent — the item records sharing its
+    /// thread. Drawn as a band under the dispatch card so a run SHOWS its fleet working
+    /// instead of only counting it. Empty in the Plan view and for a record that dispatched
+    /// nothing.
+    var items: [SZAgentGraphRun] = []
     let mode: SZAgentGraphPanelMode
     let zoom: CGFloat
     let nudges: [String: CGSize]
@@ -101,46 +106,60 @@ struct SZAgentGraphCanvasContent: View {
             }
             .allowsHitTesting(false)
 
-            planEntryStubs(placement: placement)
+            planEntryStub(placement: placement)
+                .allowsHitTesting(false)
+            settlesReturns(placement: placement)
                 .allowsHitTesting(false)
         }
     }
 
-    /// One `start` stub per declared entry, labelled with the kind that enters there — the
-    /// entry map drawn as the front doors it is. Two kinds entering the SAME node stack
-    /// their capsules rather than overprinting.
+    /// The one `start` stub, into the message node — the graph has a single door now, and
+    /// which kinds it accepts is said by that card's ports rather than by a fan of labelled
+    /// stubs. (This used to be one stub per entry-map key, with stacking for two kinds
+    /// sharing a node; the door made all of that unnecessary.) It keeps a pill, because a
+    /// bare stem says nothing: what arrives here is a MESSAGE, and the card sorts it.
     @ViewBuilder
-    private func planEntryStubs(placement: SZAgentGraphLayout.Placement) -> some View {
-        let entries = graph.entry.sorted { entryRank($0.key) < entryRank($1.key) }
-        ForEach(Array(entries.enumerated()), id: \.element.key) { index, entry in
-            if let frame = placement.frames[entry.value] {
-                let stacked = entries.prefix(index).filter { $0.value == entry.value }.count
-                let end = CGPoint(x: SZAgentGraphLayout.inputPoint(frame).x,
-                                  y: SZAgentGraphLayout.inputPoint(frame).y + CGFloat(stacked) * 16)
-                let start = CGPoint(x: end.x - 46, y: end.y)
-                let z = max(zoom, 0.1)
-                SZAgentGraphWire(path: (start, end), outcome: "ok", bounded: false, zoom: zoom)
-                Text(entry.key.rawValue)
-                    .font(.system(size: max(7, 10 / z), weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.black.opacity(0.82))
-                    .padding(.horizontal, max(3, 5 / z))
-                    .padding(.vertical, max(1, 2 / z))
-                    .background(Capsule().fill(SZAgentGraphStyle.done))
-                    .position(x: start.x - 16, y: start.y)
-            }
+    private func planEntryStub(placement: SZAgentGraphLayout.Placement) -> some View {
+        if let door = graph.messageNode?.id, let frame = placement.frames[door] {
+            let end = SZAgentGraphLayout.inputPoint(frame)
+            let start = CGPoint(x: end.x - 46, y: end.y)
+            let z = max(zoom, 0.1)
+            SZAgentGraphWire(path: (start, end), outcome: "ok", bounded: false, zoom: zoom)
+            Text("message")
+                .font(.system(size: max(7, 10 / z), weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.black.opacity(0.82))
+                .padding(.horizontal, max(3, 5 / z))
+                .padding(.vertical, max(1, 2 / z))
+                .background(Capsule().fill(SZAgentGraphStyle.done))
+                .position(x: start.x - 16, y: start.y)
         }
     }
 
-    /// CAUSE order, not alphabetical: a `build`/`request` starts a thread, `item` is its
-    /// work, `settled` answers — in that order the doors face their lanes.
-    private func entryRank(_ kind: SZMessageKind) -> Int {
-        switch kind {
-        case .build: 0
-        case .request: 1
-        case .chat: 2
-        case .item: 3
-        case .settled: 4
-        case .steer: 5
+    /// The CALL RETURN, derived rather than authored: a dispatch sends and concludes, and
+    /// the fleet's reply arrives later as a `settled` message — so the loop closes through
+    /// the door, not through an edge in the file. Drawn from each dispatch's `sent` port
+    /// back to the message node's `settled` port so the picture shows the round trip; it is
+    /// deliberately NOT in `graph.edges`, so it can never enter ranking or make the rank
+    /// graph cyclic.
+    @ViewBuilder
+    private func settlesReturns(placement: SZAgentGraphLayout.Placement) -> some View {
+        if let door = graph.messageNode, graph.handles(.settled),
+           let doorFrame = placement.frames[door.id] {
+            // Into the door's INPUT, never its `settled` PORT. The ports on the right are
+            // outputs: a wire ending on one reads as leaving it, which is backwards — the
+            // reply ARRIVES, exactly like the green stub beside it, and the door then sorts
+            // it out of the `settled` port like any other delivery.
+            let end = SZAgentGraphLayout.inputPoint(doorFrame)
+            ForEach(graph.nodes) { node in
+                if case .dispatch = node.form, let frame = placement.frames[node.id] {
+                    let face = SZAgentGraphLayout.face(of: node, in: graph)
+                    let from = SZAgentGraphLayout.outcomePoint(frame, outcome: "sent", in: face)
+                    // Back-edge routing (it runs right-to-left under the cards) with its own
+                    // word: this is a reply arriving, not a loop the traversal walks.
+                    SZAgentGraphWire(path: (from, end), outcome: "settled", bounded: true,
+                                     zoom: zoom, fromForm: .dispatch, labelText: "settles")
+                }
+            }
         }
     }
 
@@ -177,6 +196,8 @@ struct SZAgentGraphCanvasContent: View {
                          visitLabel: record.visits(of: entry.node) > 1
                              ? "visit \(record.visitNumber(of: entry))" : nil,
                          stats: stats(for: entry, face: face))
+                    // The fleet this dispatch sent, under the card that sent it.
+                    if face.form == .dispatch { callBand(under: frame) }
                 }
                 ForEach(Array(record.trace.enumerated()), id: \.element.id) { position, entry in
                     let face = SZAgentGraphLayout.runFace(for: entry, in: graph)
@@ -226,6 +247,19 @@ struct SZAgentGraphCanvasContent: View {
                     }
                 }
             }
+        }
+    }
+
+    /// The sub-agent band: one lane per dispatched item, under the dispatch card that sent
+    /// them. The lanes say WHO is working and WHERE they are — the node each is on right
+    /// now — because a tally alone ("3/4") cannot show a fleet actually running.
+    @ViewBuilder
+    private func callBand(under frame: CGRect) -> some View {
+        let lanes = SZAgentGraphLayout.callBand(under: frame, lanes: items.count)
+        ForEach(Array(zip(items, lanes)), id: \.0.id) { item, laneFrame in
+            SZAgentSubagentLane(run: item)
+                .frame(width: laneFrame.width, height: laneFrame.height)
+                .offset(x: laneFrame.minX, y: laneFrame.minY)
         }
     }
 
@@ -388,5 +422,63 @@ struct SZAgentGraphSocket: View {
             .fill(colour.opacity(faded ? 0.3 : 0.85))
             .frame(width: SZNodeLayout.socketSize, height: SZNodeLayout.socketSize)
             .overlay(Circle().strokeBorder(SZDotGridView.canvasBackground, lineWidth: 1.5))
+    }
+}
+
+/// ONE dispatched sub-agent, as a lane under the dispatch that sent it: which item it is
+/// working, the node it is on RIGHT NOW, its running clock, and a pulsing `live` badge —
+/// swapped for its conclusion badge and a frozen clock once it settles, so the band visibly
+/// drains from working to done as the fleet lands.
+///
+/// Everything here is read off the item's own record: live means `endedAt == nil`, the same
+/// fact the sidebar rows pulse on, so there is no second notion of "still going". It shares
+/// the sidebar's one-second `TimelineView` cadence for the same reason.
+struct SZAgentSubagentLane: View {
+    let run: SZAgentGraphRun
+
+    /// Where this agent is: the last entry still running, else the last one it finished.
+    private var currentNode: String? {
+        run.trace.last { $0.phase == .running }?.node ?? run.trace.last?.node
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 5) {
+                Image(systemName: "hammer")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(run.item?.prefix(8) ?? "item")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(currentNode ?? "—")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Text(run.endedAt.map { SZTurnBreakdown.format($0.timeIntervalSince(run.startedAt)) }
+                    ?? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(run.startedAt)))
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    // Beside a pulsing badge: swap the string, never cross-fade it.
+                    .contentTransition(.identity)
+                if run.isLive {
+                    SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
+                        SZRunBadge(label: "live", colour: SZAgentGraphStyle.live)
+                    }
+                } else {
+                    SZRunBadge.forConclusion(run.conclusion)
+                }
+            }
+            .padding(.horizontal, 7)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(RoundedRectangle(cornerRadius: 5)
+                .fill(Color.white.opacity(run.isLive ? 0.05 : 0.025)))
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .stroke(run.isLive ? SZAgentGraphStyle.live.opacity(0.45)
+                                   : Color.white.opacity(0.08), lineWidth: 1))
+        }
     }
 }

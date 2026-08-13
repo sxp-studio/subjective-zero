@@ -1,0 +1,12 @@
+{
+  "name": "debug",
+  "label": "Debug",
+  "hint": "One read-only conversational turn: answer from the delivered graph projection, with no tools and no side effects.",
+  "nodes": [
+    { "id": "message", "title": "On message", "onMessage": {} },
+    { "id": "answer", "title": "Answer", "turn": { "brief": "prompts/chat.md.mustache", "tools": [], "session": "message" } }
+  ],
+  "edges": [
+    { "from": "message", "outcome": "chat", "to": "answer" }
+  ]
+}

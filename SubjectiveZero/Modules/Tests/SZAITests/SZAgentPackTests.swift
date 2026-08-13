@@ -72,14 +72,16 @@ private func makeRoot(_ packs: [ScratchPack]) throws -> URL {
     return root
 }
 
-/// A minimal one-turn graph handling `kind`.
+/// A minimal one-turn graph routing `kind` — a door and the turn behind it.
 private func turnGraph(name: String, kind: String = "build",
                        brief: String = "prompts/plan.md.mustache",
-                       edges: String = "[]") -> String {
-    """
-    {"name": "\(name)", "kind": "\(kind)", "entry": "plan",
-     "nodes": [{"id": "plan", "turn": {"brief": "\(brief)", "session": "spawn"}}],
-     "edges": \(edges)}
+                       edges: String = "") -> String {
+    let extra = edges.isEmpty ? "" : ", \(edges)"
+    return """
+    {"name": "\(name)",
+     "nodes": [{"id": "message", "onMessage": {}},
+               {"id": "plan", "turn": {"brief": "\(brief)", "session": "spawn"}}],
+     "edges": [{"from": "message", "outcome": "\(kind)", "to": "plan"}\(extra)]}
     """
 }
 
@@ -87,12 +89,14 @@ private func turnGraph(name: String, kind: String = "build",
 private func runGraph(items: String = "workSet", to: String = "coding",
                       routeOutcome: String = "yes") -> String {
     """
-    {"name": "run", "kind": "build", "entry": "plan",
+    {"name": "run",
      "nodes": [
+       {"id": "message", "onMessage": {}},
        {"id": "plan", "turn": {"brief": "prompts/plan.md.mustache", "session": "spawn"}},
        {"id": "route", "step": "route"},
        {"id": "send", "dispatch": {"to": "\(to)", "items": "\(items)"}}],
      "edges": [
+       {"from": "message", "outcome": "build", "to": "plan"},
        {"from": "plan", "outcome": "ok", "to": "route"},
        {"from": "route", "outcome": "\(routeOutcome)", "to": "send"}]}
     """
@@ -209,7 +213,7 @@ private func cleanup(_ root: URL) {
 
 @Test func graphShapeDefectsAreWrappedWithTheGraphName() async throws {
     let dangling = turnGraph(name: "run",
-                             edges: "[{\"from\": \"plan\", \"outcome\": \"ok\", \"to\": \"ghost\"}]")
+                             edges: "{\"from\": \"plan\", \"outcome\": \"ok\", \"to\": \"ghost\"}")
     let root = try makeRoot([directorPack(graph: dangling), codingPack()])
     defer { cleanup(root) }
     let loaded = SZAgentPackLoader.load(root: root)
@@ -218,23 +222,24 @@ private func cleanup(_ root: URL) {
                                     defect: .danglingEdge(from: "plan", to: "ghost"))])
 }
 
-@Test func sameKindVariantsNeedANamedDefault() async throws {
+@Test func twoGraphsRoutingOneKindIsACoinToss() async throws {
+    // The variant era's `defaults` key existed to break this tie. A strategy is now a route
+    // INSIDE a graph, so the tie has no legitimate reading and is simply refused.
     var director = directorPack(graph: turnGraph(name: "run"))
     director.graphs["alt"] = turnGraph(name: "alt")
     let root = try makeRoot([director, codingPack()])
     defer { cleanup(root) }
     let loaded = SZAgentPackLoader.load(root: root)
     let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
-    #expect(defects == [.missingVariantDefault(agent: "director-a", kind: .build,
-                                               graphs: ["alt", "run"])])
+    #expect(defects == [.kindRoutedTwice(agent: "director-a", kind: .build,
+                                         graphs: ["alt", "run"])])
 }
 
-@Test func aNamedDefaultLegalizesVariantsAndResolvesThem() async throws {
-    // The same two-variant pack, with agent.json naming one: legal — and the API resolves
-    // the default for a plain delivery while the other variant stays reachable by name.
+@Test func severalDocumentsAreFineWhenTheyRouteDisjointKinds() async throws {
+    // Merging kinds into one file is ALLOWED, never required: an agent may still spread
+    // its lanes over several documents as long as each kind has one destination.
     var director = directorPack(graph: turnGraph(name: "run"))
-    director.graphs["alt"] = turnGraph(name: "alt")
-    director.defaults = ["build": "run"]
+    director.graphs["talk"] = turnGraph(name: "talk", kind: "chat")
     let root = try makeRoot([director, codingPack()])
     defer { cleanup(root) }
     let loaded = SZAgentPackLoader.load(root: root)
@@ -242,34 +247,26 @@ private func cleanup(_ root: URL) {
     #expect(defects.isEmpty, "\(defects)")
 
     let pack = try #require(loaded.packs.first { $0.id == "director-a" })
-    #expect(pack.variants(handling: .build).map(\.name) == ["alt", "run"])
-    #expect(pack.graph(handling: .build)?.name == "run")
-    #expect(pack.graph(handling: .build, variant: "alt")?.name == "alt")
-    #expect(pack.graph(handling: .build, variant: "ghost") == nil)
+    #expect(pack.graph(routing: .build)?.name == "run")
+    #expect(pack.graph(routing: .chat)?.name == "talk")
+    #expect(pack.graph(routing: .item) == nil)
 }
 
-@Test func aDefaultNamingNoVariantIsADefect() async throws {
-    var director = directorPack()   // one build graph, "run"
-    director.defaults = ["build": "ghost"]
-    let root = try makeRoot([director, codingPack()])
-    defer { cleanup(root) }
-    let loaded = SZAgentPackLoader.load(root: root)
-    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
-    #expect(defects == [.unknownVariantDefault(agent: "director-a", kind: .build,
-                                               named: "ghost")])
-    // The single handler still resolves — an unknown default never orphans the kind.
-    let pack = try #require(loaded.packs.first { $0.id == "director-a" })
-    #expect(pack.graph(handling: .build)?.name == "run")
-}
-
-@Test func defaultsNamingAnUnknownKindIsMisdeclared() throws {
+@Test func aRetiredDefaultsKeyIsRefusedByName() throws {
+    // Silently ignoring it would leave an author believing they still steer which graph
+    // answers what — the same policy the retired `entry`/`kind` graph keys get.
     let root = try makeRoot([ScratchPack(folder: "alpha",
-        agentJSON: "{\"id\": \"alpha\", \"seat\": null, \"defaults\": {\"bogus\": \"g\"}}")])
+        agentJSON: "{\"id\": \"alpha\", \"seat\": null, \"defaults\": {\"build\": \"g\"}}")])
     defer { cleanup(root) }
     let loaded = SZAgentPackLoader.load(root: root)
     #expect(loaded.packs.isEmpty)
-    #expect(loaded.defects == [.misdeclared(file: "alpha/agent.json",
-        detail: "defaults names unknown kind 'bogus'")])
+    #expect(loaded.defects.count == 1)
+    if case .unreadable(let file, let detail) = loaded.defects.first {
+        #expect(file == "alpha/agent.json")
+        #expect(detail.contains("retired"))
+    } else {
+        Issue.record("expected an unreadable defect, got \(loaded.defects)")
+    }
 }
 
 @Test func turnBriefMustBeAmongThePackPrompts() async throws {
@@ -510,7 +507,10 @@ private let shippedPackSteps = StubSteps(infos: [
     "director/nodes-failing": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
     "director/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
     "director/route-reply": SZStepDeclarationInfo(outcomes: ["answer", "build", "plan"], facts: "chat"),
+    "director/strategy": SZStepDeclarationInfo(outcomes: ["agentic", "procedural", "recovery"],
+                                               facts: "build"),
     "coding/retrying": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "item"),
+    "coding/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
     "coding/request-op": SZStepDeclarationInfo(outcomes: ["split", "merge"], facts: "request"),
 ])
 
@@ -531,56 +531,77 @@ private let shippedPackSteps = StubSteps(infos: [
     #expect(!report.contains("step checks skipped"))
 }
 
-/// The director ships three BUILD variants: `agentic` (the default a plain run opens), the
-/// turn-less `procedural`, and the condition-gated `recovery` — validated above as full
-/// graphs, resolved here through the variant API the host's selection rides on.
-@Test func theShippedDirectorPackCarriesTheBuildVariants() throws {
+/// The director ships ONE document routing every kind it accepts, with the three build
+/// strategies as ROUTES off a `strategy` step rather than as separate files. This is the
+/// shape the "all my steps in one graph" complaint asked for, pinned.
+@Test func theShippedDirectorIsOneDocumentRoutingEveryKind() throws {
     let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     let director = try #require(loaded.packs.first { $0.id == "director" })
-    #expect(director.variants(handling: .build).map(\.name) == ["agentic", "procedural", "recovery"])
-    #expect(director.defaults == [.build: "agentic"])
-    #expect(director.graph(handling: .build)?.name == "agentic")
-    #expect(director.graph(handling: .build, variant: "procedural")?.name == "procedural")
-    // The procedural variant is turn-less by design — token-free, contract-first — and
-    // concludes at the first settle (no `settled` entry).
-    let procedural = try #require(director.graph(handling: .build, variant: "procedural"))
-    #expect(!procedural.nodes.contains { if case .turn = $0.form { true } else { false } })
-    #expect(procedural.entry[.settled] == nil)
+    #expect(director.graphs.map(\.name) == ["director"])
+    let graph = try #require(director.graph(routing: .build))
+    #expect(Set(graph.routes.keys) == [.chat, .build, .settled])
+    #expect(graph.routes[.chat] == "resuming")
+    #expect(graph.routes[.build] == "strategy")
+    #expect(graph.routes[.settled] == "strategy-settled")
+    // The strategies, as ports on one step. `procedural` is deliberately absent from the
+    // settled router: its first settle routes nowhere, which is how "no retry rounds" is
+    // spelled now that there is no settled entry to omit.
+    #expect(graph.edge(from: "strategy", outcome: "agentic")?.to == "decompose")
+    #expect(graph.edge(from: "strategy", outcome: "procedural")?.to == "work-left")
+    #expect(graph.edge(from: "strategy", outcome: "recovery")?.to == "nodes-failing")
+    #expect(graph.edge(from: "strategy-settled", outcome: "procedural") == nil)
 }
 
-/// The recovery variant: entry — build AND settled — at the `nodes-failing` step, whose
-/// "yes" routes to a reconcile turn and then the dispatch, and whose unwired "no" ends the
-/// run untouched. One recovery round (`caps.rounds: 1`); the pack default stays `agentic`.
-@Test func theShippedRecoveryVariantGatesOnTheFailingFleet() throws {
+/// The recovery strategy: gated on `nodes-failing`, whose "yes" routes to a reconcile turn
+/// and then the dispatch, and whose unwired "no" ends the run untouched. Reachable from the
+/// build port AND the settled re-entry, which is what makes it a recovery loop.
+@Test func theShippedRecoveryStrategyGatesOnTheFailingFleet() throws {
     let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     let director = try #require(loaded.packs.first { $0.id == "director" })
-    let recovery = try #require(director.graph(handling: .build, variant: "recovery"))
-    #expect(recovery.caps?.rounds == 1)
-    #expect(recovery.entry[.build] == "nodes-failing")
-    #expect(recovery.entry[.settled] == "nodes-failing")
-    #expect(recovery.node("nodes-failing")?.form == .step(name: "nodes-failing"))
-    #expect(recovery.edge(from: "nodes-failing", outcome: "yes")?.to == "reconcile")
-    #expect(recovery.edge(from: "nodes-failing", outcome: "no") == nil)   // healthy fleet → end
-    #expect(recovery.edge(from: "reconcile", outcome: "ok")?.to == "implement")
-    // A plain delivery still opens agentic — the recovery variant never usurps the default.
-    #expect(director.graph(handling: .build)?.name == "agentic")
+    let graph = try #require(director.graph(routing: .build))
+    #expect(graph.node("nodes-failing")?.form == .step(name: "nodes-failing"))
+    #expect(graph.edge(from: "nodes-failing", outcome: "yes")?.to == "reconcile")
+    #expect(graph.edge(from: "nodes-failing", outcome: "no") == nil)   // healthy fleet → end
+    #expect(graph.edge(from: "reconcile", outcome: "ok")?.to == "implement")
+    #expect(graph.kinds(reaching: "nodes-failing") == [.build, .settled])
 }
 
-/// The chat graph: the cold/resumed fork feeds the `route-reply` ruling, whose outcomes all
+/// The chat lane: the cold/resumed fork feeds the `route-reply` ruling, whose outcomes all
 /// END the traversal — `build`'s work is the `requestBuild` EFFECT (performed before edge
-/// routing), so no outcome needs an edge.
-@Test func theShippedChatGraphRoutesBothTurnsIntoRouteReply() throws {
+/// routing), so no outcome needs an edge. It now lives in the same document as the build
+/// lane, and stays lane-pure because nothing joins the two.
+@Test func theShippedChatLaneRoutesBothTurnsIntoRouteReply() throws {
     let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     let director = try #require(loaded.packs.first { $0.id == "director" })
-    let chat = try #require(director.graph(handling: .chat))
-    #expect(chat.entry[.chat] == "resuming")
-    #expect(chat.edge(from: "resuming", outcome: "no")?.to == "cold")
-    #expect(chat.edge(from: "resuming", outcome: "yes")?.to == "resumed")
-    #expect(chat.edge(from: "cold", outcome: "ok")?.to == "route-reply")
-    #expect(chat.edge(from: "resumed", outcome: "ok")?.to == "route-reply")
-    #expect(chat.node("route-reply")?.form == .step(name: "route-reply"))
+    let graph = try #require(director.graph(routing: .chat))
+    #expect(graph.edge(from: "resuming", outcome: "no")?.to == "cold")
+    #expect(graph.edge(from: "resuming", outcome: "yes")?.to == "resumed")
+    #expect(graph.edge(from: "cold", outcome: "ok")?.to == "route-reply")
+    #expect(graph.edge(from: "resumed", outcome: "ok")?.to == "route-reply")
+    #expect(graph.node("route-reply")?.form == .step(name: "route-reply"))
     for outcome in ["answer", "build", "plan"] {
-        #expect(chat.edge(from: "route-reply", outcome: outcome) == nil)
+        #expect(graph.edge(from: "route-reply", outcome: outcome) == nil)
+    }
+    #expect(graph.lanes(reaching: "route-reply") == [.chat])
+}
+
+/// The rule the whole change exists to enforce, asserted over the library generically — no
+/// agent named, so a new pack is covered by existing: every shipped graph has exactly one
+/// door, every node hangs off it, and no node straddles two facts lanes.
+@Test func everyShippedGraphIsOneConnectedLanePureDocument() throws {
+    let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
+    #expect(!loaded.packs.isEmpty)
+    for pack in loaded.packs {
+        for graph in pack.graphs {
+            let door = try #require(graph.messageNode, "\(pack.id)/\(graph.name) has no door")
+            #expect(!graph.routes.isEmpty, "\(pack.id)/\(graph.name) routes nothing")
+            for node in graph.nodes where node.id != door.id {
+                #expect(!graph.kinds(reaching: node.id).isEmpty,
+                        "\(pack.id)/\(graph.name): '\(node.id)' is unreachable")
+                #expect(graph.lanes(reaching: node.id).count == 1,
+                        "\(pack.id)/\(graph.name): '\(node.id)' straddles lanes")
+            }
+        }
     }
 }
 
@@ -598,13 +619,15 @@ private let shippedPackSteps = StubSteps(infos: [
         "director/graphs/build.json": """
         {
           "name": "build",
-          "kind": "build",
-          "entry": "plan",
           "nodes": [
+            { "id": "message", "onMessage": {} },
             { "id": "plan", "turn": { "brief": "prompts/plan.md.mustache" } },
             { "id": "implement", "dispatch": { "to": "coding", "items": "workSet" } }
           ],
-          "edges": [ { "from": "plan", "outcome": "ok", "to": "implement" } ]
+          "edges": [
+            { "from": "message", "outcome": "build", "to": "plan" },
+            { "from": "plan", "outcome": "ok", "to": "implement" }
+          ]
         }
         """,
         "director/prompts/plan.md.mustache": """
@@ -618,10 +641,11 @@ private let shippedPackSteps = StubSteps(infos: [
         "coding/graphs/item.json": """
         {
           "name": "item",
-          "kind": "item",
-          "entry": "implement",
-          "nodes": [ { "id": "implement", "turn": { "brief": "prompts/implement.md.mustache" } } ],
-          "edges": []
+          "nodes": [
+            { "id": "message", "onMessage": {} },
+            { "id": "implement", "turn": { "brief": "prompts/implement.md.mustache" } }
+          ],
+          "edges": [ { "from": "message", "outcome": "item", "to": "implement" } ]
         }
         """,
         "coding/prompts/implement.md.mustache": """

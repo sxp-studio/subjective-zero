@@ -35,8 +35,8 @@ private func specSource() throws -> String {
 
 @Test func catalogHasTheApprovedShape() throws {
     let all = SZFactCatalog.all
-    #expect(all.count == 21)
-    #expect(all.filter { $0.kind == "build" }.count == 10)
+    #expect(all.count == 22)
+    #expect(all.filter { $0.kind == "build" }.count == 11)
     #expect(all.filter { $0.kind == "chat" }.count == 4)
     #expect(all.filter { $0.kind == "item" }.count == 4)
     #expect(all.filter { $0.kind == "request" }.count == 3)
@@ -303,7 +303,7 @@ private func spec(_ body: String) -> String {
     var facts = SZBuildFacts(
         unimplemented: ["a", "b"], workSet: ["a", "b"], nodeStatuses: ["a": "implementing"],
         buildErrors: [:], round: 1, roundCap: 3, briefed: true, projectLoaded: true,
-        graphJSON: "{}", steers: []
+        graphJSON: "{}", steers: [], runVariant: ""
     )
     #expect(facts.hasWorkLeft)
     #expect(!facts.fleetIsFailing)

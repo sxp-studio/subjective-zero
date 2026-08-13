@@ -109,7 +109,7 @@ private final class ChatWorld {
          turnDrafts: Bool = false) throws {
         let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
         let director = try #require(loaded.packs.first { $0.id == "director" })
-        let graph = try #require(director.graph(handling: .chat))
+        let graph = try #require(director.graph(routing: .chat))
         let attachments = [
             "resuming": SZStepAttachment(outcomes: ["yes", "no"]),
             "route-reply": SZStepAttachment(outcomes: ["answer", "build", "plan"]),

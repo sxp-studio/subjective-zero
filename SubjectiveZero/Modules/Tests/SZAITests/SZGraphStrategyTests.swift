@@ -30,14 +30,16 @@ private func makePackRoot() throws -> URL {
     try write("director/agent.json", #"{"id": "director", "seat": "director"}"#)
     try write("director/graphs/build.json", """
     {
-      "name": "build", "kind": "build", "caps": { "rounds": 2 },
-      "entry": { "build": "work-left", "settled": "work-left" },
+      "name": "build", "caps": { "rounds": 2 },
       "nodes": [
+        { "id": "message", "onMessage": {} },
         { "id": "work-left", "step": "work-left" },
         { "id": "decompose", "turn": { "brief": "prompts/decompose.md.mustache" } },
         { "id": "implement", "dispatch": { "to": "coding", "items": "workSet" } }
       ],
       "edges": [
+        { "from": "message", "outcome": "build", "to": "work-left" },
+        { "from": "message", "outcome": "settled", "to": "work-left" },
         { "from": "work-left", "outcome": "yes", "to": "decompose" },
         { "from": "decompose", "outcome": "ok", "to": "implement" }
       ]
@@ -50,13 +52,15 @@ private func makePackRoot() throws -> URL {
     try write("coding/agent.json", #"{"id": "coding", "seat": "coding"}"#)
     try write("coding/graphs/item.json", """
     {
-      "name": "item", "kind": "item", "entry": "retrying",
+      "name": "item",
       "nodes": [
+        { "id": "message", "onMessage": {} },
         { "id": "retrying", "step": "retrying" },
         { "id": "implement", "turn": { "brief": "prompts/node-compile.md.mustache" } },
         { "id": "continue", "turn": { "brief": "prompts/node-reconcile.md.mustache", "session": "message" } }
       ],
       "edges": [
+        { "from": "message", "outcome": "item", "to": "retrying" },
         { "from": "retrying", "outcome": "no", "to": "implement" },
         { "from": "retrying", "outcome": "yes", "to": "continue" }
       ]

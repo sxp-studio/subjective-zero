@@ -1098,21 +1098,6 @@ private let piRPCCatalogLoggedOut = """
     }
 }
 
-/// The cold-start chat prompt loads (resource is bundled) and embeds the node id, the user
-/// message, and the current source/contract so a fresh Coding Agent can edit an existing node.
-@Test func nodeColdStartPromptEmbedsContext() {
-    let prompt = SZChatPrompts.nodeColdStart(
-        node: "NODE-123", userMessage: "make it invert color",
-        currentContract: "{\"title\":\"Grayscale\"}", currentSource: "final class Node: SZNode {}")
-    #expect(prompt.contains("NODE-123"))
-    #expect(prompt.contains("make it invert color"))
-    #expect(prompt.contains("\"title\":\"Grayscale\""))
-    #expect(prompt.contains("final class Node: SZNode {}"))
-    for tool in ["agent_write_node_staged", "agent_compile_node", "agent_report_status"] {
-        #expect(prompt.contains(tool))
-    }
-}
-
 /// claude is the only provider that gates per-tool, so it must MIRROR `request.allowedMCPTools`
 /// (the app's `SZHostBridge.agentCallableToolNames`) into `--allowedTools`, prefixed — a tool it
 /// isn't handed is denied in non-interactive -p mode. The app-side test target owns the guard that the

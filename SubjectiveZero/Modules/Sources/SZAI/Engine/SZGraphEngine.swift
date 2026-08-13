@@ -3,12 +3,21 @@
 // holds no host types — everything arrives through the SZTraversalHost/SZStepRunning/
 // SZModelRouting seams — so tests drive the real engine with stubs, never a replica.
 //
-// Three primitives, by design:
+// Four primitives, by design:
+// - message:  the door. Costs nothing and asks nothing — the delivered kind IS the outcome,
+//             so the traversal leaves by the port bearing its own name.
 // - step:     compiled async code; the ONLY home of routing intelligence (it may askModel).
 // - turn:     a full agent turn; mechanically dumb — `ok`/`error`, nothing else. A turn's
 //             content never routes; the VERDICT-prose-scanning era is unrepresentable.
 // - dispatch: resolve the items fact, hand the host `.item` orders, conclude. The settled
-//             reply re-enters the graph through the thread machine, not this traversal.
+//             reply re-enters the graph through the thread machine, not this traversal —
+//             and it re-enters by the MESSAGE NODE, like every other delivery.
+//
+// THE LANE, not the delivered kind, is what the host seams see: a `settled` message reasons
+// over the same build facts one round later, publishes no facts of its own and renders no
+// brief of its own. `SZMessageKind.lane` owns that fold; the delivered kind survives only in
+// the record and in the door's port lookup. Passing the raw kind to the effect catalogue
+// would refuse a settled traversal's `captureStatuses`, since no `settled` effects exist.
 //
 // Threads — sequences of traversals joined by messages — are SZThreadMachine's business.
 import Foundation
@@ -61,7 +70,7 @@ public struct SZGraphEngine {
         self.router = router
     }
 
-    /// Traverse from `kind`'s entry to a conclusion. Cancellation is checked at every node
+    /// Traverse from the message node to a conclusion. Cancellation is checked at every node
     /// boundary and concludes as `.cancelled` — never a defect, never caught-and-continued.
     public func run(kind: SZMessageKind) async -> SZTraversalResult {
         var notes: [SZTraversalNote] = []
@@ -76,16 +85,18 @@ public struct SZGraphEngine {
             host.note(value)
         }
 
-        guard let entry = graph.entry[kind] else {
-            // The pack gate guarantees a graph enters on its own kind, so a missing entry
-            // means the host delivered a kind this graph never declared — a routing bug,
-            // and the engine refuses to guess.
+        guard let door = graph.messageNode else {
+            // Validation refuses a doorless graph at load, so reaching here means an
+            // unvalidated graph was handed to the engine. It refuses to guess an entry.
             return SZTraversalResult(
-                conclusion: .defect(node: "", detail: "no entry declared for '\(kind.rawValue)'"),
+                conclusion: .defect(node: "", detail: "the graph has no message node"),
                 sent: [], sentTarget: nil, notes: [])
         }
+        // Everything the host sees is the LANE — see the file header. The delivered kind
+        // routes at the door and is otherwise the record's business.
+        let lane = kind.lane
 
-        var current: String? = entry
+        var current: String? = door.id
         var conclusion: SZTraversalConclusion?
 
         while let id = current, conclusion == nil {
@@ -103,15 +114,26 @@ public struct SZGraphEngine {
             let outcome: String
             var turnFailure: String?
             switch node.form {
+            case .message:
+                // The door: no work, no cost, no host seam. An unrouted kind is a routing
+                // bug — the gate cannot know which kinds a host will deliver — so it is a
+                // defect naming the kind rather than a silent end.
+                guard graph.edge(from: id, outcome: kind.rawValue) != nil else {
+                    let detail = "nothing routes a '\(kind.rawValue)' message"
+                    note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
+                    conclusion = .defect(node: id, detail: detail)
+                    continue
+                }
+                outcome = kind.rawValue
+
             case .step(let name):
                 // The facts snapshot is pinned HERE: the evaluation and every ask it makes
                 // see the same document, however long the step runs.
-                let facts = host.factsJSON(kind: kind)
-                let graphKind = graph.kind
+                let facts = host.factsJSON(kind: lane)
                 let report = await steps.evaluate(
                     agent: agent, step: name, factsJSON: facts,
                     ask: { [host, agent] request in
-                        try await host.serveAsk(agent: agent, step: name, kind: graphKind,
+                        try await host.serveAsk(agent: agent, step: name, kind: lane,
                                                 factsJSON: facts, requestJSON: request)
                     })
                 if report.cancelled {
@@ -136,16 +158,16 @@ public struct SZGraphEngine {
                 // traversal defect naming it, and nothing performs. Performed in the step's
                 // own order, AFTER the step returned and BEFORE edge routing.
                 if !report.effects.isEmpty {
-                    let declared = SZEffectCatalog.cases(kind: graphKind.rawValue)
+                    let declared = SZEffectCatalog.cases(kind: lane.rawValue)
                     if let unknown = report.effects.first(where: { !declared.contains($0) }) {
                         let detail = "step '\(name)' requested effect '\(unknown)', outside "
-                            + "the '\(graphKind.rawValue)' effect set"
+                            + "the '\(lane.rawValue)' effect set"
                         note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
                         conclusion = .defect(node: id, detail: detail)
                         continue
                     }
                     for effect in report.effects {
-                        await host.perform(effect: effect, kind: graphKind)
+                        await host.perform(effect: effect, kind: lane)
                     }
                 }
                 outcome = answered
@@ -153,7 +175,7 @@ public struct SZGraphEngine {
             case .turn(let turn):
                 let rendered: String
                 do {
-                    rendered = try host.renderBrief(agent: agent, template: turn.brief, kind: kind)
+                    rendered = try host.renderBrief(agent: agent, template: turn.brief, kind: lane)
                 } catch {
                     let detail = "brief '\(turn.brief)' would not render: \(error)"
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
@@ -176,7 +198,7 @@ public struct SZGraphEngine {
                 if report.failed { turnFailure = report.detail ?? "the turn failed" }
 
             case .dispatch(let dispatch):
-                let items = host.itemsFact(named: dispatch.items, kind: kind)
+                let items = host.itemsFact(named: dispatch.items, kind: lane)
                 sent = items.map { SZItemOrder(node: $0) }
                 sentTarget = dispatch.to
                 outcome = "sent"

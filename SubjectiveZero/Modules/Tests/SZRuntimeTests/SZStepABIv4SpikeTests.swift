@@ -103,7 +103,7 @@ let step = LayoutProbe()
 /// nil was the old architecture's favorite way to lie), so tests send every field.
 private func buildFacts(workLeft: Int) -> String {
     let ids = "[" + (0..<workLeft).map { _ in "\"node-\(UUID().uuidString.prefix(8))\"" }.joined(separator: ", ") + "]"
-    return #"{"unimplemented": \#(ids), "workSet": \#(ids), "nodeStatuses": {}, "buildErrors": {}, "round": 1, "roundCap": 2, "briefed": false, "projectLoaded": true, "graphJSON": "{}", "steers": []}"#
+    return #"{"unimplemented": \#(ids), "workSet": \#(ids), "nodeStatuses": {}, "buildErrors": {}, "round": 1, "roundCap": 2, "briefed": false, "projectLoaded": true, "graphJSON": "{}", "steers": [], "runVariant": ""}"#
 }
 
 private let chatFacts = #"{"sentMessage": "hey", "resuming": false, "draftedWork": false}"#

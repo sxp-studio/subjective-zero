@@ -12,9 +12,9 @@ Shipped packs: `SZAI/Resources/Agents/`. Tutorial: [AUTHORING.md](AUTHORING.md).
 
 ## The message vocabulary
 
-One enum, `SZMessageKind`, spoken everywhere — queue intent, graph kind, entry key, delivery
-record. A graph declares which kind it **handles**, and a delivered message enters the handling
-graph at that kind's declared entry node.
+One enum, `SZMessageKind`, spoken everywhere — queue intent, message-node port, delivery record.
+A graph's **message node** is its one door: a delivered message leaves by the port bearing its own
+kind.
 
 | message | means | who sends it |
 |---|---|---|
@@ -28,6 +28,11 @@ graph at that kind's declared entry node.
 `steer` is the one kind that never enters a graph: the thread machine drains steers into the next
 traversal's facts, and a conclusion sweeps leftovers.
 
+**Kinds vs LANES.** `settled` is a real message — recorded, glyphed, delivered — but it publishes no
+facts of its own: it re-reads the same live build picture one round later. So it *reasons* in the
+build lane, and `SZMessageKind.lane` owns that fold in one place. The delivered kind routes at the
+door and names the record; everything past the door — facts, briefs, asks, effects — sees the lane.
+
 **Vocabulary.** A build is a **thread**: short graph **traversals** joined by messages, sharing one
 identity from the Build press to the conclusion. A **turn** is one agent running because a turn
 node asked — the unit that spends model time. Turn ⊂ traversal ⊂ thread.
@@ -36,7 +41,7 @@ node asked — the unit that spends model time. Turn ⊂ traversal ⊂ thread.
 
 ```
 Resources/Agents/<id>/
-  agent.json        identity, seat, per-kind default variants
+  agent.json        identity and seat — nothing else
   graphs/           one file per graph — the graph's name IS the filename stem
   prompts/          brief templates (*.md.mustache) — ALL prompt prose lives here
   steps/<name>/     one compiled decision per folder: a single Step.swift
@@ -46,68 +51,106 @@ Resources/Agents/<id>/
 
 ```jsonc
 {
-  "id": "director",                  // must equal the folder name — identity lives in the filesystem
-  "seat": "director",                // director | coding; omit = seatless (addressable, never dispatched to)
-  "defaults": { "build": "agentic" } // kind → graph name, only where a kind has VARIANTS
+  "id": "director",   // must equal the folder name — identity lives in the filesystem
+  "seat": "director"  // director | coding; omit = seatless (addressable, never dispatched to)
 }
 ```
+
+There is no third field: which graph answers which kind is said by the graphs' own message nodes,
+so the manifest has nothing left to arbitrate. (A leftover `defaults` key is refused by name rather
+than ignored — an author must not believe they still steer routing from here.)
+
+The shipped packs each carry ONE document — `director/graphs/director.json`,
+`coding/graphs/coding.json`, `debug/graphs/debug.json`. That is a convention, not a rule: an agent
+may spread its lanes over several files, as long as each kind has exactly one destination
+(`kindRoutedTwice` refuses the tie).
 
 Seats resolve over the loaded library: exactly one holder each, checked at validation. A dispatch
 names a seat, never an agent id — replace a folder and whoever now holds the seat receives the work.
 
-## Graph files: an entry map and three node forms
+## Graph files: one door and four node forms
 
 ```jsonc
 {
-  "name": "agentic",           // must equal the filename stem
-  "kind": "build",             // the kind this graph HANDLES
-  "label": "Agentic",          // picker display name (optional)
-  "hint": "…",                 // picker subtitle (optional)
+  "name": "director",          // must equal the filename stem
+  "label": "Director",         // display name (optional)
+  "hint": "…",                 // subtitle (optional)
   "caps": { "rounds": 2 },     // settled re-entries this graph buys (≥ 1; omitted = one)
-  "entry": { "build": "decompose", "settled": "work-left" },
-  "nodes": [ … ],
-  "edges": [ { "from": "decompose", "outcome": "ok", "to": "implement" } ]
+  "nodes": [ { "id": "message", "title": "On message", "onMessage": {} }, … ],
+  "edges": [ { "from": "message", "outcome": "build", "to": "strategy" }, … ]
 }
 ```
 
-`entry` maps a **message kind to the node its delivery enters at**. A graph always declares its
-own kind's entry; `settled` re-enters here after a dispatch set concludes — and *omitting* the
-settled entry is how a graph says "the first settle concludes the run" (the shipped `procedural`).
-Wire sugar: a bare string (`"entry": "plan"`) is the graph's own kind.
+Every graph has exactly **one message node** — its door — and the kinds it accepts are the
+**outcomes of the edges leaving it**. There is no `kind` field and no `entry` map: the ports and
+the routing cannot disagree, because they are the same edges. Both retired keys are refused by name
+at decode rather than ignored.
 
-A node takes **exactly one of three forms** — enforced at decode, so a malformed node is
+> **Why the door is a node.** `entry` used to be a map from kind to node, so a graph with two doors
+> drew as two disconnected fragments — the fleet's `settled` reply in particular had nowhere to
+> enter but a second entry key, leaving the retry lane attached to nothing. As a node, every kind
+> the agent accepts is one port on one card, the whole document is one connected picture, and
+> `unreachable` refuses a floating fragment at load instead of leaving it to be noticed on a canvas.
+
+A node takes **exactly one of four forms** — enforced at decode, so a malformed node is
 unrepresentable:
 
 | form | body | outcomes |
 |---|---|---|
+| `"onMessage": {}` | the door — no body, no cost, no host seam | the message kinds it routes; `steer` is not among them |
 | `"step": "<folder>"` | the compiled `Step.swift` in the agent's pack | whatever the step's own exported declaration names |
 | `"turn": { "brief", "session"?, "tools"? }` | a full agent turn; the mustache brief IS the body | fixed `ok` / `error` — process truth only, content never routes |
 | `"dispatch": { "to", "items" }` | fan work out: one `item` message per element of the `items` fact | `sent`, and **no out-edges** — send-and-conclude is structural |
 
+The dispatch has no return edge, and does not need one: the fleet's reply is a `settled` MESSAGE
+delivered to the sender, so it comes in by the same door as everything else. Leaving the door's
+`settled` port unwired is how a graph says "the first settle concludes the run". The panel draws
+the round trip anyway, as a derived wire from each dispatch's `sent` port back to the `settled`
+port — a picture of a real path, not an edge in the file.
+
 `session` on a turn: `spawn` (default) cold-starts; `message` continues the scope's existing
 session (spawning when none exists). `tools` narrows the turn's tool surface; nil is the agent's
-default. `dispatch.to` is a seat; `dispatch.items` must be a `[String]`-typed fact of the graph's
-kind (the catalog check at load) — `workSet` is the one builds use.
+default — and `[]` means no MCP server at all. `dispatch.to` is a seat; `dispatch.items` must be a
+`[String]`-typed fact of the node's lane (the catalog check at load) — `workSet` is the one builds
+use.
 
 Edges are `{ from, outcome, to, maxTraversals? }`. An outcome with **no edge ends the traversal**
 — that is not an error; it is how a condition's `no` ends a run. A cycle is legal only across a
 `maxTraversals`-bounded edge; unbounded cycles are refused at load.
 
-## Variants, defaults, and the picker
+## Lanes: one document, several kinds, still typed
 
-Several graphs may handle one kind — they are that kind's **variants** — but only under a named
-default: `agent.json`'s `defaults` must name exactly one of them, or the pack is refused (a plain
-delivery must never open a coin toss). A single-graph kind needs no entry.
+A document may route several kinds — the shipped director carries its chat lane and its build lane
+in one file — but a NODE may not straddle two. Steps and briefs are typed to one kind's facts, so
+the gate computes, per node, which ports can reach it: exactly one lane, or `laneImpure`. That is
+strictly stronger than the era when a graph simply declared one `kind` by fiat, because now the
+lane is *proven* by reachability from the door the message actually enters.
 
-The director ships three build variants: **agentic** (decompose → dispatch → reconcile rounds; the
-default), **procedural** (token-free and contract-first — no turns, first settle concludes), and
-**recovery** (entry at the `nodes-failing` condition: a failing fleet gets one reconcile turn and a
-re-dispatch; a healthy fleet ends the run untouched).
+Merging kinds into one file is therefore allowed and never required. What it buys is
+deduplication: the director's three build strategies share `reconcile`, `implement` and
+`nodes-failing`, which would have to be triplicated across separate variant files.
 
-Selection is per-run, resolved at Build: `SZ_RUN_GRAPH` (env, per launch) > the persisted choice
-(`debug_set_orchestrator`) > the pack default. A stale or
-typoed choice falls back to the default with one honest status line, never silently. A new
-build-kind file in the director's `graphs/` is selectable with no Swift change.
+## Strategies: a route, not a file
+
+A build **strategy** is a step at the head of the build lane, not a choice of document. The
+director's `strategy` step is one line:
+
+```swift
+let step = SZBuildRouter("agentic", "procedural", "recovery") {
+    ["procedural", "recovery"].contains($0.runVariant) ? $0.runVariant : "agentic"
+}
+```
+
+Its three ports route into three lanes that share nodes wherever their wiring agrees:
+**agentic** (decompose → dispatch → reconcile rounds; the default the step falls back to),
+**procedural** (token-free and contract-first — no planning turn, and its settled re-entry routes
+nowhere, so the first settle concludes), and **recovery** (gated on `nodes-failing`: a failing
+fleet gets a reconcile turn and a re-dispatch; a healthy fleet ends the run untouched).
+
+The requested name reaches the step as the `runVariant` fact: `SZ_RUN_GRAPH` (env, per launch) >
+the persisted choice (`debug_set_orchestrator`). The host does **not** validate it — the step owns
+the fallback, and refusing a name here could overrule a pack that would have honoured it — but a
+name the wiring does not offer gets one honest status line, and the canvas shows which port fired.
 
 ## Steps: one Step.swift, typed to its kind
 
@@ -168,13 +211,14 @@ brief can then read it — no registry, no third spelling.
 Loading (`SZAgentPackLoader`) collects defects, never first-errors: one unreadable pack reports
 while its siblings load, and inside a folder one bad graph file reports while the folder's healthy
 graphs — and its seat — still load. Validation covers the library as a whole: seats (exactly one
-holder each), variant defaults, graph shape (duplicate ids, dangling/duplicate edges, undeclared
-outcomes, unbounded cycles, entry rules), turn briefs (the template exists; every `{{token}}` is
-one the kind's assembly substitutes; every partial a token renders from ships in the pack — no
+holder each), one destination per kind per agent, graph shape (duplicate ids, dangling/duplicate
+edges, undeclared outcomes, unbounded cycles, the door's cardinality, reachability, lane purity),
+turn briefs (the template exists; every `{{token}}` is
+one the LANE's assembly substitutes; every partial a token renders from ships in the pack — no
 literal token reaches a model from a turn brief; an `askModel` template is resolved at RUN time and
 is not scanned, so a typo there ships literally), dispatch targets (a held seat whose holder handles `item`)
 and items facts (catalogued, `[String]`-typed), and — through the step seam — each compiled step's
-declared outcomes and facts kind. With no step provider those checks are **skipped and the report
+declared outcomes and facts kind, checked against the one lane that reaches it. With no step provider those checks are **skipped and the report
 says so**; they never pass silently.
 
 `debug_check_pack` runs the same load + validation as a pre-flight, without spending a token, and
@@ -198,13 +242,24 @@ a step opens its `Step.swift`, a turn opens its brief, and a dispatch links into
 
 ## RUNS records and the panel
 
-Every traversal — a director's, each item's, each chat reply — is recorded as an
-`SZAgentGraphRun`: who entered which graph on which kind, a per-node trace (running → done/failed,
-outcome, detail), the conclusion, and — for a dispatching traversal — the set's live tally,
-amended as items settle (the one sanctioned post-seal write). Live records exist only in memory; a
-record persists at seal into the project's `runs.json`, so the panel's RUNS list, each row's
-trace, and the conclusions survive a relaunch while a crash mid-traversal loses the record and
-keeps the transcript. The history caps per budget, never evicting a live record.
+Every traversal — a director's, each item's, and **each chat reply, whichever agent answers it** —
+is recorded as an `SZAgentGraphRun`: who entered which graph on which kind, a per-node trace
+(running → done/failed, outcome, detail), the conclusion, and — for a dispatching traversal — the
+set's live tally, amended as items settle (the one sanctioned post-seal write). The trace opens at
+the door, so a record's first entry says what arrived. Live records exist only in memory; a record
+persists at seal into the project's `runs.json`, so the panel's RUNS list, each row's trace, and
+the conclusions survive a relaunch while a crash mid-traversal loses the record and keeps the
+transcript. The history caps per budget, never evicting a live record.
+
+A chat record carries **no thread**, even when delivered mid-build: a node outside the work set can
+be chatted while the fleet runs, and the list's thread header picks the newest non-item traversal
+as the thread's decider — so a chat joining the group would paint its own ending as the build's.
+
+The list names the **agent** ("Director", "Coding"), with the graph's authored `label` on the line
+below and the raw pack id / file stem in the tooltip. On the canvas, a dispatch card carries a band
+of its sub-agents: one lane per dispatched item, each naming the node that agent is on right now,
+its running clock, and a pulsing `live` badge — swapped for a conclusion badge and a frozen clock
+as each settles, so the band drains from working to done while the fleet lands.
 
 ## The thread machine
 

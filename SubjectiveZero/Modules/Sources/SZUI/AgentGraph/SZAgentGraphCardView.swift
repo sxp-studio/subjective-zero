@@ -301,6 +301,9 @@ struct SZAgentGraphWire: View {
     /// A Run-view forecast wire: part of the projected future, not something that happened —
     /// dashed and neutral so it cannot be mistaken for a step the traversal took.
     var projected: Bool = false
+    /// Overrides the back-edge pill's word. A bounded edge is a `loop`; the derived return
+    /// from a dispatch to its agent's door is not a loop but a reply, and says so.
+    var labelText: String? = nil
 
     var body: some View {
         ZStack {
@@ -310,12 +313,12 @@ struct SZAgentGraphWire: View {
         }
     }
 
-    /// ONLY the loop gets a pill. Outcome names live on the cards as labelled rows, so a
+    /// ONLY a back edge gets a pill. Outcome names live on the cards as labelled rows, so a
     /// pill repeating them would be duplication.
     @ViewBuilder private var label: some View {
         if bounded {
             let z = max(zoom, 0.1)
-            Text("loop")
+            Text(labelText ?? "loop")
                 .font(.system(size: max(7, 10 / z), weight: .semibold, design: .rounded))
                 .foregroundStyle(Color.black.opacity(0.82))
                 .padding(.horizontal, max(3, 5 / z))

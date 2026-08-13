@@ -24,7 +24,13 @@ private final class StubHost: SZTraversalHost {
     /// edge-routing (a perform must land before the next node's turn).
     var events: [String] = []
 
-    func factsJSON(kind: SZMessageKind) -> String { facts }
+    /// Which lane each facts read was made in — what pins the settled→build fold.
+    var factsKindsSeen: [SZMessageKind] = []
+
+    func factsJSON(kind: SZMessageKind) -> String {
+        factsKindsSeen.append(kind)
+        return facts
+    }
     func itemsFact(named name: String, kind: SZMessageKind) -> [String] { items }
     func renderBrief(agent: String, template: String, kind: SZMessageKind) throws -> String {
         briefPrefix + template
@@ -84,15 +90,17 @@ private let identityRouter = SZIdentityRouter(
 /// across a bounded edge. The same shape the P2 scratch packs proved through the gate.
 private func makeBuildGraph() -> SZAgentGraph {
     SZAgentGraph(
-        name: "build", kind: .build,
-        entry: [.build: "plan", .settled: "work-left"],
+        name: "build",
         nodes: [
+            .init(id: "message", form: .message(.init())),
             .init(id: "plan", form: .turn(.init(brief: "prompts/decompose.md.mustache"))),
             .init(id: "work-left", form: .step(name: "work-left")),
             .init(id: "unblock", form: .turn(.init(brief: "prompts/unblock.md.mustache"))),
             .init(id: "implement", form: .dispatch(.init(to: "coding", items: "workSet"))),
         ],
         edges: [
+            .init(from: "message", outcome: "build", to: "plan"),
+            .init(from: "message", outcome: "settled", to: "work-left"),
             .init(from: "plan", outcome: "ok", to: "work-left"),
             .init(from: "work-left", outcome: "yes", to: "implement"),
             .init(from: "work-left", outcome: "no", to: "unblock", maxTraversals: 2),
@@ -128,30 +136,64 @@ struct SZGraphEngineTests {
         #expect(host.turnsSeen.count == 1)
         #expect(host.turnsSeen[0].brief == "rendered:prompts/decompose.md.mustache")
         #expect(host.turnsSeen[0].choice.providerID == "stub")
-        // The trace saw every node run and settle.
-        #expect(host.notes.contains(SZTraversalNote(ordinal: 2, node: "work-left", phase: .done, outcome: "yes")))
+        // The trace saw every node run and settle — starting at the DOOR, whose outcome is
+        // the delivered kind, so the trace opens by saying what arrived.
+        #expect(host.notes.first == SZTraversalNote(ordinal: 1, node: "message", phase: .running))
+        #expect(host.notes.contains(SZTraversalNote(ordinal: 1, node: "message", phase: .done,
+                                                    outcome: "build")))
+        #expect(host.notes.contains(SZTraversalNote(ordinal: 3, node: "work-left", phase: .done, outcome: "yes")))
     }
 
-    @Test func settledReEntersAtItsOwnEntry() async throws {
+    @Test func settledReEntersThroughTheDoorsOwnPort() async throws {
         let host = StubHost()
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes")]))
         let result = await engine.run(kind: .settled)
-        // Entry at work-left, straight to dispatch — no decompose turn on a re-entry.
+        // In by the `settled` port to work-left, straight to dispatch — no decompose turn
+        // on a re-entry. The reply IS a message, so it uses the same door as the build.
+        #expect(host.notes.first?.node == "message")
+        #expect(host.notes.contains(SZTraversalNote(ordinal: 1, node: "message", phase: .done,
+                                                    outcome: "settled")))
         #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
         #expect(host.turnsSeen.isEmpty)
     }
 
-    @Test func aForeignKindIsARoutingDefectBeforeAnyNodeRuns() async throws {
+    @Test func aSettledTraversalReasonsInTheBuildLane() async throws {
+        // The regression guard for the lane fold: `SZEffectCatalog.cases(kind: "settled")`
+        // is EMPTY, so handing the seams the delivered kind instead of its lane would
+        // refuse a settled traversal's `captureStatuses` as an unknown effect.
+        let host = StubHost()
+        let engine = makeEngine(
+            attachments: ["work-left": SZStepAttachment(outcomes: ["yes"])],
+            host: host,
+            steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes",
+                                                                 effects: ["captureStatuses"])]))
+        let result = await engine.run(kind: .settled)
+        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
+        #expect(host.performed.map(\.effect) == ["captureStatuses"])
+        // Performed under BUILD, the lane a settled reply reasons in.
+        #expect(host.performed.map(\.kind) == [.build])
+        // And the facts it read were the build lane's, not a settled document.
+        #expect(host.factsKindsSeen.allSatisfy { $0 == .build })
+    }
+
+    @Test func anUnroutedKindDefectsAtTheDoorBeforeAnyWorkRuns() async throws {
         let host = StubHost()
         let engine = makeEngine(host: host, steps: StubSteps(answers: [:]))
         let result = await engine.run(kind: .chat)
-        guard case .defect(_, let detail) = result.conclusion else {
+        guard case .defect(let node, let detail) = result.conclusion else {
             Issue.record("expected a defect, got \(result.conclusion)")
             return
         }
+        // The door is a real visit now, so the defect is ATTRIBUTED to it and the trace
+        // shows the message arriving and failing — rather than a traversal with no notes
+        // at all, which used to leave a routing bug with nothing to point at.
+        #expect(node == "message")
         #expect(detail.contains("chat"))
-        #expect(host.notes.isEmpty)
+        #expect(host.notes.map(\.node) == ["message", "message"])
+        #expect(host.notes.last?.phase == .failed)
+        // Nothing behind the door ran.
+        #expect(!host.notes.contains { $0.node != "message" })
     }
 
     @Test func anExhaustedErrorLeashStillFailsTheTraversal() async throws {
@@ -175,7 +217,7 @@ struct SZGraphEngineTests {
         var graph = makeBuildGraph()
         graph.nodes.append(.init(id: "gate", form: .step(name: "gate")))
         graph.nodes.append(.init(id: "clarify", form: .turn(.init(brief: "prompts/clarify.md.mustache"))))
-        graph.entry[.request] = "gate"
+        graph.edges.append(.init(from: "message", outcome: "request", to: "gate"))
         graph.edges.append(.init(from: "gate", outcome: "declined", to: "clarify", maxTraversals: 1))
         graph.edges.append(.init(from: "clarify", outcome: "ok", to: "gate"))
         let host = StubHost()
@@ -259,7 +301,7 @@ struct SZGraphEngineTests {
     @Test func declinedWithNoEdgeIsARefusalNotAFailure() async throws {
         var graph = makeBuildGraph()
         graph.nodes.append(.init(id: "gate", form: .step(name: "gate")))
-        graph.entry[.request] = "gate"
+        graph.edges.append(.init(from: "message", outcome: "request", to: "gate"))
         let host = StubHost()
         let engine = makeEngine(
             graph: graph,
@@ -317,7 +359,9 @@ struct SZGraphEngineTests {
         // Route the effect-emitting step onward to a TURN, so the order pin has an
         // observable "next node" to land after.
         graph.nodes.append(.init(id: "gate", form: .step(name: "gate")))
-        graph.entry[.build] = "gate"
+        // Re-point the build port at the gate — the door is where a lane starts now.
+        graph.edges.removeAll { $0.from == "message" && $0.outcome == "build" }
+        graph.edges.append(.init(from: "message", outcome: "build", to: "gate"))
         graph.edges.append(.init(from: "gate", outcome: "go", to: "plan"))
         let host = StubHost()
         host.items = ["node-a"]

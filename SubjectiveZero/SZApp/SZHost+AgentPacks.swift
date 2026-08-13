@@ -133,10 +133,10 @@ extension SZHost {
         }
     }
 
-    // MARK: - Run-graph variants
+    // MARK: - The build strategy
 
-    /// The director pack, loaded from the live packs root — the variant helpers' one source.
-    /// Cheap (a handful of small files); called from the debug tools and run start only.
+    /// The director pack, loaded from the live packs root — the strategy helpers' one
+    /// source. Cheap (a handful of small files); called from the debug tools and run start.
     private func loadedDirectorPack() -> SZAgentPack? {
         guard let root = Self.graphAgentPacksRoot() else { return nil }
         let loaded = SZAgentPackLoader.load(root: root)
@@ -144,24 +144,26 @@ extension SZHost {
         return loaded.packs.first { $0.id == id }
     }
 
-    /// The director pack's build-kind variant names — `debug_set_orchestrator`'s valid set.
-    func directorBuildVariantNames() -> [String] {
-        loadedDirectorPack()?.variants(handling: .build).map(\.name) ?? []
+    /// The strategies the director's build lane OFFERS, read off the graph: the outcomes
+    /// wired out of whatever node its `build` port routes to. No compiler needed — the
+    /// wiring is the offer, and a strategy nothing routes is not on the menu.
+    ///
+    /// ADVISORY, never a gate (see `resolvedRunGraphVariant`): the deciding step owns its
+    /// own fallback, so refusing a name here could reject one the pack would have honoured.
+    func directorBuildStrategyNames() -> [String] {
+        guard let pack = loadedDirectorPack(), let graph = pack.graph(routing: .build),
+              let head = graph.routes[.build] else { return [] }
+        return graph.edges.filter { $0.from == head }.map(\.outcome).sorted()
     }
 
-    /// The variant the NEXT run drives build with, by name: env > persisted > pack default,
-    /// resolved against the loaded variants (an unknown choice reads as the default). Silent —
-    /// `resolvedRunGraphVariant` is the run path's narrating twin. nil = no pack library.
+    /// The strategy the NEXT run asks for: env > persisted > whatever the pack defaults to
+    /// on an empty string. Silent — `resolvedRunGraphVariant` is the run path's narrating
+    /// twin. nil = nothing requested, and the graph's own step decides.
     func activeRunGraphVariant() -> String? {
-        guard let pack = loadedDirectorPack() else { return nil }
-        let names = pack.variants(handling: .build).map(\.name)
-        if let requested = requestedRunGraphVariant(), names.contains(requested) {
-            return requested
-        }
-        return pack.graph(handling: .build)?.name
+        requestedRunGraphVariant()
     }
 
-    /// The user's stated choice before validation: `SZ_RUN_GRAPH` outranks the persisted one.
+    /// The user's stated choice: `SZ_RUN_GRAPH` outranks the persisted one.
     private func requestedRunGraphVariant() -> String? {
         if let env = ProcessInfo.processInfo.environment["SZ_RUN_GRAPH"], !env.isEmpty {
             return env
@@ -169,14 +171,16 @@ extension SZHost {
         return runGraphVariant
     }
 
-    /// The run path's resolution: the validated choice, or nil for the pack default — with
-    /// ONE status line when the choice names no loaded variant (a stale persisted name, a
-    /// typoed env), so the fallback never happens silently.
+    /// The run path's resolution: the request, passed through verbatim for the graph to
+    /// rule on. A name the wiring does not offer still travels — the strategy step has the
+    /// fallback, and second-guessing it here would be the host overruling the pack — but it
+    /// gets ONE status line, so a typo never falls back invisibly.
     func resolvedRunGraphVariant() -> String? {
         guard let requested = requestedRunGraphVariant() else { return nil }
-        guard directorBuildVariantNames().contains(requested) else {
-            status = "run-graph variant '\(requested)' is unknown — using the pack default"
-            return nil
+        let offered = directorBuildStrategyNames()
+        if !offered.isEmpty, !offered.contains(requested) {
+            status = "build strategy '\(requested)' is not one the director's graph offers "
+                + "(\(offered.joined(separator: ", "))) — its strategy step will decide"
         }
         return requested
     }
@@ -186,7 +190,7 @@ extension SZHost {
     func setRunGraphVariant(_ name: String?) {
         runGraphVariant = name
         persistAppState()
-        agentGraphPlanCache = nil   // the sidebar's active badge follows the choice, now
+        agentGraphPlanCache = nil   // the sidebar's active chip follows the choice, now
     }
 }
 

@@ -152,11 +152,13 @@ extension SZHostBridge {
         ])
     }
 
-    /// Run-graph variant selection. The valid values are DYNAMIC (the director pack's
-    /// build-kind graph names), so the argument stays an untyped string validated here at
-    /// call time — the error names the loaded set. A valid name persists (app-state.json,
-    /// same store as the other host prefs); `graph` acks as a no-op for compatibility with
-    /// callers from the strategy-selection era.
+    /// Build-strategy selection. The value is whatever the director's graph rules on, so
+    /// the argument stays an untyped string and is NOT refused here: the strategy step owns
+    /// its own fallback, and a host that rejected a name could overrule a pack that would
+    /// have honoured it. The reply carries the strategies the wiring currently offers, so a
+    /// typo is still visible to a caller. The choice persists (app-state.json, same store as
+    /// the other host prefs); `graph` acks as a no-op for compatibility with callers from
+    /// the strategy-selection era.
     private func debugSetOrchestrator(_ arguments: [String: Any]) throws -> String {
         guard let strategy = arguments.string("strategy") else {
             throw SZMCPError.message("debug_set_orchestrator needs `strategy`")
@@ -165,18 +167,13 @@ extension SZHostBridge {
             return SZJSONRPC.encode(["orchestrator": SZHost.orchestratorName,
                                      "variant": host.activeRunGraphVariant() ?? "unavailable"])
         }
-        let variants = host.directorBuildVariantNames()
-        guard variants.contains(strategy) else {
-            throw SZMCPError.message("unknown run-graph variant '\(strategy)' — valid: "
-                + (variants.isEmpty ? "(no agent-pack library is loaded)"
-                                    : variants.joined(separator: ", ")))
-        }
         host.setRunGraphVariant(strategy)
         // What will actually RUN — `SZ_RUN_GRAPH` still outranks the persisted choice, and a
         // debug surface that answered with the request would lie to the closed-loop tests
         // this tool exists for.
         return SZJSONRPC.encode(["orchestrator": SZHost.orchestratorName,
-                                 "variant": host.activeRunGraphVariant() ?? strategy])
+                                 "variant": host.activeRunGraphVariant() ?? strategy,
+                                 "offered": host.directorBuildStrategyNames()])
     }
 
     private func debugChatTranscript(_ arguments: [String: Any]) throws -> String {
