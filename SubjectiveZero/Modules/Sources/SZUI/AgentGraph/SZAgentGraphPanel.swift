@@ -88,19 +88,14 @@ public struct SZAgentGraphPanel: View {
     /// the traversing head — each time the chain grows. A manual pan disengages it (the
     /// user took the camera; don't fight them); a new traversal starting re-arms it, the
     /// same moment the panel switches itself back to Run. Zoom deliberately does NOT
-    /// disengage: both zoom paths pivot on the view centre, so the followed card stays
-    /// centred and the follow keeps honouring the chosen zoom.
+    /// disengage: the follow re-centres the head on the next growth either way, so a zoom
+    /// (pinch about the view centre, ⌘-scroll about the pointer) just picks the scale the
+    /// follow then honours.
     @State private var following = true
 
     @State private var camera = SZCanvasCamera(zoom: 1, offset: CGSize(width: 60, height: 0))
     @State private var pinchAnchor: SZCanvasCamera?
     @State private var viewSize: CGSize = .zero
-    /// Where the cursor is over THIS canvas, nil when it is elsewhere. The scroll-wheel
-    /// monitor is a window-wide `NSEvent` monitor with no hit-testing of its own, so every
-    /// canvas must decide for itself whether a scroll was meant for it — without this, two
-    /// open canvases pan together and neither obeys the cursor (the node editor's rule,
-    /// applied here).
-    @State private var cursor: CGPoint?
     @State private var centred = false
     /// Per-node nudges, in world points. Session-only and deliberately NOT persisted: the
     /// layout is computed, and these exist so a graph can be pulled apart to read it, not
@@ -274,19 +269,12 @@ public struct SZAgentGraphPanel: View {
             .clipped()
             .coordinateSpace(name: Self.space)
             .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let point): cursor = point
-                case .ended: cursor = nil
-                }
-            }
+            // Only scrolls that land ON this canvas arrive here — the catcher's frame is this
+            // space, so the ones panning the node editor next door never reach it.
             .monitorCanvasScrollWheel { scroll in
-                // Only when the cursor is over THIS canvas: the monitor sees every scroll
-                // in the window, including the ones panning the node editor next door.
-                guard let cursor else { return }
                 if scroll.commandHeld {
                     let target = camera.zoom * (1 + scroll.deltaY * 0.01)
-                    camera.applyZoom(target, pivot: cursor, from: camera)
+                    camera.applyZoom(target, pivot: scroll.location, from: camera)
                 } else {
                     following = false
                     camera.pan(by: CGSize(width: scroll.deltaX, height: scroll.deltaY))

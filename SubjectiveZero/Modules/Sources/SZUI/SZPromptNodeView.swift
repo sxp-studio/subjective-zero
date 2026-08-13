@@ -165,5 +165,10 @@ struct SZPromptNodeView: View, Equatable {
             // Freshly added → drop straight into editing; the live TextField's own onAppear grabs
             // the keyboard, so a new node is ready to type into with no extra click.
             .onAppear { if autoFocus, !locked { editing = true } }
+            // A card torn down while focused (culled off-screen, display graph swapped, panel
+            // maximized) never gets the focus transition above, so the panel would keep believing
+            // this node is being typed into — and it suppresses canvas scroll while it does. Report
+            // the end only: committing is the blur path's job, fence and all.
+            .onDisappear { if focused { onEditingChanged(false) } }
     }
 }

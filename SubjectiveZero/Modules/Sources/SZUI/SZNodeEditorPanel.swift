@@ -245,6 +245,7 @@ public struct SZNodeEditorPanel: View {
             // rows pointing at a ghost. Node add/remove also moves the visible set.
             .onChange(of: project?.graph.nodes.map(\.id)) {
                 validateContextMenuTarget()
+                validateEditingNode()
                 scheduleVisiblePublish()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
@@ -300,6 +301,9 @@ public struct SZNodeEditorPanel: View {
             // its `path` pre-set. Whole-area catcher (same "szcanvas" frame, so its top-left drop point
             // matches the double-tap gesture's screen point); non-media files are ignored (not consumed).
             .background(SZFileDropCatcher(onDrop: handleFileDrop, onTargeted: { dropTargeted = $0 }))
+            // Trackpad/mouse scroll → pan (⌘+scroll → zoom). Also a monitor behind a background
+            // view framed to this space: its frame is what claims a scroll for THIS canvas.
+            .monitorCanvasScrollWheel { handleScroll($0) }
             .overlay {
                 if dropTargeted {
                     RoundedRectangle(cornerRadius: 6)
@@ -307,6 +311,9 @@ public struct SZNodeEditorPanel: View {
                         .allowsHitTesting(false)
                 }
             }
+            // Decoration + pinch pivot only — deliberately NOT an input router: hover is not
+            // delivered while a button is held and needs pointer MOTION to resume, so anything
+            // gated on it (scroll pan, once) dies silently until the mouse is moved.
             .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
                 switch phase {
                 case .active(let p): cursor = p
@@ -314,7 +321,6 @@ public struct SZNodeEditorPanel: View {
                 }
             }
             .simultaneousGesture(zoomGesture)
-            .monitorCanvasScrollWheel { handleScroll($0) }
             // Delete / Backspace removes the selected node or connection. The canvas holds keyboard
             // focus (set on appear + on every selection below); a focused prompt TextField captures
             // the key instead, so editing prompts is unaffected.
@@ -583,6 +589,15 @@ public struct SZNodeEditorPanel: View {
         case .canvas: true
         }
         if !valid { dismissContextMenu() }
+    }
+
+    /// `editingNodeID` is reported by the prompt card's focus transition, so a card destroyed while
+    /// its field is focused (the node deleted mid-edit) never reports the blur — and a stuck value
+    /// silently kills scroll pan/zoom for the rest of the session. The node leaving the graph is
+    /// the one signal the card can't send itself.
+    private func validateEditingNode() {
+        guard let editing = editingNodeID, let graph = project?.graph else { return }
+        if !graph.nodes.contains(where: { $0.id == editing }) { editingNodeID = nil }
     }
 
     @ViewBuilder
@@ -1173,11 +1188,14 @@ public struct SZNodeEditorPanel: View {
             .onEnded { _ in pinchAnchor = nil }
     }
 
+    /// Only reached for scrolls that landed ON this canvas — the catcher hit-tests the event, so
+    /// there is no hover state to consult here. `editingNodeID` is the one remaining reason to pass
+    /// a scroll up: a prompt field being edited scrolls its own text instead of the canvas.
     private func handleScroll(_ data: SZScrollWheelData) {
         dismissContextMenu()   // same rule as zoom: the camera moved, the anchor didn't
-        guard cursor != nil, editingNodeID == nil else { return }   // only when hovering, not typing
+        guard editingNodeID == nil else { return }
         if data.commandHeld {
-            camera.applyZoom(camera.zoom * (1 - data.deltaY * 0.005), pivot: pivot(), from: camera)
+            camera.applyZoom(camera.zoom * (1 - data.deltaY * 0.005), pivot: data.location, from: camera)
         } else {
             camera.pan(by: CGSize(width: data.deltaX, height: data.deltaY))
         }
