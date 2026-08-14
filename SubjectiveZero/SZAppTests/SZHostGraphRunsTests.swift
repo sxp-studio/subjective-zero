@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The RUNS-record host seam, smoke-tested end to end without a project or an engine: the
-// strategy's hooks (begin → note → conclude → tally) land on `SZHost` and must leave the
-// observable list the Agent Graph panel draws — ordered, sealed, tally-amended — with the
-// engine's note vocabulary mapped onto the record's own trace entry.
+// strategy's hooks (begin → note → conclude) land on `SZHost` and must leave the
+// observable list the Agent Graph panel draws — ordered, sealed, tallies riding the trace
+// notes — with the engine's note vocabulary mapped onto the record's own entry.
 import Foundation
 import Testing
 import SZAI
@@ -25,19 +25,22 @@ import SZCore
                                                 kind: .item, item: "node-1"))
     #expect(host.agentGraphRuns.map(\.id) == [build, item])
 
+    // The dispatch waits INSIDE the build traversal now, so the tally lands through the
+    // ordinary note flow — on the dispatch visit's own entry, before the seal.
+    host.noteAgentGraphRun(build, SZTraversalNote(ordinal: 2, node: "implement", phase: .done,
+                                                  outcome: "settled",
+                                                  tally: .init(settled: 1, total: 1, failed: 1)))
     host.concludeAgentGraphRun(build, .ended)
     host.noteAgentGraphRun(item, SZTraversalNote(ordinal: 1, node: "implement", phase: .failed,
                                                  detail: "the turn threw"))
     host.concludeAgentGraphRun(item, .failed(reason: "the turn threw"))
-    // The set settles after the sender sealed — the sanctioned post-seal amend.
-    host.amendAgentGraphRunTally(build, settled: 1, total: 1, failed: 1)
 
     let sealed = host.agentGraphRuns
     #expect(sealed.allSatisfy { !$0.isLive })
     let buildRecord = try #require(sealed.first { $0.id == build })
     #expect(buildRecord.conclusion == .ended)
-    #expect(buildRecord.tally == SZAgentGraphRun.Tally(settled: 1, total: 1, failed: 1))
-    #expect(buildRecord.trace.map(\.outcome) == ["yes"])       // note replaced, not appended
+    #expect(buildRecord.trace.last?.tally == SZAgentGraphRun.Tally(settled: 1, total: 1, failed: 1))
+    #expect(buildRecord.trace.map(\.outcome) == ["yes", "settled"])   // notes replaced, not appended
     let itemRecord = try #require(sealed.first { $0.id == item })
     #expect(itemRecord.item == "node-1")
     #expect(itemRecord.conclusion == .failed(reason: "the turn threw"))
@@ -59,18 +62,16 @@ import SZCore
 /// and the synthesized reply says how long the straggler was given.
 @Test @MainActor func aWatchdogTimeoutSealsTheRecordsHonestly() throws {
     let host = SZHost()
-    var machine = SZThreadMachine(bounds: .init(roundCeiling: 8,
-                                                dispatchDeadline: .seconds(900),
-                                                defaultRounds: 1))
-    _ = machine.handle(.opened(kind: .build, graphRounds: 1, handlesSettled: true))
+    var machine = SZThreadMachine(bounds: .init(dispatchDeadline: .seconds(900)))
 
-    // The director traversal concludes by dispatching two items; its record seals .ended.
+    // The director traversal reaches its dispatch, which mints the set and WAITS — its
+    // record stays live for the whole fleet phase.
     let build = UUID()
     host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director",
-                                                graphName: "recovery", kind: .build))
-    let sent = machine.handle(.traversalConcluded(
-        .ended, dispatch: .init(target: "coding", items: ["node-a", "node-b"], notes: [:])))
-    host.concludeAgentGraphRun(build, .ended)
+                                                graphName: "director", kind: .build))
+    host.noteAgentGraphRun(build, SZTraversalNote(ordinal: 1, node: "implement", phase: .running))
+    let sent = machine.handle(.dispatched(
+        .init(target: "coding", items: ["node-a", "node-b"], notes: [:])))
     var setID = -1
     for case .deliverItems(let id, _, _) in sent { setID = id }
     #expect(setID != -1)
@@ -93,14 +94,18 @@ import SZCore
         for command in commands {
             switch command {
             case .amendTally(_, let settled, let total, let failed):
-                host.amendAgentGraphRunTally(build, settled: settled, total: total, failed: failed)
+                // The progress lane: the tally rides a running-note on the LIVE dispatch
+                // visit — the same flow the engine's deliver progress uses.
+                host.noteAgentGraphRun(build, SZTraversalNote(
+                    ordinal: 1, node: "implement", phase: .running,
+                    tally: .init(settled: settled, total: total, failed: failed)))
             case .cancelItems(_, let nodes):
                 for node in nodes {
                     if let id = records.removeValue(forKey: node) {
                         host.concludeAgentGraphRun(id, .cancelled)
                     }
                 }
-            case .deliverSettled(let summary):
+            case .settled(let summary):
                 synthesized = summary
             default:
                 break
@@ -110,6 +115,11 @@ import SZCore
     execute(machine.handle(.itemSettled(node: "node-a", setID: setID, outcome: "ok")))
     host.concludeAgentGraphRun(itemA, .ended)
     execute(machine.handle(.watchdogFired(setID: setID)))
+    // The set closed: the waiting traversal walks on and seals — after its fleet, never
+    // before it.
+    host.noteAgentGraphRun(build, SZTraversalNote(ordinal: 1, node: "implement", phase: .done,
+                                                  outcome: "settled"))
+    host.concludeAgentGraphRun(build, .ended)
 
     // Every record is sealed — nothing pulses "live" after the timeout.
     #expect(host.agentGraphRuns.allSatisfy { !$0.isLive })
@@ -118,10 +128,11 @@ import SZCore
     #expect(wedged.conclusion == .cancelled)
     let healthy = try #require(host.agentGraphRuns.first { $0.id == itemA })
     #expect(healthy.conclusion == .ended)
-    // The sender's sealed record took the amended tally — the timed-out item counts FAILED.
+    // The dispatch visit's entry took the live tally — the timed-out item counts FAILED —
+    // and the done re-emit never erased it.
     let sender = try #require(host.agentGraphRuns.first { $0.id == build })
     #expect(sender.conclusion == .ended)
-    #expect(sender.tally == SZAgentGraphRun.Tally(settled: 2, total: 2, failed: 1))
+    #expect(sender.trace.first?.tally == SZAgentGraphRun.Tally(settled: 2, total: 2, failed: 1))
     // And the synthesized reply says how long the straggler was given.
     #expect(synthesized?.outcomes["node-b"] == "timedOut: no terminal report within 900s")
     #expect(synthesized?.outcomes["node-a"] == "ok")

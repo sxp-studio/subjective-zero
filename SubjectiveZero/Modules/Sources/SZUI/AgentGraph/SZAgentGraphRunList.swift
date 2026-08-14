@@ -258,7 +258,6 @@ struct SZAgentGraphRunRow: View {
     static func glyph(for run: SZAgentGraphRun) -> String {
         switch run.kind {
         case .build: "play.circle"
-        case .settled: "arrow.uturn.backward.circle"
         case .item: "wrench.and.screwdriver"
         case .chat: "bubble.left"
         case .request: "envelope"

@@ -95,7 +95,8 @@ public struct SZTraversalSighting: Sendable, Equatable {
 }
 
 /// One step of a traversal as the panel/RUNS record sees it advance. Reported repeatedly
-/// per node — running, then settled — consumers replace by (ordinal, node).
+/// per node — running, then settled — consumers replace by (ordinal, node). A dispatch
+/// visit's re-emits carry the fleet's live tally, so the card counts up while it waits.
 public struct SZTraversalNote: Sendable, Equatable {
     public enum Phase: Sendable, Equatable { case running, done, failed }
     public var ordinal: Int
@@ -103,12 +104,15 @@ public struct SZTraversalNote: Sendable, Equatable {
     public var phase: Phase
     public var outcome: String?
     public var detail: String?
-    public init(ordinal: Int, node: String, phase: Phase, outcome: String? = nil, detail: String? = nil) {
+    public var tally: SZAgentGraphRun.Tally?
+    public init(ordinal: Int, node: String, phase: Phase, outcome: String? = nil,
+                detail: String? = nil, tally: SZAgentGraphRun.Tally? = nil) {
         self.ordinal = ordinal
         self.node = node
         self.phase = phase
         self.outcome = outcome
         self.detail = detail
+        self.tally = tally
     }
 }
 
@@ -135,6 +139,15 @@ public protocol SZTraversalHost: AnyObject, Sendable {
     /// `CancellationError` answers the ask as cancelled; other errors as failed.
     func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
                   requestJSON: String) async throws -> String
+    /// Deliver one dispatch set and WAIT for it: send `orders` to the seat, report the
+    /// live tally through `progress` as items land, and return the set's one summary.
+    /// nil = this host cannot dispatch (a chat or item host — the pack gate keeps
+    /// dispatch nodes off those lanes, so reaching nil is a routing bug the engine
+    /// records as a defect). Cancellation propagates in: a cancelled delivery returns
+    /// nil and the engine concludes `.cancelled` at its boundary check.
+    func deliver(orders: [SZItemOrder], to seat: String,
+                 progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
+        async -> SZSettledSummary?
     /// Perform one EFFECT a step requested with its outcome. The engine calls this AFTER
     /// the step returned and BEFORE edge routing, in the step's own order, and only with
     /// names it validated against the kind's effect set (an unknown name is a traversal

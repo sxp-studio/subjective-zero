@@ -12,12 +12,13 @@ import Testing
 
 // MARK: - The test pack root
 
-/// Write a minimal VALID two-pack library: a director whose build graph is
-/// `work-left(step) --yes--> decompose(turn) --ok--> implement(dispatch)`, entering at
-/// `work-left` for both `build` and `settled`; a coding pack whose item graph is the draft's
-/// shape (`retrying(step)` routing cold vs continue). Step folders carry placeholder sources
-/// (the tests script outcomes + declarations; nothing compiles). Templates are token-only
-/// scaffolding — prompt prose ships in the real packs, not in tests.
+/// Write a minimal VALID two-pack library: a director whose build lane is
+/// `work-left(step) --yes--> decompose(turn) --ok--> implement(dispatch)`, with the
+/// dispatch's leashed `settled` edge looping back into `work-left` (the retry round); a
+/// coding pack whose item graph is the draft's shape (`retrying(step)` routing cold vs
+/// continue). Step folders carry placeholder sources (the tests script outcomes +
+/// declarations; nothing compiles). Templates are token-only scaffolding — prompt prose
+/// ships in the real packs, not in tests.
 private func makePackRoot() throws -> URL {
     let root = FileManager.default.temporaryDirectory
         .appending(path: "graph-strategy-packs-\(UUID().uuidString)")
@@ -30,7 +31,7 @@ private func makePackRoot() throws -> URL {
     try write("director/agent.json", #"{"id": "director", "seat": "director"}"#)
     try write("director/graphs/build.json", """
     {
-      "name": "build", "caps": { "rounds": 2 },
+      "name": "build",
       "nodes": [
         { "id": "message", "onMessage": {} },
         { "id": "work-left", "step": "work-left" },
@@ -39,9 +40,9 @@ private func makePackRoot() throws -> URL {
       ],
       "edges": [
         { "from": "message", "outcome": "build", "to": "work-left" },
-        { "from": "message", "outcome": "settled", "to": "work-left" },
         { "from": "work-left", "outcome": "yes", "to": "decompose" },
-        { "from": "decompose", "outcome": "ok", "to": "implement" }
+        { "from": "decompose", "outcome": "ok", "to": "implement" },
+        { "from": "implement", "outcome": "settled", "to": "work-left", "maxTraversals": 2 }
       ]
     }
     """)
@@ -121,8 +122,7 @@ private final class Recorder {
     var codingTurnStarted = false
 }
 
-private let testBounds = SZThreadMachine.Bounds(
-    roundCeiling: 8, dispatchDeadline: .seconds(900), defaultRounds: 1)
+private let testBounds = SZThreadMachine.Bounds(dispatchDeadline: .seconds(900))
 
 private let identityRouter = SZIdentityRouter(choice: SZModelChoice(
     providerID: "claude", model: "test-model", reasoningEffort: nil))
@@ -214,8 +214,8 @@ struct SZGraphStrategyTests {
         #expect(request.packageDirectory == context.projectURL)
         #expect(request.model == "test-model")
         #expect(request.resumeSessionID == nil)
-        // The set's one settled reply carried the ok outcome, and the settled re-entry ran the
-        // entry step once more, one round later.
+        // The set's one summary carried the ok outcome, and the settled edge walked the
+        // SAME traversal back to the gate, one round later — no re-entry, no second record.
         #expect(recorder.settled.count == 1)
         #expect(recorder.settled[0].outcomes == [gray.uuidString: "ok"])
         let workLeft = steps.calls.filter { $0.step == "work-left" }
@@ -245,8 +245,8 @@ struct SZGraphStrategyTests {
     }
 
     /// (c) A failing item: the coding turn throws — the item traversal fails, its outcome
-    /// string carries the detail into the settled reply verbatim, and the settled re-entry
-    /// still runs (the machine's reply → re-entry choreography).
+    /// string carries the detail into the set's summary verbatim, and the settled edge
+    /// still walks on (a failed fleet closes its set; it does not end the message).
     @Test func aFailingItemCarriesItsDetailAndTheSettledReentryRuns() async throws {
         struct Boom: Error, CustomStringConvertible {
             var description: String { "the agent exploded" }
@@ -267,7 +267,8 @@ struct SZGraphStrategyTests {
         let outcome = try #require(recorder.settled[0].outcomes[gray.uuidString])
         #expect(outcome.hasPrefix("error: "))
         #expect(outcome.contains("the agent exploded"))
-        // The settled re-entry ran — the failure closed the set, it did not end the thread.
+        // The gate ran again past the settled edge — the failure closed the set, it did
+        // not end the traversal.
         #expect(steps.calls.filter { $0.step == "work-left" }.count == 2)
     }
 

@@ -506,7 +506,6 @@ private let shippedPackSteps = StubSteps(infos: [
     "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
     "director/nodes-failing": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
     "director/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
-    "director/route-reply": SZStepDeclarationInfo(outcomes: ["answer", "build", "plan"], facts: "chat"),
     "director/strategy": SZStepDeclarationInfo(outcomes: ["agentic", "procedural", "recovery"],
                                                facts: "build"),
     "coding/retrying": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "item"),
@@ -539,17 +538,19 @@ private let shippedPackSteps = StubSteps(infos: [
     let director = try #require(loaded.packs.first { $0.id == "director" })
     #expect(director.graphs.map(\.name) == ["director"])
     let graph = try #require(director.graph(routing: .build))
-    #expect(Set(graph.routes.keys) == [.chat, .build, .settled])
+    #expect(Set(graph.routes.keys) == [.chat, .build])
     #expect(graph.routes[.chat] == "resuming")
     #expect(graph.routes[.build] == "strategy")
-    #expect(graph.routes[.settled] == "strategy-settled")
-    // The strategies, as ports on one step. `procedural` is deliberately absent from the
-    // settled router: its first settle routes nowhere, which is how "no retry rounds" is
-    // spelled now that there is no settled entry to omit.
+    // The strategies, as ports on one step — and the retry loop as the dispatch's own
+    // leashed settled edge, the message's whole journey one connected walk.
     #expect(graph.edge(from: "strategy", outcome: "agentic")?.to == "decompose")
     #expect(graph.edge(from: "strategy", outcome: "procedural")?.to == "work-left")
     #expect(graph.edge(from: "strategy", outcome: "recovery")?.to == "nodes-failing")
-    #expect(graph.edge(from: "strategy-settled", outcome: "procedural") == nil)
+    let settled = try #require(graph.edge(from: "implement", outcome: "settled"))
+    #expect(settled.to == "unresolved")
+    #expect(settled.maxTraversals == 2)   // the leash IS the old rounds cap
+    // Procedural's dispatch has NO settled edge — its first settlement ends the run.
+    #expect(graph.edge(from: "implement-once", outcome: "settled") == nil)
 }
 
 /// The recovery strategy: gated on `nodes-failing`, whose "yes" routes to a reconcile turn
@@ -563,7 +564,7 @@ private let shippedPackSteps = StubSteps(infos: [
     #expect(graph.edge(from: "nodes-failing", outcome: "yes")?.to == "reconcile")
     #expect(graph.edge(from: "nodes-failing", outcome: "no") == nil)   // healthy fleet → end
     #expect(graph.edge(from: "reconcile", outcome: "ok")?.to == "implement")
-    #expect(graph.kinds(reaching: "nodes-failing") == [.build, .settled])
+    #expect(graph.kinds(reaching: "nodes-failing") == [.build])
 }
 
 /// The chat lane: the cold/resumed fork feeds the `route-reply` ruling, whose outcomes all
@@ -578,11 +579,16 @@ private let shippedPackSteps = StubSteps(infos: [
     #expect(graph.edge(from: "resuming", outcome: "yes")?.to == "resumed")
     #expect(graph.edge(from: "cold", outcome: "ok")?.to == "route-reply")
     #expect(graph.edge(from: "resumed", outcome: "ok")?.to == "route-reply")
-    #expect(graph.node("route-reply")?.form == .step(name: "route-reply"))
+    // route-reply is the shipped ASK node — the declarative ruling: prompt file in, one
+    // structured completion, and only `build` carries the effect. Pure config, no Swift.
+    #expect(graph.node("route-reply")?.form == .ask(.init(
+        prompt: "prompts/route-reply.md.mustache",
+        outcomes: ["answer", "build", "plan"],
+        effects: ["build": ["requestBuild"]])))
     for outcome in ["answer", "build", "plan"] {
         #expect(graph.edge(from: "route-reply", outcome: outcome) == nil)
     }
-    #expect(graph.lanes(reaching: "route-reply") == [.chat])
+    #expect(graph.kinds(reaching: "route-reply") == [.chat])
 }
 
 /// The rule the whole change exists to enforce, asserted over the library generically — no
@@ -598,7 +604,7 @@ private let shippedPackSteps = StubSteps(infos: [
             for node in graph.nodes where node.id != door.id {
                 #expect(!graph.kinds(reaching: node.id).isEmpty,
                         "\(pack.id)/\(graph.name): '\(node.id)' is unreachable")
-                #expect(graph.lanes(reaching: node.id).count == 1,
+                #expect(graph.kinds(reaching: node.id).count == 1,
                         "\(pack.id)/\(graph.name): '\(node.id)' straddles lanes")
             }
         }

@@ -46,10 +46,18 @@ enum SZGraphFactsEncoding {
 
 // MARK: - The DIRECTOR-bound host
 
-/// One director thread's traversal host: every read is rebuilt fresh from the live context, and
-/// the motor injects the per-traversal values (round, steers) before each `startTraversal`.
+/// One director run's traversal host: every read is rebuilt fresh from the live context;
+/// the motor injects the per-set values (round, steers) as each fleet lands, and fulfils
+/// the `deliver` seam through the `fleet` closure it assigns after construction.
 @MainActor
 final class SZDirectorTraversalHost: SZTraversalHost {
+    /// The motor's fleet-delivery closure, assigned right after init (the motor cannot
+    /// exist yet while this host is being built). nil would mean a dispatch with no
+    /// fleet behind it — the engine records that honestly as a defect.
+    var fleet: ((_ orders: [SZItemOrder], _ seat: String,
+                 _ progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
+                async -> SZSettledSummary?)?
+
     private let context: SZOrchestrationContext
     private let renderer: SZBriefRenderer
     private let roundCap: Int
@@ -75,11 +83,17 @@ final class SZDirectorTraversalHost: SZTraversalHost {
         self.onNote = onNote
     }
 
-    /// Injected per traversal by the motor: which settled re-entry this is, and the steers the
-    /// machine drained into its `startTraversal` command.
+    /// Injected by the motor: at run start, and again as each fleet lands — which set the
+    /// traversal is past, and the steers drained while it was out.
     func begin(round: Int, steers: [String]) {
         self.round = round
         self.steers = steers
+    }
+
+    func deliver(orders: [SZItemOrder], to seat: String,
+                 progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
+        async -> SZSettledSummary? {
+        await fleet?(orders, seat, progress)
     }
 
     /// The facts document. Always the BUILD facts: this host serves the build lane, and a
@@ -292,6 +306,12 @@ public final class SZChatTraversalHost: SZTraversalHost {
         await effect(name, kind)
     }
 
+    /// A chat delivery has no fleet — the pack gate keeps dispatch nodes off lanes whose
+    /// kind carries no [String] items fact, so this nil is a backstop, not a path.
+    public func deliver(orders: [SZItemOrder], to seat: String,
+                        progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
+        async -> SZSettledSummary? { nil }
+
     public func note(_ note: SZTraversalNote) { onNote(note) }
 }
 
@@ -420,6 +440,11 @@ final class SZItemTraversalHost: SZTraversalHost {
     func perform(effect: String, kind: SZMessageKind) async {
         await context.performEffect(effect, kind)
     }
+
+    /// An item traversal has no fleet of its own — a coding agent never dispatches.
+    func deliver(orders: [SZItemOrder], to seat: String,
+                 progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
+        async -> SZSettledSummary? { nil }
 
     func note(_ note: SZTraversalNote) { onNote(note) }
 }

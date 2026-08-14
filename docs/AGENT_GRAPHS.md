@@ -21,17 +21,17 @@ kind.
 | `chat` | one reply on a scope's transcript | the user, or a tool |
 | `build` | open a fleet thread over the project's work set | the Build press, `ui_build`, a chat turn's requestBuild effect |
 | `item` | one dispatched work item | a director graph's dispatch node |
-| `settled` | the dispatch set's single terminal reply | the host, as supervisor — it IS the reply |
 | `request` | a structured proxied operation (split/merge …) | `ui_split_node`, `ui_merge_nodes` — routed on payload, never prose |
 | `steer` | a note folded into the recipient's NEXT brief | the user, mid-run |
 
 `steer` is the one kind that never enters a graph: the thread machine drains steers into the next
 traversal's facts, and a conclusion sweeps leftovers.
 
-**Kinds vs LANES.** `settled` is a real message — recorded, glyphed, delivered — but it publishes no
-facts of its own: it re-reads the same live build picture one round later. So it *reasons* in the
-build lane, and `SZMessageKind.lane` owns that fold in one place. The delivered kind routes at the
-door and names the record; everything past the door — facts, briefs, asks, effects — sees the lane.
+**One message is one traversal.** Nothing re-enters a graph: a dispatch waits for its fleet and
+settles onward over its own edge, so the whole journey from delivery to conclusion is a single
+connected walk — and the RUNS list maps one row to one message received. (`settled` used to be a
+fifth kind, the fleet's reply re-entering the sender's graph as a second traversal; the waiting
+dispatch made it the dispatch node's own outcome instead, and the kind is gone.)
 
 **Vocabulary.** A build is a **thread**: short graph **traversals** joined by messages, sharing one
 identity from the Build press to the conclusion. A **turn** is one agent running because a turn
@@ -68,23 +68,23 @@ may spread its lanes over several files, as long as each kind has exactly one de
 Seats resolve over the loaded library: exactly one holder each, checked at validation. A dispatch
 names a seat, never an agent id — replace a folder and whoever now holds the seat receives the work.
 
-## Graph files: one door and four node forms
+## Graph files: one door and five node forms
 
 ```jsonc
 {
   "name": "director",          // must equal the filename stem
   "label": "Director",         // display name (optional)
   "hint": "…",                 // subtitle (optional)
-  "caps": { "rounds": 2 },     // settled re-entries this graph buys (≥ 1; omitted = one)
   "nodes": [ { "id": "message", "title": "On message", "onMessage": {} }, … ],
   "edges": [ { "from": "message", "outcome": "build", "to": "strategy" }, … ]
 }
 ```
 
 Every graph has exactly **one message node** — its door — and the kinds it accepts are the
-**outcomes of the edges leaving it**. There is no `kind` field and no `entry` map: the ports and
-the routing cannot disagree, because they are the same edges. Both retired keys are refused by name
-at decode rather than ignored.
+**outcomes of the edges leaving it**. There is no `kind` field, no `entry` map, and no `caps`
+budget: the ports and the routing cannot disagree because they are the same edges, and retry
+depth is the settled edge's own leash. All three retired keys are refused by name at decode
+rather than ignored.
 
 > **Why the door is a node.** `entry` used to be a map from kind to node, so a graph with two doors
 > drew as two disconnected fragments — the fleet's `settled` reply in particular had nowhere to
@@ -92,21 +92,30 @@ at decode rather than ignored.
 > the agent accepts is one port on one card, the whole document is one connected picture, and
 > `unreachable` refuses a floating fragment at load instead of leaving it to be noticed on a canvas.
 
-A node takes **exactly one of four forms** — enforced at decode, so a malformed node is
+A node takes **exactly one of five forms** — enforced at decode, so a malformed node is
 unrepresentable:
 
 | form | body | outcomes |
 |---|---|---|
 | `"onMessage": {}` | the door — no body, no cost, no host seam | the message kinds it routes; `steer` is not among them |
 | `"step": "<folder>"` | the compiled `Step.swift` in the agent's pack | whatever the step's own exported declaration names |
+| `"ask": { "prompt", "outcomes", "effects"? }` | a structured model query authored as data — the prompt file is the question | its declared `outcomes`; the reply's `{"outcome": …}` routes, repaired once on a shape mismatch |
 | `"turn": { "brief", "session"?, "tools"? }` | a full agent turn; the mustache brief IS the body | fixed `ok` / `error` — process truth only, content never routes |
-| `"dispatch": { "to", "items" }` | fan work out: one `item` message per element of the `items` fact | `sent`, and **no out-edges** — send-and-conclude is structural |
+| `"dispatch": { "to", "items" }` | fan work out — one `item` message per element of the `items` fact — and **wait for the set** | `settled`, when the last item lands (or the watchdog synthesizes the stragglers) |
 
-The dispatch has no return edge, and does not need one: the fleet's reply is a `settled` MESSAGE
-delivered to the sender, so it comes in by the same door as everything else. Leaving the door's
-`settled` port unwired is how a graph says "the first settle concludes the run". The panel draws
-the round trip anyway, as a derived wire from each dispatch's `sent` port back to the `settled`
-port — a picture of a real path, not an edge in the file.
+**A dispatch waits.** The traversal holds at the node while the fleet works — the card is live,
+its sub-agent lanes ticking under it — and when the set closes it produces `settled` and routes
+its one edge. No edge = settlement ends the run (procedural's spelling). A settled edge that
+loops back is the RETRY ROUND, and it must carry a `maxTraversals` leash — the same bound every
+other loop speaks; an unleashed settled loop is refused at load like any unbounded cycle. There
+is no separate "rounds" budget any more: the leash is the budget.
+
+**`ask` vs a step's `askModel`.** Both run one stateless completion through the same serving path
+(render like a brief, route, complete, journal, repair). The ask form is the declarative spelling
+— prompt file + declared outcomes + per-outcome `effects`, all validated at load — for the common
+ruling that needs no computation. A step with `askModel` remains the code spelling for rulings
+that weigh facts first. The shipped `route-reply` is an ask node: its `build` outcome carries the
+`requestBuild` effect as config, and no `Step.swift` exists for it.
 
 `session` on a turn: `spawn` (default) cold-starts; `message` continues the scope's existing
 session (spawning when none exists). `tools` narrows the turn's tool surface; nil is the agent's
@@ -142,10 +151,11 @@ let step = SZBuildRouter("agentic", "procedural", "recovery") {
 ```
 
 Its three ports route into three lanes that share nodes wherever their wiring agrees:
-**agentic** (decompose → dispatch → reconcile rounds; the default the step falls back to),
-**procedural** (token-free and contract-first — no planning turn, and its settled re-entry routes
-nowhere, so the first settle concludes), and **recovery** (gated on `nodes-failing`: a failing
-fleet gets a reconcile turn and a re-dispatch; a healthy fleet ends the run untouched).
+**agentic** (decompose → dispatch, whose leashed settled edge buys the reconcile rounds; the
+default the step falls back to), **procedural** (token-free and contract-first — no planning
+turn, and its own dispatch carries no settled edge, so the first settlement concludes), and
+**recovery** (gated on `nodes-failing`: a failing fleet gets a reconcile turn and a re-dispatch
+through the same loop; a healthy fleet ends the run untouched).
 
 The requested name reaches the step as the `runVariant` fact: `SZ_RUN_GRAPH` (env, per launch) >
 the persisted choice (`debug_set_orchestrator`). The host does **not** validate it — the step owns
@@ -242,14 +252,15 @@ a step opens its `Step.swift`, a turn opens its brief, and a dispatch links into
 
 ## RUNS records and the panel
 
-Every traversal — a director's, each item's, and **each chat reply, whichever agent answers it** —
-is recorded as an `SZAgentGraphRun`: who entered which graph on which kind, a per-node trace
-(running → done/failed, outcome, detail), the conclusion, and — for a dispatching traversal — the
-set's live tally, amended as items settle (the one sanctioned post-seal write). The trace opens at
-the door, so a record's first entry says what arrived. Live records exist only in memory; a record
-persists at seal into the project's `runs.json`, so the panel's RUNS list, each row's trace, and
-the conclusions survive a relaunch while a crash mid-traversal loses the record and keeps the
-transcript. The history caps per budget, never evicting a live record.
+Every message an agent receives — a Build press, each dispatched item, each chat reply — is ONE
+record, an `SZAgentGraphRun`: who received which kind, the ordered trace of the whole journey
+(running → done/failed, outcome, detail — a dispatch visit carrying its fleet's tally, live on
+the entry while the set works), and the conclusion. The trace opens at the door, so a record's
+first entry says what arrived, and a build's record stays LIVE for its whole run — fleets
+included — sealing only when the story actually ends. Live records exist only in memory; a
+record persists at seal into the project's `runs.json`, so the panel's RUNS list, each row's
+trace, and the conclusions survive a relaunch while a crash mid-traversal loses the record and
+keeps the transcript. The history caps per budget, never evicting a live record.
 
 A chat record carries **no thread**, even when delivered mid-build: a node outside the work set can
 be chatted while the fleet runs, and the list's thread header picks the newest non-item traversal
@@ -261,30 +272,27 @@ of its sub-agents: one lane per dispatched item, each naming the node that agent
 its running clock, and a pulsing `live` badge — swapped for a conclusion badge and a frozen clock
 as each settles, so the band drains from working to done while the fleet lands.
 
-## The thread machine
+## The set supervisor
 
-One pure value machine (`SZThreadMachine`) owns a thread's whole lifecycle; hosts are its motor —
-they run traversals, deliver items, arm timers, and report back as events — and tests drive the
-real machine with event lists. The invariants:
+One pure value machine (`SZThreadMachine`) supervises each dispatch set while the traversal's
+dispatch node waits; hosts are its motor — they deliver items, arm timers, and report back as
+events — and tests drive the real machine with event lists. The invariants:
 
-- **One open dispatch set at a time, structurally.** Dispatch is send-and-conclude, orders are
-  minted only when the sending traversal concludes, and the settled re-entry starts only when the
-  set closes — a set can never overlap a traversal, nor two sets each other.
-- **Exactly one settled reply per set.** Collected from item outcomes when the last lands, or
-  synthesized when the per-set watchdog fires: stragglers are cancelled *before* the reply ships
-  and marked `timedOut` with the deadline stated at millisecond precision. A closed set drops
-  every later event — keyed by set id, never node id, which a re-dispatch makes ambiguous.
-- **Rounds.** Each settled re-entry increments the thread's round; the graph's `caps.rounds`
-  (one round when it declares none) and the host ceiling (8) bound it — `min` of the two —
-  and a re-entry past the bound concludes the
-  thread loudly (`roundCeiling`), so a graph that ships without its own gate can never re-dispatch
-  forever. The deadline itself mirrors the coding-turn budgets, so the watchdog can never fire
-  before a healthy turn's own budget would have ended it.
-- **Steers queue, never traverse.** A steer in any live state is folded into the NEXT traversal's
-  brief; the conclusion carries whatever was never consumed, so the ending ceremony can say so.
-- **Stop is not timeout.** Stop cancels the traversal and outstanding items and concludes
-  `cancelled` — nothing is synthesized; a stopped conversation just ends. Termination is
-  absorbing: after the conclusion, every event is a no-op by construction.
+- **One open set at a time, structurally.** The engine is sequential and the dispatch node holds
+  the traversal until its set closes; the machine refuses a second set defensively.
+- **Exactly one settled summary per set.** Collected from item outcomes when the last lands, or
+  synthesized when the per-set watchdog fires: stragglers are cancelled *before* the summary
+  ships and marked `timedOut` with the deadline stated at millisecond precision. A closed set
+  drops every later event — keyed by set id, never node id, which a re-dispatch makes ambiguous.
+  The deadline mirrors the coding-turn budgets, so the watchdog can never fire before a healthy
+  turn's own budget would have ended it.
+- **Attempts accumulate per item across sets** — the retry loop re-dispatches a node as attempt
+  2, stamped into the order as it is minted.
+- **Steers queue, never traverse.** A steer raised while a fleet is out is folded into the
+  traversal's NEXT brief render; the conclusion carries whatever was never consumed.
+- **Stop is not timeout.** Cancellation propagates into the waiting dispatch; the set is swept
+  with no summary synthesized, and the traversal concludes `cancelled`. Termination is absorbing:
+  after a stop, every event is a no-op by construction.
 
 ## Effects
 

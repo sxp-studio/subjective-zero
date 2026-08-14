@@ -108,8 +108,6 @@ struct SZAgentGraphCanvasContent: View {
 
             planEntryStub(placement: placement)
                 .allowsHitTesting(false)
-            settlesReturns(placement: placement)
-                .allowsHitTesting(false)
         }
     }
 
@@ -132,34 +130,6 @@ struct SZAgentGraphCanvasContent: View {
                 .padding(.vertical, max(1, 2 / z))
                 .background(Capsule().fill(SZAgentGraphStyle.done))
                 .position(x: start.x - 16, y: start.y)
-        }
-    }
-
-    /// The CALL RETURN, derived rather than authored: a dispatch sends and concludes, and
-    /// the fleet's reply arrives later as a `settled` message — so the loop closes through
-    /// the door, not through an edge in the file. Drawn from each dispatch's `sent` port
-    /// back to the message node's `settled` port so the picture shows the round trip; it is
-    /// deliberately NOT in `graph.edges`, so it can never enter ranking or make the rank
-    /// graph cyclic.
-    @ViewBuilder
-    private func settlesReturns(placement: SZAgentGraphLayout.Placement) -> some View {
-        if let door = graph.messageNode, graph.handles(.settled),
-           let doorFrame = placement.frames[door.id] {
-            // Into the door's INPUT, never its `settled` PORT. The ports on the right are
-            // outputs: a wire ending on one reads as leaving it, which is backwards — the
-            // reply ARRIVES, exactly like the green stub beside it, and the door then sorts
-            // it out of the `settled` port like any other delivery.
-            let end = SZAgentGraphLayout.inputPoint(doorFrame)
-            ForEach(graph.nodes) { node in
-                if case .dispatch = node.form, let frame = placement.frames[node.id] {
-                    let face = SZAgentGraphLayout.face(of: node, in: graph)
-                    let from = SZAgentGraphLayout.outcomePoint(frame, outcome: "sent", in: face)
-                    // Back-edge routing (it runs right-to-left under the cards) with its own
-                    // word: this is a reply arriving, not a loop the traversal walks.
-                    SZAgentGraphWire(path: (from, end), outcome: "settled", bounded: true,
-                                     zoom: zoom, fromForm: .dispatch, labelText: "settles")
-                }
-            }
         }
     }
 
@@ -273,7 +243,7 @@ struct SZAgentGraphCanvasContent: View {
         let face = SZAgentGraphLayout.runFace(for: entry, in: graph)
         return SZAgentGraphCardState(phase: entry.phase, outcome: entry.outcome,
                                      detail: entry.detail,
-                                     tally: face.form == .dispatch ? record.tally : nil)
+                                     tally: entry.tally)
     }
 
     /// The stat line a Run card carries: wall time, ticking while the visit runs, frozen

@@ -9,17 +9,14 @@
 // - step:     compiled async code; the ONLY home of routing intelligence (it may askModel).
 // - turn:     a full agent turn; mechanically dumb — `ok`/`error`, nothing else. A turn's
 //             content never routes; the VERDICT-prose-scanning era is unrepresentable.
-// - dispatch: resolve the items fact, hand the host `.item` orders, conclude. The settled
-//             reply re-enters the graph through the thread machine, not this traversal —
-//             and it re-enters by the MESSAGE NODE, like every other delivery.
+// - dispatch: resolve the items fact, hand the host the orders, and WAIT — the host
+//             supervises the set (SZThreadMachine) and returns its one settled summary;
+//             the node then produces `settled` and routes its edge like any other. A
+//             retry round is the settled edge looping back under a `maxTraversals`
+//             leash — the same bound every other loop speaks, no second mechanism.
 //
-// THE LANE, not the delivered kind, is what the host seams see: a `settled` message reasons
-// over the same build facts one round later, publishes no facts of its own and renders no
-// brief of its own. `SZMessageKind.lane` owns that fold; the delivered kind survives only in
-// the record and in the door's port lookup. Passing the raw kind to the effect catalogue
-// would refuse a settled traversal's `captureStatuses`, since no `settled` effects exist.
-//
-// Threads — sequences of traversals joined by messages — are SZThreadMachine's business.
+// One message is one traversal: the engine walks from the door to the conclusion, fleets
+// and all, and the record's trace is the whole journey.
 import Foundation
 import SZCore
 
@@ -92,10 +89,6 @@ public struct SZGraphEngine {
                 conclusion: .defect(node: "", detail: "the graph has no message node"),
                 sent: [], sentTarget: nil, notes: [])
         }
-        // Everything the host sees is the LANE — see the file header. The delivered kind
-        // routes at the door and is otherwise the record's business.
-        let lane = kind.lane
-
         var current: String? = door.id
         var conclusion: SZTraversalConclusion?
 
@@ -113,6 +106,8 @@ public struct SZGraphEngine {
 
             let outcome: String
             var turnFailure: String?
+            var noteDetail: String?
+            var noteTally: SZAgentGraphRun.Tally?
             switch node.form {
             case .message:
                 // The door: no work, no cost, no host seam. An unrouted kind is a routing
@@ -126,14 +121,77 @@ public struct SZGraphEngine {
                 }
                 outcome = kind.rawValue
 
+            case .ask(let ask):
+                // The declarative twin of a step's askModel: render the prompt like a
+                // brief, run one stateless completion through the SAME serving path, and
+                // route the decoded outcome. The repair loop is the engine's here — the
+                // reply is re-asked with the decode error attached, once.
+                let facts = host.factsJSON(kind: kind)
+                var answered: String?
+                var lastDetail = "no reply"
+                var cancelled = false
+                for attempt in 0...1 {
+                    let request = Self.askRequestJSON(template: ask.prompt, attempt: attempt,
+                                                     error: attempt == 0 ? nil : lastDetail,
+                                                     previousReply: attempt == 0 ? nil : answered)
+                    let reply: String
+                    do {
+                        reply = try await host.serveAsk(agent: agent, step: id, kind: kind,
+                                                        factsJSON: facts, requestJSON: request)
+                    } catch is CancellationError {
+                        cancelled = true
+                        break
+                    } catch {
+                        lastDetail = String(describing: error)
+                        break   // a completion failure is not a shape mismatch — no repair
+                    }
+                    if let outcome = Self.extractOutcome(from: reply) {
+                        if ask.outcomes.contains(outcome) { answered = outcome; break }
+                        lastDetail = "'\(outcome)' is not among \(ask.outcomes)"
+                        answered = reply
+                    } else {
+                        lastDetail = #"the reply carries no {"outcome": …} object"#
+                        answered = reply
+                    }
+                    answered = nil
+                }
+                if cancelled {
+                    note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done))
+                    conclusion = .cancelled(node: id)
+                    continue
+                }
+                guard let ruled = answered else {
+                    let detail = "ask '\(id)' got no usable ruling: \(lastDetail)"
+                    note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
+                    conclusion = .defect(node: id, detail: detail)
+                    continue
+                }
+                // Effects are config here — validated against the kind's catalog exactly
+                // like a step's, performed before the edge routes.
+                let asked = ask.effects[ruled] ?? []
+                if !asked.isEmpty {
+                    let declared = SZEffectCatalog.cases(kind: kind.rawValue)
+                    if let unknown = asked.first(where: { !declared.contains($0) }) {
+                        let detail = "ask '\(id)' declares effect '\(unknown)', outside "
+                            + "the '\(kind.rawValue)' effect set"
+                        note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
+                        conclusion = .defect(node: id, detail: detail)
+                        continue
+                    }
+                    for effect in asked {
+                        await host.perform(effect: effect, kind: kind)
+                    }
+                }
+                outcome = ruled
+
             case .step(let name):
                 // The facts snapshot is pinned HERE: the evaluation and every ask it makes
                 // see the same document, however long the step runs.
-                let facts = host.factsJSON(kind: lane)
+                let facts = host.factsJSON(kind: kind)
                 let report = await steps.evaluate(
                     agent: agent, step: name, factsJSON: facts,
                     ask: { [host, agent] request in
-                        try await host.serveAsk(agent: agent, step: name, kind: lane,
+                        try await host.serveAsk(agent: agent, step: name, kind: kind,
                                                 factsJSON: facts, requestJSON: request)
                     })
                 if report.cancelled {
@@ -158,16 +216,16 @@ public struct SZGraphEngine {
                 // traversal defect naming it, and nothing performs. Performed in the step's
                 // own order, AFTER the step returned and BEFORE edge routing.
                 if !report.effects.isEmpty {
-                    let declared = SZEffectCatalog.cases(kind: lane.rawValue)
+                    let declared = SZEffectCatalog.cases(kind: kind.rawValue)
                     if let unknown = report.effects.first(where: { !declared.contains($0) }) {
                         let detail = "step '\(name)' requested effect '\(unknown)', outside "
-                            + "the '\(lane.rawValue)' effect set"
+                            + "the '\(kind.rawValue)' effect set"
                         note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
                         conclusion = .defect(node: id, detail: detail)
                         continue
                     }
                     for effect in report.effects {
-                        await host.perform(effect: effect, kind: lane)
+                        await host.perform(effect: effect, kind: kind)
                     }
                 }
                 outcome = answered
@@ -175,7 +233,7 @@ public struct SZGraphEngine {
             case .turn(let turn):
                 let rendered: String
                 do {
-                    rendered = try host.renderBrief(agent: agent, template: turn.brief, kind: lane)
+                    rendered = try host.renderBrief(agent: agent, template: turn.brief, kind: kind)
                 } catch {
                     let detail = "brief '\(turn.brief)' would not render: \(error)"
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
@@ -198,21 +256,41 @@ public struct SZGraphEngine {
                 if report.failed { turnFailure = report.detail ?? "the turn failed" }
 
             case .dispatch(let dispatch):
-                let items = host.itemsFact(named: dispatch.items, kind: lane)
-                sent = items.map { SZItemOrder(node: $0) }
+                let items = host.itemsFact(named: dispatch.items, kind: kind)
+                let orders = items.map { SZItemOrder(node: $0) }
+                sent += orders
                 sentTarget = dispatch.to
-                outcome = "sent"
-                note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done, outcome: outcome,
-                                     detail: "\(sent.count) item(s) to \(dispatch.to)"))
-                // Send-and-conclude: the shape gate refused any out-edge, so the loop ends
-                // here and the settled reply re-enters via the machine.
-                conclusion = .ended(node: id, outcome: outcome)
-                continue
+                // The visit is RUNNING for the whole fleet phase — the card pulses and
+                // its tally counts up through the progress notes, which is how the panel
+                // says "these agents are working right now".
+                let visitOrdinal = ordinal
+                let summary = await host.deliver(orders: orders, to: dispatch.to) { [host] tally in
+                    host.note(SZTraversalNote(ordinal: visitOrdinal, node: id, phase: .running,
+                                              tally: tally))
+                }
+                if Task.isCancelled {
+                    note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done))
+                    conclusion = .cancelled(node: id)
+                    continue
+                }
+                guard let summary else {
+                    let detail = "this delivery cannot dispatch (no fleet host)"
+                    note(SZTraversalNote(ordinal: ordinal, node: id, phase: .failed, detail: detail))
+                    conclusion = .defect(node: id, detail: detail)
+                    continue
+                }
+                outcome = "settled"
+                noteDetail = "\(summary.outcomes.count)/\(orders.count) settled"
+                    + (summary.failedCount > 0 ? " · \(summary.failedCount) failed" : "")
+                noteTally = SZAgentGraphRun.Tally(settled: summary.outcomes.count,
+                                                  total: orders.count,
+                                                  failed: summary.failedCount)
             }
 
             note(SZTraversalNote(ordinal: ordinal, node: id,
                                  phase: turnFailure == nil ? .done : .failed,
-                                 outcome: outcome, detail: turnFailure))
+                                 outcome: outcome, detail: turnFailure ?? noteDetail,
+                                 tally: noteTally))
 
             // How this traversal ends when nothing routes onward from `outcome` — shared
             // by the edge-less exit and the spent leash, so neither can launder a failed
@@ -246,6 +324,68 @@ public struct SZGraphEngine {
             sent: sent,
             sentTarget: sentTarget,
             notes: notes)
+    }
+
+    // MARK: - The ask form's wire pieces
+
+    /// The ask request in the SAME wire shape a compiled step's `askModel` sends, so the
+    /// query service serves both identically (render → route → complete → journal → repair).
+    nonisolated static func askRequestJSON(template: String, attempt: Int,
+                                           error: String?, previousReply: String?) -> String {
+        var request: [String: Any] = ["template": template, "attempt": attempt]
+        if let error {
+            request["repair"] = ["error": error, "previousReply": previousReply ?? ""]
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])) ?? Data()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// `{"outcome": …}` out of a CLI-shaped reply: the bytes as-is, else every balanced
+    /// object inside them (fences, preambles, restated formats), string-literal aware —
+    /// the SDK's tolerant-decode rule, restated on this side of the ABI for the one shape
+    /// an ask node reads.
+    nonisolated static func extractOutcome(from reply: String) -> String? {
+        struct Ruling: Decodable { let outcome: String }
+        let decoder = JSONDecoder()
+        if let whole = try? decoder.decode(Ruling.self, from: Data(reply.utf8)) {
+            return whole.outcome
+        }
+        var searchStart = reply.startIndex
+        while let start = reply[searchStart...].firstIndex(of: "{") {
+            if let end = balancedEnd(in: reply, from: start),
+               let ruling = try? decoder.decode(Ruling.self, from: Data(reply[start...end].utf8)) {
+                return ruling.outcome
+            }
+            searchStart = reply.index(after: start)
+        }
+        return nil
+    }
+
+    /// The index of the closer balancing the opener at `start`, skipping string literals
+    /// (with escape handling). nil if the reply never balances.
+    private nonisolated static func balancedEnd(in reply: String,
+                                                from start: String.Index) -> String.Index? {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var index = start
+        while index < reply.endIndex {
+            let ch = reply[index]
+            if inString {
+                if escaped { escaped = false }
+                else if ch == "\\" { escaped = true }
+                else if ch == "\"" { inString = false }
+            } else if ch == "\"" {
+                inString = true
+            } else if ch == "{" {
+                depth += 1
+            } else if ch == "}" {
+                depth -= 1
+                if depth == 0 { return index }
+            }
+            index = reply.index(after: index)
+        }
+        return nil
     }
 }
 

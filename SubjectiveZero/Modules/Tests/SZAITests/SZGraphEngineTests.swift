@@ -49,19 +49,36 @@ private final class StubHost: SZTraversalHost {
         performed.append((effect, kind))
         events.append("perform:\(effect)")
     }
+    /// The fleet, scripted: each deliver consumes the next summary (nil = a host that
+    /// cannot dispatch), relays the scripted tallies through `progress` first, and records
+    /// what was sent.
+    var summaries: [SZSettledSummary?] = []
+    var progressTallies: [SZAgentGraphRun.Tally] = []
+    var delivered: [(orders: [SZItemOrder], seat: String)] = []
+    func deliver(orders: [SZItemOrder], to seat: String,
+                 progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
+        async -> SZSettledSummary? {
+        delivered.append((orders, seat))
+        events.append("deliver:\(seat):\(orders.map(\.node).joined(separator: ","))")
+        for tally in progressTallies { progress(tally) }
+        return summaries.isEmpty ? nil : summaries.removeFirst()
+    }
     func note(_ note: SZTraversalNote) { notes.append(note) }
 }
 
 /// Scripted step answers, keyed by step name; missing key = a failure report. A step whose
 /// key maps to `.ask` invokes the engine-provided ask closure and answers with its reply.
-private struct StubSteps: SZStepRunning {
+private final class StubSteps: SZStepRunning, @unchecked Sendable {
     enum Script: Sendable {
         case report(SZStepReport)
+        /// One report per VISIT, in order — a loop's gate answering differently each pass.
+        /// The last report repeats if the step is visited beyond the script.
+        case reports([SZStepReport])
         /// Call the ask closure with `request` and answer with whatever comes back.
         case ask(request: String)
     }
 
-    let scripts: [String: Script]
+    private var scripts: [String: Script]
 
     init(answers: [String: SZStepReport]) {
         scripts = answers.mapValues { .report($0) }
@@ -75,6 +92,10 @@ private struct StubSteps: SZStepRunning {
                   ask: @escaping @Sendable (String) async throws -> String) async -> SZStepReport {
         switch scripts[step] {
         case .report(let report): return report
+        case .reports(let queue):
+            let head = queue.first ?? SZStepReport(failure: "script exhausted for \(step)")
+            if queue.count > 1 { scripts[step] = .reports(Array(queue.dropFirst())) }
+            return head
         case .ask(let request):
             do { return SZStepReport(outcome: try await ask(request)) }
             catch { return SZStepReport(failure: String(describing: error)) }
@@ -100,7 +121,6 @@ private func makeBuildGraph() -> SZAgentGraph {
         ],
         edges: [
             .init(from: "message", outcome: "build", to: "plan"),
-            .init(from: "message", outcome: "settled", to: "work-left"),
             .init(from: "plan", outcome: "ok", to: "work-left"),
             .init(from: "work-left", outcome: "yes", to: "implement"),
             .init(from: "work-left", outcome: "no", to: "unblock", maxTraversals: 2),
@@ -123,58 +143,89 @@ private func makeEngine(graph: SZAgentGraph = makeBuildGraph(),
 @MainActor
 struct SZGraphEngineTests {
 
-    @Test func aBuildTraversalRoutesTurnThenStepThenDispatch() async throws {
+    @Test func aBuildTraversalAwaitsItsFleetAndEndsAtTheUnwiredSettled() async throws {
         let host = StubHost()
         host.items = ["node-a", "node-b"]
+        host.summaries = [SZSettledSummary(setID: 1, from: "coding",
+                                           outcomes: ["node-a": "ok", "node-b": "ok"], round: 1)]
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes")]))
         let result = await engine.run(kind: .build)
 
-        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
-        #expect(result.sent == [SZItemOrder(node: "node-a"), SZItemOrder(node: "node-b")])
+        // The dispatch WAITED: the summary landed inside the traversal, and — with no
+        // settled edge wired in this fixture — settlement IS the honest ending.
+        #expect(result.conclusion == .ended(node: "implement", outcome: "settled"))
+        #expect(host.delivered.count == 1)
+        #expect(host.delivered[0].seat == "coding")
+        #expect(host.delivered[0].orders == [SZItemOrder(node: "node-a"), SZItemOrder(node: "node-b")])
         // The turn went out rendered, with the router's choice attached.
         #expect(host.turnsSeen.count == 1)
         #expect(host.turnsSeen[0].brief == "rendered:prompts/decompose.md.mustache")
         #expect(host.turnsSeen[0].choice.providerID == "stub")
         // The trace saw every node run and settle — starting at the DOOR, whose outcome is
-        // the delivered kind, so the trace opens by saying what arrived.
+        // the delivered kind, so the trace opens by saying what arrived — and the dispatch
+        // entry carries the fleet's final tally.
         #expect(host.notes.first == SZTraversalNote(ordinal: 1, node: "message", phase: .running))
         #expect(host.notes.contains(SZTraversalNote(ordinal: 1, node: "message", phase: .done,
                                                     outcome: "build")))
         #expect(host.notes.contains(SZTraversalNote(ordinal: 3, node: "work-left", phase: .done, outcome: "yes")))
+        let landing = host.notes.last { $0.node == "implement" && $0.phase == .done }
+        #expect(landing?.tally == SZAgentGraphRun.Tally(settled: 2, total: 2, failed: 0))
     }
 
-    @Test func settledReEntersThroughTheDoorsOwnPort() async throws {
+    @Test func aSettledEdgeRoutesTheTraversalOnwardAfterTheFleet() async throws {
+        // The retry shape: implement ─settled→ work-left (leashed). Fleet 1 lands, the gate
+        // still sees work, the loop re-dispatches; fleet 2 lands, the gate says no, end.
+        var graph = makeBuildGraph()
+        graph.edges.append(.init(from: "implement", outcome: "settled", to: "work-left",
+                                 maxTraversals: 2))
         let host = StubHost()
+        host.items = ["node-a"]
+        host.summaries = [
+            SZSettledSummary(setID: 1, from: "coding", outcomes: ["node-a": "error: red"], round: 1),
+            SZSettledSummary(setID: 2, from: "coding", outcomes: ["node-a": "ok"], round: 2),
+        ]
+        let steps = StubSteps(scripts: ["work-left": .reports([
+            SZStepReport(outcome: "yes"),   // before fleet 1
+            SZStepReport(outcome: "yes"),   // after fleet 1 — still unresolved
+            SZStepReport(outcome: "no"),    // after fleet 2 — done
+        ])])
+        let engine = makeEngine(graph: graph, host: host, steps: steps)
+        let result = await engine.run(kind: .build)
+        // One message, ONE traversal, both fleets inside it.
+        #expect(host.delivered.count == 2)
+        #expect(result.conclusion == .ended(node: "work-left", outcome: "no"))
+        // The trace shows the dispatch VISITED twice — the loop unrolled, per visit.
+        #expect(host.notes.filter { $0.node == "implement" && $0.phase == .done }.count == 2)
+    }
+
+    @Test func theDispatchProgressNotesCarryTheLiveTally() async throws {
+        let host = StubHost()
+        host.items = ["node-a", "node-b"]
+        host.progressTallies = [SZAgentGraphRun.Tally(settled: 1, total: 2, failed: 0)]
+        host.summaries = [SZSettledSummary(setID: 1, from: "coding",
+                                           outcomes: ["node-a": "ok", "node-b": "ok"], round: 1)]
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes")]))
-        let result = await engine.run(kind: .settled)
-        // In by the `settled` port to work-left, straight to dispatch — no decompose turn
-        // on a re-entry. The reply IS a message, so it uses the same door as the build.
-        #expect(host.notes.first?.node == "message")
-        #expect(host.notes.contains(SZTraversalNote(ordinal: 1, node: "message", phase: .done,
-                                                    outcome: "settled")))
-        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
-        #expect(host.turnsSeen.isEmpty)
+        _ = await engine.run(kind: .build)
+        // Mid-fleet the card still reads RUNNING, tally attached — that is the band's
+        // "these agents are working right now".
+        #expect(host.notes.contains(SZTraversalNote(
+            ordinal: 4, node: "implement", phase: .running,
+            tally: SZAgentGraphRun.Tally(settled: 1, total: 2, failed: 0))))
     }
 
-    @Test func aSettledTraversalReasonsInTheBuildLane() async throws {
-        // The regression guard for the lane fold: `SZEffectCatalog.cases(kind: "settled")`
-        // is EMPTY, so handing the seams the delivered kind instead of its lane would
-        // refuse a settled traversal's `captureStatuses` as an unknown effect.
-        let host = StubHost()
-        let engine = makeEngine(
-            attachments: ["work-left": SZStepAttachment(outcomes: ["yes"])],
-            host: host,
-            steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes",
-                                                                 effects: ["captureStatuses"])]))
-        let result = await engine.run(kind: .settled)
-        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
-        #expect(host.performed.map(\.effect) == ["captureStatuses"])
-        // Performed under BUILD, the lane a settled reply reasons in.
-        #expect(host.performed.map(\.kind) == [.build])
-        // And the facts it read were the build lane's, not a settled document.
-        #expect(host.factsKindsSeen.allSatisfy { $0 == .build })
+    @Test func aHostWithNoFleetMakesADispatchAnHonestDefect() async throws {
+        let host = StubHost()   // summaries empty → deliver returns nil
+        host.items = ["node-a"]
+        let engine = makeEngine(host: host,
+                                steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes")]))
+        let result = await engine.run(kind: .build)
+        guard case .defect(let node, let detail) = result.conclusion else {
+            Issue.record("expected a defect, got \(result.conclusion)"); return
+        }
+        #expect(node == "implement")
+        #expect(detail.contains("cannot dispatch"))
     }
 
     @Test func anUnroutedKindDefectsAtTheDoorBeforeAnyWorkRuns() async throws {
@@ -252,10 +303,11 @@ struct SZGraphEngineTests {
         graph.edges.append(.init(from: "plan", outcome: "error", to: "work-left"))
         let host = StubHost()
         host.turnReports = [SZTurnReport(failed: true, detail: "flaky")]
+        host.summaries = [SZSettledSummary(setID: 1, from: "coding", outcomes: [:], round: 1)]
         let engine = makeEngine(graph: graph, host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "yes")]))
         let result = await engine.run(kind: .build)
-        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
+        #expect(result.conclusion == .ended(node: "implement", outcome: "settled"))
     }
 
     @Test func aBoundedEdgeLeashesItsLoopThenEndsOnTheOutcome() async throws {
@@ -273,7 +325,7 @@ struct SZGraphEngineTests {
         let host = StubHost()
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(outcome: "perhaps")]))
-        let result = await engine.run(kind: .settled)
+        let result = await engine.run(kind: .build)
         guard case .defect(let node, let detail) = result.conclusion else {
             Issue.record("expected a defect, got \(result.conclusion)")
             return
@@ -286,7 +338,7 @@ struct SZGraphEngineTests {
         let host = StubHost()
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(failure: "swiftc missing")]))
-        let result = await engine.run(kind: .settled)
+        let result = await engine.run(kind: .build)
         #expect(result.conclusion == .defect(node: "work-left", detail: "swiftc missing"))
     }
 
@@ -294,7 +346,7 @@ struct SZGraphEngineTests {
         let host = StubHost()
         let engine = makeEngine(host: host,
                                 steps: StubSteps(answers: ["work-left": SZStepReport(cancelled: true)]))
-        let result = await engine.run(kind: .settled)
+        let result = await engine.run(kind: .build)
         #expect(result.conclusion == .cancelled(node: "work-left"))
     }
 
@@ -323,6 +375,9 @@ struct SZGraphEngineTests {
             func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
                           requestJSON: String) async throws -> String { throw CancellationError() }
             func perform(effect: String, kind: SZMessageKind) async {}
+            func deliver(orders: [SZItemOrder], to seat: String,
+                         progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
+                async -> SZSettledSummary? { nil }
             func note(_ note: SZTraversalNote) {}
         }
         let engine = SZGraphEngine(agent: "director", graph: makeBuildGraph(),
@@ -340,12 +395,13 @@ struct SZGraphEngineTests {
     @Test func anAskingStepGetsTheGraphKindAndThePinnedFacts() async throws {
         let host = StubHost()
         host.askReply = "yes"
-        // Entered as `.settled`, the ask still carries the GRAPH's own kind (build) and the
-        // exact facts bytes the evaluation was handed — the pinned-snapshot contract.
+        // The ask carries the delivered kind and the exact facts bytes the evaluation was
+        // handed — the pinned-snapshot contract.
         let engine = makeEngine(host: host,
                                 steps: StubSteps(scripts: ["work-left": .ask(request: #"{"template": "classify"}"#)]))
-        let result = await engine.run(kind: .settled)
-        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
+        host.summaries = [SZSettledSummary(setID: 1, from: "coding", outcomes: [:], round: 1)]
+        let result = await engine.run(kind: .build)
+        #expect(result.conclusion == .ended(node: "implement", outcome: "settled"))
         #expect(host.asksSeen.count == 1)
         let ask = try #require(host.asksSeen.first)
         #expect(ask.step == "work-left")
@@ -373,12 +429,16 @@ struct SZGraphEngineTests {
                 "gate": .report(SZStepReport(outcome: "go", effects: ["captureStatuses"])),
                 "work-left": .report(SZStepReport(outcome: "yes")),
             ]))
+        host.summaries = [SZSettledSummary(setID: 1, from: "coding", outcomes: [:], round: 1)]
         let result = await engine.run(kind: .build)
-        #expect(result.conclusion == .ended(node: "implement", outcome: "sent"))
+        #expect(result.conclusion == .ended(node: "implement", outcome: "settled"))
         #expect(host.performed.map(\.effect) == ["captureStatuses"])
         #expect(host.performed.first?.kind == .build)
-        // The pinned order: the effect performed BEFORE anything routed onward ran.
-        #expect(host.events == ["perform:captureStatuses", "turn:rendered:prompts/decompose.md.mustache"])
+        // The pinned order: the effect performed BEFORE anything routed onward ran, and
+        // the dispatch's delivery came last — after the routed turn.
+        #expect(host.events == ["perform:captureStatuses",
+                                "turn:rendered:prompts/decompose.md.mustache",
+                                "deliver:coding:node-a"])
     }
 
     @Test func anUnknownEffectIsADefectNamingItAndNothingPerforms() async throws {
@@ -387,7 +447,7 @@ struct SZGraphEngineTests {
                                 steps: StubSteps(scripts: [
                                     "work-left": .report(SZStepReport(outcome: "yes", effects: ["explode"])),
                                 ]))
-        let result = await engine.run(kind: .settled)
+        let result = await engine.run(kind: .build)
         guard case .defect(let node, let detail) = result.conclusion else {
             Issue.record("expected a defect, got \(result.conclusion)")
             return
@@ -405,7 +465,7 @@ struct SZGraphEngineTests {
                                 steps: StubSteps(scripts: [
                                     "work-left": .report(SZStepReport(outcome: "yes", effects: ["requestBuild"])),
                                 ]))
-        let result = await engine.run(kind: .settled)
+        let result = await engine.run(kind: .build)
         guard case .defect(_, let detail) = result.conclusion else {
             Issue.record("expected a defect, got \(result.conclusion)")
             return

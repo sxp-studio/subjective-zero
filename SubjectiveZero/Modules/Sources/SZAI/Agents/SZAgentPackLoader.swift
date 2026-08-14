@@ -72,6 +72,9 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
     case stepDeclaresNothing(agent: String, graph: String, node: String, step: String)
     /// The step provider could not produce a declaration (compile/load failure).
     case stepUnavailable(agent: String, step: String, detail: String)
+    /// An ask node's config lies about itself — an effect keyed on an undeclared outcome,
+    /// or naming an action outside its lane's effect set.
+    case askInvalid(agent: String, graph: String, node: String, detail: String)
 
     public var description: String {
         switch self {
@@ -108,6 +111,8 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
             "\(agent)/graphs/\(graph) node '\(node)': steps/\(step) compiled against '\(declared)' facts, not this graph's kind"
         case .stepDeclaresNothing(let agent, let graph, let node, let step):
             "\(agent)/graphs/\(graph) node '\(node)': steps/\(step) declares no outcomes, yet edges leave it"
+        case .askInvalid(let agent, let graph, let node, let detail):
+            "\(agent)/graphs/\(graph) ask '\(node)': \(detail)"
         case .stepUnavailable(let agent, let step, let detail):
             "\(agent)/steps/\(step) has no declaration: \(detail)"
         }
@@ -349,38 +354,38 @@ public enum SZAgentPackLoader {
             // Not exactly one lane means the shape gate already reported `laneImpure` or
             // `unreachable`; running kind-typed checks against an ambiguous lane would pile
             // noise on top of the defect that explains it.
-            let lanes = graph.lanes(reaching: node.id)
+            let lanes = graph.kinds(reaching: node.id)
             guard let lane = lanes.count == 1 ? lanes.first : nil else { continue }
             switch node.form {
             case .message:
                 break   // the door declares nothing a pack can get wrong; shape covers it
 
-            case .turn(let turn):
-                if !pack.prompts.contains(turn.brief) {
-                    defects.append(.missingTemplate(agent: pack.id, graph: graph.name,
-                                                    node: node.id, path: turn.brief))
-                } else if let text = pack.promptSources[turn.brief] {
-                    // The brief exists — every `{{token}}` it mentions must be one the
-                    // kind's assembly substitutes, and every partial a mentioned token
-                    // renders from must be in the pack. The renderer owns both namespaces;
-                    // this only reads them.
-                    let known = SZBriefRenderer.knownTokens(kind: lane)
-                    let partials = SZBriefRenderer.requiredPartials(kind: lane)
-                    for token in SZPromptTemplate.tokens(in: text) {
-                        guard known.contains(token) else {
-                            defects.append(.unknownTemplateToken(
-                                agent: pack.id, graph: graph.name, node: node.id,
-                                template: turn.brief, token: token))
-                            continue
-                        }
-                        for partial in partials[token] ?? []
-                        where !pack.prompts.contains(partial) {
-                            defects.append(.missingPartial(
-                                agent: pack.id, graph: graph.name, node: node.id,
-                                token: token, partial: partial))
-                        }
+            case .ask(let ask):
+                // The prompt validates exactly like a turn brief (existence, the lane's
+                // token namespace, its partials) — one rule, whichever form renders it.
+                defects += briefDefects(pack: pack, graph: graph, node: node.id,
+                                        brief: ask.prompt, lane: lane)
+                // Effects are config, so the gate can check ALL of it: every keyed outcome
+                // must be one the ask declares, every named effect one the lane catalogs.
+                let declared = SZEffectCatalog.cases(kind: lane.rawValue)
+                for (outcome, names) in ask.effects.sorted(by: { $0.key < $1.key }) {
+                    if !ask.outcomes.contains(outcome) {
+                        defects.append(.askInvalid(agent: pack.id, graph: graph.name,
+                                                   node: node.id,
+                                                   detail: "effects keyed on '\(outcome)', "
+                                                       + "an outcome the ask never declares"))
+                    }
+                    for name in names where !declared.contains(name) {
+                        defects.append(.askInvalid(agent: pack.id, graph: graph.name,
+                                                   node: node.id,
+                                                   detail: "effect '\(name)' is outside the "
+                                                       + "'\(lane.rawValue)' effect set"))
                     }
                 }
+
+            case .turn(let turn):
+                defects += briefDefects(pack: pack, graph: graph, node: node.id,
+                                        brief: turn.brief, lane: lane)
 
             case .dispatch(let dispatch):
                 let targetSeat = SZAgentSeat(rawValue: dispatch.to)
@@ -450,6 +455,34 @@ public enum SZAgentPackLoader {
         return defects
     }
 
+    /// One rendered template's checks, shared by `turn` and `ask` (both render through the
+    /// same path): the file exists, every `{{token}}` is one the lane's assembly
+    /// substitutes, and every partial a mentioned token renders from ships in the pack.
+    private static func briefDefects(pack: SZAgentPack, graph: SZAgentGraph, node: String,
+                                     brief: String, lane: SZMessageKind) -> [SZAgentPackDefect] {
+        guard pack.prompts.contains(brief) else {
+            return [.missingTemplate(agent: pack.id, graph: graph.name, node: node, path: brief)]
+        }
+        guard let text = pack.promptSources[brief] else { return [] }
+        var defects: [SZAgentPackDefect] = []
+        let known = SZBriefRenderer.knownTokens(kind: lane)
+        let partials = SZBriefRenderer.requiredPartials(kind: lane)
+        for token in SZPromptTemplate.tokens(in: text) {
+            guard known.contains(token) else {
+                defects.append(.unknownTemplateToken(
+                    agent: pack.id, graph: graph.name, node: node,
+                    template: brief, token: token))
+                continue
+            }
+            for partial in partials[token] ?? [] where !pack.prompts.contains(partial) {
+                defects.append(.missingPartial(
+                    agent: pack.id, graph: graph.name, node: node,
+                    token: token, partial: partial))
+            }
+        }
+        return defects
+    }
+
     // MARK: - The report
 
     /// The pre-flight report: load + validate `root` exactly as the host would and render
@@ -473,7 +506,6 @@ public enum SZAgentPackLoader {
                 // The routed kinds ARE the graph's summary now — a merged document says
                 // "chat · build · settled", which is what a reader wants to know.
                 var facts = [graph.routes.keys.map(\.rawValue).sorted().joined(separator: " · ")]
-                if let rounds = graph.caps?.rounds { facts.append("rounds: \(rounds)") }
                 facts.append("\(graph.nodes.count) node\(graph.nodes.count == 1 ? "" : "s")")
                 lines.append("  graph \(graph.name) · " + facts.joined(separator: " · "))
             }

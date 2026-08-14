@@ -52,7 +52,7 @@ extension SZHost {
     /// A failed item traversal knows WHY it failed; without this the post-run sweep paints
     /// the node with its generic "never compiled this node or reported a blocker" line and
     /// the reason is lost. Keyed on the traversal's own conclusion, so it covers every
-    /// graph — a retryless variant that never delivers a settled reply included.
+    /// graph — a retryless strategy that ends at its first settlement included.
     ///
     /// An agent's OWN report always wins: a coding agent that said `needsInput` with its
     /// question keeps saying that. Only a node whose agent never reported takes this word.
@@ -73,15 +73,6 @@ extension SZHost {
         case .declined(let reason): "declined — \(reason)"
         case .defect(let detail): detail
         }
-    }
-
-    /// The machine's live settlement count for a dispatch set, amended onto the SENDING
-    /// traversal's record — the one sanctioned post-seal write, re-persisted each time so
-    /// the archive's tally is as current as the panel's.
-    func amendAgentGraphRunTally(_ id: UUID, settled: Int, total: Int, failed: Int) {
-        guard let i = agentGraphRuns.firstIndex(where: { $0.id == id }) else { return }
-        agentGraphRuns[i].amendDispatchTally(settled: settled, total: total, failed: failed)
-        persistAgentGraphRuns()
     }
 
     /// Run-task drain: seal anything of THIS run's still live as cancelled. Structured
@@ -196,6 +187,6 @@ private extension SZAgentGraphRun.Entry {
         case .failed: .failed
         }
         self.init(ordinal: note.ordinal, node: note.node, phase: phase,
-                  outcome: note.outcome, detail: note.detail)
+                  outcome: note.outcome, detail: note.detail, tally: note.tally)
     }
 }

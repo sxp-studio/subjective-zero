@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The agent-graph model: a declared topology wiring authored steps. A node takes exactly one
-// of four forms — `message` (the graph's one entry: a delivered message leaves by the port
-// bearing its kind), `step` (compiled code, outcomes exported by the step itself), `turn` (a
-// full agent turn whose body is a mustache brief; outcomes fixed ok/error), `dispatch` (fan
-// work out as messages; send-and-conclude, so no out-edges). Lives in SZCore because SZUI
-// draws graphs and may not import SZAI; everything here is pure data + shape validation.
+// of five forms — `message` (the graph's one entry: a delivered message leaves by the port
+// bearing its kind), `step` (compiled code, outcomes exported by the step itself), `ask`
+// (a prompt file + declared outcomes: ONE structured model query routes, no code), `turn`
+// (a full agent turn whose body is a mustache brief; outcomes fixed ok/error), `dispatch`
+// (fan work out to another agent, WAIT for the set, settle onward). Lives in SZCore because
+// SZUI draws graphs and may not import SZAI; everything here is pure data + shape validation.
 //
 // THE MESSAGE NODE IS WHY THE GRAPH IS ONE PICTURE. An earlier model kept `entry` as a map
-// from kind to node, which meant a graph with two doors drew as two disconnected fragments —
-// the fleet's `settled` reply in particular had nowhere to enter but a second entry key, so
-// the retry lane floated unattached to anything. Making the door a NODE puts every kind the
-// agent accepts on one card with one port each, and `unreachable` below refuses a fragment
-// at load rather than leaving it to be noticed on a canvas.
+// from kind to node, which meant a graph with two doors drew as two disconnected fragments.
+// Making the door a NODE puts every kind the agent accepts on one card with one port each,
+// and `unreachable` below refuses a fragment at load rather than leaving it to be noticed
+// on a canvas. ONE MESSAGE IS ONE TRAVERSAL: a dispatch waits for its fleet and settles
+// onward over its own edge, so nothing ever re-enters a graph — the whole journey from
+// delivery to conclusion is a single connected walk of this document.
 //
 // Validation is split by what it can see: `defects()` here checks graph SHAPE alone. Checks
 // needing pack context — a step's declared outcomes, template existence, dispatch-target
@@ -24,15 +26,8 @@ public struct SZAgentGraph: Sendable, Equatable {
     /// Optional display name / picker hint (drawn by the panel; never routing input).
     public var label: String?
     public var hint: String?
-    public var caps: Caps?
     public var nodes: [Node]
     public var edges: [Edge]
-
-    public struct Caps: Codable, Sendable, Equatable {
-        /// How many settled re-entries this graph buys. The host ceiling still applies.
-        public var rounds: Int?
-        public init(rounds: Int? = nil) { self.rounds = rounds }
-    }
 
     public struct Node: Sendable, Equatable, Identifiable {
         public var id: String
@@ -53,8 +48,40 @@ public struct SZAgentGraph: Sendable, Equatable {
         /// A compiled `Step.swift` in the agent's pack; `name` is its folder. Outcomes come
         /// from the step's own exported declaration, attached at pack load.
         case step(name: String)
+        /// A structured model query authored as data: the prompt file is the question, the
+        /// declared outcomes are the answers, and the reply routes — the declarative twin
+        /// of a code step's `askModel`.
+        case ask(Ask)
         case turn(Turn)
         case dispatch(Dispatch)
+    }
+
+    /// The ask form's whole configuration. The host renders `prompt` against the lane's
+    /// facts (the same tokens a turn brief speaks), runs ONE stateless completion, decodes
+    /// `{"outcome": …}` from the reply — with the repair loop on a mismatch — and routes.
+    /// `effects` may name host actions per outcome, validated against the lane's effect
+    /// catalog at load: config, not code, so the common ruling needs no `Step.swift`.
+    public struct Ask: Codable, Sendable, Equatable {
+        /// The question, a pack-relative `.md.mustache` path — the template IS the body.
+        public var prompt: String
+        /// The answers the model may give, in display order — each may carry an edge.
+        public var outcomes: [String]
+        /// Host actions per outcome, performed before the edge routes (a chat ruling's
+        /// `build` → `requestBuild` is the shipped example).
+        public var effects: [String: [String]]
+
+        public init(prompt: String, outcomes: [String], effects: [String: [String]] = [:]) {
+            self.prompt = prompt
+            self.outcomes = outcomes
+            self.effects = effects
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            prompt = try container.decode(String.self, forKey: .prompt)
+            outcomes = try container.decode([String].self, forKey: .outcomes)
+            effects = try container.decodeIfPresent([String: [String]].self, forKey: .effects) ?? [:]
+        }
     }
 
     /// The message form carries no configuration — WHICH kinds it accepts is said by the
@@ -108,9 +135,13 @@ public struct SZAgentGraph: Sendable, Equatable {
             self.to = to
             self.items = items
         }
-        /// Send-and-conclude: the `settled` reply re-enters the graph via the machine, so a
-        /// dispatch node has exactly one outcome and may have no out-edges.
-        public static let outcomes: Set<String> = ["sent"]
+        /// A dispatch WAITS: the orders go out, the traversal holds at this node while the
+        /// set works, and when the last item lands (or the watchdog synthesizes the
+        /// stragglers) the node produces `settled` and routes its one edge — or ends the
+        /// traversal right here when nothing is wired, which is how "no retry" is spelled.
+        /// A settled edge that loops back MUST be leashed (`maxTraversals`): the leash IS
+        /// the retry budget, using the same bound every other loop already speaks.
+        public static let outcomes: Set<String> = ["settled"]
     }
 
     public struct Edge: Codable, Sendable, Equatable {
@@ -128,11 +159,10 @@ public struct SZAgentGraph: Sendable, Equatable {
     }
 
     public init(name: String, label: String? = nil, hint: String? = nil,
-                caps: Caps? = nil, nodes: [Node], edges: [Edge]) {
+                nodes: [Node], edges: [Edge]) {
         self.name = name
         self.label = label
         self.hint = hint
-        self.caps = caps
         self.nodes = nodes
         self.edges = edges
     }
@@ -190,19 +220,16 @@ public struct SZAgentGraph: Sendable, Equatable {
         return out
     }
 
-    /// The FACTS lanes reaching `id` — `kinds(reaching:)` folded through `SZMessageKind.lane`,
-    /// so a node shared by the build lane and its settled re-entry counts as ONE lane and
-    /// stays typeable. This is what the pack gate checks a step's facts kind against.
-    public func lanes(reaching id: String) -> Set<SZMessageKind> {
-        Set(kinds(reaching: id).map(\.lane))
-    }
 }
 
 // MARK: - Wire format
 
 extension SZAgentGraph: Codable {
     enum CodingKeys: String, CodingKey {
-        case name, label, hint, caps, nodes, edges
+        case name, label, hint, nodes, edges
+        /// Retired with the settled re-entry: retry depth is the settled edge's own
+        /// `maxTraversals` leash now, not a graph-level budget.
+        case caps
         /// Retired keys, decoded ONLY to refuse them by name. A pack written against the
         /// entry-map era is not migrated (this repo does not migrate); it is told what to
         /// do, because the alternative is a file that loads and silently routes nothing.
@@ -222,7 +249,12 @@ extension SZAgentGraph: Codable {
         name = try container.decode(String.self, forKey: .name)
         label = try container.decodeIfPresent(String.self, forKey: .label)
         hint = try container.decodeIfPresent(String.self, forKey: .hint)
-        caps = try container.decodeIfPresent(Caps.self, forKey: .caps)
+        if container.contains(.caps) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .caps, in: container,
+                debugDescription: "'caps' is retired — bound the dispatch's 'settled' edge "
+                    + "instead (\"maxTraversals\": 2 buys two retry rounds)")
+        }
         nodes = try container.decode([Node].self, forKey: .nodes)
         edges = try container.decodeIfPresent([Edge].self, forKey: .edges) ?? []
     }
@@ -232,7 +264,6 @@ extension SZAgentGraph: Codable {
         try container.encode(name, forKey: .name)
         try container.encodeIfPresent(label, forKey: .label)
         try container.encodeIfPresent(hint, forKey: .hint)
-        try container.encodeIfPresent(caps, forKey: .caps)
         try container.encode(nodes, forKey: .nodes)
         try container.encode(edges, forKey: .edges)
     }
@@ -240,7 +271,7 @@ extension SZAgentGraph: Codable {
 
 extension SZAgentGraph.Node: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, title, onMessage, step, turn, dispatch
+        case id, title, onMessage, step, ask, turn, dispatch
     }
 
     public init(from decoder: Decoder) throws {
@@ -256,6 +287,9 @@ extension SZAgentGraph.Node: Codable {
         if let name = try container.decodeIfPresent(String.self, forKey: .step) {
             forms.append(.step(name: name))
         }
+        if let ask = try container.decodeIfPresent(SZAgentGraph.Ask.self, forKey: .ask) {
+            forms.append(.ask(ask))
+        }
         if let turn = try container.decodeIfPresent(SZAgentGraph.Turn.self, forKey: .turn) {
             forms.append(.turn(turn))
         }
@@ -266,7 +300,7 @@ extension SZAgentGraph.Node: Codable {
             throw DecodingError.dataCorruptedError(
                 forKey: .id, in: container,
                 debugDescription: "node '\(id)' must declare exactly one of "
-                    + "onMessage/step/turn/dispatch")
+                    + "onMessage/step/ask/turn/dispatch")
         }
         form = only
     }
@@ -278,6 +312,7 @@ extension SZAgentGraph.Node: Codable {
         switch form {
         case .message(let message): try container.encode(message, forKey: .onMessage)
         case .step(let name): try container.encode(name, forKey: .step)
+        case .ask(let ask): try container.encode(ask, forKey: .ask)
         case .turn(let turn): try container.encode(turn, forKey: .turn)
         case .dispatch(let dispatch): try container.encode(dispatch, forKey: .dispatch)
         }
@@ -299,12 +334,13 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
     /// A node reachable from two FACTS lanes. Steps and briefs are typed to one lane's
     /// facts, so a node serving two has no checkable type.
     case laneImpure(node: String, lanes: [String])
+    /// An ask that declares no outcomes — a question whose every answer would defect.
+    case askWithoutOutcomes(node: String)
     case danglingEdge(from: String, to: String)
     case duplicateEdge(from: String, outcome: String)
-    case edgeFromDispatch(node: String)
+    case edgeFromDispatch(node: String, outcome: String)
     case undeclaredOutcome(node: String, outcome: String)
     case nonPositiveBound(from: String, outcome: String)
-    case nonPositiveRounds(Int)
     case unboundedCycle(nodes: [String])
 
     public var description: String {
@@ -324,19 +360,18 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
         case .laneImpure(let node, let lanes):
             "'\(node)' is reachable from both \(lanes.joined(separator: " and ")) — a node "
                 + "reads one kind's facts, so it belongs to one lane"
+        case .askWithoutOutcomes(let node):
+            "ask '\(node)' declares no outcomes — the model would have nothing to answer"
         case .danglingEdge(let from, let to):
             "edge \(from) → \(to) names an unknown node"
         case .duplicateEdge(let from, let outcome):
             "two edges leave '\(from)' on '\(outcome)' — the second can never route"
-        case .edgeFromDispatch(let node):
-            "dispatch '\(node)' sends and concludes — it cannot have an out-edge"
+        case .edgeFromDispatch(let node, let outcome):
+            "dispatch '\(node)' produces only 'settled' — an edge on '\(outcome)' can never route"
         case .undeclaredOutcome(let node, let outcome):
             "'\(node)' never produces outcome '\(outcome)'"
         case .nonPositiveBound(let from, let outcome):
             "edge \(from) on '\(outcome)' declares a bound below 1"
-        case .nonPositiveRounds(let rounds):
-            "caps.rounds is \(rounds) — 'no re-entries' is spelled by leaving the message "
-                + "node's 'settled' port unwired"
         case .unboundedCycle(let nodes):
             "cycle \(nodes.joined(separator: " → ")) never crosses a bounded edge"
         }
@@ -366,10 +401,6 @@ extension SZAgentGraph {
         default: defects.append(.severalMessageNodes(ids: doors.map(\.id).sorted()))
         }
 
-        if let rounds = caps?.rounds, rounds < 1 {
-            defects.append(.nonPositiveRounds(rounds))
-        }
-
         var routes: Set<String> = []
         for edge in edges {
             if !routes.insert("\(edge.from)\u{0}\(edge.outcome)").inserted {
@@ -386,9 +417,11 @@ extension SZAgentGraph {
                 defects.append(.edgeIntoMessage(from: edge.from))
             }
             switch node(edge.from)?.form {
-            case .dispatch:
-                defects.append(.edgeFromDispatch(node: edge.from))
+            case .dispatch where !Dispatch.outcomes.contains(edge.outcome):
+                defects.append(.edgeFromDispatch(node: edge.from, outcome: edge.outcome))
             case .turn where !Turn.outcomes.contains(edge.outcome):
+                defects.append(.undeclaredOutcome(node: edge.from, outcome: edge.outcome))
+            case .ask(let ask) where !ask.outcomes.contains(edge.outcome):
                 defects.append(.undeclaredOutcome(node: edge.from, outcome: edge.outcome))
             case .message where !Message.outcomes.contains(edge.outcome):
                 // Catches both "that is not a message kind" and "steer never enters a
@@ -396,6 +429,12 @@ extension SZAgentGraph {
                 defects.append(.undeclaredOutcome(node: edge.from, outcome: edge.outcome))
             default:
                 break
+            }
+        }
+
+        for node in nodes {
+            if case .ask(let ask) = node.form, ask.outcomes.isEmpty {
+                defects.append(.askWithoutOutcomes(node: node.id))
             }
         }
 
@@ -410,7 +449,7 @@ extension SZAgentGraph {
                 .filter { $0 != door && kinds(reaching: $0).isEmpty }
             if !stranded.isEmpty { defects.append(.unreachable(nodes: stranded.sorted())) }
             for node in nodes where node.id != door {
-                let lanes = lanes(reaching: node.id)
+                let lanes = kinds(reaching: node.id)
                 if lanes.count > 1 {
                     defects.append(.laneImpure(node: node.id,
                                                lanes: lanes.map(\.rawValue).sorted()))

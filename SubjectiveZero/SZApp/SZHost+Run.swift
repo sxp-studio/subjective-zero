@@ -564,17 +564,15 @@ extension SZHost {
         return url
     }
 
-    /// The graph orchestrator's thread-machine bounds. No rounds knob exists on main, so the
-    /// ceiling is a plain constant; the per-set dispatch deadline mirrors the coding-turn
+    /// The set supervisor's bounds. The per-set dispatch deadline mirrors the coding-turn
     /// budgets (`SZAgentTurnBudgets`: `SZ_AGENT_TIMEOUT` wall + `SZ_AGENT_INACTIVITY_TIMEOUT`
     /// grace), so the set's watchdog can never fire before a healthy turn's own budget would
-    /// have ended it.
+    /// have ended it. (Retry depth is no longer a bound here — the settled edge's leash in
+    /// the graph is the budget, and the gate refuses an unleashed settled loop at load.)
     nonisolated static func graphOrchestratorBounds() -> SZThreadMachine.Bounds {
         SZThreadMachine.Bounds(
-            roundCeiling: 8,
             dispatchDeadline: .seconds(SZAgentTurnBudgets.codingTimeout
-                + SZAgentTurnBudgets.codingInactivityTimeout),
-            defaultRounds: 1)
+                + SZAgentTurnBudgets.codingInactivityTimeout))
     }
 
     /// Build the graph orchestrator for one run: the host's step runtime behind the evaluation
@@ -610,9 +608,6 @@ extension SZHost {
             },
             onConcluded: { [weak self] id, ending in
                 self?.concludeAgentGraphRun(id, ending)
-            },
-            onTally: { [weak self] id, settled, total, failed in
-                self?.amendAgentGraphRunTally(id, settled: settled, total: total, failed: failed)
             },
             onSettled: { summary in
                 Self.appendGraphTrace([

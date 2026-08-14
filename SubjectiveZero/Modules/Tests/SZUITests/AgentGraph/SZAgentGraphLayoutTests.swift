@@ -37,11 +37,10 @@ private func entry(_ ordinal: Int, _ node: String, phase: SZAgentGraphRun.Entry.
                           startedAt: started.map(Date.init(timeIntervalSinceReferenceDate:)))
 }
 
-private func record(_ entries: [SZAgentGraphRun.Entry],
-                    tally: SZAgentGraphRun.Tally? = nil) -> SZAgentGraphRun {
+private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     SZAgentGraphRun(id: UUID(), agent: "director", graphName: "build", kind: .build,
                     startedAt: Date(timeIntervalSinceReferenceDate: 0),
-                    trace: entries, tally: tally)
+                    trace: entries)
 }
 
 // MARK: - Faces (the era's derivation)
@@ -95,10 +94,11 @@ private func record(_ entries: [SZAgentGraphRun.Entry],
 
 @Test func revisitsAndDispatchTalliesGrowTheSubheaderRow() {
     // `check` visited twice → BOTH its entries carry the visit mark; the dispatch entry
-    // carries the record's tally. The frame must grow with the row or sockets land a line
-    // above it.
-    let run = record([entry(1, "check"), entry(2, "send"), entry(3, "check")],
-                     tally: .init(settled: 2, total: 4, failed: 0))
+    // carries ITS OWN tally (per visit, since a retry loop's second set is its own). The
+    // frame must grow with the row or sockets land a line above it.
+    var dispatchVisit = entry(2, "send")
+    dispatchVisit.tally = .init(settled: 2, total: 4, failed: 0)
+    let run = record([entry(1, "check"), dispatchVisit, entry(3, "check")])
     for e in run.trace {
         let face = SZAgentGraphLayout.runFace(for: e, in: graph)
         #expect(SZAgentGraphLayout.hasSubheader(e, in: run, face: face))
@@ -219,8 +219,22 @@ private func record(_ entries: [SZAgentGraphRun.Entry],
 @Test func theDoorDrawsOnePortPerRoutedKindInCauseOrder() {
     let face = SZAgentGraphLayout.face(of: graph.node("message")!, in: graph)
     #expect(face.form == .message)
-    // A build opens the thread, its settled reply answers it — cause order, not alphabet.
-    #expect(face.outcomes == ["build", "settled"])
+    #expect(face.outcomes == ["build"])
+    // Cause order across the deliverable kinds, not alphabet: work opens threads before
+    // conversation, and the fleet's items follow the request lane they serve.
+    let door = SZAgentGraph.Node(id: "m", form: .message(.init()))
+    let wide = SZAgentGraph(name: "wide", nodes: [
+        door,
+        .init(id: "a", form: .turn(.init(brief: "prompts/a.md.mustache"))),
+        .init(id: "b", form: .turn(.init(brief: "prompts/b.md.mustache"))),
+        .init(id: "c", form: .turn(.init(brief: "prompts/c.md.mustache"))),
+    ], edges: [
+        .init(from: "m", outcome: "chat", to: "a"),
+        .init(from: "m", outcome: "item", to: "b"),
+        .init(from: "m", outcome: "request", to: "c"),
+    ])
+    let wideFace = SZAgentGraphLayout.face(of: door, in: wide)
+    #expect(wideFace.outcomes == ["request", "chat", "item"])
     // The door costs nothing, so it never carries a wall-time strip.
     #expect(!SZAgentGraphLayout.spends(.message))
 }

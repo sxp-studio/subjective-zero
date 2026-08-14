@@ -23,7 +23,7 @@ import SZCore
 public struct SZAgentGraphFace: Equatable, Sendable {
     /// The three forms, re-stated flat so renderers can switch without pattern-matching
     /// payloads they don't read.
-    public enum Form: Equatable, Sendable { case message, step, turn, dispatch }
+    public enum Form: Equatable, Sendable { case message, step, ask, turn, dispatch }
     /// What the card's source affordance opens: the step's authored Swift, or the brief
     /// template that IS a turn's body. A value, not an action — the host resolves the file.
     public enum Source: Equatable, Sendable {
@@ -104,6 +104,12 @@ public enum SZAgentGraphLayout {
                                     symbol: "curlybraces",
                                     outcomes: wired.isEmpty ? ["done"] : wired,
                                     source: .step(name: name))
+        case .ask(let ask):
+            // The declared answers, in the author's order — each is a port whether or not
+            // an edge is wired (an unwired ruling honestly ends the traversal).
+            return SZAgentGraphFace(form: .ask, title: node.title ?? briefName(ask.prompt),
+                                    symbol: "questionmark.bubble", outcomes: ask.outcomes,
+                                    source: .brief(path: ask.prompt))
         case .turn(let turn):
             // Fixed process-truth rows, in the reading order the model documents.
             return SZAgentGraphFace(form: .turn, title: node.title ?? briefName(turn.brief),
@@ -126,8 +132,7 @@ public enum SZAgentGraphLayout {
         case .request: 1
         case .chat: 2
         case .item: 3
-        case .settled: 4
-        case .steer: 5
+        case .steer: 4
         }
     }
 
@@ -177,7 +182,7 @@ public enum SZAgentGraphLayout {
     /// pixels it draws can never disagree.
     public static func hasSubheader(_ entry: SZAgentGraphRun.Entry, in record: SZAgentGraphRun,
                                     face: SZAgentGraphFace) -> Bool {
-        record.visits(of: entry.node) > 1 || (face.form == .dispatch && record.tally != nil)
+        record.visits(of: entry.node) > 1 || (face.form == .dispatch && entry.tally != nil)
     }
 
     /// Whether a Run entry's card carries the stats footer. A spending step gets it from its
@@ -190,7 +195,7 @@ public enum SZAgentGraphLayout {
     /// Which forms SPEND — the ones whose cards carry wall time. A compiled step settles in
     /// sub-millisecond noise and reaches no agent; stats there would be decoration.
     public static func spends(_ form: SZAgentGraphFace.Form) -> Bool {
-        form == .turn || form == .dispatch
+        form == .turn || form == .dispatch || form == .ask
     }
 
     // MARK: - The Run view's chain

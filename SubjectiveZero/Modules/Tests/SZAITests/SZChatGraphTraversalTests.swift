@@ -3,12 +3,11 @@
 // host adapter, over the SHIPPED pack (graph + templates): the resuming fork renders the
 // SAME bytes the retired direct render calls produced, the turn streams through the
 // injected runner, and the route-reply ruling ends the traversal — answer/plan bare,
-// build with the requestBuild effect. The step SEAM is scripted to mirror the shipped
-// step's contract (the compiled step itself is pinned in SZRuntimeTests'
-// `SZShippedPackStepTests`); what THIS suite pins is the wiring around it — above all that
-// the `draftedWork` fact is diffed LIVE at route-reply's own post-turn evaluation, and
-// that the mechanical build spends no query while the typed ruling spends exactly one,
-// served through the real query service over the pack's route-reply template.
+// build with the requestBuild effect. `resuming` is the one scripted step; route-reply is
+// an ASK NODE now — engine-native, no compiled step — so what this suite pins is the whole
+// declarative lane: the pack's route-reply template rendered against the live facts, ONE
+// completion served through the real query service, the {"outcome"} ruling routed, and
+// only `build` carrying the effect.
 import Foundation
 import Synchronization
 import Testing
@@ -23,16 +22,10 @@ private let shippedPacksRoot = URL(filePath: #filePath)
 
 // MARK: - The scripted step seam (mirrors the shipped steps' contracts)
 
-/// `resuming` answers the fact; `route-reply` answers `build`+effect mechanically on
-/// `draftedWork`, else asks ONE typed ruling through the engine-provided ask closure —
-/// the same contract the compiled steps export, so the traversal shape is the real one.
+/// `resuming` answers the fact — the ONE compiled step this graph still carries; the
+/// route-reply ruling is the engine's own ask form and needs nothing scripted here.
 private struct ChatSteps: SZStepRunning {
-    private struct Facts: Decodable {
-        var resuming: Bool
-        var draftedWork: Bool
-    }
-
-    private struct Ruling: Decodable { var kind: String }
+    private struct Facts: Decodable { var resuming: Bool }
 
     func evaluate(agent: String, step: String, factsJSON: String,
                   ask: @escaping @Sendable (String) async throws -> String) async -> SZStepReport {
@@ -42,19 +35,6 @@ private struct ChatSteps: SZStepRunning {
         switch step {
         case "resuming":
             return SZStepReport(outcome: facts.resuming ? "yes" : "no")
-        case "route-reply":
-            if facts.draftedWork {
-                return SZStepReport(outcome: "build", effects: ["requestBuild"])
-            }
-            do {
-                let reply = try await ask(#"{"template": "route-reply", "attempt": 0}"#)
-                let kind = try JSONDecoder().decode(Ruling.self, from: Data(reply.utf8)).kind
-                return kind == "build"
-                    ? SZStepReport(outcome: "build", effects: ["requestBuild"])
-                    : SZStepReport(outcome: kind)
-            } catch {
-                return SZStepReport(failure: String(describing: error))
-            }
         default:
             return SZStepReport(failure: "unknown step '\(step)'")
         }
@@ -105,14 +85,13 @@ private final class ChatWorld {
 
     /// `resuming` picks the fork; `rulingReply` scripts the query executor; `turnDrafts`
     /// makes the TURN add a fresh prompt node to the live graph (the drafted-work case).
-    init(resuming: Bool, rulingReply: String = #"{"kind": "answer"}"#,
+    init(resuming: Bool, rulingReply: String = #"{"outcome": "answer"}"#,
          turnDrafts: Bool = false) throws {
         let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
         let director = try #require(loaded.packs.first { $0.id == "director" })
         let graph = try #require(director.graph(routing: .chat))
         let attachments = [
             "resuming": SZStepAttachment(outcomes: ["yes", "no"]),
-            "route-reply": SZStepAttachment(outcomes: ["answer", "build", "plan"]),
         ]
         let renderer = SZBriefRenderer(packRoot: shippedPacksRoot)
         let router = SZIdentityRouter(choice: SZModelChoice(providerID: "claude",
@@ -184,42 +163,38 @@ struct SZChatGraphTraversalTests {
             == SZDirectorPrompt.renderResumedChat(graph: world.box.graph, message: "make it warmer"))
     }
 
-    @Test func draftedWorkFiresRequestBuildWithoutSpendingAQuery() async throws {
-        let world = try ChatWorld(resuming: false, turnDrafts: true)
-        let result = await world.engine.run(kind: .chat)
-        #expect(result.conclusion == .ended(node: "route-reply", outcome: "build"))
-        // The mechanical lane: the effect fired, and the ask executor NEVER ran.
-        #expect(world.effects.values == ["requestBuild"])
-        #expect(world.queryPrompts.values.isEmpty)
-    }
-
-    @Test func preExistingDraftsDoNotReadAsThisTurnsWork() async throws {
-        // The fixture graph already carries an unimplemented prompt node; the turn adds
-        // nothing — so route-reply must ASK, not auto-build off work it never drafted.
-        let world = try ChatWorld(resuming: false, rulingReply: #"{"kind": "answer"}"#)
-        let result = await world.engine.run(kind: .chat)
-        #expect(result.conclusion == .ended(node: "route-reply", outcome: "answer"))
-        #expect(world.queryPrompts.values.count == 1)
-        #expect(world.effects.values.isEmpty)
-    }
-
     @Test func aTypedBuildRulingFiresTheEffectThroughOneServedQuery() async throws {
-        let world = try ChatWorld(resuming: false, rulingReply: #"{"kind": "build"}"#)
+        let world = try ChatWorld(resuming: false, rulingReply: #"{"outcome": "build"}"#)
         let result = await world.engine.run(kind: .chat)
         #expect(result.conclusion == .ended(node: "route-reply", outcome: "build"))
         #expect(world.effects.values == ["requestBuild"])
-        // One completion, rendered from the PACK's route-reply template against the pinned
+        // One completion, rendered from the PACK's route-reply template against the live
         // facts — the user's message travels into the classification ask.
         let prompts = world.queryPrompts.values
         #expect(prompts.count == 1)
         #expect(prompts.first?.contains("make it warmer") == true)
-        #expect(prompts.first?.contains(#"{"kind": "answer"}"#) == true)
+        #expect(prompts.first?.contains(#"{"outcome": "answer"}"#) == true)
     }
 
     @Test func aPlanRulingEndsTheTraversalWithNoEffect() async throws {
-        let world = try ChatWorld(resuming: false, rulingReply: #"{"kind": "plan"}"#)
+        let world = try ChatWorld(resuming: false, rulingReply: #"{"outcome": "plan"}"#)
         let result = await world.engine.run(kind: .chat)
         #expect(result.conclusion == .ended(node: "route-reply", outcome: "plan"))
+        #expect(world.effects.values.isEmpty)
+    }
+
+    @Test func aMalformedRulingIsRepairedOnceThenRuled() async throws {
+        // The ask form's repair loop: prose first, the typed object on the re-ask — two
+        // completions total, the second carrying the repair framing.
+        let world = try ChatWorld(resuming: false, rulingReply: "let me think about that")
+        let result = await world.engine.run(kind: .chat)
+        guard case .defect(let node, _) = result.conclusion else {
+            Issue.record("prose twice must defect honestly, got \(result.conclusion)")
+            return
+        }
+        #expect(node == "route-reply")
+        #expect(world.queryPrompts.values.count == 2)
+        #expect(world.queryPrompts.values.last?.contains("previous reply did not decode") == true)
         #expect(world.effects.values.isEmpty)
     }
 }

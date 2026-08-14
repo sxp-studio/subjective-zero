@@ -16,8 +16,10 @@ private func run(_ started: TimeInterval, live: Bool = false,
 
 private func entry(_ ordinal: Int, node: String = "step",
                    phase: SZAgentGraphRun.Entry.Phase = .running,
-                   outcome: String? = nil) -> SZAgentGraphRun.Entry {
-    SZAgentGraphRun.Entry(ordinal: ordinal, node: node, phase: phase, outcome: outcome)
+                   outcome: String? = nil,
+                   tally: SZAgentGraphRun.Tally? = nil) -> SZAgentGraphRun.Entry {
+    SZAgentGraphRun.Entry(ordinal: ordinal, node: node, phase: phase, outcome: outcome,
+                          tally: tally)
 }
 
 // MARK: - Ordering and the caps
@@ -164,22 +166,25 @@ private func entry(_ ordinal: Int, node: String = "step",
     #expect(record.conclusion == .ended)
 }
 
-// MARK: - The sanctioned post-seal write
+// MARK: - The tally on the visit
 
-@Test func amendDispatchTallyWritesThroughTheSeal() {
+@Test func aDispatchVisitsTallyRidesItsEntryAndSurvivesReEmits() {
+    // The dispatch waits inside the traversal now, so the tally lands BEFORE the seal —
+    // per visit, through the ordinary note flow. A re-emit without a tally (a phase
+    // change racing a progress note) never erases the count a progress note wrote.
     var record = run(0, live: true)
-    record.note(entry(1, node: "dispatch", phase: .done, outcome: "sent"))
+    record.note(entry(1, node: "dispatch", phase: .running,
+                      tally: .init(settled: 1, total: 4, failed: 0)))
+    record.note(entry(1, node: "dispatch", phase: .running))
+    #expect(record.trace[0].tally == SZAgentGraphRun.Tally(settled: 1, total: 4, failed: 0))
+    record.note(entry(1, node: "dispatch", phase: .done, outcome: "settled",
+                      tally: .init(settled: 4, total: 4, failed: 1)))
+    #expect(record.trace[0].tally == SZAgentGraphRun.Tally(settled: 4, total: 4, failed: 1))
     record.seal(conclusion: .ended, at: Date(timeIntervalSinceReferenceDate: 100))
-    // The set settles minutes after the sender sealed — the tally must still land, and
-    // nothing else may move.
-    record.amendDispatchTally(settled: 3, total: 4, failed: 1)
-    #expect(record.tally == SZAgentGraphRun.Tally(settled: 3, total: 4, failed: 1))
-    #expect(record.conclusion == .ended)
-    #expect(record.endedAt == Date(timeIntervalSinceReferenceDate: 100))
-    #expect(record.trace.count == 1)
-    // And it stays amendable — the machine re-counts on every settle and timeout.
-    record.amendDispatchTally(settled: 4, total: 4, failed: 1)
-    #expect(record.tally?.settled == 4)
+    // Sealed means SEALED — there is no post-seal write left in the model.
+    record.note(entry(1, node: "dispatch", phase: .done, outcome: "settled",
+                      tally: .init(settled: 4, total: 4, failed: 2)))
+    #expect(record.trace[0].tally?.failed == 1)
 }
 
 // MARK: - The ending mapping (SZTraversalEnding → the archive's own vocabulary)

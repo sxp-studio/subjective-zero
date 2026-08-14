@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One RUN of an agent graph — a single graph traversal, as a record: which agent traversed
-// which graph on which delivered kind, when, the ordered trace of what it did, how it
-// concluded, and (for a traversal that dispatched) how its set settled. The Agent Graph
-// panel's RUNS list is `[SZAgentGraphRun]`; the host begins a record as a traversal starts,
-// feeds it trace entries from the engine's notes, and seals it on the traversal's conclusion.
-// The RULES live here as mutations so they are testable without a host: the sealed-record
-// guard, the stamp-preserving merge, the idempotent seal, and `amendDispatchTally` — the ONE
-// sanctioned post-seal write.
+// One RUN of an agent graph — a single message's whole journey, as a record: which agent
+// received which kind, when, the ordered trace of everything it did (a dispatch visit
+// carries its fleet's tally ON the entry, live while the set works), and how it concluded.
+// The Agent Graph panel's RUNS list is `[SZAgentGraphRun]`; the host begins a record as a
+// delivery starts, feeds it trace entries from the engine's notes, and seals it on the
+// conclusion. The RULES live here as mutations so they are testable without a host: the
+// sealed-record guard, the stamp-preserving merge, and the idempotent seal. Nothing writes
+// a sealed record — the dispatch now waits inside its traversal, so the tally lands before
+// the seal, and the post-seal amend the old send-and-conclude model needed is gone.
 //
 // The trace entry is deliberately this module's OWN value: the engine's note type lives in
 // SZAI, which neither SZCore nor SZUI may import — the host maps one onto the other at its
@@ -36,17 +37,11 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     public var trace: [Entry]
     /// How the traversal ended — nil while live, stamped exactly once by `seal`.
     public var conclusion: Conclusion?
-    /// A dispatching traversal's settlement tally. The traversal that SENT seals seconds
-    /// later; its set settles minutes after that — `amendDispatchTally` keeps this current
-    /// so the record reads "3/4 · 1 failed" rather than "0/4" forever.
-    public var tally: Tally?
-
     public var isLive: Bool { endedAt == nil }
 
     public init(id: UUID, agent: String, graphName: String, kind: SZMessageKind,
                 thread: UUID? = nil, item: String? = nil, startedAt: Date = Date(),
-                endedAt: Date? = nil, trace: [Entry] = [], conclusion: Conclusion? = nil,
-                tally: Tally? = nil) {
+                endedAt: Date? = nil, trace: [Entry] = [], conclusion: Conclusion? = nil) {
         self.id = id
         self.agent = agent
         self.graphName = graphName
@@ -57,7 +52,6 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         self.endedAt = endedAt
         self.trace = trace
         self.conclusion = conclusion
-        self.tally = tally
     }
 
     // MARK: - The trace entry
@@ -75,6 +69,10 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         public var outcome: String?
         /// A failed entry's reason — agent-reported words, preserved verbatim.
         public var detail: String?
+        /// A dispatch visit's fleet tally, amended on every settle WHILE the visit runs —
+        /// per entry, because a retry loop visits the dispatch twice and each visit owns
+        /// its own set.
+        public var tally: Tally?
         /// HOST-stamped wall clock (`note` stamps on first sight / settle) — never
         /// engine-stamped, so SZAI's outputs stay date-free. Persisted with the trace.
         public var startedAt: Date?
@@ -89,12 +87,14 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         }
 
         public init(ordinal: Int, node: String, phase: Phase, outcome: String? = nil,
-                    detail: String? = nil, startedAt: Date? = nil, endedAt: Date? = nil) {
+                    detail: String? = nil, tally: Tally? = nil,
+                    startedAt: Date? = nil, endedAt: Date? = nil) {
             self.ordinal = ordinal
             self.node = node
             self.phase = phase
             self.outcome = outcome
             self.detail = detail
+            self.tally = tally
             self.startedAt = startedAt
             self.endedAt = endedAt
         }
@@ -108,7 +108,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         // Tolerant both ways: an entry written before an optional field decodes with its
         // default, and an absent value is NOT encoded — no key that says nothing.
         private enum CodingKeys: String, CodingKey {
-            case ordinal, node, phase, outcome, detail, startedAt, endedAt
+            case ordinal, node, phase, outcome, detail, tally, startedAt, endedAt
         }
 
         public init(from decoder: Decoder) throws {
@@ -118,6 +118,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             phase = try c.decodeIfPresent(Phase.self, forKey: .phase) ?? .done
             outcome = try c.decodeIfPresent(String.self, forKey: .outcome)
             detail = try c.decodeIfPresent(String.self, forKey: .detail)
+            tally = try c.decodeIfPresent(Tally.self, forKey: .tally)
             startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
             endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
         }
@@ -129,6 +130,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             try c.encode(phase, forKey: .phase)
             try c.encodeIfPresent(outcome, forKey: .outcome)
             try c.encodeIfPresent(detail, forKey: .detail)
+            try c.encodeIfPresent(tally, forKey: .tally)
             try c.encodeIfPresent(startedAt, forKey: .startedAt)
             try c.encodeIfPresent(endedAt, forKey: .endedAt)
         }
@@ -174,7 +176,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     // MARK: - Codable (tolerant like the entry)
 
     private enum CodingKeys: String, CodingKey {
-        case id, agent, graphName, kind, thread, item, startedAt, endedAt, trace, conclusion, tally
+        case id, agent, graphName, kind, thread, item, startedAt, endedAt, trace, conclusion
     }
 
     public init(from decoder: Decoder) throws {
@@ -182,14 +184,15 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         id = try c.decode(UUID.self, forKey: .id)
         agent = try c.decode(String.self, forKey: .agent)
         graphName = try c.decode(String.self, forKey: .graphName)
-        kind = try c.decodeIfPresent(SZMessageKind.self, forKey: .kind) ?? .build
+        // Tolerant of retired kinds: a `settled`-era archive record reads as build-lane
+        // history rather than sinking the whole sidecar.
+        kind = (try? c.decodeIfPresent(SZMessageKind.self, forKey: .kind)) ?? nil ?? .build
         thread = try c.decodeIfPresent(UUID.self, forKey: .thread)
         item = try c.decodeIfPresent(String.self, forKey: .item)
         startedAt = try c.decode(Date.self, forKey: .startedAt)
         endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
         trace = try c.decodeIfPresent([Entry].self, forKey: .trace) ?? []
         conclusion = try c.decodeIfPresent(Conclusion.self, forKey: .conclusion)
-        tally = try c.decodeIfPresent(Tally.self, forKey: .tally)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -204,7 +207,6 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         try c.encodeIfPresent(endedAt, forKey: .endedAt)
         try c.encode(trace, forKey: .trace)
         try c.encodeIfPresent(conclusion, forKey: .conclusion)
-        try c.encodeIfPresent(tally, forKey: .tally)
     }
 
     // MARK: - The traversal feeding its record
@@ -220,6 +222,8 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         if let i = trace.firstIndex(where: { $0.ordinal == entry.ordinal && $0.node == entry.node }) {
             merged.startedAt = trace[i].startedAt
             merged.endedAt = trace[i].endedAt
+            // A re-emit without a tally never erases one a progress note wrote.
+            if merged.tally == nil { merged.tally = trace[i].tally }
             if merged.phase != .running, merged.endedAt == nil { merged.endedAt = now }
             trace[i] = merged
         } else {
@@ -243,14 +247,6 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             self.conclusion = conclusion
         }
         endedAt = now
-    }
-
-    /// Amend the dispatch settlement tally — the ONE sanctioned post-seal write. The
-    /// traversal that sent the set ends and seals; its items settle long after, and the
-    /// counts must keep up. Counts only: trace, conclusion and stamps stay exactly as the
-    /// traversal sealed them.
-    public mutating func amendDispatchTally(settled: Int, total: Int, failed: Int) {
-        tally = Tally(settled: settled, total: total, failed: failed)
     }
 
     // MARK: - Reading the trace

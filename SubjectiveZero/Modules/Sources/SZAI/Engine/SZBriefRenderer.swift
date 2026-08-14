@@ -181,8 +181,8 @@ public struct SZBriefRenderer: Sendable {
         case .request:
             ["original", "intent", "stage", "count", "source", "boundary", "instruction",
              "constituents"]
-        case .settled, .steer:
-            []   // no brief renders for these kinds (`unrenderableKind`)
+        case .steer:
+            []   // no brief renders for a steer (`unrenderableKind`)
         }
     }
 
@@ -199,7 +199,7 @@ public struct SZBriefRenderer: Sendable {
             ["reference": [referencePreservePartial, referenceInlinePartial,
                            referenceLibraryPartial],
              "schema": [schemaInlinePartial, schemaFetchPartial]]
-        case .request, .settled, .steer:
+        case .request, .steer:
             [:]
         }
     }
@@ -310,7 +310,7 @@ public struct SZBriefRenderer: Sendable {
                     .joined(separator: "\n\n")
             }
 
-        case .settled, .steer:
+        case .steer:
             throw SZBriefRenderError.unrenderableKind(kind)
         }
 

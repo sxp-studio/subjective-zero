@@ -1,30 +1,30 @@
 {
   "name": "director",
   "label": "Director",
-  "hint": "Every message the director receives and what it does with each: a chat turn routed by its own ruling; a build opened under the chosen strategy; the fleet's settled reply arriving back through the same door.",
-  "caps": { "rounds": 2 },
+  "hint": "Every message the director receives and what it does with each: a chat turn routed by its own ruling; a build opened under the chosen strategy, its fleet awaited at the dispatch and reconciled around the settled loop.",
   "nodes": [
     { "id": "message", "title": "On message", "onMessage": {} },
 
     { "id": "resuming", "title": "Resuming?", "step": "resuming" },
     { "id": "cold", "title": "Cold turn", "turn": { "brief": "prompts/chat.md.mustache" } },
     { "id": "resumed", "title": "Resumed turn", "turn": { "brief": "prompts/chat-resumed.md.mustache", "session": "message" } },
-    { "id": "route-reply", "title": "Route the reply", "step": "route-reply" },
+    { "id": "route-reply", "title": "Route the reply", "ask": { "prompt": "prompts/route-reply.md.mustache", "outcomes": ["answer", "build", "plan"], "effects": { "build": ["requestBuild"] } } },
 
     { "id": "strategy", "title": "Strategy", "step": "strategy" },
-    { "id": "strategy-settled", "title": "Strategy (settled)", "step": "strategy" },
 
     { "id": "decompose", "title": "Decompose", "turn": { "brief": "prompts/decompose.md.mustache" } },
-    { "id": "work-left", "title": "Work left?", "step": "work-left" },
-    { "id": "work-left-settled", "title": "Work left now?", "step": "work-left" },
-    { "id": "nodes-failing", "title": "Nodes failing?", "step": "nodes-failing" },
+    { "id": "implement", "title": "Implement", "dispatch": { "to": "coding", "items": "workSet" } },
+    { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
     { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "prompts/reconcile.md.mustache", "session": "message" } },
-    { "id": "implement", "title": "Implement", "dispatch": { "to": "coding", "items": "workSet" } }
+
+    { "id": "work-left", "title": "Work left?", "step": "work-left" },
+    { "id": "implement-once", "title": "Implement once", "dispatch": { "to": "coding", "items": "workSet" } },
+
+    { "id": "nodes-failing", "title": "Nodes failing?", "step": "nodes-failing" }
   ],
   "edges": [
     { "from": "message", "outcome": "chat", "to": "resuming" },
     { "from": "message", "outcome": "build", "to": "strategy" },
-    { "from": "message", "outcome": "settled", "to": "strategy-settled" },
 
     { "from": "resuming", "outcome": "no", "to": "cold" },
     { "from": "resuming", "outcome": "yes", "to": "resumed" },
@@ -35,13 +35,13 @@
     { "from": "strategy", "outcome": "procedural", "to": "work-left" },
     { "from": "strategy", "outcome": "recovery", "to": "nodes-failing" },
 
-    { "from": "strategy-settled", "outcome": "agentic", "to": "work-left-settled" },
-    { "from": "strategy-settled", "outcome": "recovery", "to": "nodes-failing" },
-
     { "from": "decompose", "outcome": "ok", "to": "implement" },
-    { "from": "work-left", "outcome": "yes", "to": "implement" },
-    { "from": "work-left-settled", "outcome": "yes", "to": "reconcile" },
-    { "from": "nodes-failing", "outcome": "yes", "to": "reconcile" },
-    { "from": "reconcile", "outcome": "ok", "to": "implement" }
+    { "from": "implement", "outcome": "settled", "to": "unresolved", "maxTraversals": 2 },
+    { "from": "unresolved", "outcome": "yes", "to": "reconcile" },
+    { "from": "reconcile", "outcome": "ok", "to": "implement" },
+
+    { "from": "work-left", "outcome": "yes", "to": "implement-once" },
+
+    { "from": "nodes-failing", "outcome": "yes", "to": "reconcile" }
   ]
 }

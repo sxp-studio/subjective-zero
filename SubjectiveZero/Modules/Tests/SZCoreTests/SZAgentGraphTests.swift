@@ -6,13 +6,12 @@ import Testing
 import Foundation
 @testable import SZCore
 
-/// A well-formed build graph exercising all four node forms and a bounded cycle. Its door
-/// routes `build` and `settled` — the pair that used to draw as two disconnected fragments.
+/// A well-formed build graph exercising the node forms and a bounded cycle. Its door
+/// routes `build` and `chat`-free: one lane, one door, one connected walk.
 private func makeBuildGraph() -> SZAgentGraph {
     SZAgentGraph(
         name: "build",
         label: "Directed",
-        caps: .init(rounds: 2),
         nodes: [
             .init(id: "message", title: "On message", form: .message(.init())),
             .init(id: "plan", title: "Plan contracts", form: .turn(.init(brief: "prompts/decompose.md.mustache"))),
@@ -22,7 +21,6 @@ private func makeBuildGraph() -> SZAgentGraph {
         ],
         edges: [
             .init(from: "message", outcome: "build", to: "plan"),
-            .init(from: "message", outcome: "settled", to: "work-left"),
             .init(from: "plan", outcome: "ok", to: "work-left"),
             .init(from: "work-left", outcome: "yes", to: "implement"),
             .init(from: "work-left", outcome: "no", to: "unblock", maxTraversals: 2),
@@ -170,13 +168,18 @@ struct SZAgentGraphTests {
         #expect(graph.defects().contains(.laneImpure(node: "plan", lanes: ["build", "chat"])))
     }
 
-    @Test func aSettledPortSharesTheBuildLane() {
-        // `settled` folds into `build`, so the shipped shape — a build lane and its settled
-        // re-entry meeting at `work-left` — is lane-PURE, not impure.
-        let graph = makeBuildGraph()
-        #expect(graph.kinds(reaching: "work-left") == [.build, .settled])
-        #expect(graph.lanes(reaching: "work-left") == [.build])
+    @Test func aSettledLoopIsOneLaneAndMustBeLeashed() {
+        // The retry shape: the dispatch's settled edge loops back into the build lane —
+        // still ONE lane (nothing new arrives; the fleet's reply is the node's own
+        // outcome), and the loop is refused without its leash like any other cycle.
+        var graph = makeBuildGraph()
+        graph.edges.append(.init(from: "implement", outcome: "settled", to: "work-left",
+                                 maxTraversals: 2))
+        #expect(graph.kinds(reaching: "work-left") == [.build])
         #expect(graph.defects().isEmpty)
+        let leash = graph.edges.firstIndex { $0.from == "implement" }!
+        graph.edges[leash].maxTraversals = nil
+        #expect(graph.defects().contains { if case .unboundedCycle = $0 { true } else { false } })
     }
 
     @Test func danglingEdges() {
@@ -185,10 +188,29 @@ struct SZAgentGraphTests {
         #expect(graph.defects().contains(.danglingEdge(from: "plan", to: "nowhere")))
     }
 
-    @Test func dispatchIsSendAndConclude() {
+    @Test func aDispatchRoutesOnlyItsSettledOutcome() {
+        // The settled edge is legal (the fleet's return); anything else can never route.
         var graph = makeBuildGraph()
         graph.edges.append(.init(from: "implement", outcome: "sent", to: "plan"))
-        #expect(graph.defects().contains(.edgeFromDispatch(node: "implement")))
+        #expect(graph.defects().contains(.edgeFromDispatch(node: "implement", outcome: "sent")))
+    }
+
+    @Test func anAskRoutesItsDeclaredOutcomesAndNeedsSome() {
+        var graph = makeBuildGraph()
+        graph.nodes.append(.init(id: "rule", form: .ask(.init(
+            prompt: "prompts/rule.md.mustache", outcomes: ["go", "hold"]))))
+        graph.edges.append(.init(from: "plan", outcome: "error", to: "rule"))
+        graph.edges.append(.init(from: "rule", outcome: "go", to: "work-left"))
+        #expect(graph.defects().isEmpty)
+        // An undeclared answer can never route…
+        graph.edges.append(.init(from: "rule", outcome: "sideways", to: "work-left"))
+        #expect(graph.defects().contains(.undeclaredOutcome(node: "rule", outcome: "sideways")))
+        // …and a question with no answers is refused outright.
+        graph.edges.removeLast()
+        graph.nodes.append(.init(id: "mute", form: .ask(.init(
+            prompt: "prompts/mute.md.mustache", outcomes: []))))
+        graph.edges.append(.init(from: "rule", outcome: "hold", to: "mute"))
+        #expect(graph.defects().contains(.askWithoutOutcomes(node: "mute")))
     }
 
     @Test func aTurnOnlySpeaksOkOrError() {
@@ -210,10 +232,13 @@ struct SZAgentGraphTests {
         #expect(graph.defects().contains(.duplicateEdge(from: "work-left", outcome: "yes")))
     }
 
-    @Test func roundsBelowOneAreRefused() {
-        var graph = makeBuildGraph()
-        graph.caps = .init(rounds: 0)
-        #expect(graph.defects().contains(.nonPositiveRounds(0)))
+    @Test func theRetiredCapsKeyIsRefusedByName() {
+        // Retry depth is the settled edge's leash now; a graph still carrying the old
+        // budget must be told, not silently stripped of it.
+        let json = #"{"name": "x", "caps": {"rounds": 2}, "nodes": []}"#
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
+        }
     }
 
     @Test func aCycleMustCrossABoundedEdge() {

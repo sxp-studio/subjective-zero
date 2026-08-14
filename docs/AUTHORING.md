@@ -29,10 +29,11 @@ launch — that copy is yours to edit, and it wins until an app update ships a n
 ## Messages, and the graph that answers them
 
 Nothing calls an agent directly. Everything is a message, and every graph opens at its **message
-node** — its one door, with a port per kind it accepts: `chat` (answer this), `build` (open a fleet
-thread), `item` (one node's slice of the work), `request` (a structured operation in your name),
-`settled` (the app's reply when work you dispatched finishes). A delivery leaves by the port
-bearing its own name.
+node** — its one door, with a port per kind it accepts: `chat` (answer this), `build` (open a
+fleet thread), `item` (one node's slice of the work), `request` (a structured operation in your
+name). A delivery leaves by the port bearing its own name — and when work you dispatched
+finishes, the reply lands at the WAITING dispatch node as its own `settled` outcome, not as a
+new message.
 
 Here is a whole build strategy — the `procedural` lane of the shipped `director/graphs/director.json`:
 
@@ -42,28 +43,31 @@ Here is a whole build strategy — the `procedural` lane of the shipped `directo
     { "id": "message", "title": "On message", "onMessage": {} },
     { "id": "strategy", "title": "Strategy", "step": "strategy" },
     { "id": "work-left", "title": "Work left?", "step": "work-left" },
-    { "id": "implement", "title": "Implement", "dispatch": { "to": "coding", "items": "workSet" } }
+    { "id": "implement-once", "title": "Implement once", "dispatch": { "to": "coding", "items": "workSet" } }
   ],
   "edges": [
     { "from": "message", "outcome": "build", "to": "strategy" },
     { "from": "strategy", "outcome": "procedural", "to": "work-left" },
-    { "from": "work-left", "outcome": "yes", "to": "implement" }
+    { "from": "work-left", "outcome": "yes", "to": "implement-once" }
   ]
 }
 ```
 
 Read it: a `build` delivery leaves the door by its `build` port into `strategy`, a compiled router;
-its `procedural` port routes to `work-left`, a compiled condition; `yes` routes to `implement`,
-which sends one `item` message per work-set node — a dispatch **sends and the traversal concludes**
-(an out-edge from one is refused at load). `no` has no edge, so a clean project ends the run right
-there; that is not an error, it is the graph's honest ending. And when the fleet reports back, that
-`settled` message arrives at the SAME door — if no `settled` port routes it onward, the thread
-simply concludes. "No retry rounds" is spelled by leaving a port unwired.
+its `procedural` port routes to `work-left`, a compiled condition; `yes` routes to `implement-once`,
+which sends one `item` message per work-set node and **waits for the whole set** — the traversal
+holds at the dispatch while the fleet works, and settlement is the node's own `settled` outcome.
+`no` has no edge, so a clean project ends the run right there; that is not an error, it is the
+graph's honest ending. And `implement-once` wires no `settled` edge, so the first settlement
+concludes — "no retry" is spelled by leaving the port unwired, while the agentic lane's `implement`
+loops its settled edge back through the reconcile gate under a `maxTraversals: 2` leash: the leash
+IS the retry budget.
 
-A node is one of exactly four forms: the **message** door (no body — the delivered kind is the
-outcome), a **step** (compiled code, its outcomes exported by the step itself), a **turn** (a full
+A node is one of exactly five forms: the **message** door (no body — the delivered kind is the
+outcome), a **step** (compiled code, its outcomes exported by the step itself), an **ask** (a
+prompt file + declared outcomes: one structured model query routes, no code), a **turn** (a full
 agent turn whose body is a mustache brief; outcomes fixed `ok`/`error` — what an agent *says* never
-routes), or a **dispatch** (fan out and conclude).
+routes), or a **dispatch** (fan out, wait, settle onward).
 
 ## Three ways to change what an agent does
 
@@ -119,8 +123,8 @@ agent coding · seat: coding · 3 steps · 12 prompts
   graph coding · chat · item · request · 10 nodes
 agent debug · no seat · 0 steps · 1 prompt
   graph debug · chat · 2 nodes
-agent director · seat: director · 5 steps · 6 prompts
-  graph director · build · chat · settled · rounds: 2 · 13 nodes
+agent director · seat: director · 4 steps · 6 prompts
+  graph director · build · chat · 13 nodes
 verdict: validates — 3 agents, zero defects
 ```
 
@@ -205,26 +209,25 @@ The shipped `recovery` strategy is this recipe, and it is two small edits. The s
 let step = SZBuildCondition { $0.fleetIsFailing }
 ```
 
-The wiring — inside `director/graphs/director.json` — hangs it off the strategy router on BOTH the
-build port and the settled re-entry, and reuses the pack's existing reconcile brief:
+The wiring — inside `director/graphs/director.json` — hangs it off the strategy router and joins
+the agentic lane's existing retry loop, reusing the pack's reconcile brief:
 
 ```jsonc
 { "id": "nodes-failing", "step": "nodes-failing" },
 
-{ "from": "strategy",         "outcome": "recovery", "to": "nodes-failing" },
-{ "from": "strategy-settled", "outcome": "recovery", "to": "nodes-failing" },
-{ "from": "nodes-failing",    "outcome": "yes",      "to": "reconcile" },
-{ "from": "reconcile",        "outcome": "ok",       "to": "implement" }
+{ "from": "strategy",      "outcome": "recovery", "to": "nodes-failing" },
+{ "from": "nodes-failing", "outcome": "yes",      "to": "reconcile" },
+{ "from": "reconcile",     "outcome": "ok",       "to": "implement" }
 ```
 
 A healthy fleet answers `no` — no edge, run over, zero tokens. A failing one gets a reconcile turn
-(`session: "message"` continues the director's own session mid-run) and a re-dispatch. Because both
-routers are the same `strategy` step, the new name appears on the menu by being wired: nothing in
-`agent.json` names it, and nothing in Swift knows it exists.
+(`session: "message"` continues the director's own session mid-run) and a re-dispatch through
+`implement`, whose leashed `settled` edge walks the traversal back to the gate when the fleet
+lands. The new strategy appears on the menu by being wired: nothing in `agent.json` names it, and
+nothing in Swift knows it exists.
 
-Note `nodes-failing` is reached from the `build` port and from `settled` — and that is still ONE
-lane, because `settled` folds into `build`. Reach a node from `chat` as well and the gate refuses
-it: a node reads one kind's facts.
+Reach a node from two ports of DIFFERENT kinds — `chat` and `build`, say — and the gate refuses
+it (`laneImpure`): a node reads one kind's facts.
 
 ## What is closed, and why
 
