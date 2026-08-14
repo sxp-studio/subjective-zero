@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // P0 proving ground for step ABI v4: real swiftc → codesign → dlopen round-trips exercising
-// the async evaluation contract — sync one-liners, `askModel` typed rulings with repair
+// the async evaluation contract — sync one-liners, `ctx.ask` typed rulings with repair
 // retry, cancellation mid-flight, swap-with-drain hot reload, and the layout pin that keeps
 // the host's request struct byte-matched with the SDK's copy.
 import Testing
@@ -59,75 +59,72 @@ private func eventually(within deadline: Duration = .seconds(15),
 
 // MARK: - Step sources and facts documents
 
-private let workLeftCondition = """
-let step = SZBuildCondition { $0.hasWorkLeft }
+private let workLeftStep = """
+let step = SZStep(outcomes: ["yes", "no"]) { $0.hasWorkLeft ? "yes" : "no" }
 """
 
-private let classifyRouter = """
+private let classifyStep = """
 struct Ruling: Codable { let kind: String }
-let step = SZMessageRouter("answer", "build") { ctx in
-    try await ctx.askModel(template: "classify-reply", as: Ruling.self).kind
+let step = SZStep(outcomes: ["answer", "build"]) { ctx in
+    try await ctx.ask("classify-reply", as: Ruling.self).kind
 }
 """
 
 /// Blocks inside an ask until the host's runner releases it — the in-flight body for the
 /// cancellation and drain tests.
 private let blockingAskStep = """
-let step = SZMessageRouter("done") { ctx in
-    _ = try await ctx.askModel(template: "block", as: [String: String].self)
+let step = SZStep(outcomes: ["done"]) { ctx in
+    _ = try await ctx.ask("block", as: [String: String].self)
     return "done"
 }
 """
 
 /// Reports the SDK-side layout of the request struct, interpolation-free.
 private let layoutProbeStep = """
-struct LayoutProbe: SZStep {
-    var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: ["layout"], facts: SZMessageFacts.kindName) }
-    func evaluate(_ ctx: SZContext<SZMessageFacts>) async throws -> String {
-        let parts = [
-            MemoryLayout<SZStepEvalRequestRaw>.size,
-            MemoryLayout<SZStepEvalRequestRaw>.alignment,
-            MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.apiVersion) ?? -1,
-            MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.factsJSON) ?? -1,
-            MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.factsLen) ?? -1,
-            MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.hostContext) ?? -1,
-            MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.askFn) ?? -1,
-        ]
-        return parts.map(String.init).joined(separator: "/")
-    }
+let step = SZStep(outcomes: ["layout"]) { _ in
+    let parts = [
+        MemoryLayout<SZStepEvalRequestRaw>.size,
+        MemoryLayout<SZStepEvalRequestRaw>.alignment,
+        MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.apiVersion) ?? -1,
+        MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.factsJSON) ?? -1,
+        MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.factsLen) ?? -1,
+        MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.hostContext) ?? -1,
+        MemoryLayout<SZStepEvalRequestRaw>.offset(of: \\.askFn) ?? -1,
+    ]
+    return parts.map(String.init).joined(separator: "/")
 }
-let step = LayoutProbe()
 """
 
 /// A complete build-kind facts document — the snapshot is all-required by design (a silent
 /// nil was the old architecture's favorite way to lie), so tests send every field.
 private func buildFacts(workLeft: Int) -> String {
-    let ids = "[" + (0..<workLeft).map { _ in "\"node-\(UUID().uuidString.prefix(8))\"" }.joined(separator: ", ") + "]"
-    return #"{"unimplemented": \#(ids), "workSet": \#(ids), "nodeStatuses": {}, "buildErrors": {}, "round": 1, "roundCap": 2, "briefed": false, "projectLoaded": true, "graphJSON": "{}", "steers": [], "runVariant": ""}"#
+    let ids = "[" + (0..<workLeft).map { _ in "\"\(UUID().uuidString)\"" }.joined(separator: ", ") + "]"
+    return #"{"message": "", "resuming": false, "run": {"workSet": \#(ids), "round": 1, "roundCap": 2, "steers": [], "instruction": ""}}"#
 }
 
-private let chatFacts = #"{"sentMessage": "hey", "resuming": false, "draftedWork": false}"#
+private let chatFacts = #"{"message": "hey", "resuming": false}"#
 
 // MARK: - Tests
 
 /// Serialized: each test drives a real swiftc; parallel compile storms help nobody.
 @Suite(.serialized)
-struct SZStepABIv4SpikeTests {
+struct SZStepABISpikeTests {
 
     @Test func aSyncConditionCompilesLoadsAndAnswers() async throws {
-        let loader = try loadStep(workLeftCondition)
+        let loader = try loadStep(workLeftStep)
 
-        // The one-line authoring surface declares itself: yes/no + its kind, no sidecar.
+        // The one-line authoring surface declares itself: its outcomes, no sidecar.
         let declaration = try #require(loader.declaration)
-        #expect(declaration.contains("\"yes\"") && declaration.contains("\"no\""))
-        #expect(declaration.contains(#""facts":"build""#))
+        #expect(declaration == #"{"outcomes":["yes","no"]}"#)
 
         let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
         #expect(await loader.evaluate(factsJSON: buildFacts(workLeft: 2), ask: noAsk) == .outcome("yes"))
         #expect(await loader.evaluate(factsJSON: buildFacts(workLeft: 0), ask: noAsk) == .outcome("no"))
-        // The snapshot is all-required: an incomplete document REFUSES to start rather
-        // than silently reading neutral values.
-        guard case .failed(let reason) = await loader.evaluate(factsJSON: chatFacts, ask: noAsk) else {
+        // A prose delivery carries no run — the gate answers its honest "no".
+        #expect(await loader.evaluate(factsJSON: chatFacts, ask: noAsk) == .outcome("no"))
+        // A document missing the REQUIRED fields refuses to start rather than silently
+        // reading neutral values.
+        guard case .failed(let reason) = await loader.evaluate(factsJSON: "{}", ask: noAsk) else {
             Issue.record("an incomplete facts document must refuse to start")
             return
         }
@@ -135,7 +132,7 @@ struct SZStepABIv4SpikeTests {
     }
 
     @Test func anAskModelStepGetsATypedRulingThroughProse() async throws {
-        let loader = try loadStep(classifyRouter)
+        let loader = try loadStep(classifyStep)
         let seen = Mutex<[String]>([])
 
         // The reply arrives fenced in chatter — the tolerant extractor's whole point.
@@ -154,7 +151,7 @@ struct SZStepABIv4SpikeTests {
     }
 
     @Test func aShapeMismatchTriggersOneRepairRetryCarryingTheError() async throws {
-        let loader = try loadStep(classifyRouter)
+        let loader = try loadStep(classifyStep)
         let seen = Mutex<[String]>([])
 
         let result = await loader.evaluate(factsJSON: chatFacts) { request in
@@ -173,7 +170,7 @@ struct SZStepABIv4SpikeTests {
     }
 
     @Test func exhaustedRepairsFailWithTheTemplateNamed() async throws {
-        let loader = try loadStep(classifyRouter)
+        let loader = try loadStep(classifyStep)
         let calls = Mutex(0)
         let result = await loader.evaluate(factsJSON: chatFacts) { _ in
             calls.withLock { $0 += 1 }
@@ -190,7 +187,7 @@ struct SZStepABIv4SpikeTests {
     }
 
     @Test func braceyRepliesStillYieldTheirRuling() async throws {
-        let loader = try loadStep(classifyRouter)
+        let loader = try loadStep(classifyStep)
 
         // A brace inside a JSON string must not derail the balanced scan…
         let inString = await loader.evaluate(factsJSON: chatFacts) { _ in
@@ -206,13 +203,13 @@ struct SZStepABIv4SpikeTests {
     }
 
     @Test func aRedReloadNeverCostsTheGreenModule() async throws {
-        let loader = try loadStep(workLeftCondition)
+        let loader = try loadStep(workLeftStep)
         let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
 
         // A step source that does not compile: the toolchain throws, the loader is untouched.
         let dir = try makeTempDir()
         let broken = dir.appending(path: "Step.swift")
-        try "let step = SZCondition {".write(to: broken, atomically: true, encoding: .utf8)
+        try "let step = SZStep(outcomes: [\"x\"]) {".write(to: broken, atomically: true, encoding: .utf8)
         #expect(throws: (any Error).self) {
             try SZToolchain().compile(stepSource: broken, into: dir.appending(path: "build"))
         }
@@ -227,11 +224,10 @@ struct SZStepABIv4SpikeTests {
     }
 
     @Test func aStepDeclaringNothingReadsAsNil() async throws {
+        // Empty outcomes = the step declares nothing; the gate refuses to wire edges
+        // from it, and the declaration channel honestly answers nil.
         let loader = try loadStep("""
-        struct Quiet: SZStep {
-            func evaluate(_ ctx: SZContext<SZMessageFacts>) async throws -> String { "spoke" }
-        }
-        let step = Quiet()
+        let step = SZStep(outcomes: []) { _ in "spoke" }
         """)
         #expect(loader.declaration == nil)
         let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
@@ -276,7 +272,7 @@ struct SZStepABIv4SpikeTests {
         try await eventually { askEntered.withLock { $0 } }
 
         // Swap in a different step. The old module must retire, not die.
-        _ = try loadStep(workLeftCondition, into: loader)
+        _ = try loadStep(workLeftStep, into: loader)
         #expect(loader.drainingCount == 1)
 
         // New evaluations run the NEW code while the old evaluation is still parked.
@@ -308,7 +304,7 @@ struct SZStepABIv4SpikeTests {
             }
             try await eventually { askEntered.withLock { $0 } }
             // Swap under it — alternate the incoming source so codepaths actually differ.
-            _ = try loadStep(round.isMultiple(of: 2) ? workLeftCondition : blockingAskStep, into: loader)
+            _ = try loadStep(round.isMultiple(of: 2) ? workLeftStep : blockingAskStep, into: loader)
             released.withLock { $0 = true }
             #expect(await parked.value == .outcome("done"))
             try await eventually { loader.drainingCount == 0 }
@@ -327,7 +323,7 @@ struct SZStepABIv4SpikeTests {
     /// `SZ_P0_LIVE_ASK=1 swift test --filter liveModel`.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["SZ_P0_LIVE_ASK"] == "1"))
     func liveModelReturnsATypedRulingThroughACompiledStep() async throws {
-        let loader = try loadStep(classifyRouter)
+        let loader = try loadStep(classifyStep)
         let result = await loader.evaluate(factsJSON: chatFacts) { requestJSON in
             let ask = try decodeAsk(requestJSON)
             // Stand-in for the P2 QueryService: template name → a rendered prompt. The

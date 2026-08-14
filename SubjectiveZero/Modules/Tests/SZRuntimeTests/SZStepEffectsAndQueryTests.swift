@@ -8,6 +8,7 @@ import Foundation
 import Synchronization
 import Testing
 @testable import SZAI
+@testable import SZCore
 @testable import SZRuntime
 
 private func makeTempDir() throws -> URL {
@@ -27,27 +28,27 @@ private func loadStep(_ source: String) throws -> SZStepLoader {
     return loader
 }
 
-private let chatFacts = #"{"sentMessage": "hey", "resuming": false, "draftedWork": false}"#
+private let proseFacts = #"{"message": "hey", "resuming": false}"#
 
-/// An effect-emitting router, still one line — the authoring bar the wire had to clear.
-private let effectRouter = """
-let step = SZMessageRouter("answer", "build") { _ in .outcome("build", effects: ["requestBuild"]) }
+/// An effect-emitting step, still one line — the authoring bar the wire had to clear.
+private let effectStep = """
+let step = SZStep(outcomes: ["answer", "build"]) { _ in .outcome("build", effects: [.requestBuild]) }
 """
 
 /// The mixed closure: a bare string literal in one branch, an effect answer in the other —
 /// both spellings at home in ONE body (`SZAnswer`'s string-literal conformance).
-private let mixedRouter = """
-let step = SZMessageRouter("answer", "build") { ctx in
+private let mixedStep = """
+let step = SZStep(outcomes: ["answer", "build"]) { ctx in
     if ctx.resuming { return "answer" }
-    return .outcome("build", effects: ["requestBuild"])
+    return .outcome("build", effects: [.requestBuild])
 }
 """
 
-/// The spike's askModel router, unchanged — the QueryService integration drives it.
-private let classifyRouter = """
+/// An asking step — the QueryService integration drives it.
+private let classifyStep = """
 struct Ruling: Codable { let kind: String }
-let step = SZMessageRouter("answer", "build") { ctx in
-    try await ctx.askModel(template: "classify-reply", as: Ruling.self).kind
+let step = SZStep(outcomes: ["answer", "build"]) { ctx in
+    try await ctx.ask("classify-reply", as: Ruling.self).kind
 }
 """
 
@@ -56,28 +57,28 @@ let step = SZMessageRouter("answer", "build") { ctx in
 struct SZStepEffectsAndQueryTests {
 
     @Test func anEffectAnswerRidesTheJSONEnvelope() async throws {
-        let loader = try loadStep(effectRouter)
+        let loader = try loadStep(effectStep)
         let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
-        let result = await loader.evaluate(factsJSON: chatFacts, ask: noAsk)
+        let result = await loader.evaluate(factsJSON: proseFacts, ask: noAsk)
         // Deterministic envelope bytes (.sortedKeys): effects before outcome.
         #expect(result == .outcome(#"{"effects":["requestBuild"],"outcome":"build"}"#))
     }
 
     @Test func aMixedBodyKeepsBareStringsBareAndEnvelopesEffects() async throws {
-        let loader = try loadStep(mixedRouter)
+        let loader = try loadStep(mixedStep)
         let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
         // resuming=false takes the effect branch…
-        #expect(await loader.evaluate(factsJSON: chatFacts, ask: noAsk)
+        #expect(await loader.evaluate(factsJSON: proseFacts, ask: noAsk)
             == .outcome(#"{"effects":["requestBuild"],"outcome":"build"}"#))
         // …resuming=true the bare-literal branch: the payload is the outcome string, no
         // envelope — the additive-wire guarantee, on the SAME compiled step.
-        let resumed = #"{"sentMessage": "hey", "resuming": true, "draftedWork": false}"#
+        let resumed = #"{"message": "hey", "resuming": true}"#
         #expect(await loader.evaluate(factsJSON: resumed, ask: noAsk) == .outcome("answer"))
     }
 
     @MainActor
     @Test func aCompiledAskModelStepIsServedByTheQueryService() async throws {
-        let loader = try loadStep(classifyRouter)
+        let loader = try loadStep(classifyStep)
 
         // The real query service as the ask runner; only the completion is scripted —
         // garbage prose first, the ruling on the repair retry, so the SDK's repair loop and
@@ -104,9 +105,9 @@ struct SZStepEffectsAndQueryTests {
                 return attempt == 1 ? "hmm, probably build?" : #"{"kind": "build"}"#
             })
 
-        let result = await loader.evaluate(factsJSON: chatFacts) { requestJSON in
-            try await service.serve(agent: "coding", graph: "message", step: "classify",
-                                    kind: .message, factsJSON: chatFacts,
+        let result = await loader.evaluate(factsJSON: proseFacts) { requestJSON in
+            try await service.serve(agent: "coding", step: "classify",
+                                    message: "hey", world: SZWorld(),
                                     requestJSON: requestJSON)
         }
         #expect(result == .outcome("build"))

@@ -21,12 +21,15 @@ public typealias SZQueryExecutor =
 public enum SZQueryError: Error, CustomStringConvertible {
     /// The ask request JSON would not decode — an SDK/host drift, not a model failure.
     case unreadableRequest(detail: String)
+    /// The routed provider id is not in the registry.
+    case unknownProvider(String)
     /// The provider ran and reported failure (its message attached when it left one).
     case completionFailed(String)
 
     public var description: String {
         switch self {
         case .unreadableRequest(let detail): "unreadable ask request: \(detail)"
+        case .unknownProvider(let id): "unknown provider: \(id)"
         case .completionFailed(let detail): "the query completion failed: \(detail)"
         }
     }
@@ -85,12 +88,12 @@ public final class SZQueryService {
 
     // MARK: - Serving
 
-    /// Serve one step ask end to end. `kind` is the GRAPH's own kind (a settled re-entry
-    /// traverses its build graph, so it renders as build by construction) and `factsJSON`
-    /// is the SAME pinned document the evaluation was handed — the engine supplies both.
-    /// Throwing `CancellationError` answers the ask as cancelled; any other throw as failed.
-    public func serve(agent: String, graph: String?, step: String, kind: SZMessageKind,
-                      factsJSON: String, requestJSON: String) async throws -> String {
+    /// Serve one step ask end to end. `message`/`world` are the SAME pinned snapshot the
+    /// evaluation holds — the delivery supplies them. Throwing `CancellationError` answers
+    /// the ask as cancelled; any other throw as failed.
+    public func serve(agent: String, step: String, message: String, world: SZWorld,
+                      extras: SZBriefExtras = SZBriefExtras(),
+                      requestJSON: String) async throws -> String {
         let request: AskRequest
         do {
             request = try JSONDecoder().decode(AskRequest.self, from: Data(requestJSON.utf8))
@@ -98,10 +101,10 @@ public final class SZQueryService {
             throw SZQueryError.unreadableRequest(detail: String(describing: error))
         }
 
-        // The named template, pack-relative, resolved and rendered EXACTLY like a brief —
-        // one resolution, one token namespace, one facts document.
-        var prompt = try renderer.render(agent: agent, template: Self.templatePath(request.template),
-                                         kind: kind, factsJSON: factsJSON)
+        // The named template, rendered EXACTLY like a brief — one resolution, one token
+        // table, one snapshot.
+        var prompt = try renderer.render(agent: agent, template: request.template,
+                                         message: message, world: world, extras: extras)
         // A retry carries the repair wrapper: the host-owned template, appended below the
         // re-rendered ask so the model sees the question and why its last answer failed.
         if request.attempt > 0, let repair = request.repair {
@@ -114,10 +117,9 @@ public final class SZQueryService {
             ])
         }
 
-        let choice = router.resolve(SZModelCall(class: .query, agent: agent,
-                                                graph: graph, step: step))
+        let choice = router.resolve(SZModelCall(class: .query, agent: agent, step: step))
         guard let provider = registry.provider(id: choice.providerID) else {
-            throw SZOrchestratorError.unknownProvider(choice.providerID)
+            throw SZQueryError.unknownProvider(choice.providerID)
         }
 
         // One stateless completion: no MCP port, no resume, no tools — a query is a
@@ -144,12 +146,6 @@ public final class SZQueryService {
     }
 
     // MARK: - Pieces
-
-    /// The pack-relative path an ask template name resolves to — the same `prompts/` home
-    /// turn briefs live in. A name that already carries a path is taken as written.
-    static func templatePath(_ name: String) -> String {
-        name.contains("/") ? name : "prompts/\(name).md.mustache"
-    }
 
     /// A stable short digest of the rendered prompt bytes.
     static func hash(_ prompt: String) -> String {

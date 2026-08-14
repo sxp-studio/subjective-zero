@@ -1,0 +1,22 @@
+{
+  "label": "Director",
+  "hint": "Every message the director receives, decided at its door: a granted build goes to work and its fleet is awaited at the dispatch, reconciled around the settled loop; prose is triaged by content and answered in conversation.",
+  "nodes": [
+    { "id": "door", "title": "On message", "step": "door" },
+    { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose" } },
+    { "id": "implement", "title": "Implement", "dispatch": { "to": "coding" } },
+    { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
+    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume" } },
+    { "id": "chat", "title": "Cold turn", "turn": { "brief": "chat" } },
+    { "id": "chat-resumed", "title": "Resumed turn", "turn": { "brief": "chat-resumed", "session": "resume" } }
+  ],
+  "edges": [
+    { "from": "door", "outcome": "build", "to": "decompose" },
+    { "from": "door", "outcome": "answer", "to": "chat" },
+    { "from": "door", "outcome": "answer-resumed", "to": "chat-resumed" },
+    { "from": "decompose", "outcome": "ok", "to": "implement" },
+    { "from": "implement", "outcome": "settled", "to": "unresolved", "maxTraversals": 2 },
+    { "from": "unresolved", "outcome": "yes", "to": "reconcile" },
+    { "from": "reconcile", "outcome": "ok", "to": "implement" }
+  ]
+}

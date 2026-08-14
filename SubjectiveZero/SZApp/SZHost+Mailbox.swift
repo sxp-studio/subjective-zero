@@ -17,10 +17,10 @@
 // 4. `tryAcquire` respects earlier waiters' reservations (ledger rule), so the pump cannot starve a
 //    parked multi-resource acquire.
 // 5. A small delivery-concurrency cap keeps a run-end release from spawning one CLI process per
-//    queued scope at once. Burst-after-Stop (queued messages delivering once the run stops) is
-//    accepted V1 behavior — capped, not suppressed.
-// 6. The pump is suspended for the duration of `switchProject` (which also re-checks the busy guard
-//    after its one await).
+//    queued scope at once. Burst-after-Stop is accepted V1 behavior — capped, not suppressed.
+// 6. The pump is suspended for the duration of `switchProject`.
+// 7. A MINTED RUN is admitted at the head of every pump pass — ahead of any queued prose —
+//    so the run always beats the next Director message to the freed transcript.
 import Foundation
 import SZAI
 import SZCore
@@ -32,7 +32,7 @@ extension SZHost {
     /// delivery. Steers are never pumped (their consumer drains them).
     func pumpMailboxes() {
         guard !pumpSuspended else { return }
-        fireQueuedDirectorRunIfPossible()
+        admitPendingRunIfPossible()
         for key in mailbox.recipientsWithPending {
             guard activeDeliveries < Self.deliveryCap else { break }
             guard let scope = SZChatScope(key: key),
@@ -50,25 +50,10 @@ extension SZHost {
         }
     }
 
-    /// Start the run a Director turn queued (`ui_run` mid-turn → `pendingDirectorRun`) the moment
-    /// it can actually claim what it needs. Runs at the head of every pump pass — i.e. on every
-    /// ledger release — so the ORDERING is structural: the promised run always beats the next
-    /// queued Director message to the freed transcript, and a start refused by a transient claim
-    /// (a concurrent delivery holding a work-set node) retries on the next release instead of
-    /// being dropped. Cleared only on a SUCCESSFUL start (or by stopping the Director's turn).
-    private func fireQueuedDirectorRunIfPossible() {
-        guard let instruction = pendingDirectorRun, !isRunning,
-              ledger.holder(of: .transcript(.director)) == nil else { return }
-        startRun(instruction: instruction, directorAlreadyBriefed: true)
-        if isRunning { pendingDirectorRun = nil }
-    }
-
-    /// Deliver one envelope as a real agent turn on its scope — the body `sendChat` used to run
-    /// inline, now executed when the queue says it's this message's moment. Prompt, recap, and
-    /// mention expansion are built HERE, at delivery time, against the live graph. Never touches
-    /// the active tab (delivery must not steal focus). Ends with `markProcessed` → release →
-    /// `pendingDirectorRun` — strictly in that order, so a Director turn's queued run acquires the
-    /// director transcript AFTER this delivery's claim is gone instead of being silently refused.
+    /// Deliver one envelope as a real agent turn on its scope, THROUGH its agent's graph.
+    /// Prompt, recap, and mention expansion are built HERE, at delivery time, against the
+    /// live graph. Never touches the active tab. Ends with `markProcessed` → release →
+    /// the pump's next pass, whose head admits any minted run before queued prose.
     func performChatTurn(_ envelopeID: UUID, scope: SZChatScope, claim: SZClaimToken) async {
         var released = false
         func releaseClaim() {
@@ -114,8 +99,7 @@ extension SZHost {
         }
 
         // Redelivery after a restart whose transcript lost the bubble (queue survived, sidecar
-        // older): re-append it so the conversation shows what is being delivered. The common case —
-        // bubble restored with the transcript — appends nothing (`transcriptMessageID` matches).
+        // older): re-append it so the conversation shows what is being delivered.
         if let bubbleID = envelope.transcriptMessageID,
            !store.messages(for: scope).contains(where: { $0.id == bubbleID }) {
             store.appendChatMessage(envelope.message, to: scope)
@@ -144,9 +128,7 @@ extension SZHost {
             flushTranscript(scope)
         }
 
-        // Queue wait, keyed to THIS turn's own message id — misattribution is impossible by
-        // construction (v1 stashed per-scope and had to guard zombies). Recorded via the explicit-
-        // turnID escape hatch: the turn's context binding doesn't exist until deliver.
+        // Queue wait, keyed to THIS turn's own message id.
         if SZTrace.isEnabled {
             SZTrace.record(SZTurnEvent(stage: SZTurnStage.queueWait, start: envelope.enqueuedAt,
                                        duration: waitEnded.timeIntervalSince(envelope.enqueuedAt)),
@@ -156,8 +138,7 @@ extension SZHost {
         let generation = resolvedGenerationSettings(for: providerID)
         // The turn core, driven by the graph's own ORDER: `tools` and `session` are what
         // the turn node declares, so tool-free-ness is the debug pack's `"tools": []`
-        // rather than a `scope == .debug` branch here — the special case is deleted, not
-        // relocated.
+        // rather than a scope branch here.
         func runDeliveredTurn(_ order: SZTurnOrder, prompt: String) async throws -> SZAgentRunResult {
             let request = SZAgentRunRequest(
                 prompt: prompt,
@@ -166,7 +147,7 @@ extension SZHost {
                 cacheDirectory: cacheDirectory,
                 mcpServerPort: order.tools?.isEmpty == true ? nil : mcpPort,
                 allowedMCPTools: order.tools ?? SZHostBridge.agentCallableToolNames,
-                resumeSessionID: order.session == .message ? existing?.sessionID : nil,
+                resumeSessionID: order.session == .resume ? existing?.sessionID : nil,
                 model: generation.model,
                 reasoningEffort: generation.reasoningEffort,
                 fastMode: generation.fastMode ?? false,
@@ -175,36 +156,35 @@ extension SZHost {
                                      existingAssistantID: assistantID, claim: claim).result
         }
         do {
-            // EVERY chat delivery flows through its agent's chat lane: the pack decides
-            // which brief a turn gets, the turn streams through `runDeliveredTurn`
-            // unchanged (recap + attachments wrap the brief HERE, delivery context that
-            // never enters the pack render), and any ruling step decides what the turn WAS
-            // — firing `requestBuild` when the director's answer is a build.
+            // EVERY delivery flows through its agent's graph: the door decides what the
+            // message is, the pack decides which brief a turn gets, and the turn streams
+            // through `runDeliveredTurn` unchanged (recap + attachments wrap the brief
+            // HERE — delivery context that never enters the pack render).
             let expanded = SZMentionExpansion.agentText(
                 text, nodes: (store.project?.graph.nodes ?? []).map { (id: $0.id, title: $0.title) })
             let messageAttachments = envelope.message.attachments
             // A node chat's cold seed needs the node's current files. Read only when there
             // is no session to resume: the resumed brief mentions neither token, and the
             // renderer computes only what a brief actually mentions.
-            var delivery = SZBriefDelivery()
+            var extras = SZBriefExtras()
             if case .node(let nodeID) = scope, existing == nil {
                 let nodeDir = projectURL.appending(path: "nodes/\(nodeID.uuidString)")
-                delivery.nodeContract =
+                extras.nodeContract =
                     (try? String(contentsOf: nodeDir.appending(path: "node-contract.json"), encoding: .utf8))
                     ?? "(no contract yet)"
-                delivery.nodeSource =
+                extras.nodeSource =
                     (try? String(contentsOf: nodeDir.appending(path: "Node.swift"), encoding: .utf8))
                     ?? "(this node has no Node.swift yet)"
             }
-            let (result, ack) = try await runChatTraversal(
+            let (result, ack) = try await runProseDelivery(
                 scope: scope, message: expanded, existing: existing, providerID: providerID,
-                nodeSeed: scope.nodeID?.uuidString, delivery: delivery) { order in
+                extras: extras) { order in
                     var prompt = order.brief
                     if let recap { prompt = recap + "\n\n" + prompt }
                     if !messageAttachments.isEmpty { prompt += Self.attachmentManifest(messageAttachments) }
                     return try await runDeliveredTurn(order, prompt: prompt)
                 }
-            // A turn-less ruling's one line — the triage `implement` ack, in the bubble
+            // A turn-less ruling's one line — the door's `requestBuild` ack, in the bubble
             // the delivery already opened.
             if let ack { reply(ack) }
             if Task.isCancelled {
@@ -213,17 +193,14 @@ extension SZHost {
                 let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
                 reply(empty ? "(stopped)" : "\n(stopped)")
                 status = "chat turn stopped"
-                // Only the DIRECTOR turn's Stop kills its own queued run — stopping some other
-                // scope's concurrent delivery must not discard a run the Director promised.
-                if scope == .director { pendingDirectorRun = nil }
+                // Only the DIRECTOR turn's Stop discards its own minted run.
+                if scope == .director { pendingRun = nil }
                 mailbox.markProcessed(envelopeID)
                 return
             }
             if result.outcome.failed, dropSessionIfStale(scope) {
-                // The probation self-heal just fired: the failure was (very likely) the stale
-                // disk-restored session, and the machinery healed at the exact moment this message
-                // died. ONE cold-start redelivery — bounded structurally: with the session gone, a
-                // second failure can't drop anything, so it lands in markFailed below.
+                // The probation self-heal just fired: ONE cold-start redelivery — bounded
+                // structurally: with the session gone, a second failure lands in markFailed.
                 reply("(session expired — retrying with a fresh session)")
                 status = "chat turn failed — retrying with a fresh session"
                 mailbox.requeue(envelopeID)
@@ -242,9 +219,8 @@ extension SZHost {
                 mailbox.markProcessed(envelopeID)
             }
         } catch {
-            // A deliver that bowed out before its turn-end path ran (claim refusal, zombie) left
-            // the queue-wait row parked under this turn — drop it rather than leak it. Harmless
-            // no-op when finalizeTurn already took the events.
+            // A deliver that bowed out before its turn-end path ran left the queue-wait row
+            // parked under this turn — drop it rather than leak it.
             SZTrace.discard(turnID: assistantID)
             if dropSessionIfStale(scope) {
                 reply("(session expired — retrying with a fresh session)")
@@ -256,15 +232,15 @@ extension SZHost {
             status = "chat failed"
             mailbox.markFailed(envelopeID, reason: "\(error)")
         }
-        // A ui_run recorded during THIS Director turn fires from the pump: the defer's release
-        // triggers `fireQueuedDirectorRunIfPossible` at the head of the very next pump pass —
-        // after our claim is gone (so startRun can take the transcript) and BEFORE the next queued
-        // Director message is considered (so the promised run wins the freed transcript).
+        // A run this turn minted (the door's `requestBuild`, or a mid-turn `ui_run`) fires
+        // from the pump: the defer's release triggers `admitPendingRunIfPossible` at the
+        // head of the very next pump pass — after our claim is gone, and BEFORE the next
+        // queued Director message is considered.
     }
 
-    // MARK: - The chat traversal
+    // MARK: - The prose delivery
 
-    /// Which agent answers a scope's chat. A map over the SEAT vocabulary, not per-agent
+    /// Which agent answers a scope's prose. A map over the SEAT vocabulary, not per-agent
     /// branching: replace the folder holding `coding` and node chats follow it. A seatless
     /// scope addresses an agent by id, which is what its key already is.
     nonisolated static func chatAgentID(for scope: SZChatScope,
@@ -276,28 +252,17 @@ extension SZHost {
         }
     }
 
-    /// One chat turn — ANY scope's — delivered THROUGH its agent's chat lane: the pack's
-    /// own steps pick the brief, the turn streams through `turn` (all the delivery
-    /// machinery — recap, attachments, session resume, claims, streaming — rides inside
-    /// that closure unchanged), and a ruling step decides what the turn WAS, firing the
-    /// `requestBuild` effect when a director's answer is a build.
+    /// One prose message, delivered THROUGH its agent's graph: the door decides what it is
+    /// (its triage may spend a model call), the graph's own turn streams through `turn`
+    /// (all delivery machinery rides inside that closure), and a `requestBuild` effect
+    /// mints the run with the user's words as its instruction.
     ///
-    /// The director used to be the only scope that walked a graph; every other chat ran the
-    /// host's own hardcoded prompt copies and left NO RUNS record, which is why messaging a
-    /// coding agent directly showed nothing in the sidebar.
-    ///
-    /// Runs the engine DIRECTLY, without the thread machine — a deliberate scope call: a
-    /// chat is ONE traversal, and the machine's whole business (dispatch sets, one settled
-    /// reply, rounds, absorbing termination) has no counterpart here; putting it in the
-    /// middle would wrap a single `startTraversal` in commands nothing consumes.
-    ///
-    /// Returns the turn's own run result, so `performChatTurn`'s post-processing (Stop,
-    /// stale-session retry, provider failure detail, queue settle) stays exactly as it was.
-    /// A traversal that never reached its turn throws instead; a POST-turn routing defect
-    /// never eats the streamed reply — it lands as one honest Director line beside it.
-    private func runChatTraversal(
+    /// Returns the turn's own run result so `performChatTurn`'s post-processing stays as
+    /// it was. A traversal that never reached its turn throws instead — except the honest
+    /// turn-less ending after `requestBuild` fired, which returns the ack line.
+    private func runProseDelivery(
         scope: SZChatScope, message: String, existing: SZAgentSession?, providerID: String,
-        nodeSeed: String?, delivery: SZBriefDelivery,
+        extras: SZBriefExtras,
         turn: @escaping @MainActor (SZTurnOrder) async throws -> SZAgentRunResult
     ) async throws -> (result: SZAgentRunResult, ack: String?) {
         guard let packsRoot = Self.graphAgentPacksRoot() else {
@@ -307,14 +272,12 @@ extension SZHost {
         let loaded = SZAgentPackLoader.load(root: packsRoot)
         guard let agentID = Self.chatAgentID(for: scope, seats: loaded.seats),
               let pack = loaded.packs.first(where: { $0.id == agentID }),
-              let graph = pack.graph(routing: .message) else {
+              let graph = pack.graph else {
             throw SZChatTraversalFailure(
-                detail: "no agent answers \(turnLabel(for: scope)) chat — its pack is missing "
-                    + "or routes no 'message' kind")
+                detail: "no agent answers \(turnLabel(for: scope)) — its pack is missing or broken")
         }
-        // Attach the chat graph's step declarations (compiled once; the host's step runtime
-        // caches across turns). A step that will not compile refuses HERE, loudly — the same
-        // policy as a run's full-library gate, scoped to the one graph a chat turn traverses.
+        // Attach the graph's step declarations (compiled once; the host's step runtime
+        // caches across turns). A step that will not compile refuses HERE, loudly.
         let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
         var attachments: [String: SZStepAttachment] = [:]
         for node in graph.nodes {
@@ -328,24 +291,28 @@ extension SZHost {
         let router = SZIdentityRouter(choice: SZModelChoice(
             providerID: providerID, model: generation.model,
             reasoningEffort: generation.reasoningEffort))
-        // One query service per turn (route-reply's ask); production executor — the routed
-        // provider runs one stateless completion.
+        // One query service per delivery (the door's triage ask); production executor.
         let queries = SZQueryService(
             renderer: renderer, router: router,
             cacheDirectory: FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache"))
         // The turn's result crosses the seam in a box: the graph speaks SZTurnReport
         // (process truth only), while performChatTurn needs the full run result back.
-        final class TurnCapture { var result: SZAgentRunResult?; var error: Error? }
-        let capture = TurnCapture()
-        // A chat reply is a traversal like any other: it gets its record, so the RUNS list
-        // and the panel's canvas show a routed reply the same way they show a build.
-        let sighting = SZTraversalSighting(id: UUID(), agent: pack.id,
-                                            graphName: graph.name, kind: .message)
-        beginAgentGraphRun(sighting)
-        let host = SZChatTraversalHost(
-            message: message, resuming: existing != nil, nodeSeed: nodeSeed, delivery: delivery,
-            renderer: renderer, graphName: graph.name, queries: queries,
-            liveGraph: { [weak self] in self?.store.project?.graph },
+        final class Capture { var result: SZAgentRunResult?; var error: Error?; var minted = false }
+        let capture = Capture()
+        // A prose reply is a traversal like any other: it gets its record, thread-less (a
+        // conversation is never part of a build thread).
+        let sighting = SZTraversalSighting(id: UUID(), agent: pack.id)
+        beginAgentGraphRun(sighting, thread: nil)
+        let delivery = SZDelivery(
+            agent: pack.id, message: message, extras: extras,
+            renderer: renderer, queries: queries,
+            world: { [weak self] in
+                guard let self else { return SZWorld() }
+                return SZWorld(graph: self.store.project?.graph,
+                               statuses: self.nodeStatusLines,
+                               node: scope.nodeID,
+                               resuming: existing != nil)
+            },
             turn: { order in
                 do {
                     let result = try await turn(order)
@@ -357,21 +324,21 @@ extension SZHost {
                     return SZTurnReport(failed: true, detail: String(describing: error))
                 }
             },
-            effect: { [weak self] effect, kind in
+            effect: { [weak self] effect in
                 guard let self else { return }
-                if effect == SZMessageEffect.requestBuild.rawValue {
-                    // The graph's way to start a run — the SAME queued lane a mid-turn
-                    // `ui_run` uses, with the user's message riding as the run's
-                    // instruction (the turn that ruled `build` did the shaping).
-                    self.queueChatRequestedBuild(instruction: message)
-                } else {
-                    await self.perform(effect: effect, kind: kind)
+                switch effect {
+                case .requestBuild:
+                    // The door ruled the prose a build: mint the run with the user's words
+                    // as its standing instruction. The pump admits it the moment this
+                    // delivery's claim frees.
+                    capture.minted = true
+                    self.mintRun(instruction: message)
                 }
             },
             onNote: { [weak self] note in self?.noteAgentGraphRun(sighting.id, note) })
         let outcome = await SZGraphEngine(
             agent: pack.id, graph: graph, attachments: attachments,
-            host: host, steps: steps, router: router).run(kind: .message)
+            host: delivery, steps: steps, router: router).run()
         concludeAgentGraphRun(sighting.id, SZTraversalEnding(outcome.conclusion))
         // The turn's own throw (Stop, zombie claim, stale session) resumes performChatTurn's
         // existing catch handling untouched.
@@ -381,27 +348,26 @@ extension SZHost {
             case .cancelled:
                 throw CancellationError()
             case .failed(let node, let detail), .defect(let node, let detail):
-                throw SZChatTraversalFailure(detail: "chat graph '\(node)': \(detail)")
+                throw SZChatTraversalFailure(detail: "graph '\(node)': \(detail)")
             case .ended(let node, let endOutcome):
-                // Turn-LESS endings are a real lane now: the triage ask ruling `implement`
-                // fires the requestBuild effect and ends — the run is the reply. Synthesize
-                // an ok result so the delivery settles, with the ack as its one line.
-                if node == "triage" || endOutcome == "implement" {
+                // A turn-LESS ending is honest exactly when this delivery minted a run —
+                // the run is the reply. The delivery performed the effect, so it KNOWS.
+                if capture.minted {
                     return (SZAgentRunResult(
                         process: SZProcessResult(exitCode: 0, output: ""),
                         outcome: SZAgentOutcome(sessionID: nil, failed: false)),
                         ack: "(build requested — starting a run)")
                 }
                 throw SZChatTraversalFailure(detail:
-                    "the chat graph ended at '\(node)' (\(endOutcome)) without running a turn")
+                    "the graph ended at '\(node)' (\(endOutcome)) without running a turn")
             case .declined(let node, let reason):
-                throw SZChatTraversalFailure(detail: "the chat graph declined at '\(node)'"
+                throw SZChatTraversalFailure(detail: "the graph declined at '\(node)'"
                     + (reason.map { ": \($0)" } ?? ""))
             }
         }
         if case .defect(let node, let detail) = outcome.conclusion {
-            // On the DELIVERING scope's transcript, not always the Director's — a node
-            // chat's routing defect belongs in that node's conversation.
+            // On the DELIVERING scope's transcript — a node chat's routing defect belongs
+            // in that node's conversation.
             store.appendChatMessage(
                 SZChatMessage(role: .assistant,
                               text: "(reply routing failed at '\(node)': \(detail))",
@@ -411,24 +377,9 @@ extension SZHost {
         }
         return (result, ack: nil)
     }
-
-    /// The `requestBuild` chat effect's landing: queue the run on the SAME `pendingDirectorRun`
-    /// lane a mid-turn `ui_run` uses — the delivering chat turn still holds the Director
-    /// transcript, so a direct `startRun` here would refuse against our own claim. The pump
-    /// fires it the moment the transcript frees (normally this very delivery's release), with
-    /// `directorAlreadyBriefed` — the turn that ruled `build` did the shaping. A run the turn
-    /// already queued itself (`ui_run` mid-turn) wins: one request is enough.
-    func queueChatRequestedBuild(instruction: String) {
-        guard !isRunning else {
-            narrateDirector("Effect 'requestBuild' skipped — a run is already active.")
-            return
-        }
-        if pendingDirectorRun == nil { pendingDirectorRun = instruction }
-        pumpMailboxes()   // fires now if the transcript is free; else the delivery's release re-fires
-    }
 }
 
-/// A chat traversal that could not do its job before (or instead of) running its turn.
+/// A prose delivery that could not do its job before (or instead of) running its turn.
 struct SZChatTraversalFailure: Error, CustomStringConvertible {
     let detail: String
     var description: String { detail }

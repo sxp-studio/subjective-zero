@@ -12,13 +12,9 @@ public struct SZStepDeclarationInfo: Codable, Sendable {
     /// The closed outcome set the step answers with — every outcome-labeled edge leaving the
     /// step's node must name one of these.
     public var outcomes: [String]
-    /// The facts KIND name the step compiled against (`"build"`, `"chat"`, …), when known.
-    /// nil is tolerated for now — declarations predating the kind field carry none.
-    public var facts: String?
 
-    public init(outcomes: [String], facts: String? = nil) {
+    public init(outcomes: [String]) {
         self.outcomes = outcomes
-        self.facts = facts
     }
 }
 

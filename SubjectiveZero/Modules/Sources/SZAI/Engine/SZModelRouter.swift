@@ -21,15 +21,12 @@ public struct SZModelCall: Sendable {
     public var `class`: Class
     /// The agent (type) on whose behalf the call runs.
     public var agent: String
-    /// The graph variant the traversal is executing, when the call originates inside one.
-    public var graph: String?
-    /// The step whose evaluation (or turn) is asking, when the call originates at a step.
+    /// The graph node whose evaluation (or turn) is asking.
     public var step: String?
 
-    public init(class: Class, agent: String, graph: String? = nil, step: String? = nil) {
+    public init(class: Class, agent: String, step: String? = nil) {
         self.class = `class`
         self.agent = agent
-        self.graph = graph
         self.step = step
     }
 }

@@ -1,16 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The host-owned SDK compiled into every step dylib beside the author's `Step.swift` — the
-// `SZRuntimeSupport` pattern, step tier, ABI v4.
-//
-// The source is ASSEMBLED, not written: the ABI prelude and the authoring surface are
-// static here, and the facts land in the middle from `SZStepSDKGenerated` — the verbatim
-// spec region of SZCore's SZFacts.swift plus its derived-convenience extensions, emitted by
-// the SZFactGen plugin. One spec, compiled twice: the app and every step decode the same
-// wire shape, and `hasWorkLeft`-style spellings exist exactly once.
-//
-// A step is typed to its graph kind: `SZBuildCondition { $0.hasWorkLeft }` compiles against
-// SZBuildFacts, and reading a fact another kind publishes is a COMPILE error in the step —
-// the gate the old vocabulary-audit machinery approximated with text scans.
+// The host-owned SDK compiled into every step dylib beside the author's Step.swift (ABI
+// v5). Assembled: the ABI prelude + the spliced SZFacts spec + the authoring surface.
+// One way to write a step — `let step = SZStep(outcomes: [...]) { ctx in … }` — and ctx is
+// the delivery's facts plus one capability, `ask`. No kind anywhere.
 import Foundation
 
 enum SZStepSDK {
@@ -25,7 +17,7 @@ enum SZStepSDK {
     // MARK: - Static core, part 1: the ABI prelude
 
     private static let corePrefix = """
-    // HOST-OWNED. Assembled by SZRuntime (step SDK, ABI v4). Do not edit in a step.
+    // HOST-OWNED. Assembled by SZRuntime (step SDK, ABI v5). Do not edit in a step.
     import Foundation
 
     // MARK: - ABI (must byte-match SZStepABI.swift in the host)
@@ -46,19 +38,6 @@ enum SZStepSDK {
     // MARK: - Static core, part 2: the authoring surface + entry points
 
     private static let coreSuffix = """
-    // MARK: - Kinds
-
-    /// A facts struct a step may be typed against. The four conformances below are
-    /// architectural — one per graph kind — and the name is what the step's declaration
-    /// reports so the pack gate can refuse a step wired into the wrong kind's graph.
-    public protocol SZFactsKind: Codable, Sendable {
-        static var kindName: String { get }
-    }
-    extension SZBuildFacts: SZFactsKind { public static var kindName: String { "build" } }
-    extension SZMessageFacts: SZFactsKind { public static var kindName: String { "message" } }
-    extension SZWorkFacts: SZFactsKind { public static var kindName: String { "work" } }
-    extension SZRequestFacts: SZFactsKind { public static var kindName: String { "request" } }
-
     // MARK: - Errors
 
     public enum SZStepError: Error, CustomStringConvertible {
@@ -81,27 +60,29 @@ enum SZStepSDK {
 
     // MARK: - The context
 
-    /// What one evaluation may touch: its kind's facts snapshot — pinned at evaluate-start;
-    /// a step that awaits and then reads a fact sees the world as it was when evaluation
-    /// began — and one question-asking capability. Facts read directly off the context:
-    /// `$0.hasWorkLeft`, `$0.nodeStatuses`. `@unchecked Sendable`: the pointers are
+    /// What one evaluation may touch: the delivery's facts snapshot — pinned at
+    /// evaluate-start; a step that awaits and then reads a fact sees the world as it was
+    /// when evaluation began — and one question-asking capability. Facts read directly off
+    /// the context: `ctx.message`, `ctx.resuming`, `ctx.run`, `ctx.assignment`,
+    /// `ctx.stagedOp`, `ctx.hasWorkLeft`. `@unchecked Sendable`: the pointers are
     /// host-owned and outlive the evaluation by the ABI's settle contract.
     @dynamicMemberLookup
-    public struct SZContext<Facts: SZFactsKind>: @unchecked Sendable {
-        public let facts: Facts
+    public struct SZContext: @unchecked Sendable {
+        public let facts: SZFacts
         let host: UnsafeMutableRawPointer?
         let askFn: SZStepAskFn?
 
-        public subscript<Value>(dynamicMember keyPath: KeyPath<Facts, Value>) -> Value {
+        public subscript<Value>(dynamicMember keyPath: KeyPath<SZFacts, Value>) -> Value {
             facts[keyPath: keyPath]
         }
 
-        /// Render `template` (a `.md.mustache` the host resolves against THIS evaluation's
-        /// facts), run ONE stateless model completion, decode the reply into `T`. On a
-        /// shape mismatch the host is asked again with the decode error attached
-        /// (`repair`), up to `retries` more times. The step never names a model — routing
-        /// is the host's.
-        public func askModel<T: Decodable>(template: String, as type: T.Type, retries: Int = 1) async throws -> T {
+        /// Ask the model ONE question: render the pack template named `template` (a stem —
+        /// `prompts/<template>.md.mustache`) against THIS evaluation's facts, run one
+        /// stateless completion, decode the reply into `T`. On a shape mismatch the host is
+        /// asked again with the decode error and the previous reply attached (the repair
+        /// loop), up to `retries` more times, then the step throws honestly. The step never
+        /// names a model — routing is the host's.
+        public func ask<T: Decodable>(_ template: String, as type: T.Type, retries: Int = 1) async throws -> T {
             var repair: SZAskRepair? = nil
             var lastDetail = "no reply"
             for attempt in 0...max(0, retries) {
@@ -238,111 +219,53 @@ enum SZStepSDK {
 
     // MARK: - The authoring surface
 
-    /// What a step answers with, and which kind's facts it compiled against — what the
-    /// panel draws as the card's ports and the pack gate validates edges and wiring with.
-    public struct SZStepDeclaration: Encodable {
-        public var outcomes: [String]
-        public var facts: String
-        public init(outcomes: [String], facts: String) {
-            self.outcomes = outcomes
-            self.facts = facts
-        }
-    }
-
-    /// A step's full answer: the outcome the graph routes on, plus EFFECTS — named host
+    /// A step's full answer: the outcome the graph routes on, plus EFFECTS — the typed host
     /// actions the step requests. The host runs them AFTER the step returns and BEFORE edge
-    /// routing; an effect outside the kind's declared set is a traversal defect. A bare
-    /// string is a plain effect-less outcome, so today's spellings need no ceremony.
+    /// routing. A bare string is a plain effect-less outcome, so ordinary spellings need no
+    /// ceremony.
     public struct SZAnswer: Sendable, ExpressibleByStringLiteral {
         public var outcome: String
-        public var effects: [String]
+        public var effects: [SZEffect]
 
-        public init(outcome: String, effects: [String] = []) {
+        public init(outcome: String, effects: [SZEffect] = []) {
             self.outcome = outcome
             self.effects = effects
         }
 
         public init(stringLiteral value: String) { self.init(outcome: value) }
 
-        /// The spelled-out factory: `return .outcome("build", effects: ["requestBuild"])`.
-        public static func outcome(_ outcome: String, effects: [String] = []) -> SZAnswer {
+        /// The spelled-out factory: `return .outcome("implement", effects: [.requestBuild])`.
+        public static func outcome(_ outcome: String, effects: [SZEffect] = []) -> SZAnswer {
             SZAnswer(outcome: outcome, effects: effects)
         }
     }
 
-    /// The step contract: one kind's facts in, one declared outcome out. A body may
-    /// `await` — and may `askModel` — but it cannot mutate the host; anything it wants
-    /// done travels back as its outcome (and, for a host action, as a requested effect).
-    public protocol SZStep: Sendable {
-        associatedtype Facts: SZFactsKind
-        var declaration: SZStepDeclaration { get }
-        func evaluate(_ ctx: SZContext<Facts>) async throws -> String
-        /// The full answer, effects included. Defaulted onto `evaluate`, so a plain step
-        /// never spells it; `SZRouter` forwards its closure's whole answer through here.
-        func answer(_ ctx: SZContext<Facts>) async throws -> SZAnswer
-        func teardown()
-    }
-    public extension SZStep {
-        func teardown() {}
-        var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: [], facts: Facts.kindName) }
-        func answer(_ ctx: SZContext<Facts>) async throws -> SZAnswer {
-            SZAnswer(outcome: try await evaluate(ctx))
-        }
-    }
+    /// THE step — the one authoring construct. Declare the outcomes (the card's ports; the
+    /// pack gate checks the graph's edges against them), write the body:
+    ///
+    ///     let step = SZStep(outcomes: ["yes", "no"]) { $0.hasWorkLeft ? "yes" : "no" }
+    ///
+    /// The body reads `ctx` (the facts, `ask`) and answers an outcome — or a full
+    /// `SZAnswer` when it requests effects. It may `await`; it cannot mutate the host:
+    /// anything it wants done travels back as its outcome (or a requested effect).
+    public struct SZStep: Sendable {
+        public let outcomes: [String]
+        let body: @Sendable (SZContext) async throws -> SZAnswer
 
-    /// A yes/no question — the ordinary step, still one line, typed to its kind:
-    ///
-    ///     let step = SZBuildCondition { $0.hasWorkLeft }
-    ///
-    /// A synchronous closure converts implicitly; `try await` inside is equally at home.
-    public struct SZCondition<Facts: SZFactsKind>: SZStep {
-        let body: @Sendable (SZContext<Facts>) async throws -> Bool
-        public init(_ body: @escaping @Sendable (SZContext<Facts>) async throws -> Bool) { self.body = body }
-        public var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: ["yes", "no"], facts: Facts.kindName) }
-        public func evaluate(_ ctx: SZContext<Facts>) async throws -> String { try await body(ctx) ? "yes" : "no" }
-    }
-
-    /// A question whose answer IS data — one outcome per branch, named up front because the
-    /// graph draws an edge from each:
-    ///
-    ///     let step = SZMessageRouter("answer", "build") {
-    ///         try await $0.askModel(template: "classify-reply", as: Ruling.self).kind
-    ///     }
-    public struct SZRouter<Facts: SZFactsKind>: SZStep {
-        let outcomes: [String]
-        let body: @Sendable (SZContext<Facts>) async throws -> SZAnswer
-        public init(_ outcomes: String..., answer: @escaping @Sendable (SZContext<Facts>) async throws -> String) {
+        public init(outcomes: [String], _ body: @escaping @Sendable (SZContext) async throws -> String) {
             self.outcomes = outcomes
-            self.body = { SZAnswer(outcome: try await answer($0)) }
+            self.body = { SZAnswer(outcome: try await body($0)) }
         }
-        /// The effect-emitting spelling, still one line:
-        ///
-        ///     let step = SZMessageRouter("answer", "build") { _ in
-        ///         .outcome("build", effects: ["requestBuild"])
-        ///     }
-        ///
-        /// Disfavored so a body that answers plain strings keeps resolving to the String
-        /// overload (bit-stable wire for every existing step); this one wins exactly when
-        /// the body actually speaks `SZAnswer`.
+
+        /// The effect-emitting spelling, same shape. Disfavored so a body answering plain
+        /// strings resolves to the String overload; this one wins exactly when the body
+        /// actually speaks `SZAnswer`.
         @_disfavoredOverload
-        public init(_ outcomes: String..., answer: @escaping @Sendable (SZContext<Facts>) async throws -> SZAnswer) {
+        public init(outcomes: [String], _ body: @escaping @Sendable (SZContext) async throws -> SZAnswer) {
             self.outcomes = outcomes
-            self.body = answer
+            self.body = body
         }
-        public var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: outcomes, facts: Facts.kindName) }
-        public func evaluate(_ ctx: SZContext<Facts>) async throws -> String { try await body(ctx).outcome }
-        public func answer(_ ctx: SZContext<Facts>) async throws -> SZAnswer { try await body(ctx) }
     }
-
-    /// One spelling per kind — the graph kind is part of the step's name, nothing else.
-    public typealias SZBuildCondition = SZCondition<SZBuildFacts>
-    public typealias SZMessageCondition = SZCondition<SZMessageFacts>
-    public typealias SZWorkCondition = SZCondition<SZWorkFacts>
-    public typealias SZRequestCondition = SZCondition<SZRequestFacts>
-    public typealias SZBuildRouter = SZRouter<SZBuildFacts>
-    public typealias SZMessageRouter = SZRouter<SZMessageFacts>
-    public typealias SZWorkRouter = SZRouter<SZWorkFacts>
-    public typealias SZRequestRouter = SZRouter<SZRequestFacts>
 
     // MARK: - Entry points
 
@@ -374,9 +297,8 @@ enum SZStepSDK {
     }
 
     /// The success payload on the wire, ADDITIVE by construction: an effect-less answer is
-    /// the bare outcome string exactly as it always was; only an answer carrying effects
-    /// rides the JSON envelope (which no bare outcome can be mistaken for — outcomes are
-    /// names, not JSON objects).
+    /// the bare outcome string; only an answer carrying effects rides the JSON envelope
+    /// (which no bare outcome can be mistaken for — outcomes are names, not JSON objects).
     private func szWirePayload(_ answer: SZAnswer) -> String {
         guard !answer.effects.isEmpty else { return answer.outcome }
         struct Envelope: Encodable {
@@ -385,27 +307,25 @@ enum SZStepSDK {
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(Envelope(outcome: answer.outcome, effects: answer.effects)) else {
+        guard let data = try? encoder.encode(Envelope(outcome: answer.outcome, effects: answer.effects.map(\\.rawValue))) else {
             return answer.outcome
         }
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// Generic over the authored step's kind, so the facts document decodes into exactly
-    /// the struct the body was compiled against — an off-kind document fails to start.
-    private func szStartEvaluation<S: SZStep>(_ authored: S, _ request: SZStepEvalRequestRaw,
-                                              _ done: @escaping SZStepCompletionFn,
-                                              _ doneCtx: UnsafeMutableRawPointer?) -> UInt64 {
+    private func szStartEvaluation(_ authored: SZStep, _ request: SZStepEvalRequestRaw,
+                                   _ done: @escaping SZStepCompletionFn,
+                                   _ doneCtx: UnsafeMutableRawPointer?) -> UInt64 {
         guard let factsPtr = request.factsJSON, request.factsLen > 0,
-              let facts = try? JSONDecoder().decode(S.Facts.self, from: Data(bytes: factsPtr, count: Int(request.factsLen)))
+              let facts = try? JSONDecoder().decode(SZFacts.self, from: Data(bytes: factsPtr, count: Int(request.factsLen)))
         else { return 0 }   // could not start; the completion is never called
 
-        let ctx = SZContext<S.Facts>(facts: facts, host: request.hostContext, askFn: request.askFn)
+        let ctx = SZContext(facts: facts, host: request.hostContext, askFn: request.askFn)
         let token = szEvalTable.mint()
         let task = Task {
             var status: Int32 = 0
             var payload = ""
-            do { payload = szWirePayload(try await authored.answer(ctx)) }
+            do { payload = szWirePayload(try await authored.body(ctx)) }
             catch is CancellationError { status = 1 }
             catch { status = 2; payload = String(describing: error) }
             // The table entry dies BEFORE the completion: once done() fires the host may
@@ -418,7 +338,7 @@ enum SZStepSDK {
     }
 
     @_cdecl("SZStepAPIVersion")
-    public func SZStepAPIVersion() -> Int32 { 4 }
+    public func SZStepAPIVersion() -> Int32 { 5 }
 
     @_cdecl("SZStepEvaluate")
     public func SZStepEvaluate(_ raw: UnsafeRawPointer?, _ done: SZStepCompletionFn?, _ doneCtx: UnsafeMutableRawPointer?) -> UInt64 {
@@ -432,17 +352,15 @@ enum SZStepSDK {
 
     @_cdecl("SZStepDeclare")
     public func SZStepDeclare(_ out: UnsafeMutablePointer<CChar>?, _ cap: Int32) -> Int32 {
-        guard let out, !step.declaration.outcomes.isEmpty else { return 0 }
+        guard let out, !step.outcomes.isEmpty else { return 0 }
+        struct Declaration: Encodable { var outcomes: [String] }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(step.declaration) else { return 0 }
+        guard let data = try? encoder.encode(Declaration(outcomes: step.outcomes)) else { return 0 }
         let bytes = Array(data)
         let n = min(bytes.count, Int(cap))
         for i in 0..<n { out[i] = CChar(bitPattern: bytes[i]) }
         return Int32(bytes.count)
     }
-
-    @_cdecl("SZStepTeardown")
-    public func SZStepTeardown() { step.teardown() }
     """
 }

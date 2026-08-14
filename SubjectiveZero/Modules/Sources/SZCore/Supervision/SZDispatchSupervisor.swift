@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // THE dispatch-set supervisor — one pure value machine owning the fleet's lifecycle while
-// a traversal's dispatch node waits. It used to own the whole thread (rounds, settled
-// re-entries, the thread's conclusion) back when a dispatch concluded on send and the
-// reply re-entered the graph as a new message; a dispatch now WAITS inside its own
-// traversal, so the journey's shape belongs to the graph again (a retry round is a leashed
-// edge, an ending is the traversal's own conclusion) and what remains here is exactly the
-// part that must never be reinvented per host: set supervision. Hosts are its motor — they
-// deliver items, arm timers, and report back as events — and tests drive THE REAL THING
-// with event lists.
+// a traversal's dispatch node waits. The host is its motor: it delivers items, arms
+// timers, and reports back as events — and tests drive THE REAL THING with event lists.
 //
 // The model, stated once:
 //  - ONE open set at a time, structurally: the engine is sequential and a dispatch node
@@ -94,7 +88,7 @@ public enum SZTraversalEnding: Sendable, Equatable {
 
 /// One pure value-type state machine owning dispatch-set lifecycle. Feed it events,
 /// execute the commands it returns, in order — that is the entire contract.
-public struct SZThreadMachine: Sendable {
+public struct SZDispatchSupervisor: Sendable {
     /// Every bound the machine obeys, injected once at construction.
     public struct Bounds: Sendable, Equatable {
         /// The per-set watchdog delay — after this, a set that has not fully settled

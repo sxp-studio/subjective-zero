@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// CROSS-TARGET PIN, side B, for the shipped shipped packs' step declarations. Side A is
+// CROSS-TARGET PIN, side B, for the shipped packs' step declarations. Side A is
 // SZAITests' `shippedPackSteps` stub (SZAgentPackTests): the pack gate over there validates
 // the shipped packs root with HAND-WRITTEN declarations, because SZAITests may not import
 // SZRuntime to compile the sources. This suite closes the loop with the real machinery —
@@ -20,11 +20,10 @@ private let shippedPacksRoot = URL(filePath: #filePath)
 /// agent/step → the declaration JSON the compiled module must export (`SZStepDeclare`
 /// encodes with sorted keys). Mirrors SZAITests' `shippedPackSteps` claims exactly.
 private let pinnedDeclarations: [String: String] = [
-    "director/work-left": #"{"facts":"build","outcomes":["yes","no"]}"#,
-    "director/resuming": #"{"facts":"message","outcomes":["yes","no"]}"#,
-    "coding/retrying": #"{"facts":"work","outcomes":["yes","no"]}"#,
-    "coding/resuming": #"{"facts":"message","outcomes":["yes","no"]}"#,
-    "coding/request-op": #"{"facts":"request","outcomes":["split","merge"]}"#,
+    "director/door": #"{"outcomes":["build","answer","answer-resumed","implement"]}"#,
+    "director/work-left": #"{"outcomes":["yes","no"]}"#,
+    "coding/door": #"{"outcomes":["implement","continue","chat","chat-resumed"]}"#,
+    "debug/door": #"{"outcomes":["answer"]}"#,
 ]
 
 /// Serialized like the other step suites: each test drives real swiftc invocations.

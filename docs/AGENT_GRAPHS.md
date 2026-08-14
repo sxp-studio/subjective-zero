@@ -1,49 +1,50 @@
 # Agent graphs
 
-**An agent is a mailbox plus graphs.** Everything an agent does — which graph answers which
-message, what a turn is told, what happens when the fleet settles — is data in the agent's own
-folder, validated as a library at load and traversed by one engine.
+**An agent is a folder with one graph, and a message is words.** Everything an agent does —
+how it decides what a message means, what a turn is told, what happens when the fleet
+settles — is data and code in the agent's own folder, validated as a library at load and
+run by one engine. There is no message kind anywhere: what a delivery *means* is decided
+by the agent's own door, in code you can open.
 
-Model: `SZCore/Agents/SZAgentGraph.swift` (+ `SZMessageKind.swift`, `SZSeatAssignment.swift`).
-Facts: `SZCore/AgentFacts/SZFacts.swift`. Supervision: `SZCore/Supervision/SZThreadMachine.swift`.
-Loader + validation: `SZAI/Agents/SZAgentPackLoader.swift`. Engine: `SZAI/Engine/SZGraphEngine.swift`
-(+ `SZGraphStrategy.swift`, `SZBriefRenderer.swift`). Step runtime: `SZRuntime/Steps/`.
-Shipped packs: `SZAI/Resources/Agents/`. Tutorial: [AUTHORING.md](AUTHORING.md).
+Model: `SZCore/Agents/SZAgentGraph.swift` (+ `SZAgentGraphRun.swift`, `SZSeatAssignment.swift`).
+Facts: `SZCore/AgentFacts/` (`SZFacts.swift` is the spec, `SZWorld.swift` the host
+projection). Supervision: `SZCore/Supervision/SZDispatchSupervisor.swift`. Loader +
+validation: `SZAI/Agents/SZAgentPackLoader.swift`. Engine: `SZAI/Engine/SZGraphEngine.swift`
+(+ `SZBriefRenderer.swift`, `SZQueryService.swift`). Delivery: `SZApp/SZDelivery.swift` +
+`SZHost+Run.swift` / `SZHost+Mailbox.swift`. Step runtime: `SZRuntime/Steps/`. Shipped
+packs: `SZAI/Resources/Agents/`. Tutorial: [AUTHORING.md](AUTHORING.md).
 
-## The message vocabulary
+## A message is words; structure is world state
 
-One enum, `SZMessageKind`, spoken everywhere — queue intent, message-node port, delivery record.
-A graph's **message node** is its one door: a delivery leaves by the port bearing its kind — and
-for prose, that is where classification STOPS being provenance and becomes content: the `message`
-port routes into a triage ask that rules on what was said.
+A message carries prose and nothing else. Everything structural lives in the **world** —
+state that is true between messages, minted by the host, read by steps and briefs:
 
-| message | means | who sends it |
+| world state | true while | minted by |
 |---|---|---|
-| `message` | human prose — ONE kind for everything someone says; what it MEANS is ruled inside the graph (the triage ask), never by the kind | the user, or a tool speaking prose |
-| `build` | the granted build, carrying the standing instruction into the build lane | the Build press, `ui_run`, or a `message` whose triage ruled `implement` |
-| `work` | one node's coding assignment, dispatched off the run's work set | a director graph's dispatch node |
-| `request` | a structured proxied operation (split/merge …) | `ui_split_node`, `ui_merge_nodes` — routed on payload, never prose |
-| `steer` | a note folded into the recipient's NEXT brief | the user, mid-run |
+| `run` | a granted build is live — its work set, round, retry cap, steers, standing instruction | the Build press, `ui_run`, or the door's `requestBuild` effect |
+| `assignment` | work stands assigned to this scope — the attempt, the sender's note | a dispatch node's fleet delivery |
+| `graph`, `statuses` | always — the live project document and the agents' reported statuses | the app |
+| `node`, `resuming` | the delivery's binding: which node it is about, whether the scope already has a session | the delivering host |
 
-`steer` is the one kind that never enters a graph: the thread machine drains steers into the next
-traversal's facts, and a conclusion sweeps leftovers.
+New machinery never grows a message: it mints world state and knocks. The rule that keeps
+the spec honest: **every fact names its shipped consumer** (a step predicate or a brief
+token) — a fact nothing reads is deleted, not kept warm.
 
-**One message is one traversal.** Nothing re-enters a graph: a dispatch waits for its fleet and
-settles onward over its own edge, so the whole journey from delivery to conclusion is a single
-connected walk — and the RUNS list maps one row to one message received. (`settled` used to be a
-fifth kind, the fleet's reply re-entering the sender's graph as a second traversal; the waiting
-dispatch made it the dispatch node's own outcome instead, and the kind is gone.)
+**One message is one traversal.** Nothing re-enters a graph: a dispatch waits for its
+fleet and settles onward over its own edge, so the whole journey from delivery to
+conclusion is a single connected walk — and the RUNS list maps one row to one message
+received.
 
-**Vocabulary.** A build is a **thread**: short graph **traversals** joined by messages, sharing one
-identity from the Build press to the conclusion. A **turn** is one agent running because a turn
-node asked — the unit that spends model time. Turn ⊂ traversal ⊂ thread.
+**Vocabulary.** A build is a **thread**: the build traversal and the work children it
+dispatched, sharing the build record's own id. A **turn** is one agent running because a
+turn node asked — the unit that spends model time. Turn ⊂ traversal ⊂ thread.
 
 ## One folder per agent
 
 ```
 Resources/Agents/<id>/
   agent.json        identity and seat — nothing else
-  graphs/           one file per graph — the graph's name IS the filename stem
+  graph.json        THE graph — one per agent, so it carries no name
   prompts/          brief templates (*.md.mustache) — ALL prompt prose lives here
   steps/<name>/     one compiled decision per folder: a single Step.swift
 ```
@@ -57,270 +58,215 @@ Resources/Agents/<id>/
 }
 ```
 
-There is no third field: which graph answers which kind is said by the graphs' own message nodes,
-so the manifest has nothing left to arbitrate. (A leftover `defaults` key is refused by name rather
-than ignored — an author must not believe they still steer routing from here.)
+Seats resolve over the loaded library: exactly one holder each, checked at validation. A
+dispatch names a seat, never an agent id — replace a folder and whoever now holds the seat
+receives the work.
 
-The shipped packs each carry ONE document — `director/graphs/director.json`,
-`coding/graphs/coding.json`, `debug/graphs/debug.json`. That is a convention, not a rule: an agent
-may spread its lanes over several files, as long as each kind has exactly one destination
-(`kindRoutedTwice` refuses the tie).
-
-Seats resolve over the loaded library: exactly one holder each, checked at validation. A dispatch
-names a seat, never an agent id — replace a folder and whoever now holds the seat receives the work.
-
-## Graph files: one door and five node forms
+## The graph: three node forms, and the door is a step
 
 ```jsonc
 {
-  "name": "director",          // must equal the filename stem
   "label": "Director",         // display name (optional)
   "hint": "…",                 // subtitle (optional)
-  "nodes": [ { "id": "message", "title": "On message", "onMessage": {} }, … ],
-  "edges": [ { "from": "message", "outcome": "build", "to": "strategy" }, … ]
+  "nodes": [ { "id": "door", "title": "On message", "step": "door" }, … ],
+  "edges": [ { "from": "door", "outcome": "build", "to": "decompose" }, … ]
 }
 ```
 
-Every graph has exactly **one message node** — its door — and the kinds it accepts are the
-**outcomes of the edges leaving it**. There is no `kind` field, no `entry` map, and no `caps`
-budget: the ports and the routing cannot disagree because they are the same edges, and retry
-depth is the settled edge's own leash. All three retired keys are refused by name at decode
-rather than ignored.
-
-> **Why the door is a node.** `entry` used to be a map from kind to node, so a graph with two doors
-> drew as two disconnected fragments — the fleet's `settled` reply in particular had nowhere to
-> enter but a second entry key, leaving the retry lane attached to nothing. As a node, every kind
-> the agent accepts is one port on one card, the whole document is one connected picture, and
-> `unreachable` refuses a floating fragment at load instead of leaving it to be noticed on a canvas.
-
-A node takes **exactly one of five forms** — enforced at decode, so a malformed node is
-unrepresentable:
+A node takes **exactly one of three forms** — enforced at decode:
 
 | form | body | outcomes |
 |---|---|---|
-| `"onMessage": {}` | the door — no body, no cost, no host seam | the message kinds it routes; `steer` is not among them |
 | `"step": "<folder>"` | the compiled `Step.swift` in the agent's pack | whatever the step's own exported declaration names |
-| `"ask": { "prompt", "outcomes", "effects"? }` | a structured model query authored as data — the prompt file is the question | its declared `outcomes`; the reply's `{"outcome": …}` routes, repaired once on a shape mismatch |
-| `"turn": { "brief", "session"?, "tools"? }` | a full agent turn; the mustache brief IS the body | fixed `ok` / `error` — process truth only, content never routes |
-| `"dispatch": { "to", "items" }` | fan work out — one `work` message per element of the `items` fact — and **wait for the set** | `settled`, when the last lands (or the watchdog synthesizes the stragglers) |
+| `"turn": { "brief", "session"?, "tools"? }` | a full agent turn; the mustache brief (named by stem) IS the body | fixed `ok` / `error` — process truth only, content never routes |
+| `"dispatch": { "to" }` | fan the run's work set out to a seat — and **wait for the set** | `settled`, when the last lands (or the watchdog synthesizes the stragglers) |
 
-**A dispatch waits.** The traversal holds at the node while the fleet works — the card is live,
-its sub-agent lanes ticking under it — and when the set closes it produces `settled` and routes
-its one edge. No edge = settlement ends the run (procedural's spelling). A settled edge that
-loops back is the RETRY ROUND, and it must carry a `maxTraversals` leash — the same bound every
-other loop speaks; an unleashed settled loop is refused at load like any unbounded cycle. There
-is no separate "rounds" budget any more: the leash is the budget.
-
-**`ask` vs a step's `askModel`.** Both run one stateless completion through the same serving path
-(render like a brief, route, complete, journal, repair). The ask form is the declarative spelling
-— prompt file + declared outcomes + per-outcome `effects`, all validated at load — for the common
-ruling that needs no computation. A step with `askModel` remains the code spelling for rulings
-that weigh facts first. The shipped `route-reply` is an ask node: its `build` outcome carries the
-`requestBuild` effect as config, and no `Step.swift` exists for it.
-
-`session` on a turn: `spawn` (default) cold-starts; `message` continues the scope's existing
-session (spawning when none exists). `tools` narrows the turn's tool surface; nil is the agent's
-default — and `[]` means no MCP server at all. `dispatch.to` is a seat; `dispatch.items` must be a
-`[String]`-typed fact of the node's lane (the catalog check at load) — `workSet` is the one builds
-use.
-
-Edges are `{ from, outcome, to, maxTraversals? }`. An outcome with **no edge ends the traversal**
-— that is not an error; it is how a condition's `no` ends a run. A cycle is legal only across a
-`maxTraversals`-bounded edge; unbounded cycles are refused at load.
-
-## Lanes: one document, several kinds, still typed
-
-A document may route several kinds — the shipped director carries its chat lane and its build lane
-in one file — but a NODE may not straddle two. Steps and briefs are typed to one kind's facts, so
-the gate computes, per node, which ports can reach it: exactly one lane, or `laneImpure`. That is
-strictly stronger than the era when a graph simply declared one `kind` by fiat, because now the
-lane is *proven* by reachability from the door the message actually enters.
-
-Merging kinds into one file is therefore allowed and never required. What it buys is
-deduplication: the director's three build strategies share `reconcile`, `implement` and
-`nodes-failing`, which would have to be triplicated across separate variant files.
-
-## Strategies: authorable, not shipped
-
-V1 ships ONE build lane: a work message routes straight into `decompose`, the fleet is awaited at
-`implement`, and the leashed settled edge buys the reconcile rounds. There is no strategy router
-in the shipped pack — a preference is not a decision, and a card that always answers the same
-thing is noise.
-
-Variant lanes remain a PACK EDIT away. The seam is the `runVariant` build fact: the host passes
-`SZ_RUN_GRAPH` (env, per launch) > the persisted choice (`debug_set_orchestrator`) through
-verbatim, and a pack that wants strategies puts a router step at the head of its build lane:
+**The door is the step node with the reserved id `door`** — every delivery enters there,
+and it must be a step: the agent's routing intelligence is code the author opens, reads,
+and replaces. It examines the message's words and the world's state and answers an outcome
+like any step; nothing routes *into* it. The shipped director's door, whole:
 
 ```swift
-// director/steps/strategy/Step.swift
-let step = SZBuildRouter("agentic", "procedural") {
-    $0.runVariant == "procedural" ? "procedural" : "agentic"
+// director/steps/door/Step.swift
+struct Ruling: Codable { let outcome: String }
+
+let step = SZStep(outcomes: ["build", "answer", "answer-resumed", "implement"]) { ctx in
+    if ctx.run != nil { return "build" }        // a granted build arrives PRE-RULED
+    let ruling = try await ctx.ask("triage", as: Ruling.self)
+    if ruling.outcome == "implement" {
+        return .outcome("implement", effects: [.requestBuild])   // the run is the reply
+    }
+    return ctx.resuming ? "answer-resumed" : "answer"
 }
 ```
 
-— one port per lane, the default living in the `?:`. The host never validates the name (the step
-owns its fallback); when a build lane's head is a router, the sidebar marks the requested strategy
-on the agent's graph row.
-
-## Steps: one Step.swift, typed to its kind
-
-A step folder holds **one file**. The ordinary step is one line:
+Every line is a real decision: a grant goes straight to work (re-triaging it would spend a
+token to maybe drop a build), prose is triaged by the model, and an `implement` ruling
+mints the run. The coding agent's whole decision surface is four lines:
 
 ```swift
-let step = SZBuildCondition { $0.hasWorkLeft }
+// coding/steps/door/Step.swift
+let step = SZStep(outcomes: ["implement", "continue", "chat", "chat-resumed"]) { ctx in
+    if let job = ctx.assignment { return job.attempt > 1 ? "continue" : "implement" }
+    return ctx.resuming ? "chat-resumed" : "chat"
+}
 ```
 
-The kind is part of the type name — `SZBuildCondition`, `SZChatCondition`, `SZItemCondition`,
-`SZRequestCondition` (and `SZ<Kind>Router` where the answer IS data and names its own outcomes:
-`SZRequestRouter("split", "merge") { … }`). A condition declares `yes`/`no` on its own; conforming
-to `SZStep` directly stays available for a question that wants its own type.
+**A dispatch waits.** The traversal holds at the node while the fleet works — the card is
+live, its sub-agent lanes ticking under it — and when the set closes it produces `settled`
+and routes its one edge. No edge = settlement ends the run. A settled edge that loops back
+is the RETRY ROUND, and it must carry a `maxTraversals` leash — the same bound every other
+loop speaks; an unleashed settled loop is refused at load like any unbounded cycle. The
+leash IS the retry budget (the reconcile brief's `{{cap}}` reads it off the graph).
 
-The host compiles the file beside an **assembled SDK** (`SZRuntime/Steps/SZStepSDK.swift`, step
-ABI v4) whose middle section is the facts spec itself — so `$0.fleetIsFailing` compiles against
-the very source the app compiled, and reading a fact another kind publishes is a **compile error**
-in the step, not a text-scan approximation. The compiled module **exports its declaration**
-(outcomes + facts kind, `SZStepDeclare`); the pack gate reads it to validate every outcome-labeled
-edge and to refuse a step wired into the wrong kind's graph. A step body may `await`; it cannot
-mutate the host — anything it wants done travels back as its outcome.
+`session` on a turn: `spawn` (default) cold-starts; `resume` continues the scope's
+existing session (spawning when none exists). `tools` narrows the turn's tool surface;
+`[]` means no MCP server at all.
 
-### askModel and the repair loop
+Edges are `{ from, outcome, to, maxTraversals? }`. An outcome with **no edge ends the
+traversal** — that is not an error; it is how a gate's `no` ends a run. A cycle is legal
+only across a `maxTraversals`-bounded edge.
+
+## Steps: one construct, one context, one capability
+
+A step folder holds one file, and there is one way to write a step:
+
+```swift
+let step = SZStep(outcomes: ["yes", "no"]) { $0.hasWorkLeft ? "yes" : "no" }
+```
+
+`ctx` is the delivery's facts plus one capability, exhaustively: `message` (the words),
+`node`, `resuming`, `run`, `assignment`, `hasWorkLeft`, and `ask`. The host compiles the
+file beside an **assembled SDK** (`SZRuntime/Steps/SZStepSDK.swift`, step ABI v5) whose
+middle section is the facts spec itself, so both sides of the ABI decode the same wire
+shape and spellings like `hasWorkLeft` exist exactly once. The compiled module **exports
+its declaration** (its outcomes); the pack gate reads it to validate every outcome-labeled
+edge. A step body may `await`; it cannot mutate the host.
+
+### ask and the repair loop
 
 The SDK's one capability beyond facts: a step may ask one model question.
 
 ```swift
-try await $0.askModel(template: "classify-reply", as: Ruling.self)
+try await ctx.ask("triage", as: Ruling.self)
 ```
 
-The host renders the named pack template against the SAME facts snapshot the evaluation holds,
-runs one stateless completion, and decodes the reply into the requested type — tolerantly (the
-first balanced JSON object in a fenced or prose-wrapped reply counts). On a shape mismatch the
-host is asked again with the decode error and the previous reply attached (the repair loop), up
-to `retries` more times, then the step throws honestly. The step never names a model — routing is
-the host's. The director's `route-reply` step is the shipped example: it rules what a chat turn
-was, and only its `build` ruling carries the effect that starts a run.
+The host renders the named pack template (`prompts/triage.md.mustache`) against the SAME
+snapshot the evaluation holds, runs one stateless completion, and decodes the reply into
+the requested type — tolerantly (the first balanced JSON object in a fenced or
+prose-wrapped reply counts). On a shape mismatch the host is asked again with the decode
+error and the previous reply attached, up to `retries` more times, then the step throws
+honestly. The step never names a model — routing is the host's.
+
+### Effects
+
+A step answers with an outcome, and may ask for a typed host ACTION alongside it:
+
+```swift
+return .outcome("implement", effects: [.requestBuild])
+```
+
+The set is `SZEffect` in the facts spec — one case today, because one has a live
+consumer: `requestBuild` mints a run with the delivered message as its standing
+instruction. Effects are performed after the step returns and before its edge routes.
 
 ## Facts: one spec, compiled twice
 
-`SZCore/AgentFacts/SZFacts.swift` is the single spec of everything a step or brief can read. It
-compiles normally into SZCore — and the `SZFactGen` build-tool plugin parses its sentinel-marked
-region (a rigid grammar; any line it cannot classify fails the build, and a stray sentinel that
-would truncate the region silently is refused loudly) to generate, at build time:
+`SZCore/AgentFacts/SZFacts.swift` is the single spec of everything a step can read:
+`SZFacts` (the wire document — message, node, resuming, and the typed optional groups
+`SZRun` / `SZAssignment`) and `SZEffect`. The SZFactGen build-tool plugin splices the
+sentinel-marked region verbatim into the step SDK, so a step compiles against the very
+source the app compiled. **Adding a fact is two edits**: the documented `public var` line
+in the spec (its doc comment must name the consumer), and the projection in `SZWorld` —
+which also carries the host-side-only values (the typed project graph, the statuses) that
+feed brief rendering and never cross the ABI.
 
-- `SZFactCatalog.generated.swift` (SZCore) — one record per fact field; what the pack gate uses
-  to type-check a dispatch's `items` fact, and what tooling lists;
-- `SZStepSDKGenerated.swift` (SZRuntime) — the region's verbatim text plus the derived
-  conveniences below it, spliced into every step's SDK so both sides decode the same wire shape
-  and spellings like `hasWorkLeft` exist exactly once.
+## Briefs: one token table
 
-**Adding a fact is two edits**: the documented `public var` line in the spec region, and the host
-projection that populates it (`SZAI/Engine/SZGraphTraversalHosts.swift`). Every step and every
-brief can then read it — no registry, no third spelling.
+A turn's brief is a mustache template; the prompt assembler (`SZBriefRenderer`) computes
+exactly the `{{tokens}}` the template mentions from `(message, world, extras)` and
+substitutes them. There is ONE token table — every token has one meaning (`{{node}}` is
+the node this delivery is about; `{{boundary}}` is the contract to honor, from a staged
+op's bundle when one is present, else from the graph) — and two guarantees: an unknown
+token is refused at load, and rendered output with any live `{{token}}` left throws
+rather than ship a literal to a model. Briefs are read from disk per render, so a saved
+edit reaches the very next turn.
 
 ## The pack gate
 
-Loading (`SZAgentPackLoader`) collects defects, never first-errors: one unreadable pack reports
-while its siblings load, and inside a folder one bad graph file reports while the folder's healthy
-graphs — and its seat — still load. Validation covers the library as a whole: seats (exactly one
-holder each), one destination per kind per agent, graph shape (duplicate ids, dangling/duplicate
-edges, undeclared outcomes, unbounded cycles, the door's cardinality, reachability, lane purity),
-turn briefs (the template exists; every `{{token}}` is
-one the LANE's assembly substitutes; every partial a token renders from ships in the pack — no
-literal token reaches a model from a turn brief; an `askModel` template is resolved at RUN time and
-is not scanned, so a typo there ships literally), dispatch targets (a held seat whose holder routes `work`)
-and items facts (catalogued, `[String]`-typed), and — through the step seam — each compiled step's
-declared outcomes and facts kind, checked against the one lane that reaches it. With no step provider those checks are **skipped and the report
-says so**; they never pass silently.
+Loading collects defects, never first-errors: one unreadable pack reports while its
+siblings load. Validation covers the library as a whole: seats (exactly one holder each),
+one `graph.json` per agent, graph shape (duplicate ids, dangling/duplicate edges,
+undeclared outcomes, unbounded cycles, the door's existence and step-ness, reachability
+from the door), turn briefs (the template exists; every token is in the table; every
+partial a token renders from ships in the pack), dispatch seats, and — through the step
+seam — each compiled step's declared outcomes, the door included. With no step provider
+those checks are **skipped and the report says so**.
 
-`debug_check_pack` runs the same load + validation as a pre-flight, without spending a token, and
-renders the report: each agent's surface, the sorted defects, and a verdict naming the highest
-tier honestly attained — `does not load`, `loads, does not validate`, or `validates`.
+What a code door makes honest: whether a brief's tokens fit the messages that will
+actually arrive is *not statically knowable* — that check runs at render, loudly, into
+the traversal's trace.
 
-## Materialization, hot reload, and the source pills
+`debug_check_pack` runs the same load + validation as a pre-flight, without spending a
+token, and renders the report: each agent's surface (its door's declared outcomes lead
+the graph line), the sorted defects, and a verdict — `does not load`, `loads, does not
+validate`, or `validates`.
 
-Bundled resources are sealed inside a signed .app, so at start the host **materializes** the pack
-tree into `~/Library/Application Support/SubjectiveZero/agents/` — the writable copy everything
-then reads (`SZ_AGENT_PACKS` overrides the root wholesale). Freshness is per file by mtime: an
-app update's newer copy refreshes; your newer edit wins until then; files the bundle no longer
-ships are pruned (your own top-level pack folders are left alone).
+## The runtime: one delivery, no orchestrator
 
-Prompts need no watcher — briefs are read from disk per render, so a saved edit reaches the very
-next turn. Step sources are compiled code, so each `steps/<name>/Step.swift` is watched:
-save → recompile → swap on green, keep the old module on red, with the compiler's own words
-surfacing at the next run's gate. In the Agent Graph panel every card carries its **source pill**:
-a step opens its `Step.swift`, a turn opens its brief, and a dispatch links into the graph it calls
-— the very files (and graphs) the next traversal will use.
+Every message is delivered the same way: the host builds one **`SZDelivery`** — the
+message's words, a live world projection for the delivery's binding, the turn transport,
+and (for a build) the fleet seam — and the engine runs the agent's graph against it.
+
+- **Prose** is queued in the mailbox and pumped when the recipient's resources free; the
+  door's `requestBuild` effect mints a run, which the pump admits at the head of its next
+  pass — ahead of any queued prose — the moment the director transcript frees.
+- **A build** is one traversal: the Build press mints the run (work set, instruction,
+  claims), and the director's engine runs from door to conclusion, holding at the
+  dispatch while the fleet works.
+- **Work children** are not queued: the waiting dispatch delivers them directly as child
+  traversals under the run's own claim — same engine, same seam, same record shape.
+
+The fleet is supervised by **`SZDispatchSupervisor`** (one pure value machine; tests
+drive it with event lists): one open set at a time, exactly one settled summary per set
+(collected, or synthesized by the per-set watchdog with stragglers cancelled first and
+marked `timedOut`), attempts accumulate per item across sets, steers queue and fold into
+the next brief render, and stop is absorbing — a stopped set ships no summary; the
+traversal concludes `cancelled`.
+
+## Hot reload and the source pills
+
+Bundled resources are sealed inside a signed .app, so at start the host **materializes**
+the pack tree into `~/Library/Application Support/SubjectiveZero/agents/` — the writable
+copy everything reads (`SZ_AGENT_PACKS` overrides the root wholesale). Prompts need no
+watcher — briefs are read per render. Step sources are compiled code, so each
+`steps/<name>/Step.swift` is watched: save → recompile → swap on green, keep the old
+module on red. In the Agent Graph panel every card carries its **source pill**: a step —
+the door included — opens its `Step.swift`, a turn opens its brief, and a dispatch links
+into the target seat's graph.
 
 ## RUNS records and the panel
 
-Every message an agent receives — a Build press, each dispatched piece of work, each chat reply — is ONE
-record, an `SZAgentGraphRun`: who received which kind, the ordered trace of the whole journey
-(running → done/failed, outcome, detail — a dispatch visit carrying its fleet's tally, live on
-the entry while the set works), and the conclusion. The trace opens at the door, so a record's
-first entry says what arrived, and a build's record stays LIVE for its whole run — fleets
-included — sealing only when the story actually ends. Live records exist only in memory; a
-record persists at seal into the project's `runs.json`, so the panel's RUNS list, each row's
-trace, and the conclusions survive a relaunch while a crash mid-traversal loses the record and
-keeps the transcript. The history caps per budget, never evicting a live record.
+Every message an agent receives is ONE record, an `SZAgentGraphRun`: the ordered trace of
+the whole journey (entry 1 is the door visit — its outcome says what arrived and how it
+was ruled), and the conclusion. The record carries no kind: a build **leads its thread**
+(its `thread` is its own id, shared by the work children it dispatched), a work child
+carries the node it served, a conversation stands alone. A build's record stays LIVE for
+its whole run — fleets included — sealing only when the story actually ends. Live records
+exist only in memory; sealed records persist into the project's `runs.json`, capped per
+budget (thread leaders and the rest separately), never evicting a live record.
 
-A chat record carries **no thread**, even when delivered mid-build: a node outside the work set can
-be chatted while the fleet runs, and the list's thread header picks the newest non-work traversal
-as the thread's decider — so a chat joining the group would paint its own ending as the build's.
-
-The list names the **agent** ("Director", "Coding"), with the graph's authored `label` on the line
-below and the raw pack id / file stem in the tooltip. On the canvas, a dispatch card carries a band
-of its sub-agents: one lane per dispatched work message, each naming the node that agent is on right now,
-its running clock, and a pulsing `live` badge — swapped for a conclusion badge and a frozen clock
-as each settles, so the band drains from working to done while the fleet lands.
-
-## The set supervisor
-
-One pure value machine (`SZThreadMachine`) supervises each dispatch set while the traversal's
-dispatch node waits; hosts are its motor — they deliver items, arm timers, and report back as
-events — and tests drive the real machine with event lists. The invariants:
-
-- **One open set at a time, structurally.** The engine is sequential and the dispatch node holds
-  the traversal until its set closes; the machine refuses a second set defensively.
-- **Exactly one settled summary per set.** Collected from item outcomes when the last lands, or
-  synthesized when the per-set watchdog fires: stragglers are cancelled *before* the summary
-  ships and marked `timedOut` with the deadline stated at millisecond precision. A closed set
-  drops every later event — keyed by set id, never node id, which a re-dispatch makes ambiguous.
-  The deadline mirrors the coding-turn budgets, so the watchdog can never fire before a healthy
-  turn's own budget would have ended it.
-- **Attempts accumulate per item across sets** — the retry loop re-dispatches a node as attempt
-  2, stamped into the order as it is minted.
-- **Steers queue, never traverse.** A steer raised while a fleet is out is folded into the
-  traversal's NEXT brief render; the conclusion carries whatever was never consumed.
-- **Stop is not timeout.** Cancellation propagates into the waiting dispatch; the set is swept
-  with no summary synthesized, and the traversal concludes `cancelled`. Termination is absorbing:
-  after a stop, every event is a no-op by construction.
-
-## Effects
-
-A step answers with an outcome, and may ask for named host ACTIONS alongside it:
-
-```swift
-return .outcome("build", effects: ["requestBuild"])
-```
-
-The names are closed per kind, declared in the facts spec beside the facts themselves
-(`SZChatEffect.requestBuild`, `SZBuildEffect.captureStatuses`, `SZRequestEffect.split`/`.merge`)
-and generated into `SZEffectCatalog`. The engine validates every requested name against the graph
-kind's set BEFORE performing any of them — an unknown or cross-kind name is a traversal defect
-naming it, and nothing runs. What survives validation the host performs in the step's own order,
-after the step returned and before the edge routes.
-
-That ordering is the contract: an effect is how a step reaches the world (a chat turn ruling
-`build` starts the run), and it lands before the traversal moves on. Today `requestBuild` is the
-only one a shipped step requests; the others exist in the spec, and the host answers them with an
-honest status line until their lanes are graph-routed.
+The list names the **agent**, with the door's ruling on the line below. On the canvas, a
+dispatch card carries a band of its sub-agents: one lane per work child, each naming the
+node that agent is on right now, its running clock, and a pulsing `live` badge — swapped
+for a conclusion badge as each settles.
 
 ## Termination
 
-Two vocabularies, deliberately: **outcomes route** (the graph's open set — an outcome with no
-edge ends the traversal), **conclusions end** (the closed set, exactly one per traversal:
-`ended`, `failed`, `cancelled`, `declined` — a refusal is never a failure and never "complete" —
-and `defect`, the traversal's own integrity breaking, which validation makes unreachable for
-shipped packs). The thread maps the last traversal's conclusion onto its own ending, plus
-`roundCeiling`. **Sessions survive every ending**: the host keeps each node's coding session
-across traversals, a retry resumes it re-grounded on the blocker, and a fresh thread's first
-dispatch still cold-starts by design — each item's `attempt` restarts at 1.
+Two vocabularies, deliberately: **outcomes route** (the graph's open set — an outcome
+with no edge ends the traversal), **conclusions end** (the closed set, exactly one per
+traversal: `ended`, `failed`, `cancelled`, `declined` — a refusal is never a failure —
+and `defect`, the traversal's own integrity breaking, which validation makes unreachable
+for shipped packs). **Sessions survive every ending**: the one session store keeps each
+scope's agent session across traversals, a retry resumes it re-grounded on the blocker,
+and a fresh run's first dispatch still cold-starts by design.

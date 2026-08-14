@@ -19,14 +19,14 @@ struct Verdict: Codable {
     enum Call: String, Codable { case retry, park }
     let call: Call
 }
-let step = SZBuildRouter("retry", "park") { ctx in
-    let verdict = try await ctx.askModel(template: "triage", as: Verdict.self)
+let step = SZStep(outcomes: ["retry", "park"]) { ctx in
+    let verdict = try await ctx.ask("triage", as: Verdict.self)
     return verdict.call.rawValue
 }
 """
 
-private func buildFacts() -> String {
-    #"{"unimplemented": [], "workSet": [], "nodeStatuses": {}, "buildErrors": {}, "round": 1, "roundCap": 2, "briefed": true, "projectLoaded": true, "graphJSON": "{}", "steers": [], "runVariant": ""}"#
+private func facts() -> String {
+    #"{"message": "", "resuming": false}"#
 }
 
 /// Serialized like the other step suites: each test drives a real swiftc.
@@ -50,12 +50,12 @@ struct SZAskModelExampleTests {
         let (loader, dir) = try compiled()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        // The compiled module EXPORTS its declaration — the pack gate reads outcomes and
-        // the facts kind from here, so a wrong wiring is refused at load, not at runtime.
-        #expect(loader.declaration == #"{"facts":"build","outcomes":["retry","park"]}"#)
+        // The compiled module EXPORTS its declaration — the pack gate reads the outcomes
+        // from here, so a wrong wiring is refused at load, not at runtime.
+        #expect(loader.declaration == #"{"outcomes":["retry","park"]}"#)
 
         let asked = Mutex<[String]>([])
-        let outcome = await loader.evaluate(factsJSON: buildFacts()) { request in
+        let outcome = await loader.evaluate(factsJSON: facts()) { request in
             asked.withLock { $0.append(request) }
             return #"{"call": "retry"}"#   // what the routed provider replied
         }
@@ -75,7 +75,7 @@ struct SZAskModelExampleTests {
         // the failure — the contract is "a typed value, or an honest throw".
         let replies = Mutex(["let me think about that…", #"{"call": "park"}"#])
         let asked = Mutex<[String]>([])
-        let outcome = await loader.evaluate(factsJSON: buildFacts()) { request in
+        let outcome = await loader.evaluate(factsJSON: facts()) { request in
             asked.withLock { $0.append(request) }
             return replies.withLock { $0.removeFirst() }
         }

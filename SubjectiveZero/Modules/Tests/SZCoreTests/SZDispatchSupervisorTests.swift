@@ -7,11 +7,11 @@ import Foundation
 import Testing
 @testable import SZCore
 
-private let bounds = SZThreadMachine.Bounds(dispatchDeadline: .seconds(300))
+private let bounds = SZDispatchSupervisor.Bounds(dispatchDeadline: .seconds(300))
 
 private func machineWithOpenSet(
-    _ items: [String] = ["a", "b"]) -> (machine: SZThreadMachine, setID: Int) {
-    var machine = SZThreadMachine(bounds: bounds)
+    _ items: [String] = ["a", "b"]) -> (machine: SZDispatchSupervisor, setID: Int) {
+    var machine = SZDispatchSupervisor(bounds: bounds)
     let commands = machine.handle(.dispatched(SZDispatchIntent(target: "coding", items: items)))
     guard case .deliverItems(let setID, _, _) = commands.first else {
         Issue.record("expected deliverItems, got \(commands)")
@@ -20,12 +20,12 @@ private func machineWithOpenSet(
     return (machine, setID)
 }
 
-struct SZThreadMachineTests {
+struct SZDispatchSupervisorTests {
 
     // MARK: - Minting
 
     @Test func aDispatchMintsOneSetWithStampedAttemptsAndAWatchdog() {
-        var machine = SZThreadMachine(bounds: bounds)
+        var machine = SZDispatchSupervisor(bounds: bounds)
         let commands = machine.handle(.dispatched(SZDispatchIntent(
             target: "coding", items: ["a", "b", "a"], notes: ["b": "careful"])))
         // Duplicates dedupe; each order carries its per-item attempt and the sender's note.
@@ -56,7 +56,7 @@ struct SZThreadMachineTests {
     }
 
     @Test func anEmptyDispatchMintsNothing() {
-        var machine = SZThreadMachine(bounds: bounds)
+        var machine = SZDispatchSupervisor(bounds: bounds)
         #expect(machine.handle(.dispatched(SZDispatchIntent(target: "coding", items: []))) == [])
         #expect(machine.state == .idle)
     }
@@ -155,7 +155,7 @@ struct SZThreadMachineTests {
     }
 
     @Test func stopWhileIdleJustStops() {
-        var machine = SZThreadMachine(bounds: bounds)
+        var machine = SZDispatchSupervisor(bounds: bounds)
         #expect(machine.handle(.stopRequested) == [])
         #expect(machine.state == .stopped)
     }
@@ -171,7 +171,7 @@ struct SZThreadMachineTests {
     }
 
     @Test func theDeadlineTextSpeaksMillisecondsHonestly() {
-        var machine = SZThreadMachine(bounds: .init(dispatchDeadline: .milliseconds(250)))
+        var machine = SZDispatchSupervisor(bounds: .init(dispatchDeadline: .milliseconds(250)))
         _ = machine.handle(.dispatched(SZDispatchIntent(target: "coding", items: ["a"])))
         let fired = machine.handle(.watchdogFired(setID: 1))
         guard case .settled(let summary) = fired.last else {

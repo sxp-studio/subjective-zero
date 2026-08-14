@@ -32,21 +32,18 @@ private func schedule(_ runtime: SZStepRuntime, key: SZStepKey, source: String) 
 /// across reloads.
 private func fixedOutcomeStep(_ outcome: String) -> String {
     """
-    struct Fixed: SZStep {
-        func evaluate(_ ctx: SZContext<SZMessageFacts>) async throws -> String { "\(outcome)" }
-    }
-    let step = Fixed()
+    let step = SZStep(outcomes: ["\(outcome)"]) { _ in "\(outcome)" }
     """
 }
 
 private let workLeftCondition = """
-let step = SZBuildCondition { $0.hasWorkLeft }
+let step = SZStep(outcomes: ["yes", "no"]) { $0.hasWorkLeft ? "yes" : "no" }
 """
 
 /// Parks inside an ask until the host's runner settles it — the watchdog's prey.
 private let blockingAskStep = """
-let step = SZMessageRouter("done") { ctx in
-    _ = try await ctx.askModel(template: "block", as: [String: String].self)
+let step = SZStep(outcomes: ["done"]) { ctx in
+    _ = try await ctx.ask("block", as: [String: String].self)
     return "done"
 }
 """
@@ -55,10 +52,10 @@ private let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
 
 /// Complete facts documents — the snapshot is all-required by design.
 private func runtimeBuildFacts(workLeft: Int) -> String {
-    let ids = "[" + (0..<workLeft).map { _ in "\"node-\(UUID().uuidString.prefix(8))\"" }.joined(separator: ", ") + "]"
-    return #"{"unimplemented": \#(ids), "workSet": \#(ids), "nodeStatuses": {}, "buildErrors": {}, "round": 1, "roundCap": 2, "briefed": false, "projectLoaded": true, "graphJSON": "{}", "steers": [], "runVariant": ""}"#
+    let ids = "[" + (0..<workLeft).map { _ in "\"\(UUID().uuidString)\"" }.joined(separator: ", ") + "]"
+    return #"{"message": "", "resuming": false, "run": {"workSet": \#(ids), "round": 1, "roundCap": 2, "steers": [], "instruction": ""}}"#
 }
-private let runtimeChatFacts = #"{"sentMessage": "hey", "resuming": false, "draftedWork": false}"#
+private let runtimeChatFacts = #"{"message": "hey", "resuming": false}"#
 
 // MARK: - Tests
 
@@ -107,7 +104,7 @@ struct SZStepRuntimeTests {
 
         // A source that cannot compile: the old module keeps answering, and the failure is
         // reported exactly once, key attached.
-        try schedule(runtime, key: key, source: "let step = SZCondition {")
+        try schedule(runtime, key: key, source: "let step = SZStep(outcomes: [\"x\"]) {")
         #expect(await runtime.evaluate(key: key, factsJSON: runtimeBuildFacts(workLeft: 1), ask: noAsk) == .outcome("yes"))
         let seen = reports.withLock { $0 }
         #expect(seen.count == 1)

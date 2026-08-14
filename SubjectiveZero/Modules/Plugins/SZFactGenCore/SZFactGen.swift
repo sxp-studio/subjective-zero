@@ -1,37 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The SZFactGen generator's core: parses the sentinel-marked spec region of SZFacts.swift
-// (rigid grammar, plain string ops — no swift-syntax) and renders the two build-time
-// artifacts. Pure functions of the input text — same input bytes, same output bytes, no
-// timestamps — so the build stays deterministic and the tests can prove it. The tool
-// target is a thin CLI over this library; the test target imports it directly.
+// (rigid grammar, plain string ops — no swift-syntax) and renders the one build-time
+// artifact: SZStepSDKGenerated.swift, the verbatim spec region + conveniences the step SDK
+// splices into every step build, so a step compiles against the very source the app
+// compiled and both sides of the ABI decode the same wire shape. Pure functions of the
+// input text — same input bytes, same output bytes, no timestamps — so the build stays
+// deterministic and the tests can prove it. The tool target is a thin CLI over this
+// library; the test target imports it directly.
 import Foundation
 
-/// One fact field as the spec declares it. `kind` names the facts struct the field lives
-/// in ("build" for `SZBuildFacts`); `lazy` mirrors the trailing `// lazy` marker.
+/// One field as the spec declares it. `owner` names the struct the field lives in
+/// ("SZFacts", "SZRun", …) — diagnostics only; there is no catalog any more.
 public struct SZFactField: Equatable, Sendable {
     public var name: String
     public var swiftType: String
-    public var kind: String
+    public var owner: String
     public var doc: String
-    public var lazy: Bool
 
-    public init(name: String, swiftType: String, kind: String, doc: String, lazy: Bool) {
+    public init(name: String, swiftType: String, owner: String, doc: String) {
         self.name = name
         self.swiftType = swiftType
-        self.kind = kind
+        self.owner = owner
         self.doc = doc
-        self.lazy = lazy
-    }
-}
-
-/// One effect enum as the spec declares it: the kind it belongs to and its plain cases.
-public struct SZEffectSet: Equatable, Sendable {
-    public var kind: String
-    public var cases: [String]
-
-    public init(kind: String, cases: [String]) {
-        self.kind = kind
-        self.cases = cases
     }
 }
 
@@ -45,7 +35,8 @@ public struct SZFactSpec: Equatable, Sendable {
     /// it is ordinary Swift, compile-checked on both sides.
     public var tailText: String
     public var fields: [SZFactField]
-    public var effects: [SZEffectSet]
+    /// The effect enum's plain cases, spec order; empty when the spec declares none.
+    public var effectCases: [String]
 }
 
 /// A grammar violation. Every case carries the 1-based line number in the WHOLE file, so
@@ -54,9 +45,9 @@ public enum SZFactGenFailure: Error, Equatable, CustomStringConvertible {
     case missingSentinel(String)
     /// A begin/end sentinel line appears AGAIN after the region closed. The classic cause is
     /// an end sentinel accidentally landing inside the intended region: the region would
-    /// silently truncate at the stray line and everything below it — facts structs included —
-    /// would drift into the ungoverned tail, embedded in the step SDK but absent from the
-    /// catalog. A spec carries exactly one begin/end pair, loudly.
+    /// silently truncate at the stray line and everything below it — spec structs included —
+    /// would drift into the ungoverned tail, embedded in the step SDK but ungoverned. A
+    /// spec carries exactly one begin/end pair, loudly.
     case straySentinel(line: Int, sentinel: String)
     case unclassifiableLine(line: Int, text: String)
     case docOutsideStruct(line: Int)
@@ -67,19 +58,22 @@ public enum SZFactGenFailure: Error, Equatable, CustomStringConvertible {
     case malformedVar(line: Int, text: String)
     case malformedCase(line: Int, text: String)
     case unterminatedDeclaration(name: String)
-    case emptyEffectEnum(line: Int, name: String)
-    case effectWithoutFacts(line: Int, name: String)
+    case emptyEffectEnum(line: Int)
     case duplicateDeclaration(line: Int, name: String)
+    /// The region never declares the root document — the wire shape a step receives.
+    case missingRoot
+    /// A struct-typed field names a struct the region does not declare.
+    case unknownStructType(line: Int, type: String)
 
     public var line: Int? {
         switch self {
-        case .missingSentinel, .unterminatedDeclaration: return nil
+        case .missingSentinel, .unterminatedDeclaration, .missingRoot: return nil
         case .straySentinel(let line, _): return line
         case .unclassifiableLine(let line, _), .docOutsideStruct(let line),
              .danglingDoc(let line), .varWithoutDoc(let line, _), .doubledDoc(let line),
              .unsupportedType(let line, _), .malformedVar(let line, _),
-             .malformedCase(let line, _), .emptyEffectEnum(let line, _),
-             .effectWithoutFacts(let line, _), .duplicateDeclaration(let line, _):
+             .malformedCase(let line, _), .emptyEffectEnum(let line),
+             .duplicateDeclaration(let line, _), .unknownStructType(let line, _):
             return line
         }
     }
@@ -95,27 +89,32 @@ public enum SZFactGenFailure: Error, Equatable, CustomStringConvertible {
         case .unclassifiableLine(_, let text):
             return "SZFactGen: cannot classify this line inside the spec region: '\(text)'"
         case .docOutsideStruct:
-            return "SZFactGen: doc lines are only legal immediately before a var inside a facts struct"
+            return "SZFactGen: doc lines are only legal immediately before a var inside a spec struct"
         case .danglingDoc:
             return "SZFactGen: doc line is not followed by a `public var` line"
         case .varWithoutDoc(_, let name):
-            return "SZFactGen: var '\(name)' needs exactly one `///` doc line directly above it"
+            return "SZFactGen: var '\(name)' needs exactly one `///` doc line directly above it "
+                + "— the doc NAMES THE CONSUMER; a fact nothing reads is deleted, not kept warm"
         case .doubledDoc:
             return "SZFactGen: a var takes exactly ONE doc line; fold these into one"
         case .unsupportedType(_, let type):
-            return "SZFactGen: type '\(type)' is outside the rigid grammar (Int, Bool, String, String?, [String], [String: String])"
+            return "SZFactGen: type '\(type)' is outside the rigid grammar (Int, Int?, Bool, "
+                + "String, String?, [String], UUID?, [UUID], [String: String], or an optional "
+                + "of a struct declared in this region)"
         case .malformedVar(_, let text):
-            return "SZFactGen: malformed var line: '\(text)' (expected `public var name: Type` with an optional trailing `// lazy`)"
+            return "SZFactGen: malformed var line: '\(text)' (expected `public var name: Type`)"
         case .malformedCase(_, let text):
             return "SZFactGen: malformed case line: '\(text)' (expected `case name` with no raw value or payload)"
         case .unterminatedDeclaration(let name):
             return "SZFactGen: '\(name)' never closes before the end sentinel"
-        case .emptyEffectEnum(_, let name):
-            return "SZFactGen: effect enum '\(name)' has no cases — omit the enum instead"
-        case .effectWithoutFacts(_, let name):
-            return "SZFactGen: effect enum '\(name)' has no matching facts struct"
+        case .emptyEffectEnum:
+            return "SZFactGen: SZEffect has no cases — omit the enum instead"
         case .duplicateDeclaration(_, let name):
             return "SZFactGen: '\(name)' is declared twice in the spec region"
+        case .missingRoot:
+            return "SZFactGen: the region declares no `SZFacts` struct — the wire document a step receives"
+        case .unknownStructType(_, let type):
+            return "SZFactGen: '\(type)' names a struct this region does not declare"
         }
     }
 }
@@ -123,10 +122,16 @@ public enum SZFactGenFailure: Error, Equatable, CustomStringConvertible {
 public enum SZFactGen {
     public static let beginSentinel = "// SZFactGen:begin"
     public static let endSentinel = "// SZFactGen:end"
+    /// The root document — the wire shape a step evaluation receives.
+    public static let rootStruct = "SZFacts"
+    /// The one effect enum's exact name.
+    public static let effectEnum = "SZEffect"
 
-    /// The closed set of field types the grammar accepts.
+    /// The closed set of PLAIN field types the grammar accepts. A struct declared in the
+    /// region may additionally appear as an optional (`SZRun?`), validated after parse.
     public static let allowedTypes: Set<String> = [
-        "Int", "Bool", "String", "String?", "[String]", "[String: String]"
+        "Int", "Int?", "Bool", "String", "String?", "[String]", "UUID?", "[UUID]",
+        "[String: String]"
     ]
 
     // MARK: - Parsing
@@ -160,15 +165,23 @@ public enum SZFactGen {
 
         enum Scope {
             case top
-            case structBody(kind: String, name: String)
-            case enumBody(kind: String, name: String)
+            case structBody(name: String)
+            /// Inside a struct's `public init` — opaque to the grammar (the compiler
+            /// governs it on both sides). `opened` flips at the body's `{` (a wrapped
+            /// signature reaches it late); `depth` counts braces until the block closes.
+            case initBlock(structName: String, opened: Bool, depth: Int)
+            case enumBody
         }
         var scope = Scope.top
         var pendingDoc: (line: Int, text: String)? = nil
         var fields: [SZFactField] = []
-        var effects: [SZEffectSet] = []
-        var currentCases: [String] = []
+        var effectCases: [String] = []
+        var sawEffectEnum = false
+        var structNames: [String] = []
         var seenNames: Set<String> = []
+        /// Struct-typed fields, validated once every declaration is known (a group may be
+        /// declared below its first use — file order is prose order, not dependency order).
+        var structTypedUses: [(line: Int, type: String)] = []
 
         for index in (begin + 1)..<end {
             let number = index + 1                      // 1-based, whole file
@@ -180,21 +193,22 @@ public enum SZFactGen {
             switch scope {
             case .top:
                 if text.hasPrefix("///") { throw SZFactGenFailure.docOutsideStruct(line: number) }
-                if let (kind, name) = declarationOpen(text, keyword: "struct", suffix: "Facts", inheritance: "Codable, Sendable") {
+                if let name = structOpen(text) {
                     guard seenNames.insert(name).inserted else {
                         throw SZFactGenFailure.duplicateDeclaration(line: number, name: name)
                     }
-                    scope = .structBody(kind: kind, name: name)
-                } else if let (kind, name) = declarationOpen(text, keyword: "enum", suffix: "Effect", inheritance: "String, Codable, Sendable") {
-                    guard seenNames.insert(name).inserted else {
-                        throw SZFactGenFailure.duplicateDeclaration(line: number, name: name)
+                    structNames.append(name)
+                    scope = .structBody(name: name)
+                } else if text == "public enum \(effectEnum): String, Codable, Sendable {" {
+                    guard seenNames.insert(effectEnum).inserted else {
+                        throw SZFactGenFailure.duplicateDeclaration(line: number, name: effectEnum)
                     }
-                    scope = .enumBody(kind: kind, name: name)
-                    currentCases = []
+                    sawEffectEnum = true
+                    scope = .enumBody
                 } else {
                     throw SZFactGenFailure.unclassifiableLine(line: number, text: text)
                 }
-            case .structBody(let kind, _):
+            case .structBody(let owner):
                 if text == "}" {
                     if let doc = pendingDoc { throw SZFactGenFailure.danglingDoc(line: doc.line) }
                     scope = .top
@@ -205,28 +219,46 @@ public enum SZFactGen {
                     }
                     pendingDoc = (number, String(text.dropFirst(4)))
                 } else if text.hasPrefix("public var ") {
-                    let (name, type, isLazy) = try varLine(text, line: number)
+                    let (name, type) = try varLine(text, line: number)
                     guard let doc = pendingDoc else {
                         throw SZFactGenFailure.varWithoutDoc(line: number, name: name)
                     }
                     pendingDoc = nil
-                    fields.append(SZFactField(name: name, swiftType: type, kind: kind, doc: doc.text, lazy: isLazy))
+                    if !allowedTypes.contains(type) {
+                        structTypedUses.append((number, type))
+                    }
+                    fields.append(SZFactField(name: name, swiftType: type, owner: owner, doc: doc.text))
+                } else if text.hasPrefix("public init(") {
+                    if let doc = pendingDoc { throw SZFactGenFailure.danglingDoc(line: doc.line) }
+                    // Opaque to the grammar: the block is ordinary Swift the compiler
+                    // checks on both sides. Brace counting only — string literals with
+                    // braces do not belong in a spec init body.
+                    let opened = text.contains("{")
+                    let depth = braceDelta(of: text)
+                    scope = opened && depth <= 0
+                        ? .structBody(name: owner)   // one-line init
+                        : .initBlock(structName: owner, opened: opened, depth: depth)
                 } else {
                     throw SZFactGenFailure.unclassifiableLine(line: number, text: text)
                 }
-            case .enumBody(let kind, let name):
+            case .initBlock(let structName, let opened, let depth):
+                let nowOpened = opened || text.contains("{")
+                let newDepth = depth + braceDelta(of: text)
+                scope = nowOpened && newDepth <= 0
+                    ? .structBody(name: structName)
+                    : .initBlock(structName: structName, opened: nowOpened, depth: newDepth)
+            case .enumBody:
                 if text == "}" {
-                    guard !currentCases.isEmpty else {
-                        throw SZFactGenFailure.emptyEffectEnum(line: number, name: name)
+                    guard !effectCases.isEmpty else {
+                        throw SZFactGenFailure.emptyEffectEnum(line: number)
                     }
-                    effects.append(SZEffectSet(kind: kind, cases: currentCases))
                     scope = .top
                 } else if text.hasPrefix("case ") {
                     let caseName = String(text.dropFirst("case ".count))
                     guard isIdentifier(caseName) else {
                         throw SZFactGenFailure.malformedCase(line: number, text: text)
                     }
-                    currentCases.append(caseName)
+                    effectCases.append(caseName)
                 } else {
                     throw SZFactGenFailure.unclassifiableLine(line: number, text: text)
                 }
@@ -234,78 +266,26 @@ public enum SZFactGen {
         }
         switch scope {
         case .top: break
-        case .structBody(_, let name), .enumBody(_, let name):
+        case .structBody(let name), .initBlock(let name, _, _):
             throw SZFactGenFailure.unterminatedDeclaration(name: name)
+        case .enumBody: throw SZFactGenFailure.unterminatedDeclaration(name: effectEnum)
         }
+        _ = sawEffectEnum   // a spec without effects is legal; the enum is simply absent
 
-        // A kind may have no effect enum; an effect enum without a facts struct is a typo.
-        let factKinds = Set(fields.map(\.kind))
-        for effect in effects where !factKinds.contains(effect.kind) {
-            throw SZFactGenFailure.effectWithoutFacts(line: end + 1, name: "SZ\(effect.kind.capitalizedFirst)Effect")
+        guard structNames.contains(rootStruct) else { throw SZFactGenFailure.missingRoot }
+        // A struct-typed field must be an OPTIONAL of a declared struct — the typed-group
+        // pattern: outside its moment (no run, no assignment) the group is nil, never zeroed.
+        let declared = Set(structNames)
+        for use in structTypedUses {
+            guard use.type.hasSuffix("?"), declared.contains(String(use.type.dropLast())) else {
+                throw SZFactGenFailure.unknownStructType(line: use.line, type: use.type)
+            }
         }
-        return SZFactSpec(regionText: regionText, tailText: tailText, fields: fields, effects: effects)
+        return SZFactSpec(regionText: regionText, tailText: tailText,
+                          fields: fields, effectCases: effectCases)
     }
 
     // MARK: - Rendering
-
-    /// The `SZFactCatalog.generated.swift` source that compiles into SZCore.
-    public static func catalogSource(from source: String) throws -> String {
-        let spec = try parse(source)
-        var out = """
-        // Generated by the SZFactGen build-tool plugin from SZFacts.swift. DO NOT EDIT.
-        // One record per fact field in the spec region, in spec order.
-
-        /// One fact field as the spec declares it: `kind` names the facts struct the field
-        /// lives in ("build" for SZBuildFacts); `lazy` mirrors the `// lazy` marker.
-        public struct SZFactRecord: Equatable, Sendable {
-            public let name: String
-            public let swiftType: String
-            public let kind: String
-            public let doc: String
-            public let lazy: Bool
-
-            public init(name: String, swiftType: String, kind: String, doc: String, lazy: Bool) {
-                self.name = name
-                self.swiftType = swiftType
-                self.kind = kind
-                self.doc = doc
-                self.lazy = lazy
-            }
-        }
-
-        public enum SZFactCatalog {
-            public static let all: [SZFactRecord] = [
-
-        """
-        for field in spec.fields {
-            out += "        SZFactRecord(name: \(literal(field.name)), swiftType: \(literal(field.swiftType)), kind: \(literal(field.kind)), doc: \(literal(field.doc)), lazy: \(field.lazy)),\n"
-        }
-        out += """
-            ]
-        }
-
-        /// Effect case names per kind, in spec order — what the traversal engine validates a
-        /// step's requested effects against. A kind with no effect enum is absent.
-        public enum SZEffectCatalog {
-            public static let byKind: [String: [String]] = [
-
-        """
-        for effect in spec.effects {
-            out += "        \(literal(effect.kind)): [\(effect.cases.map(literal).joined(separator: ", "))],\n"
-        }
-        if spec.effects.isEmpty { out += "        :\n" }   // the empty-dictionary spelling
-        out += """
-            ]
-
-            /// The effect set for one kind name; empty for a kind that declares none.
-            public static func cases(kind: String) -> [String] {
-                byKind[kind] ?? []
-            }
-        }
-
-        """
-        return out
-    }
 
     /// The `SZStepSDKGenerated.swift` source that compiles into SZRuntime: the verbatim
     /// spec region (sentinels included) as one string constant, ready for the step SDK to
@@ -349,25 +329,20 @@ public enum SZFactGen {
 
     // MARK: - Line-level helpers
 
-    /// Matches `public <keyword> SZ<Kind><suffix>: <inheritance> {` and yields the
-    /// lowercased kind plus the full type name. Pure prefix/suffix string ops.
-    static func declarationOpen(_ text: String, keyword: String, suffix: String, inheritance: String) -> (kind: String, name: String)? {
-        let prefix = "public \(keyword) SZ"
-        let tail = "\(suffix): \(inheritance) {"
+    /// Matches `public struct SZ<Name>: Codable, Sendable {` and yields the type name.
+    /// Pure prefix/suffix string ops.
+    static func structOpen(_ text: String) -> String? {
+        let prefix = "public struct SZ"
+        let tail = ": Codable, Sendable {"
         guard text.hasPrefix(prefix), text.hasSuffix(tail) else { return nil }
-        let kind = String(text.dropFirst(prefix.count).dropLast(tail.count))
-        guard isIdentifier(kind), let first = kind.first, first.isUppercase else { return nil }
-        return (kind.lowercased(), "SZ\(kind)\(suffix)")
+        let name = String(text.dropFirst(prefix.count).dropLast(tail.count))
+        guard isIdentifier(name), let first = name.first, first.isUppercase else { return nil }
+        return "SZ\(name)"
     }
 
-    /// Parses `public var name: Type` with an optional trailing ` // lazy`.
-    static func varLine(_ text: String, line: Int) throws -> (name: String, type: String, lazy: Bool) {
-        var body = String(text.dropFirst("public var ".count))
-        var isLazy = false
-        if body.hasSuffix(" // lazy") {
-            isLazy = true
-            body = String(body.dropLast(" // lazy".count))
-        }
+    /// Parses `public var name: Type`.
+    static func varLine(_ text: String, line: Int) throws -> (name: String, type: String) {
+        let body = String(text.dropFirst("public var ".count))
         guard let colon = body.range(of: ": ") else {
             throw SZFactGenFailure.malformedVar(line: line, text: text)
         }
@@ -376,39 +351,31 @@ public enum SZFactGen {
         guard isIdentifier(name) else {
             throw SZFactGenFailure.malformedVar(line: line, text: text)
         }
-        guard allowedTypes.contains(type) else {
+        guard allowedTypes.contains(type)
+            || (type.hasSuffix("?") && structOpenName(type)) else {
             throw SZFactGenFailure.unsupportedType(line: line, type: type)
         }
-        return (name, type, isLazy)
+        return (name, type)
+    }
+
+    /// Whether `type` LOOKS like an optional spec-struct reference (`SZRun?`) — the
+    /// declared-name check runs after parse, once every declaration is known.
+    private static func structOpenName(_ type: String) -> Bool {
+        let base = String(type.dropLast())
+        return base.hasPrefix("SZ") && isIdentifier(base)
+    }
+
+    /// `{` count minus `}` count on one line — the init-block tracker's whole arithmetic.
+    static func braceDelta(of text: String) -> Int {
+        text.count(where: { $0 == "{" }) - text.count(where: { $0 == "}" })
     }
 
     static func isIdentifier(_ text: String) -> Bool {
         guard let first = text.first, first.isLetter || first == "_" else { return false }
         return text.dropFirst().allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
     }
-
-    /// A deterministic Swift string literal for `text` (escapes backslash, quote, and the
-    /// control characters the grammar could ever let through).
-    static func literal(_ text: String) -> String {
-        var out = "\""
-        for ch in text.unicodeScalars {
-            switch ch {
-            case "\\": out += "\\\\"
-            case "\"": out += "\\\""
-            case "\n": out += "\\n"
-            case "\t": out += "\\t"
-            case "\r": out += "\\r"
-            default: out.unicodeScalars.append(ch)
-            }
-        }
-        return out + "\""
-    }
 }
 
 extension String {
     var trimmed: String { trimmingCharacters(in: .whitespaces) }
-    var capitalizedFirst: String {
-        guard let first else { return self }
-        return String(first).uppercased() + dropFirst()
-    }
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The RUNS-record host seam, smoke-tested end to end without a project or an engine: the
-// strategy's hooks (begin → note → conclude) land on `SZHost` and must leave the
+// delivery's hooks (begin → note → conclude) land on `SZHost` and must leave the
 // observable list the Agent Graph panel draws — ordered, sealed, tallies riding the trace
 // notes — with the engine's note vocabulary mapped onto the record's own entry.
 import Foundation
@@ -13,16 +13,15 @@ import SZCore
     let host = SZHost()
     let build = UUID(), item = UUID()
 
-    // A director traversal begins, works, and concludes by dispatching.
-    host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director",
-                                                graphName: "build", kind: .build))
+    // A build traversal begins, works, and dispatches; its thread is its own record id.
+    host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director"), thread: build)
     host.noteAgentGraphRun(build, SZTraversalNote(ordinal: 1, node: "work-left", phase: .running))
     host.noteAgentGraphRun(build, SZTraversalNote(ordinal: 1, node: "work-left", phase: .done,
                                                   outcome: "yes"))
     // An item traversal starts while the build record is still live — the build must keep
     // the head of the list (it is what the panel follows).
-    host.beginAgentGraphRun(SZTraversalSighting(id: item, agent: "coding", graphName: "item",
-                                                kind: .work, work: "node-1"))
+    host.beginAgentGraphRun(SZTraversalSighting(id: item, agent: "coding", work: "node-1"),
+                            thread: build)
     #expect(host.agentGraphRuns.map(\.id) == [build, item])
 
     // The dispatch waits INSIDE the build traversal now, so the tally lands through the
@@ -53,24 +52,23 @@ import SZCore
 
 /// The wedged-fleet story at the host tier: one dispatched item never reports, the
 /// watchdog fires, and the RECORDS must stay honest. The decisions come from the REAL
-/// SZThreadMachine (its command semantics are pinned in SZThreadMachineTests); this test
-/// is the machine's motor over a bare SZHost, mapping each command onto the same hooks
-/// the run wires (`makeGraphOrchestrator`): amendTally → the sender's tally amend, and a
-/// cancelItems order landing as the item traversal's cooperative-cancel conclusion. What
-/// it pins: the straggler's record seals `cancelled` — never "done" — the sealed sender
-/// record takes the timeout-counting tally through the one sanctioned post-seal write,
-/// and the synthesized reply says how long the straggler was given.
+/// SZDispatchSupervisor (its command semantics are pinned in SZDispatchSupervisorTests);
+/// this test is its motor over a bare SZHost, mapping each command onto the same hooks
+/// the run wires: amendTally → the sender's tally note, and a cancelItems order landing
+/// as the child's cooperative-cancel conclusion. What it pins: the straggler's record
+/// seals `cancelled` — never "done" — the sender's entry takes the timeout-counting
+/// tally before its seal, and the synthesized reply says how long the straggler was
+/// given.
 @Test @MainActor func aWatchdogTimeoutSealsTheRecordsHonestly() throws {
     let host = SZHost()
-    var machine = SZThreadMachine(bounds: .init(dispatchDeadline: .seconds(900)))
+    var supervisor = SZDispatchSupervisor(bounds: .init(dispatchDeadline: .seconds(900)))
 
-    // The director traversal reaches its dispatch, which mints the set and WAITS — its
+    // The build traversal reaches its dispatch, which mints the set and WAITS — its
     // record stays live for the whole fleet phase.
     let build = UUID()
-    host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director",
-                                                graphName: "director", kind: .build))
+    host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director"), thread: build)
     host.noteAgentGraphRun(build, SZTraversalNote(ordinal: 1, node: "implement", phase: .running))
-    let sent = machine.handle(.dispatched(
+    let sent = supervisor.handle(.dispatched(
         .init(target: "coding", items: ["node-a", "node-b"], notes: [:])))
     var setID = -1
     for case .deliverItems(let id, _, _) in sent { setID = id }
@@ -79,18 +77,18 @@ import SZCore
     // Both items open records; "node-a" settles clean, "node-b" wedges silently.
     let itemA = UUID(), itemB = UUID()
     var records: [String: UUID] = ["node-a": itemA, "node-b": itemB]
-    host.beginAgentGraphRun(SZTraversalSighting(id: itemA, agent: "coding", graphName: "item",
-                                                kind: .work, work: "node-a"))
-    host.beginAgentGraphRun(SZTraversalSighting(id: itemB, agent: "coding", graphName: "item",
-                                                kind: .work, work: "node-b"))
-    _ = machine.handle(.workDelivered(node: "node-a", setID: setID))
-    _ = machine.handle(.workDelivered(node: "node-b", setID: setID))
+    host.beginAgentGraphRun(SZTraversalSighting(id: itemA, agent: "coding", work: "node-a"),
+                            thread: build)
+    host.beginAgentGraphRun(SZTraversalSighting(id: itemB, agent: "coding", work: "node-b"),
+                            thread: build)
+    _ = supervisor.handle(.workDelivered(node: "node-a", setID: setID))
+    _ = supervisor.handle(.workDelivered(node: "node-b", setID: setID))
 
     // The machine's motor, host-side: tallies amend the SENDER's record; a cancel order
     // lands as the cancelled item traversal's own conclusion (cancellation is cooperative —
     // the run's task unwinds and concludes .cancelled, the same hook every ending uses).
     var synthesized: SZSettledSummary?
-    func execute(_ commands: [SZThreadMachine.Command]) {
+    func execute(_ commands: [SZDispatchSupervisor.Command]) {
         for command in commands {
             switch command {
             case .amendTally(_, let settled, let total, let failed):
@@ -112,9 +110,9 @@ import SZCore
             }
         }
     }
-    execute(machine.handle(.workSettled(node: "node-a", setID: setID, outcome: "ok")))
+    execute(supervisor.handle(.workSettled(node: "node-a", setID: setID, outcome: "ok")))
     host.concludeAgentGraphRun(itemA, .ended)
-    execute(machine.handle(.watchdogFired(setID: setID)))
+    execute(supervisor.handle(.watchdogFired(setID: setID)))
     // The set closed: the waiting traversal walks on and seals — after its fleet, never
     // before it.
     host.noteAgentGraphRun(build, SZTraversalNote(ordinal: 1, node: "implement", phase: .done,
@@ -142,27 +140,25 @@ import SZCore
     #expect(host.agentGraphRuns.allSatisfy { !$0.isLive })
 }
 
-/// A CHAT record never joins a build's thread, even when delivered while one runs. The list
-/// groups by `thread` and picks the newest non-item traversal as the thread's DECIDER — so a
-/// chat that joined would paint its own ending as the build's.
+/// A conversation never joins a build's thread, even when delivered while one runs — the
+/// thread groups the build with its work children, and a chat that joined would paint its
+/// own ending as the build's.
 @Test @MainActor func aChatRecordStaysStandaloneEvenDuringARun() throws {
     let host = SZHost()
-    host.runID = UUID()
     let build = UUID(), chat = UUID(), item = UUID()
 
-    host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director",
-                                                graphName: "director", kind: .build))
-    host.beginAgentGraphRun(SZTraversalSighting(id: item, agent: "coding",
-                                                graphName: "coding", kind: .work, work: "n1"))
-    host.beginAgentGraphRun(SZTraversalSighting(id: chat, agent: "coding",
-                                                graphName: "coding", kind: .message))
+    host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director"), thread: build)
+    host.beginAgentGraphRun(SZTraversalSighting(id: item, agent: "coding", work: "n1"),
+                            thread: build)
+    host.beginAgentGraphRun(SZTraversalSighting(id: chat, agent: "coding"), thread: nil)
 
     func record(_ id: UUID) throws -> SZAgentGraphRun {
         try #require(host.agentGraphRuns.first { $0.id == id })
     }
-    // The build and its fleet share the run's identity; the conversation is its own thing.
-    #expect(try record(build).thread == host.runID)
-    #expect(try record(item).thread == host.runID)
+    // The build LEADS its thread and its fleet shares it; the conversation stands alone.
+    #expect(try record(build).leadsThread)
+    #expect(try record(item).thread == build)
+    #expect(!(try record(item).leadsThread))
     #expect(try record(chat).thread == nil)
 }
 

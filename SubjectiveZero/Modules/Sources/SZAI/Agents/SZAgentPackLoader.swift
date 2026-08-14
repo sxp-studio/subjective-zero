@@ -1,22 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Loads a ROOT of agent packs and validates the library as a whole. Loading collects
-// per-folder: an unreadable pack becomes a defect while its healthy siblings still load,
-// and INSIDE a folder a graph file that will not decode (or lies about its name) becomes a
-// defect while the folder's healthy graphs — and its seat — still load. Only a broken
-// `agent.json` drops a pack: without its manifest a folder has no identity to load under.
-// A pack root is user content, never a reason to crash. Validation is collect-everything:
-// the author fixes a pack in one round, not twenty.
+// Loads a ROOT of agent packs and validates the library as a whole. Loading collects, never
+// first-errors: an unreadable pack becomes a defect while its siblings load, and a broken
+// graph.json becomes a defect while the folder's seat still loads. Only a broken agent.json
+// drops a pack — without its manifest a folder has no identity. A pack root is user
+// content, never a reason to crash.
 //
-// The split of labor, stated once:
-//   SZAgentGraph.defects()  — graph SHAPE, from the graph file alone (SZCore)
-//   validate(packs:steps:)  — everything needing pack or library context: kind handlers,
-//                             briefs (existence, their `{{token}}` namespace, the partials
-//                             a mentioned token renders from — the renderer owns both
-//                             namespaces), step folders, seats, dispatch targets and facts, and —
-//                             through the injected `SZStepProviding` seam — the compiled
-//                             steps' declared outcomes. With no provider those step-attached
-//                             checks are SKIPPED and the report says so; they never pass
-//                             silently.
+// Split of labor: SZAgentGraph.defects() checks graph SHAPE; validate(packs:steps:) checks
+// everything needing pack or library context — briefs (existence, the one token table, the
+// partials a mentioned token pulls), step folders, seats, dispatch targets, and (through
+// the injected SZStepProviding seam) the compiled steps' declared outcomes. With no
+// provider those step-attached checks are SKIPPED and the report says so.
 import Foundation
 import SZCore
 
@@ -27,54 +20,33 @@ import SZCore
 public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertible {
     /// A file that would not read or decode; `detail` carries the underlying error.
     case unreadable(file: String, detail: String)
-    /// A file that decoded but lies about itself (an id that isn't the folder name, a graph
-    /// named unlike its file).
+    /// A file that decoded but lies about itself (an id that isn't the folder name).
     case misdeclared(file: String, detail: String)
+    /// The folder has no graph.json — nothing can ever be delivered to this agent.
+    case noGraph(agent: String)
     /// A graph-shape defect (`SZAgentGraph.defects()`), wrapped with its home.
-    case graphShape(agent: String, graph: String, defect: SZAgentGraphDefect)
-    /// Two of an agent's graphs route the same kind — which one a delivery opens would be a
-    /// coin toss. Replaces the variant/`defaults` machinery: a strategy is now a route
-    /// INSIDE a graph (a step choosing a lane), so two documents claiming one kind has no
-    /// legitimate reading left.
-    case kindRoutedTwice(agent: String, kind: SZMessageKind, graphs: [String])
-    /// A turn node's `brief` names no file in the pack's prompt inventory.
-    case missingTemplate(agent: String, graph: String, node: String, path: String)
-    /// A turn brief mentions a `{{token}}` the graph's kind can never substitute
-    /// (`SZBriefRenderer.knownTokens` is the namespace) — it would ship to the model literal.
-    case unknownTemplateToken(agent: String, graph: String, node: String, template: String,
-                              token: String)
-    /// A turn brief mentions a token whose section renders from a pack partial the prompt
-    /// inventory does not carry (`SZBriefRenderer.requiredPartials` names them).
-    case missingPartial(agent: String, graph: String, node: String, token: String,
-                        partial: String)
+    case graphShape(agent: String, defect: SZAgentGraphDefect)
+    /// A turn's `brief` stem names no file in the pack's prompt inventory.
+    case missingTemplate(agent: String, node: String, path: String)
+    /// A brief mentions a `{{token}}` outside the one token table — it would ship literal.
+    case unknownTemplateToken(agent: String, node: String, template: String, token: String)
+    /// A brief mentions a token whose section renders from a pack partial the prompt
+    /// inventory does not carry.
+    case missingPartial(agent: String, node: String, token: String, partial: String)
     /// A step node names a folder with no `Step.swift` (or no folder at all).
-    case missingStepSource(agent: String, graph: String, node: String, step: String)
+    case missingStepSource(agent: String, node: String, step: String)
     /// Library level: no loaded agent holds this seat.
     case seatUnfilled(seat: SZAgentSeat)
     /// Library level: more than one loaded agent claims this seat.
     case seatContested(seat: SZAgentSeat, holders: [String])
     /// A dispatch's `to` names no seat any loaded agent holds.
-    case unknownDispatchSeat(agent: String, graph: String, node: String, seat: String)
-    /// The dispatch target exists but has no graph routing `.work` — every dispatched
-    /// message would arrive unhandled.
-    case dispatchTargetCannotHandleWork(agent: String, graph: String, node: String,
-                                        seat: String, holder: String)
-    /// A dispatch's `items` fact is unknown for the graph's kind, or not `[String]`-typed.
-    case dispatchItemsFact(agent: String, graph: String, node: String, fact: String,
-                           detail: String)
+    case unknownDispatchSeat(agent: String, node: String, seat: String)
     /// An outcome-labeled edge leaves a step on an outcome its declaration never produces.
-    case undeclaredStepOutcome(agent: String, graph: String, node: String, outcome: String,
-                               declared: [String])
-    /// A compiled step declares facts of one kind but sits in a graph of another.
-    case stepFactsMismatch(agent: String, graph: String, node: String, step: String,
-                           declared: String)
+    case undeclaredStepOutcome(agent: String, node: String, outcome: String, declared: [String])
     /// A step declares no outcomes, yet the graph wires outcome-labeled edges from it.
-    case stepDeclaresNothing(agent: String, graph: String, node: String, step: String)
+    case stepDeclaresNothing(agent: String, node: String, step: String)
     /// The step provider could not produce a declaration (compile/load failure).
     case stepUnavailable(agent: String, step: String, detail: String)
-    /// An ask node's config lies about itself — an effect keyed on an undeclared outcome,
-    /// or naming an action outside its lane's effect set.
-    case askInvalid(agent: String, graph: String, node: String, detail: String)
 
     public var description: String {
         switch self {
@@ -82,37 +54,28 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
             "\(file) would not read: \(detail)"
         case .misdeclared(let file, let detail):
             "\(file) misdeclares itself: \(detail)"
-        case .graphShape(let agent, let graph, let defect):
-            "\(agent)/graphs/\(graph): \(defect)"
-        case .kindRoutedTwice(let agent, let kind, let graphs):
-            "\(agent): graphs \(graphs.joined(separator: ", ")) both route '\(kind.rawValue)' — "
-                + "a delivery must have one destination"
-        case .missingTemplate(let agent, let graph, let node, let path):
-            "\(agent)/graphs/\(graph) node '\(node)': brief '\(path)' is not among the pack's prompts"
-        case .unknownTemplateToken(let agent, let graph, let node, let template, let token):
-            "\(agent)/graphs/\(graph) node '\(node)': \(template) mentions '{{\(token)}}', a token nothing substitutes for this kind"
-        case .missingPartial(let agent, let graph, let node, let token, let partial):
-            "\(agent)/graphs/\(graph) node '\(node)': '{{\(token)}}' renders from '\(partial)', which is not among the pack's prompts"
-        case .missingStepSource(let agent, let graph, let node, let step):
-            "\(agent)/graphs/\(graph) node '\(node)': steps/\(step) has no Step.swift"
+        case .noGraph(let agent):
+            "\(agent) has no graph.json — nothing can be delivered to it"
+        case .graphShape(let agent, let defect):
+            "\(agent)/graph.json: \(defect)"
+        case .missingTemplate(let agent, let node, let path):
+            "\(agent) node '\(node)': brief '\(path)' is not among the pack's prompts"
+        case .unknownTemplateToken(let agent, let node, let template, let token):
+            "\(agent) node '\(node)': \(template) mentions '{{\(token)}}', a token nothing substitutes"
+        case .missingPartial(let agent, let node, let token, let partial):
+            "\(agent) node '\(node)': '{{\(token)}}' renders from '\(partial)', which is not among the pack's prompts"
+        case .missingStepSource(let agent, let node, let step):
+            "\(agent) node '\(node)': steps/\(step) has no Step.swift"
         case .seatUnfilled(let seat):
             "no loaded agent holds the \(seat.rawValue) seat"
         case .seatContested(let seat, let holders):
             "the \(seat.rawValue) seat is contested: \(holders.joined(separator: ", "))"
-        case .unknownDispatchSeat(let agent, let graph, let node, let seat):
-            "\(agent)/graphs/\(graph) node '\(node)': dispatches to '\(seat)', a seat no loaded agent holds"
-        case .dispatchTargetCannotHandleWork(let agent, let graph, let node, let seat, let holder):
-            "\(agent)/graphs/\(graph) node '\(node)': dispatches to '\(seat)' (\(holder)), which has no graph routing 'work'"
-        case .dispatchItemsFact(let agent, let graph, let node, let fact, let detail):
-            "\(agent)/graphs/\(graph) node '\(node)': items fact '\(fact)' — \(detail)"
-        case .undeclaredStepOutcome(let agent, let graph, let node, let outcome, let declared):
-            "\(agent)/graphs/\(graph) node '\(node)': edge leaves on '\(outcome)', but the step declares \(declared)"
-        case .stepFactsMismatch(let agent, let graph, let node, let step, let declared):
-            "\(agent)/graphs/\(graph) node '\(node)': steps/\(step) compiled against '\(declared)' facts, not this graph's kind"
-        case .stepDeclaresNothing(let agent, let graph, let node, let step):
-            "\(agent)/graphs/\(graph) node '\(node)': steps/\(step) declares no outcomes, yet edges leave it"
-        case .askInvalid(let agent, let graph, let node, let detail):
-            "\(agent)/graphs/\(graph) ask '\(node)': \(detail)"
+        case .unknownDispatchSeat(let agent, let node, let seat):
+            "\(agent) node '\(node)': dispatches to '\(seat)', a seat no loaded agent holds"
+        case .undeclaredStepOutcome(let agent, let node, let outcome, let declared):
+            "\(agent) node '\(node)': edge leaves on '\(outcome)', but the step declares \(declared)"
+        case .stepDeclaresNothing(let agent, let node, let step):
+            "\(agent) node '\(node)': steps/\(step) declares no outcomes, yet edges leave it"
         case .stepUnavailable(let agent, let step, let detail):
             "\(agent)/steps/\(step) has no declaration: \(detail)"
         }
@@ -152,8 +115,7 @@ public enum SZAgentPackLoader {
         let folders = ((try? fm.contentsOfDirectory(
             at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-            // A pack root is a user directory: dot-folders there are the filesystem's or the
-            // host's business, never an agent.
+            // Dot-folders are the filesystem's or the host's business, never an agent.
             .filter { !$0.lastPathComponent.hasPrefix(".") }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
@@ -182,40 +144,15 @@ public enum SZAgentPackLoader {
         return seats
     }
 
-    /// `agent.json` as the folder declares it. The id must equal the folder name — identity
-    /// lives in the filesystem, and a second naming surface would have to be reconciled.
-    /// Two fields, and no third: which graph answers which kind is said by the graphs' own
-    /// message nodes, so the manifest has nothing left to arbitrate.
+    /// `agent.json`: id (must equal the folder name — identity lives in the filesystem)
+    /// and an optional seat. Nothing else: the graph is `graph.json`, whole.
     private struct Manifest: Decodable {
         var id: String
         var seat: SZAgentSeat?
-
-        enum CodingKeys: String, CodingKey {
-            case id, seat
-            /// Retired, decoded only to refuse it by name — a silently-ignored `defaults`
-            /// would leave an author believing they still steer which graph answers what.
-            case defaults
-        }
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            guard !c.contains(.defaults) else {
-                throw DecodingError.dataCorruptedError(
-                    forKey: .defaults, in: c,
-                    debugDescription: "'defaults' is retired — a kind has one destination "
-                        + "(its graph's message-node port), and a build strategy is a step "
-                        + "inside the graph, not a choice of file")
-            }
-            id = try c.decode(String.self, forKey: .id)
-            seat = try c.decodeIfPresent(SZAgentSeat.self, forKey: .seat)
-        }
     }
 
-    /// One folder's load: the pack (nil only when `agent.json` itself is broken — a folder
-    /// without a decodable, truthful manifest has no identity to load under) plus EVERY
-    /// defect the folder shows. Collecting, not first-error: one graph file that will not
-    /// decode is a defect beside its healthy siblings, never a reason to drop the pack —
-    /// dropping it would silently vacate the pack's seat and hide the siblings' defects.
+    /// One folder's load: the pack (nil only when `agent.json` itself is broken) plus
+    /// EVERY defect the folder shows.
     private static func load(folder: URL) -> (pack: SZAgentPack?, defects: [SZAgentPackDefect]) {
         let fm = FileManager.default
         let folderName = folder.lastPathComponent
@@ -231,26 +168,15 @@ public enum SZAgentPackLoader {
         }
 
         var defects: [SZAgentPackDefect] = []
-        var graphs: [SZAgentGraph] = []
-        let graphFiles = ((try? fm.contentsOfDirectory(
-            at: folder.appending(path: "graphs"), includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "json" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        for file in graphFiles {
-            let graph: SZAgentGraph
-            switch decode(SZAgentGraph.self, file, in: "\(folderName)/graphs") {
+        var graph: SZAgentGraph?
+        let graphURL = folder.appending(path: "graph.json")
+        if fm.fileExists(atPath: graphURL.path) {
+            switch decode(SZAgentGraph.self, graphURL, in: folderName) {
             case .success(let decoded): graph = decoded
-            case .failure(let defect):
-                defects.append(defect)
-                continue
+            case .failure(let defect): defects.append(defect)
             }
-            let stem = file.deletingPathExtension().lastPathComponent
-            guard graph.name == stem else {
-                defects.append(.misdeclared(file: "\(folderName)/graphs/\(file.lastPathComponent)",
-                    detail: "names itself '\(graph.name)' — the name IS the filename"))
-                continue
-            }
-            graphs.append(graph)
+        } else {
+            defects.append(.noGraph(agent: folderName))
         }
 
         let prompts = ((try? fm.contentsOfDirectory(
@@ -259,9 +185,8 @@ public enum SZAgentPackLoader {
             .filter { $0.hasSuffix(".md.mustache") }
             .map { "prompts/\($0)" }
             .sorted()
-        // The templates' text rides along for validation's token scan. A file that lists but
-        // will not read scans as empty — its tokens cannot be judged, and the read failure
-        // will surface loudly the moment a render asks for it.
+        // The templates' text rides along for validation's token scan. A file that lists
+        // but will not read scans as empty; the read failure surfaces loudly at render.
         let promptSources = Dictionary(uniqueKeysWithValues: prompts.map { path in
             (path, (try? String(contentsOf: folder.appending(path: path), encoding: .utf8)) ?? "")
         })
@@ -269,8 +194,6 @@ public enum SZAgentPackLoader {
         let steps = ((try? fm.contentsOfDirectory(
             at: folder.appending(path: "steps"), includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-            // A pack root is a user directory: dot-folders there are the filesystem's or the
-            // host's business, never an agent.
             .filter { !$0.lastPathComponent.hasPrefix(".") }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
             .map { stepFolder in
@@ -279,9 +202,9 @@ public enum SZAgentPackLoader {
                     hasSource: fm.fileExists(atPath: stepFolder.appending(path: "Step.swift").path))
             }
 
-        return (SZAgentPack(id: manifest.id, seat: manifest.seat,
-                            graphs: graphs, prompts: prompts,
-                            promptSources: promptSources, steps: steps), defects)
+        return (SZAgentPack(id: manifest.id, seat: manifest.seat, graph: graph,
+                            prompts: prompts, promptSources: promptSources, steps: steps),
+                defects)
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ url: URL,
@@ -296,9 +219,8 @@ public enum SZAgentPackLoader {
 
     // MARK: - Validation
 
-    /// Every defect the loaded set carries, collected — never first-error. `steps` nil skips
-    /// the step-attached checks (declared outcomes, facts kind); the caller's report must say
-    /// so, which `check` does.
+    /// Every defect the loaded set carries, collected. `steps` nil skips the step-attached
+    /// checks (declared outcomes); the caller's report must say so, which `check` does.
     public static func validate(packs: [SZAgentPack],
                                 steps: (any SZStepProviding)?) async -> [SZAgentPackDefect] {
         var defects: [SZAgentPackDefect] = []
@@ -315,113 +237,35 @@ public enum SZAgentPackLoader {
         let filledSeats = Set(packs.compactMap(\.seat))
 
         for pack in packs.sorted(by: { $0.id < $1.id }) {
-            // One destination per kind, over the whole pack: a delivery must never open a
-            // coin toss. An agent may still carry several documents — they just have to
-            // route DISJOINT kinds.
-            var routedBy: [SZMessageKind: [String]] = [:]
-            for graph in pack.graphs {
-                for kind in graph.routes.keys { routedBy[kind, default: []].append(graph.name) }
-            }
-            for (kind, claimants) in routedBy.sorted(by: { $0.key.rawValue < $1.key.rawValue })
-            where claimants.count > 1 {
-                defects.append(.kindRoutedTwice(agent: pack.id, kind: kind,
-                                                graphs: claimants.sorted()))
-            }
-
-            for graph in pack.graphs.sorted(by: { $0.name < $1.name }) {
-                defects += graph.defects().map {
-                    .graphShape(agent: pack.id, graph: graph.name, defect: $0)
-                }
-                defects += await nodeDefects(pack: pack, graph: graph,
-                                             allPacks: packs,
-                                             filledSeats: filledSeats, steps: steps)
-            }
+            guard let graph = pack.graph else { continue }   // noGraph already reported
+            defects += graph.defects().map { .graphShape(agent: pack.id, defect: $0) }
+            defects += await nodeDefects(pack: pack, graph: graph,
+                                         filledSeats: filledSeats, steps: steps)
         }
         return defects
     }
 
-    /// Per-node checks for one graph: briefs resolve, step folders carry source, dispatches
-    /// name held seats and `[String]`-typed facts — and, with a provider, the compiled
-    /// steps' declarations agree with the wiring.
+    /// Per-node checks: briefs resolve against the one token table, step folders carry
+    /// source, dispatches name held seats — and, with a provider, the compiled steps'
+    /// declarations agree with the wiring (the door included: it is a step).
     private static func nodeDefects(pack: SZAgentPack, graph: SZAgentGraph,
-                                    allPacks: [SZAgentPack],
                                     filledSeats: Set<SZAgentSeat>,
                                     steps: (any SZStepProviding)?) async -> [SZAgentPackDefect] {
         var defects: [SZAgentPackDefect] = []
         for node in graph.nodes {
-            // WHICH kind's facts and tokens this node reasons in, proven by reachability
-            // from the message node's ports rather than declared once for the whole file.
-            // Not exactly one lane means the shape gate already reported `laneImpure` or
-            // `unreachable`; running kind-typed checks against an ambiguous lane would pile
-            // noise on top of the defect that explains it.
-            let lanes = graph.kinds(reaching: node.id)
-            guard let lane = lanes.count == 1 ? lanes.first : nil else { continue }
             switch node.form {
-            case .message:
-                break   // the door declares nothing a pack can get wrong; shape covers it
-
-            case .ask(let ask):
-                // The prompt validates exactly like a turn brief (existence, the lane's
-                // token namespace, its partials) — one rule, whichever form renders it.
-                defects += briefDefects(pack: pack, graph: graph, node: node.id,
-                                        brief: ask.prompt, lane: lane)
-                // Effects are config, so the gate can check ALL of it: every keyed outcome
-                // must be one the ask declares, every named effect one the lane catalogs.
-                let declared = SZEffectCatalog.cases(kind: lane.rawValue)
-                for (outcome, names) in ask.effects.sorted(by: { $0.key < $1.key }) {
-                    if !ask.outcomes.contains(outcome) {
-                        defects.append(.askInvalid(agent: pack.id, graph: graph.name,
-                                                   node: node.id,
-                                                   detail: "effects keyed on '\(outcome)', "
-                                                       + "an outcome the ask never declares"))
-                    }
-                    for name in names where !declared.contains(name) {
-                        defects.append(.askInvalid(agent: pack.id, graph: graph.name,
-                                                   node: node.id,
-                                                   detail: "effect '\(name)' is outside the "
-                                                       + "'\(lane.rawValue)' effect set"))
-                    }
-                }
-
             case .turn(let turn):
-                defects += briefDefects(pack: pack, graph: graph, node: node.id,
-                                        brief: turn.brief, lane: lane)
+                defects += briefDefects(pack: pack, node: node.id, brief: turn.brief)
 
             case .dispatch(let dispatch):
-                let targetSeat = SZAgentSeat(rawValue: dispatch.to)
-                let holder = targetSeat.flatMap { seat in allPacks.first { $0.seat == seat } }
-                if targetSeat.map(filledSeats.contains) != true {
-                    defects.append(.unknownDispatchSeat(agent: pack.id, graph: graph.name,
-                                                        node: node.id, seat: dispatch.to))
-                } else if let holder, holder.graph(routing: .work) == nil {
-                    // A seat that cannot receive items makes every dispatch a dead letter.
-                    defects.append(.dispatchTargetCannotHandleWork(
-                        agent: pack.id, graph: graph.name, node: node.id,
-                        seat: dispatch.to, holder: holder.id))
-                }
-                // The `items` fact must exist for THIS graph's kind and be `[String]`-typed —
-                // it names the node ids a dispatch fans out over.
-                let record = SZFactCatalog.all.first {
-                    $0.kind == lane.rawValue && $0.name == dispatch.items
-                }
-                if let record {
-                    if record.swiftType != "[String]" {
-                        defects.append(.dispatchItemsFact(
-                            agent: pack.id, graph: graph.name, node: node.id,
-                            fact: dispatch.items,
-                            detail: "typed \(record.swiftType), a dispatch needs [String]"))
-                    }
-                } else {
-                    defects.append(.dispatchItemsFact(
-                        agent: pack.id, graph: graph.name, node: node.id,
-                        fact: dispatch.items,
-                        detail: "no '\(lane.rawValue)' fact by that name"))
+                if SZAgentSeat(rawValue: dispatch.to).map(filledSeats.contains) != true {
+                    defects.append(.unknownDispatchSeat(agent: pack.id, node: node.id,
+                                                        seat: dispatch.to))
                 }
 
             case .step(let name):
                 guard let folder = pack.step(named: name), folder.hasSource else {
-                    defects.append(.missingStepSource(agent: pack.id, graph: graph.name,
-                                                      node: node.id, step: name))
+                    defects.append(.missingStepSource(agent: pack.id, node: node.id, step: name))
                     continue
                 }
                 guard let steps else { continue }   // skipped, and the report says so
@@ -431,20 +275,12 @@ public enum SZAgentPackLoader {
                     if let declaration, !declaration.outcomes.isEmpty {
                         for edge in outgoing where !declaration.outcomes.contains(edge.outcome) {
                             defects.append(.undeclaredStepOutcome(
-                                agent: pack.id, graph: graph.name, node: node.id,
+                                agent: pack.id, node: node.id,
                                 outcome: edge.outcome, declared: declaration.outcomes))
                         }
-                        // Strict: every SDK path stamps the kind, so a declaration without
-                        // one is hand-rolled — and a hand-rolled declaration is exactly the
-                        // case the kind gate exists for.
-                        if declaration.facts != lane.rawValue {
-                            defects.append(.stepFactsMismatch(
-                                agent: pack.id, graph: graph.name, node: node.id,
-                                step: name, declared: declaration.facts ?? "(none)"))
-                        }
                     } else if !outgoing.isEmpty {
-                        defects.append(.stepDeclaresNothing(agent: pack.id, graph: graph.name,
-                                                            node: node.id, step: name))
+                        defects.append(.stepDeclaresNothing(agent: pack.id, node: node.id,
+                                                            step: name))
                     }
                 } catch {
                     defects.append(.stepUnavailable(agent: pack.id, step: name,
@@ -455,29 +291,26 @@ public enum SZAgentPackLoader {
         return defects
     }
 
-    /// One rendered template's checks, shared by `turn` and `ask` (both render through the
-    /// same path): the file exists, every `{{token}}` is one the lane's assembly
-    /// substitutes, and every partial a mentioned token renders from ships in the pack.
-    private static func briefDefects(pack: SZAgentPack, graph: SZAgentGraph, node: String,
-                                     brief: String, lane: SZMessageKind) -> [SZAgentPackDefect] {
-        guard pack.prompts.contains(brief) else {
-            return [.missingTemplate(agent: pack.id, graph: graph.name, node: node, path: brief)]
+    /// One brief's checks: the file exists, every `{{token}}` is in the one token table,
+    /// and every partial a mentioned token renders from ships in the pack.
+    private static func briefDefects(pack: SZAgentPack, node: String,
+                                     brief: String) -> [SZAgentPackDefect] {
+        let path = SZBriefRenderer.templatePath(brief)
+        guard pack.prompts.contains(path) else {
+            return [.missingTemplate(agent: pack.id, node: node, path: path)]
         }
-        guard let text = pack.promptSources[brief] else { return [] }
+        guard let text = pack.promptSources[path] else { return [] }
         var defects: [SZAgentPackDefect] = []
-        let known = SZBriefRenderer.knownTokens(kind: lane)
-        let partials = SZBriefRenderer.requiredPartials(kind: lane)
         for token in SZPromptTemplate.tokens(in: text) {
-            guard known.contains(token) else {
+            guard SZBriefRenderer.knownTokens.contains(token) else {
                 defects.append(.unknownTemplateToken(
-                    agent: pack.id, graph: graph.name, node: node,
-                    template: brief, token: token))
+                    agent: pack.id, node: node, template: path, token: token))
                 continue
             }
-            for partial in partials[token] ?? [] where !pack.prompts.contains(partial) {
+            for partial in SZBriefRenderer.requiredPartials[token] ?? []
+            where !pack.prompts.contains(partial) {
                 defects.append(.missingPartial(
-                    agent: pack.id, graph: graph.name, node: node,
-                    token: token, partial: partial))
+                    agent: pack.id, node: node, token: token, partial: partial))
             }
         }
         return defects
@@ -486,10 +319,9 @@ public enum SZAgentPackLoader {
     // MARK: - The report
 
     /// The pre-flight report: load + validate `root` exactly as the host would and render
-    /// the result — per-agent summary, sorted defects, and a verdict naming the highest tier
-    /// honestly attained: `does not load` (nothing decoded) / `loads` (folders decoded, with
-    /// defects) / `validates` (zero defects). With no step provider the verdict carries
-    /// `step checks skipped` — those checks did not pass; they did not run.
+    /// the result — per-agent summary, sorted defects, and a verdict naming the highest
+    /// tier honestly attained: `does not load` / `loads, does not validate` / `validates`.
+    /// With no step provider the verdict carries `step checks skipped`.
     public static func check(root: URL, steps: (any SZStepProviding)?) async -> String {
         let loaded = load(root: root)
         let defects = loaded.defects + (await validate(packs: loaded.packs, steps: steps))
@@ -502,12 +334,16 @@ public enum SZAgentPackLoader {
                 + " · \(pack.steps.count) step\(pack.steps.count == 1 ? "" : "s")"
                 + (compiled != pack.steps.count ? " (\(compiled) with source)" : "")
                 + " · \(pack.prompts.count) prompt\(pack.prompts.count == 1 ? "" : "s")")
-            for graph in pack.graphs.sorted(by: { $0.name < $1.name }) {
-                // The routed kinds ARE the graph's summary now — a merged document says
-                // "chat · build · settled", which is what a reader wants to know.
-                var facts = [graph.routes.keys.map(\.rawValue).sorted().joined(separator: " · ")]
-                facts.append("\(graph.nodes.count) node\(graph.nodes.count == 1 ? "" : "s")")
-                lines.append("  graph \(graph.name) · " + facts.joined(separator: " · "))
+            if let graph = pack.graph {
+                var facts = ["\(graph.nodes.count) node\(graph.nodes.count == 1 ? "" : "s")"]
+                // The door's declared outcomes ARE the agent's front page — what it can
+                // decide about a message — shown when a provider can compile the door.
+                if let steps, case .step(let doorStep) = graph.door?.form,
+                   let declaration = (try? await steps.declaration(agent: pack.id, step: doorStep)) ?? nil,
+                   !declaration.outcomes.isEmpty {
+                    facts.insert("door: \(declaration.outcomes.joined(separator: " · "))", at: 0)
+                }
+                lines.append("  graph · " + facts.joined(separator: " · "))
             }
         }
 

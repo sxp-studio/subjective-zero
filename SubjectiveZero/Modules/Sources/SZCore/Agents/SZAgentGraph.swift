@@ -1,33 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The agent-graph model: a declared topology wiring authored steps. A node takes exactly one
-// of five forms — `message` (the graph's one entry: a delivered message leaves by the port
-// bearing its kind), `step` (compiled code, outcomes exported by the step itself), `ask`
-// (a prompt file + declared outcomes: ONE structured model query routes, no code), `turn`
-// (a full agent turn whose body is a mustache brief; outcomes fixed ok/error), `dispatch`
-// (fan work out to another agent, WAIT for the set, settle onward). Lives in SZCore because
-// SZUI draws graphs and may not import SZAI; everything here is pure data + shape validation.
+// The agent-graph model. Three node forms: step (compiled code), turn (a mustache brief;
+// ok/error), dispatch (fan out, WAIT, settle onward). Every delivery enters at the node
+// with the reserved id `door`, which must be a STEP — the agent's routing is code the
+// author opens and edits; there is no kind anywhere. One message is one traversal: nothing
+// re-enters a graph.
 //
-// THE MESSAGE NODE IS WHY THE GRAPH IS ONE PICTURE. An earlier model kept `entry` as a map
-// from kind to node, which meant a graph with two doors drew as two disconnected fragments.
-// Making the door a NODE puts every kind the agent accepts on one card with one port each,
-// and `unreachable` below refuses a fragment at load rather than leaving it to be noticed
-// on a canvas. ONE MESSAGE IS ONE TRAVERSAL: a dispatch waits for its fleet and settles
-// onward over its own edge, so nothing ever re-enters a graph — the whole journey from
-// delivery to conclusion is a single connected walk of this document.
-//
-// Validation is split by what it can see: `defects()` here checks graph SHAPE alone. Checks
-// needing pack context — a step's declared outcomes, template existence, dispatch-target
-// resolution, seat rules — belong to the pack loader (SZAI), which attaches declarations
-// and validates the whole library together.
+// Lives in SZCore (SZUI draws graphs, may not import SZAI). `defects()` checks SHAPE only;
+// checks needing pack context (step declarations, templates, seats) live in the loader.
 import Foundation
 
 public struct SZAgentGraph: Sendable, Equatable {
-    public var name: String
     /// Optional display name / picker hint (drawn by the panel; never routing input).
     public var label: String?
     public var hint: String?
     public var nodes: [Node]
     public var edges: [Edge]
+
+    /// The reserved id of the graph's entry node — the door.
+    public static let doorID = "door"
 
     public struct Node: Sendable, Equatable, Identifiable {
         public var id: String
@@ -42,62 +32,15 @@ public struct SZAgentGraph: Sendable, Equatable {
 
     /// Exactly one per node — enforced at decode, so a malformed node is unrepresentable.
     public enum Form: Sendable, Equatable {
-        /// The graph's one door. A delivery leaves by the port named for its kind; nothing
-        /// runs here, so it spends no time and reaches no host seam.
-        case message(Message)
         /// A compiled `Step.swift` in the agent's pack; `name` is its folder. Outcomes come
         /// from the step's own exported declaration, attached at pack load.
         case step(name: String)
-        /// A structured model query authored as data: the prompt file is the question, the
-        /// declared outcomes are the answers, and the reply routes — the declarative twin
-        /// of a code step's `askModel`.
-        case ask(Ask)
         case turn(Turn)
         case dispatch(Dispatch)
     }
 
-    /// The ask form's whole configuration. The host renders `prompt` against the lane's
-    /// facts (the same tokens a turn brief speaks), runs ONE stateless completion, decodes
-    /// `{"outcome": …}` from the reply — with the repair loop on a mismatch — and routes.
-    /// `effects` may name host actions per outcome, validated against the lane's effect
-    /// catalog at load: config, not code, so the common ruling needs no `Step.swift`.
-    public struct Ask: Codable, Sendable, Equatable {
-        /// The question, a pack-relative `.md.mustache` path — the template IS the body.
-        public var prompt: String
-        /// The answers the model may give, in display order — each may carry an edge.
-        public var outcomes: [String]
-        /// Host actions per outcome, performed before the edge routes (a chat ruling's
-        /// `build` → `requestBuild` is the shipped example).
-        public var effects: [String: [String]]
-
-        public init(prompt: String, outcomes: [String], effects: [String: [String]] = [:]) {
-            self.prompt = prompt
-            self.outcomes = outcomes
-            self.effects = effects
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            prompt = try container.decode(String.self, forKey: .prompt)
-            outcomes = try container.decode([String].self, forKey: .outcomes)
-            effects = try container.decodeIfPresent([String: [String]].self, forKey: .effects) ?? [:]
-        }
-    }
-
-    /// The message form carries no configuration — WHICH kinds it accepts is said by the
-    /// edges leaving it, so the ports and the routing can never disagree. An empty struct
-    /// rather than a bare case so the form can gain config later without a fifth form.
-    public struct Message: Codable, Sendable, Equatable {
-        public init() {}
-        /// Every kind that may be delivered. Reusing the ordinary outcome check means a
-        /// port naming a non-kind — or naming `steer`, which never enters a graph — is
-        /// refused as `undeclaredOutcome` with no rule of its own.
-        public static let outcomes: Set<String> =
-            Set(SZMessageKind.deliverable.map(\.rawValue))
-    }
-
     public struct Turn: Codable, Sendable, Equatable {
-        /// The brief template, a pack-relative `.md.mustache` path. The template IS the
+        /// The brief template's STEM — `prompts/<brief>.md.mustache`. The template IS the
         /// body — a turn has no code.
         public var brief: String
         public var session: Session
@@ -118,22 +61,19 @@ public struct SZAgentGraph: Sendable, Equatable {
         public enum Session: String, Codable, Sendable {
             /// Fresh conversation — the brief re-renders the world every time.
             case spawn
-            /// Continue the scope's existing session.
-            case message
+            /// Continue the scope's existing session (spawning when none exists).
+            case resume
         }
         /// A turn reports process truth and nothing else; content routing belongs to steps.
         public static let outcomes: Set<String> = ["ok", "error"]
     }
 
     public struct Dispatch: Codable, Sendable, Equatable {
-        /// The seat (role) receiving the items — resolved to an agent at pack load.
+        /// The seat (role) receiving the work — resolved to an agent at pack load. What it
+        /// sends is the run's work set: the only dispatchable list the system has.
         public var to: String
-        /// The `[SZNodeID]`-typed fact naming what to send — validated against the fact
-        /// catalog at pack load.
-        public var items: String
-        public init(to: String, items: String) {
+        public init(to: String) {
             self.to = to
-            self.items = items
         }
         /// A dispatch WAITS: the orders go out, the traversal holds at this node while the
         /// set works, and when the last item lands (or the watchdog synthesizes the
@@ -158,9 +98,8 @@ public struct SZAgentGraph: Sendable, Equatable {
         }
     }
 
-    public init(name: String, label: String? = nil, hint: String? = nil,
+    public init(label: String? = nil, hint: String? = nil,
                 nodes: [Node], edges: [Edge]) {
-        self.name = name
         self.label = label
         self.hint = hint
         self.nodes = nodes
@@ -176,92 +115,40 @@ public struct SZAgentGraph: Sendable, Equatable {
         edges.first { $0.from == from && $0.outcome == outcome }
     }
 
-    // MARK: - The door, and what it opens onto
-
-    /// The graph's one message node. Validation guarantees exactly one; a graph that has
-    /// none is refused at load, so every path here that returns nil is a broken file.
-    public var messageNode: Node? {
-        nodes.first { if case .message = $0.form { true } else { false } }
+    /// The graph's entry — the node with the reserved id. Validation guarantees it exists
+    /// and is a step; a nil here means a broken file.
+    public var door: Node? {
+        node(Self.doorID)
     }
 
-    /// Kind → the node its delivery enters at, derived from the message node's out-edges.
-    /// This is the old `entry` map, no longer stored: the edges ARE the map, which is why
-    /// the door draws and the map never could.
-    public var routes: [SZMessageKind: String] {
-        guard let door = messageNode else { return [:] }
-        var out: [SZMessageKind: String] = [:]
-        for edge in edges where edge.from == door.id {
-            if let kind = SZMessageKind(rawValue: edge.outcome) { out[kind] = edge.to }
-        }
-        return out
+    /// The largest leash on any dispatch node's settled edge — the retry budget the
+    /// reconcile brief's `{{cap}}` states. 0 when no dispatch loops.
+    public var retryCap: Int {
+        edges.filter { edge in
+            guard edge.outcome == "settled",
+                  case .dispatch = node(edge.from)?.form else { return false }
+            return true
+        }.compactMap(\.maxTraversals).max() ?? 0
     }
-
-    /// Whether a delivery of `kind` has anywhere to go.
-    public func handles(_ kind: SZMessageKind) -> Bool { routes[kind] != nil }
-
-    /// Which delivered kinds can reach `id`, by walking out from each port over EVERY edge
-    /// — bounded ones included, since a loop reaches what it loops over. The message node
-    /// is excluded from the walk: each port is its own seed, so the lanes never bleed
-    /// through the door they share.
-    public func kinds(reaching id: String) -> Set<SZMessageKind> {
-        var out: Set<SZMessageKind> = []
-        let door = messageNode?.id
-        for (kind, seed) in routes {
-            var seen: Set<String> = [seed]
-            var queue = [seed]
-            while let current = queue.popLast() {
-                if current == id { out.insert(kind); break }
-                for edge in edges
-                where edge.from == current && edge.to != door && seen.insert(edge.to).inserted {
-                    queue.append(edge.to)
-                }
-            }
-        }
-        return out
-    }
-
 }
 
 // MARK: - Wire format
 
 extension SZAgentGraph: Codable {
     enum CodingKeys: String, CodingKey {
-        case name, label, hint, nodes, edges
-        /// Retired with the settled re-entry: retry depth is the settled edge's own
-        /// `maxTraversals` leash now, not a graph-level budget.
-        case caps
-        /// Retired keys, decoded ONLY to refuse them by name. A pack written against the
-        /// entry-map era is not migrated (this repo does not migrate); it is told what to
-        /// do, because the alternative is a file that loads and silently routes nothing.
-        case kind, entry
+        case label, hint, nodes, edges
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        if container.contains(.entry) || container.contains(.kind) {
-            throw DecodingError.dataCorruptedError(
-                forKey: container.contains(.entry) ? .entry : .kind, in: container,
-                debugDescription: "'kind' and 'entry' are retired — give the graph a message "
-                    + #"node ({"id": "message", "message": {}}) and one edge out of it per "#
-                    + "kind it accepts, e.g. {\"from\": \"message\", \"outcome\": \"build\", "
-                    + "\"to\": \"decompose\"}")
-        }
-        name = try container.decode(String.self, forKey: .name)
         label = try container.decodeIfPresent(String.self, forKey: .label)
         hint = try container.decodeIfPresent(String.self, forKey: .hint)
-        if container.contains(.caps) {
-            throw DecodingError.dataCorruptedError(
-                forKey: .caps, in: container,
-                debugDescription: "'caps' is retired — bound the dispatch's 'settled' edge "
-                    + "instead (\"maxTraversals\": 2 buys two retry rounds)")
-        }
         nodes = try container.decode([Node].self, forKey: .nodes)
         edges = try container.decodeIfPresent([Edge].self, forKey: .edges) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(name, forKey: .name)
         try container.encodeIfPresent(label, forKey: .label)
         try container.encodeIfPresent(hint, forKey: .hint)
         try container.encode(nodes, forKey: .nodes)
@@ -271,24 +158,17 @@ extension SZAgentGraph: Codable {
 
 extension SZAgentGraph.Node: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, title, onMessage, step, ask, turn, dispatch
+        case id, title, step, turn, dispatch
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         title = try container.decodeIfPresent(String.self, forKey: .title)
-        // Collect, then insist on exactly one — a four-wide tuple switch is where that
-        // pattern stops reading, and the count is what the rule actually says.
+        // Collect, then insist on exactly one — the count is what the rule actually says.
         var forms: [SZAgentGraph.Form] = []
-        if let message = try container.decodeIfPresent(SZAgentGraph.Message.self, forKey: .onMessage) {
-            forms.append(.message(message))
-        }
         if let name = try container.decodeIfPresent(String.self, forKey: .step) {
             forms.append(.step(name: name))
-        }
-        if let ask = try container.decodeIfPresent(SZAgentGraph.Ask.self, forKey: .ask) {
-            forms.append(.ask(ask))
         }
         if let turn = try container.decodeIfPresent(SZAgentGraph.Turn.self, forKey: .turn) {
             forms.append(.turn(turn))
@@ -299,8 +179,7 @@ extension SZAgentGraph.Node: Codable {
         guard forms.count == 1, let only = forms.first else {
             throw DecodingError.dataCorruptedError(
                 forKey: .id, in: container,
-                debugDescription: "node '\(id)' must declare exactly one of "
-                    + "onMessage/step/ask/turn/dispatch")
+                debugDescription: "node '\(id)' must declare exactly one of step/turn/dispatch")
         }
         form = only
     }
@@ -310,9 +189,7 @@ extension SZAgentGraph.Node: Codable {
         try container.encode(id, forKey: .id)
         try container.encodeIfPresent(title, forKey: .title)
         switch form {
-        case .message(let message): try container.encode(message, forKey: .onMessage)
         case .step(let name): try container.encode(name, forKey: .step)
-        case .ask(let ask): try container.encode(ask, forKey: .ask)
         case .turn(let turn): try container.encode(turn, forKey: .turn)
         case .dispatch(let dispatch): try container.encode(dispatch, forKey: .dispatch)
         }
@@ -325,17 +202,14 @@ extension SZAgentGraph.Node: Codable {
 /// not first-error — an author fixes a pack in one round, not twenty.
 public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
     case duplicateNode(id: String)
-    case noMessageNode
-    case severalMessageNodes(ids: [String])
-    case edgeIntoMessage(from: String)
-    /// A node the door cannot reach — the floating-fragment defect. The whole reason the
-    /// entry map became a node: this is now refusable at load.
+    /// No node carries the reserved `door` id — nothing can be delivered to the graph.
+    case noDoor
+    /// The door exists but is not a step — the entry must be code the author can open.
+    case doorNotStep
+    case edgeIntoDoor(from: String)
+    /// A node the door cannot reach — the floating-fragment defect, refusable at load
+    /// because the entry is one known node.
     case unreachable(nodes: [String])
-    /// A node reachable from two FACTS lanes. Steps and briefs are typed to one lane's
-    /// facts, so a node serving two has no checkable type.
-    case laneImpure(node: String, lanes: [String])
-    /// An ask that declares no outcomes — a question whose every answer would defect.
-    case askWithoutOutcomes(node: String)
     case danglingEdge(from: String, to: String)
     case duplicateEdge(from: String, outcome: String)
     case edgeFromDispatch(node: String, outcome: String)
@@ -347,21 +221,15 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
         switch self {
         case .duplicateNode(let id):
             "two nodes share the id '\(id)'"
-        case .noMessageNode:
-            "the graph has no message node — nothing can be delivered to it"
-        case .severalMessageNodes(let ids):
-            "the graph has \(ids.count) message nodes (\(ids.joined(separator: ", "))) — "
-                + "an agent has one door"
-        case .edgeIntoMessage(let from):
-            "edge from '\(from)' points back into the message node — a message arrives, "
-                + "it is never routed to"
+        case .noDoor:
+            "the graph has no 'door' node — nothing can be delivered to it"
+        case .doorNotStep:
+            "the 'door' node is not a step — the entry is code the author opens and edits"
+        case .edgeIntoDoor(let from):
+            "edge from '\(from)' points back into the door — a message arrives, it is "
+                + "never routed to"
         case .unreachable(let nodes):
-            "\(nodes.joined(separator: ", ")) cannot be reached from the message node"
-        case .laneImpure(let node, let lanes):
-            "'\(node)' is reachable from both \(lanes.joined(separator: " and ")) — a node "
-                + "reads one kind's facts, so it belongs to one lane"
-        case .askWithoutOutcomes(let node):
-            "ask '\(node)' declares no outcomes — the model would have nothing to answer"
+            "\(nodes.joined(separator: ", ")) cannot be reached from the door"
         case .danglingEdge(let from, let to):
             "edge \(from) → \(to) names an unknown node"
         case .duplicateEdge(let from, let outcome):
@@ -392,13 +260,13 @@ extension SZAgentGraph {
         }
         let ids = Set(nodes.map(\.id))
 
-        // The door. Everything downstream — reachability, lanes, the engine's entry —
-        // reads `messageNode`, so its cardinality is checked before anything uses it.
-        let doors = nodes.filter { if case .message = $0.form { true } else { false } }
-        switch doors.count {
-        case 0: defects.append(.noMessageNode)
-        case 1: break
-        default: defects.append(.severalMessageNodes(ids: doors.map(\.id).sorted()))
+        // The door. Everything downstream — reachability, the engine's entry — starts at
+        // it, so its existence and form are checked before anything uses it.
+        var doorUsable = false
+        if let door {
+            if case .step = door.form { doorUsable = true } else { defects.append(.doorNotStep) }
+        } else {
+            defects.append(.noDoor)
         }
 
         var routes: Set<String> = []
@@ -413,48 +281,36 @@ extension SZAgentGraph {
             if let bound = edge.maxTraversals, bound < 1 {
                 defects.append(.nonPositiveBound(from: edge.from, outcome: edge.outcome))
             }
-            if case .message = node(edge.to)?.form {
-                defects.append(.edgeIntoMessage(from: edge.from))
+            if edge.to == Self.doorID {
+                defects.append(.edgeIntoDoor(from: edge.from))
             }
             switch node(edge.from)?.form {
             case .dispatch where !Dispatch.outcomes.contains(edge.outcome):
                 defects.append(.edgeFromDispatch(node: edge.from, outcome: edge.outcome))
             case .turn where !Turn.outcomes.contains(edge.outcome):
                 defects.append(.undeclaredOutcome(node: edge.from, outcome: edge.outcome))
-            case .ask(let ask) where !ask.outcomes.contains(edge.outcome):
-                defects.append(.undeclaredOutcome(node: edge.from, outcome: edge.outcome))
-            case .message where !Message.outcomes.contains(edge.outcome):
-                // Catches both "that is not a message kind" and "steer never enters a
-                // graph" — no rule of their own, because the outcome set already says so.
-                defects.append(.undeclaredOutcome(node: edge.from, outcome: edge.outcome))
             default:
                 break
             }
         }
 
-        for node in nodes {
-            if case .ask(let ask) = node.form, ask.outcomes.isEmpty {
-                defects.append(.askWithoutOutcomes(node: node.id))
-            }
-        }
-
         defects.append(contentsOf: unboundedCycles().map { .unboundedCycle(nodes: $0) })
 
-        // Reachability and lane purity read `routes`, which reads the door — skip both
-        // when the door is broken, or every node reports as unreachable on top of the
-        // defect that actually explains it.
-        if doors.count == 1 {
-            let door = doors[0].id
-            let stranded = nodes.map(\.id)
-                .filter { $0 != door && kinds(reaching: $0).isEmpty }
-            if !stranded.isEmpty { defects.append(.unreachable(nodes: stranded.sorted())) }
-            for node in nodes where node.id != door {
-                let lanes = kinds(reaching: node.id)
-                if lanes.count > 1 {
-                    defects.append(.laneImpure(node: node.id,
-                                               lanes: lanes.map(\.rawValue).sorted()))
+        // Reachability walks out from the door over every edge — bounded ones included,
+        // since a loop reaches what it loops over. Skipped while the door is broken, or
+        // every node would report unreachable on top of the defect that explains it.
+        if doorUsable {
+            var reached: Set<String> = [Self.doorID]
+            var queue = [Self.doorID]
+            while let current = queue.popLast() {
+                for edge in edges
+                where edge.from == current && ids.contains(edge.to)
+                    && reached.insert(edge.to).inserted {
+                    queue.append(edge.to)
                 }
             }
+            let stranded = nodes.map(\.id).filter { !reached.contains($0) }
+            if !stranded.isEmpty { defects.append(.unreachable(nodes: stranded.sorted())) }
         }
         return defects
     }

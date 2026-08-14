@@ -1,0 +1,17 @@
+{
+  "label": "Coding",
+  "hint": "One node's coding agent, decided at its door: a dispatched assignment implements cold or continues after a blocker; anything else is a chat about the node it owns.",
+  "nodes": [
+    { "id": "door", "title": "On message", "step": "door" },
+    { "id": "implement", "title": "Implement", "turn": { "brief": "node-compile" } },
+    { "id": "continue", "title": "Continue", "turn": { "brief": "node-reconcile", "session": "resume" } },
+    { "id": "chat", "title": "Chat turn", "turn": { "brief": "node-chat" } },
+    { "id": "chat-resumed", "title": "Resumed chat", "turn": { "brief": "node-chat-resumed", "session": "resume" } }
+  ],
+  "edges": [
+    { "from": "door", "outcome": "implement", "to": "implement" },
+    { "from": "door", "outcome": "continue", "to": "continue" },
+    { "from": "door", "outcome": "chat", "to": "chat" },
+    { "from": "door", "outcome": "chat-resumed", "to": "chat-resumed" }
+  ]
+}

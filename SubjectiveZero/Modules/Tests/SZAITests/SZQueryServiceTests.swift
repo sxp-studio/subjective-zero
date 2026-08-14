@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The query service, piece by piece against a scripted executor: request decode, brief-grade
-// template resolution + rendering against the pinned facts, the repair wrapper on a retry,
-// routing through the model seam, the stateless-request shape (no MCP, no session, no
-// tools), and the journal every exchange leaves behind.
+// template resolution + rendering against the pinned snapshot, the repair wrapper on a
+// retry, routing through the model seam, the stateless-request shape (no MCP, no session,
+// no tools), and the journal every exchange leaves behind.
 import Foundation
 import Synchronization
 import Testing
@@ -63,7 +63,9 @@ private func makeService(
     return (service, log, scripted)
 }
 
-private let buildFacts = #"{"round": 2, "roundCap": 3}"#
+/// The pinned snapshot the asks render against: a live run at round 2 of 3.
+private let roundWorld = SZWorld(run: SZRun(workSet: [], round: 2, roundCap: 3,
+                                            steers: [], instruction: ""))
 
 /// MainActor mailbox for the onRecord hook (a @Sendable closure cannot capture a local var).
 @MainActor
@@ -81,8 +83,7 @@ struct SZQueryServiceTests {
             onRecord: { seen.records.append($0) })
 
         let reply = try await service.serve(
-            agent: "director", graph: "build", step: "work-left", kind: .build,
-            factsJSON: buildFacts,
+            agent: "director", step: "work-left", message: "", world: roundWorld,
             requestJSON: #"{"template": "classify-reply", "attempt": 0}"#)
         #expect(reply == "scripted reply")
 
@@ -117,33 +118,32 @@ struct SZQueryServiceTests {
         let (service, log, _) = makeService(
             templates: ["prompts/classify-reply.md.mustache": "CLASSIFY"])
         _ = try await service.serve(
-            agent: "director", graph: nil, step: "work-left", kind: .build,
-            factsJSON: buildFacts,
+            agent: "director", step: "work-left", message: "", world: roundWorld,
             requestJSON: #"""
             {"template": "classify-reply", "attempt": 1,
-             "repair": {"error": "missing key 'kind'", "previousReply": "just prose"}}
+             "repair": {"error": "missing key 'outcome'", "previousReply": "just prose"}}
             """#)
         let prompt = try #require(log.calls.first?.request.prompt)
         #expect(prompt.hasPrefix("CLASSIFY\n"))
         // The wrapper is the host-owned template with both tokens substituted.
-        #expect(prompt.contains("missing key 'kind'"))
+        #expect(prompt.contains("missing key 'outcome'"))
         #expect(prompt.contains("just prose"))
         #expect(prompt.contains("did not decode"))
         #expect(service.journal.first?.attempt == 1)
     }
 
     @Test func templateNamesCarryingAPathAreTakenAsWritten() {
-        #expect(SZQueryService.templatePath("classify-reply") == "prompts/classify-reply.md.mustache")
-        #expect(SZQueryService.templatePath("prompts/classify-reply.md.mustache")
+        #expect(SZBriefRenderer.templatePath("classify-reply") == "prompts/classify-reply.md.mustache")
+        #expect(SZBriefRenderer.templatePath("prompts/classify-reply.md.mustache")
             == "prompts/classify-reply.md.mustache")
     }
 
     @Test func anUnknownRoutedProviderRefusesTheAsk() async throws {
         let (service, log, _) = makeService(
             templates: ["prompts/t.md.mustache": "T"], providerID: "no-such-provider")
-        await #expect(throws: SZOrchestratorError.self) {
-            _ = try await service.serve(agent: "director", graph: nil, step: "s", kind: .build,
-                                        factsJSON: buildFacts,
+        await #expect(throws: SZQueryError.self) {
+            _ = try await service.serve(agent: "director", step: "s", message: "",
+                                        world: roundWorld,
                                         requestJSON: #"{"template": "t", "attempt": 0}"#)
         }
         #expect(log.calls.isEmpty)
@@ -153,16 +153,16 @@ struct SZQueryServiceTests {
     @Test func anUnreadableRequestIsItsOwnHonestError() async throws {
         let (service, _, _) = makeService(templates: [:])
         await #expect(throws: SZQueryError.self) {
-            _ = try await service.serve(agent: "director", graph: nil, step: "s", kind: .build,
-                                        factsJSON: buildFacts, requestJSON: "not json")
+            _ = try await service.serve(agent: "director", step: "s", message: "",
+                                        world: roundWorld, requestJSON: "not json")
         }
     }
 
     @Test func aMissingTemplateSurfacesAsTheRendererRefusal() async throws {
         let (service, _, _) = makeService(templates: [:])
         await #expect(throws: SZBriefRenderError.self) {
-            _ = try await service.serve(agent: "director", graph: nil, step: "s", kind: .build,
-                                        factsJSON: buildFacts,
+            _ = try await service.serve(agent: "director", step: "s", message: "",
+                                        world: roundWorld,
                                         requestJSON: #"{"template": "ghost", "attempt": 0}"#)
         }
     }

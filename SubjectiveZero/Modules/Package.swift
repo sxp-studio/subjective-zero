@@ -18,7 +18,7 @@ let package = Package(
         .library(name: "SZUI", targets: ["SZUI"])
     ],
     targets: [
-        .target(name: "SZCore", plugins: ["SZFactGen"]),
+        .target(name: "SZCore"),
         .target(
             name: "SZAI",
             dependencies: ["SZCore"],

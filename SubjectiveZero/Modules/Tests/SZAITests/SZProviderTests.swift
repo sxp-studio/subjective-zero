@@ -1079,12 +1079,9 @@ private let piRPCCatalogLoggedOut = """
     let node = SZNodeID()
     let graph = SZGraph(nodes: [SZNode(id: node, kind: .prompt, title: "Blur", prompt: "blur it",
                                        position: SZPoint(x: 0, y: 0))])
-    let graphJSON = String(decoding: try JSONEncoder().encode(graph), as: UTF8.self)
-    let facts = String(decoding: try JSONSerialization.data(
-        withJSONObject: ["attempt": 1, "graphJSON": graphJSON]), as: UTF8.self)
     let prompt = try SZBriefRenderer(packRoot: packsRoot).render(
-        agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
-        factsJSON: facts, delivery: SZBriefDelivery(work: node.uuidString))
+        agent: "coding", template: "node-compile", message: "",
+        world: SZWorld(graph: graph, node: node, assignment: SZAssignment(attempt: 1)))
     // the tiers: search narrows, index browses, card confirms, source commits
     for tool in ["agent_library_index", "agent_library_card", "agent_library_source"] {
         #expect(prompt.contains(tool), "coding prompt should mention \(tool)")

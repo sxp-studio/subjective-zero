@@ -7,7 +7,7 @@ import SZCore
 @testable import SZUI
 
 private func run(_ started: TimeInterval, live: Bool = false) -> SZAgentGraphRun {
-    SZAgentGraphRun(id: UUID(), agent: "director", graphName: "build", kind: .build,
+    SZAgentGraphRun(id: UUID(), agent: "director",
                     startedAt: Date(timeIntervalSinceReferenceDate: started),
                     endedAt: live ? nil : Date(timeIntervalSinceReferenceDate: started + 5))
 }

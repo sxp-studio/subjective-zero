@@ -16,13 +16,8 @@ import SwiftUI
 import SZCore
 
 /// What a record is CALLED, resolved against the live pack library. The record itself
-/// denormalizes no display facts (see `SZAgentGraphRunRow.glyph`), so a row that wants to
-/// say "Director · Agentic" joins back through the same `planAgents` the Plan view browses
-/// — the join `agentGraphResolve` already does host-side, done here where the agents are.
-///
-/// A value rather than closures so the rule is constructible in tests. Both lookups degrade
-/// to the raw string: an agent the library dropped reads as its pack id, a graph with no
-/// authored `label` as its file stem — the same honesty the canvas shows a vanished pack.
+/// denormalizes no display facts, so the row joins back through the same `planAgents` the
+/// Plan view browses. Degrades to the raw pack id when the library dropped the agent.
 struct SZAgentGraphNaming: Equatable {
     var agents: [SZAgentGraphPlanAgent]
 
@@ -31,11 +26,10 @@ struct SZAgentGraphNaming: Equatable {
         agents.first { $0.id == run.agent }?.title ?? run.agent
     }
 
-    /// The traversed graph's authored label — "Agentic", "Implement one node".
-    func graphLabel(_ run: SZAgentGraphRun) -> String {
-        agents.first { $0.id == run.agent }?
-            .graphs.first { $0.name == run.graphName }?
-            .graph.label ?? run.graphName
+    /// The row's second-line context: what the DOOR ruled — the record's own first trace
+    /// entry ("build", "answer", "implement"…); "…" while the door still decides.
+    static func doorRuling(_ run: SZAgentGraphRun) -> String {
+        run.trace.first?.outcome ?? "…"
     }
 }
 
@@ -107,14 +101,10 @@ struct SZAgentGraphRunList: View {
     /// traversal's ending. Clicking it shows that deciding traversal.
     @ViewBuilder private func threadHeader(_ entry: Entry, expanded: Bool,
                                            selected: Bool) -> some View {
-        // The DECIDING traversal: the newest build-kind traversal — the list is ordered
-        // newest-first, so `first` is the traversal that concluded (or is concluding) the
-        // thread. Its ending is the thread's ending; a declined or failed decider must wear
-        // its badge HERE, where the collapsed default shows it.
-        // NOT the build traversal: that one ended the moment it dispatched. The thread's
-        // verdict belongs to the newest DIRECTOR traversal — a settled re-entry, when the
-        // fleet came back and the graph ruled on what it found.
-        let director = entry.traversals.first { $0.kind != .work } ?? entry.traversals[0]
+        // The DECIDING traversal: the thread's leader — the parent whose dispatch the
+        // children answered. Its ending is the thread's ending; a declined or failed
+        // decider must wear its badge HERE, where the collapsed default shows it.
+        let director = entry.traversals.first { $0.work == nil } ?? entry.traversals[0]
         let live = entry.traversals.contains(where: \.isLive)
         let began = entry.traversals.map(\.startedAt).min() ?? director.startedAt
         let ended = entry.traversals.compactMap(\.endedAt).max()
@@ -167,7 +157,7 @@ struct SZAgentGraphRunList: View {
                                 }
                             }
                             HStack(spacing: 5) {
-                                Text(names.graphLabel(director) + " ·")
+                                Text(SZAgentGraphNaming.doorRuling(director) + " ·")
                                     .font(.system(size: 9))
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(1)
@@ -253,16 +243,11 @@ struct SZAgentGraphRunRow: View {
     let action: () -> Void
     @State private var hovered = false
 
-    /// The record's kind as a glyph — the record deliberately denormalizes no display
-    /// facts, so the row draws what it carries: what KIND of traversal this was.
+    /// The record's structure as a glyph: a thread's leader, a work child, a conversation.
     static func glyph(for run: SZAgentGraphRun) -> String {
-        switch run.kind {
-        case .message: "bubble.left"
-        case .build: "play.circle"
-        case .work: "wrench.and.screwdriver"
-        case .request: "envelope"
-        case .steer: "arrow.triangle.turn.up.right.diamond"
-        }
+        if run.leadsThread { return "play.circle" }
+        if run.work != nil { return "wrench.and.screwdriver" }
+        return "bubble.left"
     }
 
     var body: some View {
@@ -294,9 +279,8 @@ struct SZAgentGraphRunRow: View {
                             }
                         }
                         HStack(spacing: 5) {
-                            // WHAT it traversed, demoted off the title line — the authored
-                            // label ("Node chat"), not the file stem the tooltip keeps.
-                            Text(names.graphLabel(run) + " ·")
+                            // WHAT the door ruled, demoted off the title line.
+                            Text(SZAgentGraphNaming.doorRuling(run) + " ·")
                                 .font(.system(size: 9))
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1)
@@ -324,10 +308,9 @@ struct SZAgentGraphRunRow: View {
         .onHover { hovered = $0 }
         .padding(.leading, indented ? 16 : 4)
         .padding(.trailing, 4)
-        // The absolute clock (and an item's work-node id) live in the hover tooltip — the
-        // row itself stays relative. The raw pack id and graph STEM live here too, so the
-        // strings the row displays as names stay reachable in their authored spelling.
-        .help("\(run.agent)/\(run.graphName) · \(run.kind.rawValue)"
+        // The absolute clock (and a child's work-node id) live in the hover tooltip — the
+        // row itself stays relative; the raw pack id stays reachable here.
+        .help(run.agent
               + (run.work.map { " · \($0.prefix(8))" } ?? "")
               + " · \(run.startedAt.formatted(date: .abbreviated, time: .standard))")
     }

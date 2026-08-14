@@ -1,26 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The graph model's gate: wire-format round-trips (including the retired-key refusals and
-// the exactly-one-form rule) and one test per shape-defect category, each built by breaking
-// a known-good graph in exactly one way.
+// The graph model's gate: wire-format round-trips (the exactly-one-form rule) and one test
+// per shape-defect category, each built by breaking a known-good graph in exactly one way.
 import Testing
 import Foundation
 @testable import SZCore
 
-/// A well-formed build graph exercising the node forms and a bounded cycle. Its door
-/// routes `build` and `chat`-free: one lane, one door, one connected walk.
-private func makeBuildGraph() -> SZAgentGraph {
+/// A well-formed graph exercising the node forms and a bounded cycle: one door (a step),
+/// one connected walk.
+private func makeGraph() -> SZAgentGraph {
     SZAgentGraph(
-        name: "build",
         label: "Directed",
         nodes: [
-            .init(id: "message", title: "On message", form: .message(.init())),
-            .init(id: "plan", title: "Plan contracts", form: .turn(.init(brief: "prompts/decompose.md.mustache"))),
+            .init(id: "door", title: "On message", form: .step(name: "door")),
+            .init(id: "plan", title: "Plan contracts", form: .turn(.init(brief: "decompose"))),
             .init(id: "work-left", form: .step(name: "work-left")),
-            .init(id: "unblock", title: "Unblock", form: .turn(.init(brief: "prompts/unblock.md.mustache"))),
-            .init(id: "implement", title: "Dispatch fleet", form: .dispatch(.init(to: "coding", items: "workSet"))),
+            .init(id: "unblock", title: "Unblock", form: .turn(.init(brief: "unblock"))),
+            .init(id: "implement", title: "Dispatch fleet", form: .dispatch(.init(to: "coding"))),
         ],
         edges: [
-            .init(from: "message", outcome: "build", to: "plan"),
+            .init(from: "door", outcome: "build", to: "plan"),
             .init(from: "plan", outcome: "ok", to: "work-left"),
             .init(from: "work-left", outcome: "yes", to: "implement"),
             .init(from: "work-left", outcome: "no", to: "unblock", maxTraversals: 2),
@@ -33,7 +31,7 @@ struct SZAgentGraphTests {
     // MARK: - Wire format
 
     @Test func aGraphRoundTripsThroughItsWireFormat() throws {
-        let graph = makeBuildGraph()
+        let graph = makeGraph()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(graph)
@@ -42,7 +40,7 @@ struct SZAgentGraphTests {
     }
 
     @Test func anOmittedSessionMeansSpawn() throws {
-        let json = #"{"name": "x", "nodes": [{"id": "a", "turn": {"brief": "b.md.mustache"}}]}"#
+        let json = #"{"nodes": [{"id": "a", "turn": {"brief": "b"}}]}"#
         let graph = try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
         guard case .turn(let turn) = graph.nodes[0].form else {
             Issue.record("expected a turn node")
@@ -51,131 +49,83 @@ struct SZAgentGraphTests {
         #expect(turn.session == .spawn)
     }
 
-    @Test func theDoorsPortsAreTheGraphsRoutes() throws {
+    @Test func theDoorIsTheStepAtTheReservedID() throws {
         let json = #"""
-        {"name": "message",
-         "nodes": [{"id": "message", "onMessage": {}},
-                   {"id": "reply", "turn": {"brief": "prompts/chat.md.mustache", "session": "message"}}],
-         "edges": [{"from": "message", "outcome": "message", "to": "reply"}]}
+        {"nodes": [{"id": "door", "step": "door"},
+                   {"id": "reply", "turn": {"brief": "chat", "session": "resume"}}],
+         "edges": [{"from": "door", "outcome": "answer", "to": "reply"}]}
         """#
         let graph = try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
-        // The entry map is not stored any more — it is READ OFF the door's out-edges, which
-        // is exactly why the door draws and the map never could.
-        #expect(graph.routes == [.message: "reply"])
-        #expect(graph.handles(.message))
-        #expect(!graph.handles(.build))
-        #expect(graph.messageNode?.id == "message")
+        #expect(graph.door?.id == "door")
         #expect(graph.defects().isEmpty)
-    }
-
-    @Test func theRetiredEntryAndKindKeysAreRefusedByName() {
-        // Not migrated, and not silently ignored either: a pack written for the entry-map
-        // era would otherwise load and route nothing.
-        for json in [#"{"name": "x", "kind": "build", "nodes": []}"#,
-                     #"{"name": "x", "entry": "a", "nodes": []}"#] {
-            #expect(throws: DecodingError.self) {
-                try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
-            }
+        guard case .turn(let turn) = graph.node("reply")?.form else {
+            Issue.record("expected a turn node")
+            return
         }
+        #expect(turn.session == .resume)
     }
 
     @Test func aNodeWithTwoFormsIsUnrepresentable() {
-        let json = #"{"name": "x", "nodes": [{"id": "a", "step": "s", "turn": {"brief": "b.md.mustache"}}]}"#
+        let json = #"{"nodes": [{"id": "a", "step": "s", "turn": {"brief": "b"}}]}"#
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
         }
     }
 
     @Test func aNodeWithNoFormIsUnrepresentable() {
-        let json = #"{"name": "x", "nodes": [{"id": "a"}]}"#
+        let json = #"{"nodes": [{"id": "a"}]}"#
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
         }
     }
 
-    @Test func aMessageNodeRoundTripsAsItsOwnForm() throws {
-        let json = #"{"name": "x", "nodes": [{"id": "message", "onMessage": {}}]}"#
-        let graph = try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
-        guard case .message = graph.nodes[0].form else {
-            Issue.record("expected a message node")
-            return
-        }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let back = try JSONDecoder().decode(SZAgentGraph.self, from: encoder.encode(graph))
-        #expect(back == graph)
-    }
-
     // MARK: - Shape defects, one per category
 
     @Test func theWellFormedGraphValidatesClean() {
-        #expect(makeBuildGraph().defects().isEmpty)
+        #expect(makeGraph().defects().isEmpty)
     }
 
     @Test func duplicateNodeIDs() {
-        var graph = makeBuildGraph()
+        var graph = makeGraph()
         graph.nodes.append(.init(id: "plan", form: .step(name: "shadow")))
         #expect(graph.defects().contains(.duplicateNode(id: "plan")))
     }
 
     @Test func aDoorlessGraphIsRefused() {
-        var graph = makeBuildGraph()
-        graph.nodes.removeAll { $0.id == "message" }
-        graph.edges.removeAll { $0.from == "message" }
-        #expect(graph.defects().contains(.noMessageNode))
+        var graph = makeGraph()
+        graph.nodes.removeAll { $0.id == "door" }
+        graph.edges.removeAll { $0.from == "door" }
+        #expect(graph.defects().contains(.noDoor))
     }
 
-    @Test func aSecondDoorIsRefused() {
-        var graph = makeBuildGraph()
-        graph.nodes.append(.init(id: "side", form: .message(.init())))
-        #expect(graph.defects().contains(.severalMessageNodes(ids: ["message", "side"])))
+    @Test func aDoorThatIsNotAStepIsRefused() {
+        // The entry is code the author opens and edits — a turn or dispatch cannot be it.
+        var graph = makeGraph()
+        let door = graph.nodes.firstIndex { $0.id == "door" }!
+        graph.nodes[door].form = .turn(.init(brief: "chat"))
+        #expect(graph.defects().contains(.doorNotStep))
     }
 
     @Test func nothingMayRouteBackIntoTheDoor() {
-        // A message ARRIVES; it is never a destination. Without this a graph could pretend
-        // to loop through its own inbox.
-        var graph = makeBuildGraph()
-        graph.edges.append(.init(from: "unblock", outcome: "error", to: "message"))
-        #expect(graph.defects().contains(.edgeIntoMessage(from: "unblock")))
-    }
-
-    @Test func steerCanNeverBeRouted() {
-        // No rule of its own: `steer` simply is not in the door's declared outcome set.
-        var graph = makeBuildGraph()
-        graph.edges.append(.init(from: "message", outcome: "steer", to: "plan"))
-        #expect(graph.defects().contains(.undeclaredOutcome(node: "message", outcome: "steer")))
-    }
-
-    @Test func aPortNamingSomethingThatIsNotAKindIsRefused() {
-        var graph = makeBuildGraph()
-        graph.edges.append(.init(from: "message", outcome: "whenever", to: "plan"))
-        #expect(graph.defects().contains(.undeclaredOutcome(node: "message", outcome: "whenever")))
+        // A message ARRIVES; it is never a destination.
+        var graph = makeGraph()
+        graph.edges.append(.init(from: "unblock", outcome: "error", to: "door"))
+        #expect(graph.defects().contains(.edgeIntoDoor(from: "unblock")))
     }
 
     @Test func aNodeTheDoorCannotReachIsRefused() {
-        // THE regression test for the two-disconnected-pieces complaint: a lane with no way
-        // in is now a load defect, not something to notice on a canvas.
-        var graph = makeBuildGraph()
+        // A lane with no way in is a load defect, not something to notice on a canvas.
+        var graph = makeGraph()
         graph.nodes.append(.init(id: "orphan", form: .step(name: "orphan")))
         #expect(graph.defects().contains(.unreachable(nodes: ["orphan"])))
     }
 
-    @Test func aNodeReachableFromTwoLanesIsRefused() {
-        // Steps and briefs are typed to ONE kind's facts, so a node serving two lanes has
-        // no checkable type — merging kinds into a file must not merge them into a node.
-        var graph = makeBuildGraph()
-        graph.edges.append(.init(from: "message", outcome: "message", to: "plan"))
-        #expect(graph.defects().contains(.laneImpure(node: "plan", lanes: ["build", "message"])))
-    }
-
-    @Test func aSettledLoopIsOneLaneAndMustBeLeashed() {
-        // The retry shape: the dispatch's settled edge loops back into the build lane —
-        // still ONE lane (nothing new arrives; the fleet's reply is the node's own
-        // outcome), and the loop is refused without its leash like any other cycle.
-        var graph = makeBuildGraph()
+    @Test func aSettledLoopMustBeLeashed() {
+        // The retry shape: the dispatch's settled edge loops back, refused without its
+        // leash like any other cycle.
+        var graph = makeGraph()
         graph.edges.append(.init(from: "implement", outcome: "settled", to: "work-left",
                                  maxTraversals: 2))
-        #expect(graph.kinds(reaching: "work-left") == [.build])
         #expect(graph.defects().isEmpty)
         let leash = graph.edges.firstIndex { $0.from == "implement" }!
         graph.edges[leash].maxTraversals = nil
@@ -183,66 +133,38 @@ struct SZAgentGraphTests {
     }
 
     @Test func danglingEdges() {
-        var graph = makeBuildGraph()
+        var graph = makeGraph()
         graph.edges.append(.init(from: "plan", outcome: "error", to: "nowhere"))
         #expect(graph.defects().contains(.danglingEdge(from: "plan", to: "nowhere")))
     }
 
     @Test func aDispatchRoutesOnlyItsSettledOutcome() {
-        // The settled edge is legal (the fleet's return); anything else can never route.
-        var graph = makeBuildGraph()
+        var graph = makeGraph()
         graph.edges.append(.init(from: "implement", outcome: "sent", to: "plan"))
         #expect(graph.defects().contains(.edgeFromDispatch(node: "implement", outcome: "sent")))
     }
 
-    @Test func anAskRoutesItsDeclaredOutcomesAndNeedsSome() {
-        var graph = makeBuildGraph()
-        graph.nodes.append(.init(id: "rule", form: .ask(.init(
-            prompt: "prompts/rule.md.mustache", outcomes: ["go", "hold"]))))
-        graph.edges.append(.init(from: "plan", outcome: "error", to: "rule"))
-        graph.edges.append(.init(from: "rule", outcome: "go", to: "work-left"))
-        #expect(graph.defects().isEmpty)
-        // An undeclared answer can never route…
-        graph.edges.append(.init(from: "rule", outcome: "sideways", to: "work-left"))
-        #expect(graph.defects().contains(.undeclaredOutcome(node: "rule", outcome: "sideways")))
-        // …and a question with no answers is refused outright.
-        graph.edges.removeLast()
-        graph.nodes.append(.init(id: "mute", form: .ask(.init(
-            prompt: "prompts/mute.md.mustache", outcomes: []))))
-        graph.edges.append(.init(from: "rule", outcome: "hold", to: "mute"))
-        #expect(graph.defects().contains(.askWithoutOutcomes(node: "mute")))
-    }
-
     @Test func aTurnOnlySpeaksOkOrError() {
-        var graph = makeBuildGraph()
+        var graph = makeGraph()
         graph.edges.append(.init(from: "plan", outcome: "maybe", to: "work-left"))
         #expect(graph.defects().contains(.undeclaredOutcome(node: "plan", outcome: "maybe")))
     }
 
     @Test func boundsBelowOneAreRefused() {
-        var graph = makeBuildGraph()
+        var graph = makeGraph()
         let leash = graph.edges.firstIndex { $0.from == "work-left" && $0.outcome == "no" }!
         graph.edges[leash].maxTraversals = 0
         #expect(graph.defects().contains(.nonPositiveBound(from: "work-left", outcome: "no")))
     }
 
     @Test func aSecondEdgeOnTheSameOutcomeIsRefused() {
-        var graph = makeBuildGraph()
+        var graph = makeGraph()
         graph.edges.append(.init(from: "work-left", outcome: "yes", to: "unblock"))
         #expect(graph.defects().contains(.duplicateEdge(from: "work-left", outcome: "yes")))
     }
 
-    @Test func theRetiredCapsKeyIsRefusedByName() {
-        // Retry depth is the settled edge's leash now; a graph still carrying the old
-        // budget must be told, not silently stripped of it.
-        let json = #"{"name": "x", "caps": {"rounds": 2}, "nodes": []}"#
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
-        }
-    }
-
     @Test func aCycleMustCrossABoundedEdge() {
-        var graph = makeBuildGraph()
+        var graph = makeGraph()
         // work-left → unblock → work-left, now leashless. Found by its ends rather than by
         // index: the door's edges lead the array, and an index would silently retarget.
         let leash = graph.edges.firstIndex { $0.from == "work-left" && $0.to == "unblock" }!
@@ -254,18 +176,26 @@ struct SZAgentGraphTests {
     }
 
     @Test func allDefectsAreCollectedNotFirstError() {
-        var graph = makeBuildGraph()
+        var graph = makeGraph()
         graph.nodes.append(.init(id: "orphan", form: .step(name: "orphan")))
         graph.edges.append(.init(from: "plan", outcome: "error", to: "nowhere"))
         graph.edges.append(.init(from: "implement", outcome: "sent", to: "plan"))
         #expect(graph.defects().count >= 3)
     }
 
-    // MARK: - Lookup
+    // MARK: - Lookup and derivations
 
     @Test func edgeLookupFollowsOutcomeAndAbsenceEndsTheTraversal() {
-        let graph = makeBuildGraph()
+        let graph = makeGraph()
         #expect(graph.edge(from: "work-left", outcome: "yes")?.to == "implement")
         #expect(graph.edge(from: "work-left", outcome: "declined") == nil)
+    }
+
+    @Test func theRetryCapIsTheLargestSettledLeash() {
+        var graph = makeGraph()
+        #expect(graph.retryCap == 0)   // no dispatch loops yet
+        graph.edges.append(.init(from: "implement", outcome: "settled", to: "work-left",
+                                 maxTraversals: 3))
+        #expect(graph.retryCap == 3)
     }
 }

@@ -1,37 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One RUN of an agent graph — a single message's whole journey, as a record: which agent
-// received which kind, when, the ordered trace of everything it did (a dispatch visit
-// carries its fleet's tally ON the entry, live while the set works), and how it concluded.
-// The Agent Graph panel's RUNS list is `[SZAgentGraphRun]`; the host begins a record as a
-// delivery starts, feeds it trace entries from the engine's notes, and seals it on the
-// conclusion. The RULES live here as mutations so they are testable without a host: the
-// sealed-record guard, the stamp-preserving merge, and the idempotent seal. Nothing writes
-// a sealed record — the dispatch now waits inside its traversal, so the tally lands before
-// the seal, and the post-seal amend the old send-and-conclude model needed is gone.
-//
-// The trace entry is deliberately this module's OWN value: the engine's note type lives in
-// SZAI, which neither SZCore nor SZUI may import — the host maps one onto the other at its
-// seam, and the record stays drawable by the panel and archivable by the sidecar.
+// One RUN of an agent graph — a single message's whole journey as a record: who received
+// it, the ordered trace (entry 1 is the door visit, whose outcome says what arrived), and
+// the conclusion. The record carries no kind and derives none: `thread` groups a parent
+// traversal with the work children it dispatched, and everything the list needs is that
+// structure. The host begins a record at delivery, feeds it trace entries, and seals it on
+// the conclusion. The mutation RULES live here so they are testable without a host.
 import Foundation
 
 public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     public var id: UUID
-    /// The traversing agent's pack id ("director", "coding") — enough to resolve the drawn
-    /// graph through a host closure; an archive whose library moved on degrades to an honest
-    /// empty canvas rather than a stale picture.
+    /// The traversing agent's pack id ("director", "coding").
     public var agent: String
-    public var graphName: String
-    /// The delivered kind that entered the graph (`build`, `settled`, `item`, …).
-    public var kind: SZMessageKind
-    /// The dispatch THREAD this traversal belongs to — one Build press and every traversal
-    /// it causes, across every agent, share one id; the RUNS list groups by it. nil = a
-    /// standalone traversal.
+    /// The build THREAD this traversal belongs to — the build traversal's own id, shared
+    /// by the work children it dispatched. nil = a standalone conversation.
     public var thread: UUID?
-    /// For a `.work` traversal: the dispatched node id it handles.
+    /// For a dispatched work child: the node id it serves.
     public var work: String?
     public var startedAt: Date
-    /// nil while the traversal is still under way — the record is LIVE. Live records are
-    /// never persisted (a crash mid-traversal loses the record; the transcript survives).
+    /// nil while the traversal is under way — the record is LIVE. Live records are never
+    /// persisted (a crash mid-traversal loses the record; the transcript survives).
     public var endedAt: Date?
     /// The executed trace, in traversal order — loops unrolled, one entry per node visit.
     public var trace: [Entry]
@@ -39,13 +26,17 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     public var conclusion: Conclusion?
     public var isLive: Bool { endedAt == nil }
 
-    public init(id: UUID, agent: String, graphName: String, kind: SZMessageKind,
-                thread: UUID? = nil, work: String? = nil, startedAt: Date = Date(),
-                endedAt: Date? = nil, trace: [Entry] = [], conclusion: Conclusion? = nil) {
+    /// Whether this record LEADS its thread — the parent traversal whose own id is the
+    /// thread id, which its dispatched children share. Structure, not classification:
+    /// drives list ordering (the panel follows the thread's spine) and the cap budgets
+    /// (children outnumber parents many to one).
+    public var leadsThread: Bool { thread == id }
+
+    public init(id: UUID, agent: String, thread: UUID? = nil, work: String? = nil,
+                startedAt: Date = Date(), endedAt: Date? = nil, trace: [Entry] = [],
+                conclusion: Conclusion? = nil) {
         self.id = id
         self.agent = agent
-        self.graphName = graphName
-        self.kind = kind
         self.thread = thread
         self.work = work
         self.startedAt = startedAt
@@ -54,13 +45,30 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         self.conclusion = conclusion
     }
 
+    // An absent trace decodes empty — a minimal record is legal on disk.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        agent = try c.decode(String.self, forKey: .agent)
+        thread = try c.decodeIfPresent(UUID.self, forKey: .thread)
+        work = try c.decodeIfPresent(String.self, forKey: .work)
+        startedAt = try c.decode(Date.self, forKey: .startedAt)
+        endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
+        trace = try c.decodeIfPresent([Entry].self, forKey: .trace) ?? []
+        conclusion = try c.decodeIfPresent(Conclusion.self, forKey: .conclusion)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, agent, thread, work, startedAt, endedAt, trace, conclusion
+    }
+
     // MARK: - The trace entry
 
-    /// One node visit as the record keeps it: the engine reports each visit repeatedly
-    /// (running, then settled) and the record replaces by `(ordinal, node)` — plus the
-    /// host-stamped wall clock, which the engine's date-free notes never carry.
+    /// One node visit. The engine reports each visit repeatedly (running, then settled)
+    /// and the record replaces by `(ordinal, node)` — plus the host-stamped wall clock,
+    /// which the engine's date-free notes never carry.
     public struct Entry: Sendable, Equatable, Identifiable, Codable {
-        /// Position in the traversal, the engine's own numbering (1 is the entry).
+        /// Position in the traversal, the engine's own numbering (1 is the door).
         public var ordinal: Int
         /// The graph node this entry is a visit OF.
         public var node: String
@@ -74,7 +82,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         /// its own set.
         public var tally: Tally?
         /// HOST-stamped wall clock (`note` stamps on first sight / settle) — never
-        /// engine-stamped, so SZAI's outputs stay date-free. Persisted with the trace.
+        /// engine-stamped. Persisted with the trace.
         public var startedAt: Date?
         public var endedAt: Date?
 
@@ -105,8 +113,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             return endedAt.timeIntervalSince(startedAt)
         }
 
-        // Tolerant both ways: an entry written before an optional field decodes with its
-        // default, and an absent value is NOT encoded — no key that says nothing.
+        // An absent value is NOT encoded — no key that says nothing.
         private enum CodingKeys: String, CodingKey {
             case ordinal, node, phase, outcome, detail, tally, startedAt, endedAt
         }
@@ -115,7 +122,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             ordinal = try c.decode(Int.self, forKey: .ordinal)
             node = try c.decode(String.self, forKey: .node)
-            phase = try c.decodeIfPresent(Phase.self, forKey: .phase) ?? .done
+            phase = try c.decode(Phase.self, forKey: .phase)
             outcome = try c.decodeIfPresent(String.self, forKey: .outcome)
             detail = try c.decodeIfPresent(String.self, forKey: .detail)
             tally = try c.decodeIfPresent(Tally.self, forKey: .tally)
@@ -138,8 +145,8 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
 
     // MARK: - Conclusion and tally
 
-    /// How a traversal ENDED — the machine's closed vocabulary (`SZTraversalEnding`),
-    /// respelled as a Codable archive value so the sidecar's format is owned here.
+    /// How a traversal ENDED — the closed vocabulary (`SZTraversalEnding`), respelled as a
+    /// Codable archive value so the sidecar's format is owned here.
     public enum Conclusion: Sendable, Equatable, Codable {
         case ended
         case failed(reason: String)
@@ -161,7 +168,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         }
     }
 
-    /// A dispatch set's settlement counts, exactly as the thread machine reports them.
+    /// A dispatch set's settlement counts, exactly as the supervisor reports them.
     public struct Tally: Sendable, Equatable, Codable {
         public var settled: Int
         public var total: Int
@@ -173,54 +180,10 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         }
     }
 
-    // MARK: - Codable (tolerant like the entry)
-
-    private enum CodingKeys: String, CodingKey {
-        case id, agent, graphName, kind, thread, work, startedAt, endedAt, trace, conclusion
-        /// The field's pre-rename spelling — read for tolerance, never written.
-        case item
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(UUID.self, forKey: .id)
-        agent = try c.decode(String.self, forKey: .agent)
-        graphName = try c.decode(String.self, forKey: .graphName)
-        // Tolerant of retired kinds, by their old spellings: a pre-rename archive reads as
-        // what it WAS ("chat" was prose, "item" was work, "settled" was the build's reply)
-        // rather than sinking the whole sidecar or mislabeling its history.
-        let rawKind = try c.decodeIfPresent(String.self, forKey: .kind)
-        kind = rawKind.flatMap(SZMessageKind.init(rawValue:))
-            ?? ["chat": .message, "item": .work, "settled": .build][rawKind ?? ""]
-            ?? .build
-        thread = try c.decodeIfPresent(UUID.self, forKey: .thread)
-        work = try c.decodeIfPresent(String.self, forKey: .work)
-            ?? c.decodeIfPresent(String.self, forKey: .item)
-        startedAt = try c.decode(Date.self, forKey: .startedAt)
-        endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
-        trace = try c.decodeIfPresent([Entry].self, forKey: .trace) ?? []
-        conclusion = try c.decodeIfPresent(Conclusion.self, forKey: .conclusion)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(id, forKey: .id)
-        try c.encode(agent, forKey: .agent)
-        try c.encode(graphName, forKey: .graphName)
-        try c.encode(kind, forKey: .kind)
-        try c.encodeIfPresent(thread, forKey: .thread)
-        try c.encodeIfPresent(work, forKey: .work)
-        try c.encode(startedAt, forKey: .startedAt)
-        try c.encodeIfPresent(endedAt, forKey: .endedAt)
-        try c.encode(trace, forKey: .trace)
-        try c.encodeIfPresent(conclusion, forKey: .conclusion)
-    }
-
     // MARK: - The traversal feeding its record
 
     /// Fold one reported entry in. The SEALED-RECORD GUARD is the generalized zombie
-    /// protection: once a record ended, nothing may write it (a cancelled traversal's late
-    /// reports drop here even if a caller's own guards slipped). Same-`(ordinal, node)`
+    /// protection: once a record ended, nothing may write it. Same-`(ordinal, node)`
     /// reports replace, PRESERVING the stamps: first sight stamps `startedAt`; the first
     /// non-running report stamps `endedAt`; a re-emit never restamps.
     public mutating func note(_ entry: Entry, at now: Date = Date()) {
@@ -271,40 +234,36 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
 
     // MARK: - The list's rules
 
-    /// List order: live first (a traversing record is what the panel should be showing),
-    /// then by start, newest first. Among the LIVE ones a BUILD traversal leads: a build
-    /// runs for minutes while work comes and goes, and the head of the list is what the panel
-    /// follows — an item starting mid-build must not take the canvas off the thread's spine.
+    /// List order: live first, and among the live ones the thread's LEADER leads (it runs
+    /// for minutes while children come and go, and the head of the list is what the panel
+    /// follows); then by start, newest first.
     public static func ordered(_ runs: [SZAgentGraphRun]) -> [SZAgentGraphRun] {
         runs.sorted {
             if $0.isLive != $1.isLive { return $0.isLive }
-            if $0.isLive, ($0.kind == .build) != ($1.kind == .build) { return $0.kind == .build }
+            if $0.isLive, $0.leadsThread != $1.leadsThread { return $0.leadsThread }
             return $0.startedAt > $1.startedAt
         }
     }
 
-    /// Cap the history (~50) — never a live record, whatever the burst. Two budgets rather
-    /// than one: work traversals outnumber build traversals many to one, so a shared cap
-    /// would let one busy afternoon evict every recorded build from the list AND from
-    /// `runs.json`. Order-independent: the victim is the OLDEST ENDED record of its budget
-    /// by its own clock, so the cap holds whatever list it is handed.
+    /// Cap the history (~50) — never a live record. Two budgets: thread children outnumber
+    /// their leaders many to one, so a shared cap would let one busy afternoon evict every
+    /// recorded thread. Order-independent: the victim is the OLDEST ENDED record of its
+    /// budget by its own clock.
     public static func capped(_ runs: [SZAgentGraphRun],
-                              builds: Int = 20, others: Int = 30) -> [SZAgentGraphRun] {
+                              leaders: Int = 20, others: Int = 30) -> [SZAgentGraphRun] {
         var kept = runs
-        for (isBuild, limit) in [(true, builds), (false, others)] {
-            while kept.lazy.filter({ ($0.kind == .build) == isBuild }).count > limit,
-                  let victim = oldestEnded(in: kept, isBuild: isBuild) {
+        for (leads, limit) in [(true, leaders), (false, others)] {
+            while kept.lazy.filter({ $0.leadsThread == leads }).count > limit,
+                  let victim = oldestEnded(in: kept, leading: leads) {
                 kept.remove(at: victim)
             }
         }
         return kept
     }
 
-    /// The eviction victim within one budget: the oldest ENDED record, or nil when every
-    /// record over the limit is still live.
-    private static func oldestEnded(in runs: [SZAgentGraphRun], isBuild: Bool) -> Int? {
+    private static func oldestEnded(in runs: [SZAgentGraphRun], leading: Bool) -> Int? {
         runs.indices
-            .filter { !runs[$0].isLive && (runs[$0].kind == .build) == isBuild }
+            .filter { !runs[$0].isLive && runs[$0].leadsThread == leading }
             .min { runs[$0].startedAt < runs[$1].startedAt }
     }
 }

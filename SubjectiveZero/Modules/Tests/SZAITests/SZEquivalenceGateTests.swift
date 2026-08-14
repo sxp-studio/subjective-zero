@@ -1,23 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // THE EQUIVALENCE GATE: the render path — SZBriefRenderer over the shipped agent packs
 // (Sources/SZAI/Resources/Agents) — must reproduce, byte for byte, every prompt the
-// previous orchestrator rendered, as pinned by the committed fixtures (recorded before that
-// orchestrator was deleted; the recording harness went with it). The fixtures are the gate
-// and are NEVER edited to make this pass; every render here uses the SAME fixed inputs the
-// recording harness used (same sample-anchored ids, prompts, and contract — restated below
-// because the recorder kept its world private).
-//
-// Facts documents are hand-assembled JSON following the SZFacts spec field names. Where a
-// value is host context that does not exist yet in the new architecture, the EXACT input the
-// recording harness used is stubbed into the facts/delivery — never an approximation of the
-// bytes:
-//  - chat facts carry `graphJSON` (the chat briefs re-project the live graph; the spec gains
-//    the field when the host projection lands),
-//  - node-anchored chat carries the host-read contract/source strings verbatim,
-//  - graph-op requests carry the recorder's kitchen-sink boundary contract.
-//
-// The retired strategies' *.txt fixtures (dispatch shape / argv assembly) moved to
-// Fixtures/Legacy/ when their subject was deleted — historical, no gate reads them.
+// previous orchestrator rendered, as pinned by the committed fixtures. The fixtures are
+// the gate and are NEVER edited to make this pass; every render here uses the SAME fixed
+// inputs the recording harness used (same sample-anchored ids, prompts, and contract),
+// now spelled as the living model's typed values — text + SZWorld + SZBriefExtras.
 import Foundation
 import Testing
 @testable import SZAI
@@ -113,18 +100,6 @@ private let summaryVariantsGraph = SZGraph(
                position: SZPoint(x: 1, y: 0), rebuildReason: .contractChanged),
     ])
 
-// MARK: - Facts assembly
-
-private func encoded(_ graph: SZGraph) throws -> String {
-    String(decoding: try JSONEncoder().encode(graph), as: UTF8.self)
-}
-
-/// A facts document from spec-named fields (JSONSerialization: the doc is hand-shaped here
-/// exactly because the host that shapes it lands next phase).
-private func factsJSON(_ fields: [String: Any]) throws -> String {
-    String(decoding: try JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
-}
-
 /// The recorder's fixed reconcile inputs.
 private let grayStatus =
     "needsInput: the contract's `mode` options are ambiguous — which value is the default?"
@@ -136,116 +111,109 @@ private let libraryIndexText = "## Sources\n- `camera.macos` — the live camera
 
 struct SZEquivalenceGateTests {
 
-    /// Every *.md fixture, rendered through the living path: SZBriefRenderer + the shipped packs.
+    /// Every *.md fixture, rendered through the living path: SZBriefRenderer + the shipped
+    /// packs, fed the model's own typed values.
     private static func renderAll() throws -> [String: String] {
         let renderer = SZBriefRenderer(packRoot: shippedPacksRoot)
-        let base = try encoded(fixtureGraph())
+        let base = fixtureGraph()
         var out: [String: String] = [:]
 
         // — chat framings —
         out["chat-director-cold.md"] = try renderer.render(
-            agent: "director", template: "prompts/chat.md.mustache", kind: .message,
-            factsJSON: factsJSON(["sentMessage": "make it warmer and add a soft glow",
-                                  "resuming": false, "graphJSON": base]))
+            agent: "director", template: "chat",
+            message: "make it warmer and add a soft glow",
+            world: SZWorld(graph: base))
         out["chat-director-resumed.md"] = try renderer.render(
-            agent: "director", template: "prompts/chat-resumed.md.mustache", kind: .message,
-            factsJSON: factsJSON(["sentMessage": "now dim the highlights a little",
-                                  "resuming": true, "graphJSON": base]))
+            agent: "director", template: "chat-resumed",
+            message: "now dim the highlights a little",
+            world: SZWorld(graph: base, resuming: true))
         out["chat-node-cold.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-chat.md.mustache", kind: .message,
-            factsJSON: factsJSON(["sentMessage": "add a strength slider",
-                                  "resuming": false, "nodeSeed": grayID.uuidString]),
-            delivery: SZBriefDelivery(
+            agent: "coding", template: "node-chat",
+            message: "add a strength slider",
+            world: SZWorld(graph: base, node: grayID),
+            extras: SZBriefExtras(
                 nodeContract: "{\n  \"title\": \"Grayscale\"\n}",
                 nodeSource: "struct Node {\n    // fixture source\n}"))
 
-        // — the node-compile family (.item deliveries against the graph's typed boundary) —
-        let itemFacts = try factsJSON(["attempt": 1, "graphJSON": base])
+        // — the node-compile family (work deliveries against the graph's typed boundary) —
+        let workWorld = SZWorld(graph: base, node: grayID,
+                                assignment: SZAssignment(attempt: 1))
         out["coding-compile-cold.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
-            factsJSON: itemFacts, delivery: SZBriefDelivery(work: grayID.uuidString))
+            agent: "coding", template: "node-compile", message: "", world: workWorld)
         let inline = try renderer.render(
-            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
-            factsJSON: itemFacts,
-            delivery: SZBriefDelivery(work: grayID.uuidString, libraryIndex: libraryIndexText))
+            agent: "coding", template: "node-compile", message: "", world: workWorld,
+            extras: SZBriefExtras(libraryIndex: libraryIndexText))
         out["coding-compile-inline.md"] = inline
         // opencode's tool-namespacing is a provider transform applied to the rendered brief —
         // the same real byte transform the recorder pinned.
         out["coding-compile-inline-opencode.md"] = SZOpenCodeProvider.namespacedSubZTools(in: inline)
         out["coding-compile-preserve.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
-            factsJSON: itemFacts,
-            delivery: SZBriefDelivery(work: grayID.uuidString, preserveBehavior: true))
+            agent: "coding", template: "node-compile", message: "", world: workWorld,
+            extras: SZBriefExtras(preserveBehavior: true))
         out["coding-compile-contracted.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
-            factsJSON: factsJSON(["attempt": 1,
-                                  "graphJSON": encoded(fixtureGraph(grayContract: kitchenSinkContract))]),
-            delivery: SZBriefDelivery(work: grayID.uuidString))
+            agent: "coding", template: "node-compile", message: "",
+            world: SZWorld(graph: fixtureGraph(grayContract: kitchenSinkContract),
+                           node: grayID, assignment: SZAssignment(attempt: 1)))
 
-        // — the re-grounding retry briefs (.item re-deliveries) —
+        // — the re-grounding retry briefs (work re-deliveries) —
         out["coding-reconcile-with-note.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-reconcile.md.mustache", kind: .work,
-            factsJSON: factsJSON(["attempt": 2, "graphJSON": base, "blocker": grayStatus,
-                                  "senderNote": "Use Rec.709 luma weights."]),
-            delivery: SZBriefDelivery(work: grayID.uuidString))
+            agent: "coding", template: "node-reconcile", message: "",
+            world: SZWorld(graph: base, statuses: [grayID: grayStatus], node: grayID,
+                           assignment: SZAssignment(attempt: 2, note: "Use Rec.709 luma weights.")))
         out["coding-reconcile-plain.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-reconcile.md.mustache", kind: .work,
-            factsJSON: factsJSON(["attempt": 3, "graphJSON": base, "blocker": grayStatus]),
-            delivery: SZBriefDelivery(work: grayID.uuidString))
+            agent: "coding", template: "node-reconcile", message: "",
+            world: SZWorld(graph: base, statuses: [grayID: grayStatus], node: grayID,
+                           assignment: SZAssignment(attempt: 3)))
         // No reported status → the renderer's fallback blocker, same words as before.
         out["coding-reconcile-bare.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-reconcile.md.mustache", kind: .work,
-            factsJSON: factsJSON(["attempt": 2, "graphJSON": base]),
-            delivery: SZBriefDelivery(work: grayID.uuidString))
+            agent: "coding", template: "node-reconcile", message: "",
+            world: SZWorld(graph: base, node: grayID, assignment: SZAssignment(attempt: 2)))
 
-        // — the director's build-kind briefs —
+        // — the director's build briefs —
+        func run(workSet: [SZNodeID] = [], round: Int = 0, roundCap: Int = 0,
+                 steers: [String] = [], instruction: String = "") -> SZRun {
+            SZRun(workSet: workSet, round: round, roundCap: roundCap,
+                  steers: steers, instruction: instruction)
+        }
         out["director-decompose.md"] = try renderer.render(
-            agent: "director", template: "prompts/decompose.md.mustache", kind: .build,
-            factsJSON: factsJSON(["graphJSON": base]),
-            delivery: SZBriefDelivery(instruction: "make the camera feed grayscale"))
+            agent: "director", template: "decompose", message: "",
+            world: SZWorld(graph: base, run: run(instruction: "make the camera feed grayscale")))
         out["director-decompose-noinstruction.md"] = try renderer.render(
-            agent: "director", template: "prompts/decompose.md.mustache", kind: .build,
-            factsJSON: factsJSON(["graphJSON": base]))
+            agent: "director", template: "decompose", message: "",
+            world: SZWorld(graph: base, run: run()))
         out["director-reconcile-r1.md"] = try renderer.render(
-            agent: "director", template: "prompts/reconcile.md.mustache", kind: .build,
-            factsJSON: factsJSON(["graphJSON": base, "workSet": [grayID.uuidString],
-                                  "nodeStatuses": [grayID.uuidString: grayStatus],
-                                  "steers": [fleetInboxLine], "round": 1, "roundCap": 2]))
+            agent: "director", template: "reconcile", message: "",
+            world: SZWorld(graph: base, statuses: [grayID: grayStatus],
+                           run: run(workSet: [grayID], round: 1, roundCap: 2,
+                                    steers: [fleetInboxLine])))
         // Round 2: the inbox drained on round 1; the statuses are the run's last-reported.
         out["director-reconcile-r2.md"] = try renderer.render(
-            agent: "director", template: "prompts/reconcile.md.mustache", kind: .build,
-            factsJSON: factsJSON(["graphJSON": base, "workSet": [grayID.uuidString],
-                                  "nodeStatuses": [grayID.uuidString: grayStatus],
-                                  "steers": [String](), "round": 2, "roundCap": 2]))
+            agent: "director", template: "reconcile", message: "",
+            world: SZWorld(graph: base, statuses: [grayID: grayStatus],
+                           run: run(workSet: [grayID], round: 2, roundCap: 2)))
         out["director-reconcile-r1-bare.md"] = try renderer.render(
-            agent: "director", template: "prompts/reconcile.md.mustache", kind: .build,
-            factsJSON: factsJSON(["graphJSON": base, "workSet": [grayID.uuidString],
-                                  "nodeStatuses": [String: String](),
-                                  "steers": [String](), "round": 1, "roundCap": 2]))
+            agent: "director", template: "reconcile", message: "",
+            world: SZWorld(graph: base, run: run(workSet: [grayID], round: 1, roundCap: 2)))
 
-        // — graphSummary's fallback branches, through the new path's projection —
+        // — graphSummary's fallback branches, through the one summary renderer —
         out["director-graph-summary-variants.md"] =
-            try SZBriefRenderer.graphSummary(ofJSON: encoded(summaryVariantsGraph))
+            SZDirectorPrompt.graphSummary(summaryVariantsGraph)
 
-        // — graph-op seed briefs (.request deliveries) —
+        // — graph-op seed briefs (the split/merge render bundle) —
         out["graphop-split-stage.md"] = try renderer.render(
-            agent: "coding", template: "prompts/split-stage.md.mustache", kind: .request,
-            factsJSON: factsJSON(["op": "split", "nodes": [grayID.uuidString]]),
-            delivery: SZBriefDelivery(graphOp: SZBriefDelivery.GraphOp(
+            agent: "coding", template: "split-stage", message: "", world: SZWorld(),
+            extras: SZBriefExtras(graphOp: SZBriefExtras.GraphOp(
                 original: "Grayscale Effect", intent: grayPrompt, stage: 1, count: 2,
                 source: "// original Node.swift\n", contract: kitchenSinkContract,
                 instruction: "a blur stage then a sharpen stage")))
         out["graphop-split-stage-bare.md"] = try renderer.render(
-            agent: "coding", template: "prompts/split-stage.md.mustache", kind: .request,
-            factsJSON: factsJSON(["op": "split", "nodes": [grayID.uuidString]]),
-            delivery: SZBriefDelivery(graphOp: SZBriefDelivery.GraphOp(
+            agent: "coding", template: "split-stage", message: "", world: SZWorld(),
+            extras: SZBriefExtras(graphOp: SZBriefExtras.GraphOp(
                 original: "Grayscale Effect", intent: grayPrompt, stage: 2, count: 2,
                 contract: kitchenSinkContract)))
         out["graphop-merge.md"] = try renderer.render(
-            agent: "coding", template: "prompts/merge.md.mustache", kind: .request,
-            factsJSON: factsJSON(["op": "merge",
-                                  "nodes": [cameraID.uuidString, grayID.uuidString]]),
-            delivery: SZBriefDelivery(graphOp: SZBriefDelivery.GraphOp(
+            agent: "coding", template: "merge", message: "", world: SZWorld(),
+            extras: SZBriefExtras(graphOp: SZBriefExtras.GraphOp(
                 count: 2,
                 constituents: [
                     .init(title: "MacBook Camera", intent: cameraPrompt,

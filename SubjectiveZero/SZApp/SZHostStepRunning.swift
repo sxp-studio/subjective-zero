@@ -20,7 +20,7 @@ struct SZHostStepError: Error, CustomStringConvertible {
 }
 
 @MainActor
-final class SZHostStepRunning: SZStepRunning {
+final class SZHostStepRunning: SZStepRunning, SZStepProviding {
     private let packsRoot: URL
     private let runtime: SZStepRuntime
     /// Keys this adapter has scheduled — schedule once per run; the runtime's evaluate and

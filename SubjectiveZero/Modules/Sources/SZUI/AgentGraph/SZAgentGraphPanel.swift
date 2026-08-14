@@ -24,50 +24,29 @@
 import SwiftUI
 import SZCore
 
-/// One agent in the Plan view's tree: who it is and every graph it carries. Built by the
+/// One agent in the Plan view's tree: who it is and THE graph it carries. Built by the
 /// host — the agent-pack library lives in SZAI, which this module may not import — and
 /// drawn here, the pattern every prop on this panel follows.
 public struct SZAgentGraphPlanAgent: Identifiable, Equatable, Sendable {
-    /// One of that agent's graphs, under the name a run record joins back on.
-    public struct Graph: Equatable, Sendable {
-        public var name: String
-        public var graph: SZAgentGraph
-        /// Declared outcomes per STEP node id, from the compiled steps' own exports —
-        /// resolved host-side (SZUI may not reach the compiler) and filled in asynchronously
-        /// as declarations warm. Empty until then: a card falls back to its wired ports.
-        public var stepOutcomes: [String: [String]]
-
-        public init(name: String, graph: SZAgentGraph,
-                    stepOutcomes: [String: [String]] = [:]) {
-            self.name = name
-            self.graph = graph
-            self.stepOutcomes = stepOutcomes
-        }
-    }
-
     public var id: String
     public var title: String
     public var symbol: String
-    public var graphs: [Graph]
-    /// The graph its group opens on — the kind this agent mostly exists for.
-    public var defaultGraphName: String
+    public var graph: SZAgentGraph
+    /// Declared outcomes per STEP node id, from the compiled steps' own exports —
+    /// resolved host-side (SZUI may not reach the compiler) and filled in asynchronously
+    /// as declarations warm. Empty until then: a card falls back to its wired ports.
+    public var stepOutcomes: [String: [String]]
     /// The seat this agent holds — what a dispatch's `to` resolves against. nil = seatless.
     public var seat: String?
-    /// The build STRATEGY the next run asks for (env > the persisted choice), when this
-    /// agent is the one that opens builds. Not a graph name any more — the strategies are
-    /// routes inside one document — so it marks the AGENT'S graph row rather than picking
-    /// between rows. nil = this agent has no strategy dimension, or none was requested.
-    public var activeStrategy: String?
 
-    public init(id: String, title: String, symbol: String, graphs: [Graph],
-                defaultGraphName: String, seat: String? = nil, activeStrategy: String? = nil) {
+    public init(id: String, title: String, symbol: String, graph: SZAgentGraph,
+                stepOutcomes: [String: [String]] = [:], seat: String? = nil) {
         self.id = id
         self.title = title
         self.symbol = symbol
-        self.graphs = graphs
-        self.defaultGraphName = defaultGraphName
+        self.graph = graph
+        self.stepOutcomes = stepOutcomes
         self.seat = seat
-        self.activeStrategy = activeStrategy
     }
 }
 
@@ -87,10 +66,9 @@ public struct SZAgentGraphPanel: View {
     /// The run the user PICKED, if any. nil = follow the head of the list, which is how the
     /// panel tracks the latest run without fighting an explicit choice.
     @State private var selectedRunID: UUID?
-    /// The Plan view's browse position. nil = the first agent and its default graph; a
-    /// graph name the selected agent doesn't carry falls back the same way.
+    /// The Plan view's browse position. nil = the first agent; an id the library dropped
+    /// falls back the same way.
     @State private var selectedAgentID: String?
-    @State private var selectedGraphName: String?
 
     /// The Run view's follow-cam: while armed, the camera re-centres on the newest entry —
     /// the traversing head — each time the chain grows. A manual pan disengages it (the
@@ -109,9 +87,6 @@ public struct SZAgentGraphPanel: View {
     /// layout is computed, and these exist so a graph can be pulled apart to read it, not
     /// to author a picture. Reset by switching graph.
     @State private var nudges: [String: CGSize] = [:]
-    /// Which agent groups are OPEN in the tree. Everything starts collapsed so the sidebar
-    /// reads as quiet rows until something is wanted.
-    @State private var expandedAgents: Set<String> = []
     /// The two SECTIONS collapse too: AGENTS starts folded (the plans are reference
     /// material), RUNS starts open (the live surface).
     @State private var agentsSectionOpen = false
@@ -143,57 +118,44 @@ public struct SZAgentGraphPanel: View {
         planAgents.first { $0.id == selectedAgentID } ?? planAgents.first
     }
 
-    private var planGraph: SZAgentGraphPlanAgent.Graph? {
-        guard let planAgent else { return nil }
-        return planAgent.graphs.first { $0.name == selectedGraphName }
-            ?? planAgent.graphs.first { $0.name == planAgent.defaultGraphName }
-            ?? planAgent.graphs.first
-    }
-
     /// What the canvas draws right now — the run's own graph and record, or the browsed
     /// plan graph with no record at all. nil = nothing resolvable, and `empty` says which
     /// kind of nothing.
     private var displayed: Displayed? {
         if effectiveMode == .run {
             guard let shown, let graph = resolveGraph(shown) else { return nil }
-            // The same join the naming makes: the record's agent+graph back to the plan
-            // entry, for the declared outcomes the record itself never carries.
-            let outcomes = planAgents.first { $0.id == shown.agent }?
-                .graphs.first { $0.name == shown.graphName }?.stepOutcomes ?? [:]
+            // The record's agent joins back to the plan entry for the declared outcomes
+            // the record itself never carries.
+            let outcomes = planAgents.first { $0.id == shown.agent }?.stepOutcomes ?? [:]
             return Displayed(key: shown.id.uuidString, graph: graph, record: shown,
                              agent: shown.agent, stepOutcomes: outcomes)
         }
-        guard let planAgent, let planGraph else { return nil }
-        return Displayed(key: "\(planAgent.id)/\(planGraph.name)", graph: planGraph.graph,
+        guard let planAgent else { return nil }
+        return Displayed(key: planAgent.id, graph: planAgent.graph,
                          record: nil, agent: planAgent.id,
-                         stepOutcomes: planGraph.stepOutcomes)
+                         stepOutcomes: planAgent.stepOutcomes)
     }
 
-    /// The sub-agent traversals a shown record dispatched: the ITEM records sharing its
-    /// thread. They are already in `runs` — the sidebar nests them under the same thread —
-    /// so showing the fleet on the canvas is a filter, not new plumbing.
+    /// The work children a shown record dispatched: the records sharing its thread. They
+    /// are already in `runs`, so showing the fleet on the canvas is a filter.
     private func subagents(of record: SZAgentGraphRun?) -> [SZAgentGraphRun] {
-        guard let record, let thread = record.thread, record.kind != .work else { return [] }
+        guard let record, let thread = record.thread, record.work == nil else { return [] }
         // Oldest first: the band should not reshuffle as items settle, and `runs` is
         // ordered live-first for the sidebar's benefit, not this one's.
-        return runs.filter { $0.thread == thread && $0.kind == .work }
+        return runs.filter { $0.thread == thread && $0.work != nil }
             .sorted { $0.startedAt < $1.startedAt }
     }
 
-    /// A dispatch card's link: jump the Plan view to the target seat's item graph — the
-    /// graph the dispatched items actually traverse. Unknown seat = no-op (the pack gate
-    /// refuses those, so only an archived record could carry one).
+    /// A dispatch card's link: jump the Plan view to the target seat's graph — the one the
+    /// dispatched work traverses. Unknown seat = no-op.
     private func navigate(toSeat seat: String) {
         guard let target = planAgents.first(where: { $0.seat == seat }) else { return }
-        let itemGraph = target.graphs.first { $0.graph.handles(.work) }
         mode = .plan
         selectedRunID = nil
         selectedAgentID = target.id
-        selectedGraphName = (itemGraph ?? target.graphs.first)?.name
         // Show the destination in the outline too: a canvas that swaps under a collapsed
         // AGENTS section leaves the user somewhere with no visible "here".
         agentsSectionOpen = true
-        expandedAgents.insert(target.id)
     }
 
     /// One canvas's worth of values. The Plan view carries no record — its cards are the
@@ -374,8 +336,7 @@ public struct SZAgentGraphPanel: View {
         VStack(spacing: 6) {
             if effectiveMode == .run, let shown {
                 Text("Graph unavailable").font(.system(size: 13, weight: .semibold))
-                Text("This run's graph (\(shown.agent)/\(shown.graphName)) isn't in the "
-                     + "agent-pack library any more.")
+                Text("\(shown.agent)'s graph isn't in the agent-pack library any more.")
                     .font(.system(size: 11))
                     .multilineTextAlignment(.center)
             } else {
@@ -408,84 +369,38 @@ public struct SZAgentGraphPanel: View {
         .buttonStyle(.plain)
     }
 
-    /// The AGENTS outline: every agent, its graphs indented under it — the Plan view's
-    /// whole selection surface, in the sidebar where selection lives.
+    /// The AGENTS outline: one row per agent — each IS its graph, so the row selects the
+    /// plan directly.
     private var agentTree: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(planAgents) { agent in
-                let expanded = expandedAgents.contains(agent.id)
+                let selected = effectiveMode == .plan && agent.id == planAgent?.id
                 Button {
-                    if expanded { expandedAgents.remove(agent.id) }
-                    else { expandedAgents.insert(agent.id) }
+                    selectedAgentID = agent.id
+                    mode = .plan
                 } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(.tertiary)
-                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                        Capsule()
+                            .fill(selected ? SZChatPanel.directorColor.opacity(0.8) : .clear)
+                            .frame(width: 2)
                         Image(systemName: agent.symbol)
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
                         Text(agent.title)
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(selected ? .primary : .secondary)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
-                    // Indented UNDER the section header — the outline's levels must read as
-                    // levels: section > agent > graph.
                     .padding(.leading, 18).padding(.trailing, 10).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.white.opacity(selected ? 0.06 : 0)))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                if expanded {
-                    ForEach(agent.graphs, id: \.name) { entry in
-                        graphRow(agent, entry)
-                    }
-                }
+                .help(agent.graph.label.map { "\(agent.title) · \($0)" } ?? agent.title)
             }
         }
-    }
-
-    private func graphRow(_ agent: SZAgentGraphPlanAgent,
-                          _ entry: SZAgentGraphPlanAgent.Graph) -> some View {
-        let selected = effectiveMode == .plan
-            && agent.id == planAgent?.id && entry.name == planGraph?.name
-        return Button {
-            selectedAgentID = agent.id
-            selectedGraphName = entry.name
-            mode = .plan
-        } label: {
-            HStack(spacing: 4) {
-                Capsule()
-                    .fill(selected ? SZChatPanel.directorColor.opacity(0.8) : .clear)
-                    .frame(width: 2)
-                // The authored label, matching the RUNS rows; the stem stays in the tooltip.
-                Text(entry.graph.label ?? entry.name)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(selected ? .primary : .secondary)
-                    .lineLimit(1).truncationMode(.middle)
-                Spacer(minLength: 0)
-                // The strategy a Build will actually take. It used to mark WHICH VARIANT
-                // ROW ran; with one document per agent it names the route instead, so the
-                // chip carries the strategy's own name rather than the word "active".
-                if let strategy = agent.activeStrategy, entry.graph.handles(.build) {
-                    Text(strategy)
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(SZChatPanel.directorColor.opacity(0.9))
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(Capsule().fill(SZChatPanel.directorColor.opacity(0.15)))
-                }
-            }
-            .padding(.vertical, 3).padding(.horizontal, 6)
-            .background(RoundedRectangle(cornerRadius: 5)
-                .fill(Color.white.opacity(selected ? 0.06 : 0)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.leading, 16)
-        .padding(.trailing, 4)
-        .help("\(agent.title) · \(entry.name)")
     }
 
     private func centreIfNeeded() {

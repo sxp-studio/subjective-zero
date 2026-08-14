@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// dlopen-based loader for a compiled decision-step dylib — `SZLoader`'s small sibling, ABI v4.
+// dlopen-based loader for a compiled decision-step dylib — `SZLoader`'s small sibling, ABI v5.
 // Same mapping discipline as the node tier: copy the dylib to a unique `runtime-loads/` path
 // (so the canonical build artifact can be overwritten while the previous copy stays mapped),
 // `dlopen(RTLD_NOW|RTLD_LOCAL)`, dlsym, check the API version, and keep the OLD module live on
 // any failure (a red reload never costs the green module).
 //
-// v4 adds two things the async ABI demands:
+// Two things the async ABI demands:
 // - `evaluate` is async: it parks on the module's completion callback, forwards Swift task
 //   cancellation as `SZStepCancel`, and serves the step's `askModel` calls through a per-
 //   evaluation runner that guarantees every accepted ask is answered exactly once.
@@ -219,7 +219,7 @@ public final class SZStepLoader: @unchecked Sendable {
         old?.retire()
     }
 
-    /// The grow-and-retry string channel (Declare only in v4).
+    /// The grow-and-retry string channel (Declare only).
     static func readString(_ call: (UnsafeMutablePointer<CChar>?, Int32) -> Int32) -> String? {
         var capacity = 512
         while true {

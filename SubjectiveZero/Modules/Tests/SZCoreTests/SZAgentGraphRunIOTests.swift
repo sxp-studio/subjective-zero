@@ -13,10 +13,9 @@ private func temporaryProjectURL() -> URL {
 }
 
 private func sampleRecords() -> [SZAgentGraphRun] {
-    let thread = UUID()
+    let buildID = UUID()
 
-    var build = SZAgentGraphRun(id: UUID(), agent: "director", graphName: "build",
-                                kind: .build, thread: thread,
+    var build = SZAgentGraphRun(id: buildID, agent: "director", thread: buildID,
                                 startedAt: Date(timeIntervalSinceReferenceDate: 100))
     build.note(.init(ordinal: 1, node: "work-left", phase: .running),
                at: Date(timeIntervalSinceReferenceDate: 101))
@@ -27,30 +26,28 @@ private func sampleRecords() -> [SZAgentGraphRun] {
                at: Date(timeIntervalSinceReferenceDate: 130))
     build.seal(conclusion: .ended, at: Date(timeIntervalSinceReferenceDate: 131))
 
-    var item = SZAgentGraphRun(id: UUID(), agent: "coding", graphName: "item", kind: .work,
-                               thread: thread, work: UUID().uuidString,
-                               startedAt: Date(timeIntervalSinceReferenceDate: 200))
-    item.seal(conclusion: .failed(reason: "the turn threw"),
-              at: Date(timeIntervalSinceReferenceDate: 210))
+    var child = SZAgentGraphRun(id: UUID(), agent: "coding",
+                                thread: buildID, work: UUID().uuidString,
+                                startedAt: Date(timeIntervalSinceReferenceDate: 200))
+    child.seal(conclusion: .failed(reason: "the turn threw"),
+               at: Date(timeIntervalSinceReferenceDate: 210))
 
-    var declined = SZAgentGraphRun(id: UUID(), agent: "director", graphName: "build",
-                                   kind: .build,
+    var declined = SZAgentGraphRun(id: UUID(), agent: "director",
                                    startedAt: Date(timeIntervalSinceReferenceDate: 250))
     declined.seal(conclusion: .declined(reason: "the sketch asks for a camera feed"),
                   at: Date(timeIntervalSinceReferenceDate: 260))
 
-    var stopped = SZAgentGraphRun(id: UUID(), agent: "director", graphName: "build",
-                                  kind: .build, thread: thread,
+    var stopped = SZAgentGraphRun(id: UUID(), agent: "director", thread: buildID,
                                   startedAt: Date(timeIntervalSinceReferenceDate: 300))
-    stopped.note(.init(ordinal: 1, node: "retrying", phase: .running),
+    stopped.note(.init(ordinal: 1, node: "door", phase: .running),
                  at: Date(timeIntervalSinceReferenceDate: 301))
     stopped.seal(conclusion: .cancelled, at: Date(timeIntervalSinceReferenceDate: 305))
 
-    var defect = SZAgentGraphRun(id: UUID(), agent: "coding", graphName: "item", kind: .work,
+    var defect = SZAgentGraphRun(id: UUID(), agent: "coding",
                                  startedAt: Date(timeIntervalSinceReferenceDate: 400))
     defect.seal(conclusion: .defect(detail: "unknown node mid-traversal"),
                 at: Date(timeIntervalSinceReferenceDate: 401))
-    return SZAgentGraphRun.ordered([build, item, declined, stopped, defect])
+    return SZAgentGraphRun.ordered([build, child, declined, stopped, defect])
 }
 
 @Test func runsRoundTripPreservesEveryConclusionCase() throws {
@@ -123,7 +120,7 @@ private func sampleRecords() -> [SZAgentGraphRun] {
     let json = """
     {"runs": {"formatVersion": 1, "records": [
       {"id": "E277EC37-5EAB-422B-841A-D0BC10A6F302", "agent": "director",
-       "graphName": "build", "kind": "build", "startedAt": 807799097.271941}
+       "startedAt": 807799097.271941}
     ]}}
     """
     try Data(json.utf8).write(to: SZAgentGraphRunIO.fileURL(projectURL: projectURL))

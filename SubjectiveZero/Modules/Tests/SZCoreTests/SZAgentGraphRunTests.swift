@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The run record's rules, host-free: list ordering (live first, the build leads), the caps
-// that never evict a live record, the sealed-record guard, the stamp-preserving merge, the
-// idempotent seal, and the one sanctioned post-seal write (the dispatch-tally amend).
+// The run record's rules, host-free: list ordering (live first, the thread's leader
+// leads), the caps that never evict a live record, the sealed-record guard, the
+// stamp-preserving merge, and the idempotent seal. The record carries no kind: a leader
+// is the record whose own id is its thread.
 import Foundation
 import Testing
 @testable import SZCore
 
+/// A record; `leads` makes it a thread leader (thread == its own id), `work` a child.
 private func run(_ started: TimeInterval, live: Bool = false,
-                 kind: SZMessageKind = .build, thread: UUID? = nil) -> SZAgentGraphRun {
-    SZAgentGraphRun(id: UUID(), agent: "director", graphName: "build", kind: kind,
-                    thread: thread,
-                    startedAt: Date(timeIntervalSinceReferenceDate: started),
-                    endedAt: live ? nil : Date(timeIntervalSinceReferenceDate: started + 10))
+                 leads: Bool = false, work: String? = nil,
+                 thread: UUID? = nil) -> SZAgentGraphRun {
+    let id = UUID()
+    return SZAgentGraphRun(id: id, agent: "director",
+                           thread: leads ? id : thread, work: work,
+                           startedAt: Date(timeIntervalSinceReferenceDate: started),
+                           endedAt: live ? nil : Date(timeIntervalSinceReferenceDate: started + 10))
 }
 
 private func entry(_ ordinal: Int, node: String = "step",
@@ -32,52 +36,57 @@ private func entry(_ ordinal: Int, node: String = "step",
     #expect(ordered.map(\.id) == [live.id, new.id, old.id])
 }
 
-@Test func orderedLeadsWithTheLiveBuildNotTheLiveItem() {
-    // An item traversal started while the build runs must not take the head — the head is
-    // what the panel follows, and the build is the thread's spine.
-    let build = run(10, live: true)
-    let item = run(90, live: true, kind: .work)
-    #expect(SZAgentGraphRun.ordered([item, build]).map(\.id) == [build.id, item.id])
-    // Among ENDED records the kind means nothing — newest still wins.
-    let older = run(10), newerItem = run(90, kind: .work)
-    #expect(SZAgentGraphRun.ordered([older, newerItem]).map(\.id) == [newerItem.id, older.id])
+@Test func orderedLeadsWithTheLiveThreadLeaderNotItsChild() {
+    // A work child started while the build runs must not take the head — the head is what
+    // the panel follows, and the leader is the thread's spine.
+    let leader = run(10, live: true, leads: true)
+    let child = run(90, live: true, work: "n", thread: leader.id)
+    #expect(SZAgentGraphRun.ordered([child, leader]).map(\.id) == [leader.id, child.id])
+    // Among ENDED records structure means nothing — newest still wins.
+    let older = run(10, leads: true), newerChild = run(90, work: "n")
+    #expect(SZAgentGraphRun.ordered([older, newerChild]).map(\.id) == [newerChild.id, older.id])
 }
 
 @Test func capEvictsTheOldestEndedFirst() {
-    let runs = SZAgentGraphRun.ordered([run(30), run(10), run(20)])
-    let capped = SZAgentGraphRun.capped(runs, builds: 2)
+    let runs = SZAgentGraphRun.ordered([run(30, leads: true), run(10, leads: true), run(20, leads: true)])
+    let capped = SZAgentGraphRun.capped(runs, leaders: 2)
     #expect(capped.map(\.startedAt.timeIntervalSinceReferenceDate) == [30, 20])
 }
 
 @Test func capPicksItsVictimByClockNotByPosition() {
     // Handed an UNORDERED list, the cap must still drop the oldest record rather than
     // whatever sits last.
-    let capped = SZAgentGraphRun.capped([run(10), run(30), run(20)], builds: 2)
+    let capped = SZAgentGraphRun.capped([run(10, leads: true), run(30, leads: true), run(20, leads: true)],
+                                        leaders: 2)
     #expect(Set(capped.map(\.startedAt.timeIntervalSinceReferenceDate)) == [30, 20])
 }
 
 @Test func capNeverEvictsALiveRecord() {
     // Every slot over the limit is live → nothing may be evicted, even over-cap.
-    let lives = SZAgentGraphRun.ordered([run(1, live: true), run(2, live: true), run(3, live: true)])
-    #expect(SZAgentGraphRun.capped(lives, builds: 2).count == 3)
+    let lives = SZAgentGraphRun.ordered([run(1, live: true, leads: true),
+                                         run(2, live: true, leads: true),
+                                         run(3, live: true, leads: true)])
+    #expect(SZAgentGraphRun.capped(lives, leaders: 2).count == 3)
     // Mixed: the ended record goes, the lives stay.
-    let mixed = SZAgentGraphRun.ordered([run(1, live: true), run(2), run(3, live: true)])
-    let capped = SZAgentGraphRun.capped(mixed, builds: 2)
+    let mixed = SZAgentGraphRun.ordered([run(1, live: true, leads: true),
+                                         run(2, leads: true),
+                                         run(3, live: true, leads: true)])
+    let capped = SZAgentGraphRun.capped(mixed, leaders: 2)
     #expect(capped.count == 2)
     #expect(capped.allSatisfy { $0.isLive })
 }
 
 @Test func eachBudgetIsCappedOnItsOwn() {
-    // The whole point: item traversals outnumber builds many to one, and a burst of them
-    // must not evict a single recorded build.
-    let items = (1...40).map { run(Double($0), kind: .work) }
-    let builds = (1...3).map { run(Double(100 + $0)) }
-    let capped = SZAgentGraphRun.capped(SZAgentGraphRun.ordered(items + builds),
-                                        builds: 20, others: 30)
-    #expect(capped.filter { $0.kind == .work }.count == 30)
-    #expect(capped.filter { $0.kind == .build }.count == 3)
-    // And the items that went are the oldest ones.
-    #expect(capped.filter { $0.kind == .work }
+    // The whole point: thread children outnumber their leaders many to one, and a burst
+    // of them must not evict a single recorded thread.
+    let children = (1...40).map { run(Double($0), work: "n") }
+    let leaders = (1...3).map { run(Double(100 + $0), leads: true) }
+    let capped = SZAgentGraphRun.capped(SZAgentGraphRun.ordered(children + leaders),
+                                        leaders: 20, others: 30)
+    #expect(capped.filter { !$0.leadsThread }.count == 30)
+    #expect(capped.filter(\.leadsThread).count == 3)
+    // And the children that went are the oldest ones.
+    #expect(capped.filter { !$0.leadsThread }
         .allSatisfy { $0.startedAt.timeIntervalSinceReferenceDate > 10 })
 }
 

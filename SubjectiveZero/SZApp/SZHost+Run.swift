@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Director-run orchestration — the `ui_run` entry point and the host capabilities the graph
-// orchestrator sequences: the shared agent-turn substrate (`deliver`), per-node coding
-// turns + the Director turn streamed into their tabs, the orchestration context that bundles them, and
-// the post-run reconcile/surfacing.
+// The build lane: minting a run (the Build press, `ui_run`, the door's `requestBuild`
+// effect), admitting it when its claims free, and driving it as ONE delivery — the
+// director's engine traversal, with the fleet served through the dispatch supervisor.
+// There is no orchestrator layer: the engine runs the graph, this file is transport.
 import Foundation
 import SZAI
 import SZCore
@@ -14,11 +14,7 @@ extension SZHost {
     /// duration, and (by default) remember the resulting session for chat-resume. Returns the result plus
     /// the assistant message id so a caller can post-process the reply (e.g. the chat empty-text fallback).
     ///
-    /// One substrate for `streamCodingAgent`, `runDirectorTurn`, and `sendChat`.
-    /// NOTE (deferred — seams earned, not scheduled): the per-scope *async queue / mailbox* (`post`/`drain`
-    /// for arbitrary mid-run interjection) is intentionally NOT built yet — its only consumer would be
-    /// mid-run user messaging. Per-scope serialization today is the `chatInFlight` gate; TODO: add the
-    /// mailbox when mid-run user messaging lands. See docs/AGENT_ORCHESTRATION.md "Cross-agent messaging".
+    /// One substrate for `streamCodingAgent`, `runDirectorTurn`, and the mailbox's deliveries.
     /// `existingAssistantID` lets a caller (the chat path) reuse an assistant message it already opened for
     /// its synchronous guard replies; nil → `deliver` opens its own.
     /// `claim` is the ledger token that already holds this scope's resources (a run's coding/Director
@@ -37,7 +33,7 @@ extension SZHost {
         if let claim {
             // A cancelled run's zombie dispatch presents its RELEASED token while someone else (a
             // pump delivery, a new run) may already own the scope — streaming would interleave two
-            // turns in one transcript and clobber its in-flight marker. Bow out; the strategy
+            // turns in one transcript and clobber its in-flight marker. Bow out; the caller
             // treats it like any cancelled turn. A holder mismatch WITHOUT cancellation is a real
             // claim-model divergence and stays a debug tripwire.
             guard ledger.holder(of: .transcript(scope)) == claim else {
@@ -133,12 +129,9 @@ extension SZHost {
         return (result, assistantID)
     }
 
-    /// Run one coding agent's turn during a Director run and stream it into that node's Coding Agent tab
-    /// — the `SZCodingTurnRunner` injected via `SZOrchestrationContext`. Opens the node's tab (without
-    /// stealing the active tab — a run watches the Director tab), marks the turn in flight (the chat
-    /// panel's working dots), then streams the agent's activity+reply via `streamAgentTurn`. The node's
-    /// editor pill/lock is already covered by the per-node run rule (`isRunning` + still `.prompt` —
-    /// see `isLocked` in `SZNodeEditorPanel`), so this doesn't touch `isChatting`.
+    /// Run one coding agent's turn during a run and stream it into that node's Coding Agent tab.
+    /// Opens the node's tab (without stealing the active tab — a run watches the Director tab),
+    /// marks the turn in flight, then streams the agent's activity+reply via `streamAgentTurn`.
     @MainActor
     func streamCodingAgent(
         node: SZNodeID, request: SZAgentRunRequest, provider: any SZProvider,
@@ -146,8 +139,8 @@ extension SZHost {
     ) async throws -> SZAgentRunResult {
         let scope = SZChatScope.node(node)
         // Debug test affordance: force this node to fail its first dispatch once — report `needsInput`
-        // and throw WITHOUT running an agent (the strategy's `code` catches a throwing turn and leaves the
-        // node unresolved) — so the reconcile loop fires live & repeatably (`debug_fail_node_once`).
+        // and throw WITHOUT running an agent — so the reconcile loop fires live & repeatably
+        // (`debug_fail_node_once`).
         if let blocker = forcedFailNodes.removeValue(forKey: node) {
             openChatTab(scope)
             store.appendChatMessage(SZChatMessage(role: .assistant,
@@ -155,10 +148,9 @@ extension SZHost {
             recordNodeStatus(node: node, phase: .needsInput, message: blocker)
             throw SZMCPError.message("(debug) forced needsInput: \(blocker)")
         }
-        // THE dispatch moment for this node, and so the prompt `promoteStagedNode` holds the agent to. Recorded
-        // here rather than at `startRun` because the brief is composed from the live graph after the Director
-        // decomposes — snapshotting earlier would flag a node whose re-brief the agent actually picked up.
-        // Each turn re-records, so an agentic run's reconcile rounds are held to their own latest brief.
+        // THE dispatch moment for this node, and so the prompt `promoteStagedNode` holds the agent to.
+        // Recorded here because the brief is composed from the live graph after the Director decomposes.
+        // Each turn re-records, so the reconcile rounds are held to their own latest brief.
         dispatchPrompts[node] = store.project?.graph.node(id: node)?.prompt
         openChatTab(scope)
         // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
@@ -167,19 +159,15 @@ extension SZHost {
         let result = try await deliver(scope: scope, request: request, provider: provider,
                                        claim: claim ?? runClaim).result
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
-        // (timeout, CLI error) is invisible and the node reads as a silent Draft. `deliver` already
-        // streamed the turn into `scope`; this adds the terminal error line beneath it.
+        // (timeout, CLI error) is invisible and the node reads as a silent Draft.
         if result.outcome.failed {
             let detail: String
             if result.process.timedOut {
-                // A timeout (exit 124) carries no provider message — name it explicitly instead of the
-                // generic "failure with no message", and surface the budget so the cause is legible.
                 let budget = request.timeout.map { $0 >= 60 ? " after \(Int($0 / 60))m" : " after \(Int($0))s" } ?? ""
                 detail = "the agent timed out\(budget) without finishing — the task may be too large for one turn (try splitting it up or allowing a longer budget)"
             } else if let providerDetail = await providerFailureDetail(result: result, provider: provider) {
                 // A mid-turn provider death: the red pill carries the same actionable detail —
-                // set BEFORE the run's end so `surfaceUnresolvedNodes` (still-`.prompt` only)
-                // doesn't overwrite it with its generic never-compiled line.
+                // set BEFORE the run's end so `surfaceUnresolvedNodes` doesn't overwrite it.
                 detail = providerDetail
                 recordNodeStatus(node: node, phase: .error, message: detail)
             } else {
@@ -191,26 +179,23 @@ extension SZHost {
     }
 
     /// The terminal "⚠️ Provider error:" line beneath a streamed turn — one composer for the
-    /// run-path scopes; the flush lands it after `deliver`'s turn-end flush. (The chat path
-    /// appends into its existing assistant bubble instead of a fresh message, so it composes
-    /// its own copy of the prefix.)
+    /// run-path scopes; the flush lands it after `deliver`'s turn-end flush.
     @MainActor
     func appendProviderErrorLine(_ detail: String, to scope: SZChatScope) {
         store.appendChatMessage(SZChatMessage(role: .assistant, text: "⚠️ Provider error: \(detail)"), to: scope)
         flushTranscript(scope)
     }
 
-    /// Run one Director Agent turn — spawn the active provider with the MCP server attached and the
-    /// rendered Director prompt, streamed live into the Director tab, so the user watches it establish each
-    /// node's typed contract + wiring via `ui_*`. Remembers the Director session so the user can chat-resume
-    /// it. Injected into the orchestration context as `directorTurn`; the agentic strategy calls it
-    /// before dispatch, then re-reads the graph it shaped.
+    /// Run one Director Agent turn — the active provider with the MCP server attached and the
+    /// rendered brief, streamed live into the Director tab. `session: .resume` continues the
+    /// director's own session (the graph's reconcile turn declares it); `.spawn` cold-starts.
     @MainActor
     func runDirectorTurn(
-        prompt: String, providerID: String, mcpPort: UInt16, projectURL: URL, cacheDirectory: URL
+        prompt: String, session: SZAgentGraph.Turn.Session, providerID: String,
+        mcpPort: UInt16, projectURL: URL, cacheDirectory: URL
     ) async throws -> SZAgentRunResult {
         guard let provider = SZProviderRegistry.shared.provider(id: providerID) else {
-            throw SZOrchestratorError.unknownProvider(providerID)
+            throw SZMCPError.message("unknown provider: \(providerID)")
         }
         let scope = SZChatScope.director
         let workingDirectory = cacheDirectory.appending(path: "agent/director")
@@ -220,13 +205,13 @@ extension SZHost {
             prompt: prompt, workingDirectory: workingDirectory, packageDirectory: projectURL,
             cacheDirectory: cacheDirectory, mcpServerPort: mcpPort,
             allowedMCPTools: SZHostBridge.agentCallableToolNames,
+            resumeSessionID: session == .resume ? agentSessions[scope.key]?.sessionID : nil,
             model: generation.model, reasoningEffort: generation.reasoningEffort,
             fastMode: generation.fastMode ?? false, timeout: 300)
         let result = try await deliver(scope: scope, request: request, provider: provider,
                                        claim: runClaim).result
-        // The agentic strategy discards the Director result (it re-reads the graph instead), so a
-        // mid-turn provider death would otherwise vanish — land it in the Director tab like a
-        // coding turn's terminal error line.
+        // The run re-reads the graph rather than the reply, so a mid-turn provider death
+        // would otherwise vanish — land it in the Director tab like a coding turn's error line.
         if result.outcome.failed, let detail = await providerFailureDetail(result: result, provider: provider) {
             appendProviderErrorLine(detail, to: scope)
         }
@@ -234,23 +219,13 @@ extension SZHost {
         return result                       // forgot ui_toggle_display still renders (mirrors the draft path)
     }
 
-    /// Point the viewport at what this run just built. You asked for a node; you should see it — the
-    /// endpoint staying on an unrelated node it happened to already hold is the wrong default.
-    ///
-    /// The Director's own `ui_toggle_display` wins: if it already aimed the viewport at one of this run's
-    /// nodes, it knows the graph's shape better than this does. Otherwise take the run's terminal node —
-    /// furthest downstream, tie-broken by newest.
-    ///
-    /// "Terminal" means it feeds NOTHING, not merely nothing else in the run. A node built upstream of an
-    /// existing composite (a blur spliced into a live chain) is the run's last node but not the graph's
-    /// output, and stealing the viewport for it would hide the very result it feeds. Such a run adopts
-    /// nothing and leaves the endpoint where the user put it.
+    /// Point the viewport at what this run just built — unless the Director's own
+    /// `ui_toggle_display` already aimed it at one of this run's nodes. "Terminal" means it
+    /// feeds NOTHING; a node built upstream of a live chain adopts nothing.
     private func adoptRunRenderEndpoint() {
         guard let graph = store.project?.graph else { return }
         if let endpoint = graph.renderEndpoint, runWorkSet.contains(endpoint.node) { return }
-        // Never adopt a STAGED piece: `promoteStagedNode` marks it `.generated` while it is still hidden, so
-        // a run that staged a graph op mid-flight would otherwise point the viewport at a card the user
-        // cannot see. Its commit moves the endpoint, once the piece is revealed.
+        // Never adopt a STAGED piece — it is still hidden; its commit moves the endpoint.
         guard let ref = graph.runRenderEndpoint(workSet: runWorkSet.subtracting(hiddenPieces)),
               graph.renderEndpoint != ref,
               store.setRenderEndpoint(ref) else { return }
@@ -258,9 +233,9 @@ extension SZHost {
         persistProject()
     }
 
-    /// If no viewport endpoint is set but a node declared a `texture` output as `display`, point the
-    /// viewport at it — so a Director-decomposed graph renders without a manual toggle (the agentic
-    /// counterpart of `draftContractsFromFlow`'s endpoint inference). Pushes the change live + persists.
+    /// If no viewport endpoint is set but a node declared a `texture` output as `display`,
+    /// point the viewport at it — so a Director-decomposed graph renders without a manual
+    /// toggle. Pushes the change live + persists.
     private func ensureRenderEndpointFromDisplay() {
         guard let graph = store.project?.graph, graph.renderEndpoint == nil else { return }
         for node in graph.nodes {
@@ -273,177 +248,91 @@ extension SZHost {
         }
     }
 
-    /// Build the orchestration context for a run — bundles the host capabilities the orchestrator
-    /// sequences: stream each coding turn into its node's tab, run a Director turn,
-    /// read node status + drain Director messages (reconcile). Each is captured weakly so a torn-down
-    /// host degrades gracefully. Kept separate from `startRun` so its run body reads as build-context → run.
-    private func makeOrchestrationContext(
-        providerID: String, mcpPort: UInt16, projectURL: URL, cacheDirectory: URL,
-        instruction: String, directorAlreadyBriefed: Bool, claim: SZClaimToken
-    ) -> SZOrchestrationContext {
-        SZOrchestrationContext(
-            providerID: providerID,
-            // Resolved once here — every coding agent this run launches with the user's selection
-            // (the Director turn resolves its own inside runDirectorTurn).
-            generationSettings: resolvedGenerationSettings(for: providerID),
-            store: store, mcpPort: mcpPort,
-            allowedMCPTools: SZHostBridge.agentCallableToolNames,   // mirror the .agent bus into each agent's allowlist
-            projectURL: projectURL, cacheDirectory: cacheDirectory,
-            // Stream each coding agent's output into its node's Coding Agent tab, under THIS run's
-            // claim (captured, not read live: after a cancel, a zombie dispatch must present its
-            // own released token — which deliver detects — never a NEWER run's live claim).
-            turnRunner: { [weak self] node, request, provider in
-                guard let self else { return try await provider.run(request) }
-                return try await self.streamCodingAgent(node: node, request: request,
-                                                        provider: provider, claim: claim)
-            },
-            // A chat-triggered run carries the user's words into the decompose prompt — unless the
-            // Director's own chat turn requested it, in which case that turn WAS the decompose.
-            instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed,
-            // Grant any entitlement the live graph now declares before the fleet runs — covers a
-            // permission the Director introduced mid-run (only those at initial load were pre-granted in
-            // `start`), so a node's `setup()` sees it authorized on the promote-reload (e.g. microphone).
-            grantPermissions: { [weak self] in
-                guard let self, let project = self.store.project else { return }
-                await self.runtime?.requestDeclaredPermissions(for: project)
-            },
-            directorTurn: { [weak self] prompt in
-                guard let self else { throw SZOrchestratorError.noProject }
-                return try await self.runDirectorTurn(
-                    prompt: prompt, providerID: providerID, mcpPort: mcpPort,
-                    projectURL: projectURL, cacheDirectory: cacheDirectory)
-            },
-            // The coding agents' reported status, so the orchestrator can assess unresolved
-            // nodes and reconcile after dispatch.
-            nodeStatus: { [weak self] in self?.nodeStatusLines ?? [:] },
-            // The Director's during-run messages to nodes (its `ui_send_chat`-to-a-node calls),
-            // drained by the reconcile loop and folded into each node's retry.
-            takeDirectorMessages: { [weak self] in self?.takeDirectorMessages() ?? [:] },
-            // The coding agents' during-run messages TO the Director, rendered into the next
-            // reconcile turn's prompt.
-            takeDirectorInbox: { [weak self] in self?.takeDirectorInboxMessages() ?? [] },
-            // This run's captured work set — read LIVE (each dispatch/reconcile round) so Director- and
-            // split/merge-added nodes join it; a user's mid-run draft never does. Host alive ⇒ non-nil
-            // authoritative scope (even empty); nil only with no host (tests) ⇒ strategy sees all prompt nodes.
-            workSet: { [weak self] in self?.runWorkSet },
-            // Read live: the Director can stage a split/merge mid-run, and those pieces' coding agents must
-            // be told to preserve the original's behavior rather than browse the library.
-            stagedPieces: { [weak self] in self?.hiddenPieces ?? [] },
-            // Prefetch: cold-start coding briefs embed the library categories (+ contract doc) so a
-            // first dispatch spends no tool rounds fetching them — a tool round replays the agent's
-            // whole context, which costs more than the payload. `SZ_BRIEF_PREFETCH=0` reverts to
-            // the call-the-tool framing without a build.
-            libraryIndexText: ProcessInfo.processInfo.environment["SZ_BRIEF_PREFETCH"] == "0"
-                ? nil : SZHostBridge.libraryCategoriesBlock(),
-            // Step-requested effects land on the host's own lane switch. (`queryExecutor`
-            // stays nil: production asks run the routed provider through the query
-            // service's own path.)
-            performEffect: { [weak self] effect, kind in
-                await self?.perform(effect: effect, kind: kind)
-            })
-    }
+    // MARK: - Minting and admitting a run
 
-    /// One step-requested EFFECT, landed on its host lane. Called through the engine's
-    /// perform seam — after the step returned, before edge routing, the name already
-    /// validated against the kind's effect set.
-    func perform(effect: String, kind: SZMessageKind) async {
-        if effect == SZMessageEffect.requestBuild.rawValue {
-            // Queued on the `pendingDirectorRun` lane (`queueChatRequestedBuild`): a chat
-            // effect fires while its own delivery still holds the Director transcript, so a
-            // direct start would refuse against our own claim. A bare effect name carries no
-            // instruction; the chat adapter's effect closure passes the user's message.
-            queueChatRequestedBuild(instruction: "")
+    /// The door's `requestBuild` effect and the mid-turn `ui_run` land here: mint the run
+    /// (the pending slot — a newer mint supersedes a queued one) and knock. The pump admits
+    /// it the moment the director transcript frees — ahead of any queued prose, because
+    /// admission runs at the head of every pump pass.
+    func mintRun(instruction: String) {
+        guard !isRunning else {
+            narrateDirector("Build request skipped — a run is already active.")
             return
         }
-        // captureStatuses / split / merge: their lanes aren't graph-routed yet — say so
-        // rather than swallow the request.
-        status = "effect '\(effect)' lands with its lane"
+        pendingRun = instruction
+        pumpMailboxes()   // fires now if the transcript is free; else the next release re-fires
     }
 
-    /// Start a Director run over the current graph with the active provider (the `ui_run` entry point).
-    /// The orchestrator processes dirty (prompt) nodes; agents write+compile back through the MCP server,
-    /// so this await keeps the MainActor free to service their callbacks. `onComplete` (if given) runs on
-    /// the MainActor after the run finishes — split/merge use it to commit the structural swap.
-    /// `instruction` steers the run's decompose turn; `directorAlreadyBriefed` marks a run the
-    /// Director Agent's own chat turn requested (`ui_run` mid-turn → fired at turn end), which
-    /// skips the decompose turn — that chat turn already did the job (see SZOrchestrationContext).
-    func startRun(instruction: String = "", directorAlreadyBriefed: Bool = false) {
-        // One run at a time — the single choke point every entry shares (Build button, `ui_run`,
-        // split/merge, a Director turn's queued run). Without this a second UI-driven start would
-        // orphan the first `runTask` and let two orchestrators mutate the graph concurrently.
+    /// Pump head: admit the minted run the moment it can claim what it needs. Structural
+    /// ordering: the run always beats the next queued Director message to the freed
+    /// transcript, and a start refused by a transient claim retries on the next release.
+    func admitPendingRunIfPossible() {
+        guard let instruction = pendingRun, !isRunning,
+              ledger.holder(of: .transcript(.director)) == nil else { return }
+        startRun(instruction: instruction)
+        if isRunning { pendingRun = nil }
+    }
+
+    /// Start a run over the current graph with the active provider (the Build press and
+    /// `ui_run`'s direct entry). One run at a time — the single choke point every entry
+    /// shares; a second Build while one is live is refused by the claim.
+    func startRun(instruction: String = "") {
         guard !isRunning else { return }
-        // Land any prompt the user is mid-typing before we read the graph or claim a node — the field
-        // commits only on blur, so a Build hit while it is still focused would otherwise run stale.
+        // Land any prompt the user is mid-typing before we read the graph or claim a node.
         flushPendingPromptEdit()
         // Was this run STARTED FOR a staged split/merge? Then it narrates at commit and owns the
         // hidden-piece UX. A plain run that a Director later stages an op inside still narrates itself.
         let ownsGraphOp = hasStagedGraphOp
-        guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {   // agents dial the debug-free bus
+        guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {
             print("[SZHost] cannot run — MCP server or project not ready"); return
         }
-        // This run's WORK SET candidates: the nodes dirty right now (never built, or built against a
-        // contract/intent that has since moved). Computed before the run flips live so an empty one can
-        // answer without an orchestrator.
+        // This run's WORK SET candidates: the nodes dirty right now. An undescribed prompt
+        // node is NOT handed to the fleet — an empty prompt is "undecided", not "build
+        // something"; only the coding work set excludes them.
         let nodes = store.project?.graph.nodes ?? []
         let dirty = Set(nodes.filter(\.needsImplementation).map(\.id))
-        // An undescribed prompt node is NOT handed to the fleet — an empty prompt is "undecided", not
-        // "build something", and an agent handed one invents intent from the layout. Only the coding work
-        // set excludes them; the Director's decompose turn still sees them. (A `needsRebuild` node is
-        // always `.generated` with real intent, so blanks can only be unbuilt `.prompt` nodes.)
         let isBlank: (SZNode) -> Bool = {
             $0.kind == .prompt && ($0.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         }
         let blankIDs = Set(nodes.filter { $0.needsImplementation && isBlank($0) }.map(\.id))
         let implementable = dirty.subtracting(blankIDs)
-        // Nothing to implement, nothing asked → skip the strategy entirely: a full run here would still
-        // burn a Director decompose turn (latency + tokens) to conclude "no work". A run WITH an
-        // `instruction` or a Director-briefed one still goes through — the Director may CREATE work
-        // mid-run (contracts, nodes) — and a staged split/merge always runs: its pieces are the work and
-        // its commit rides the run task's drain.
-        if implementable.isEmpty, instruction.isEmpty, !directorAlreadyBriefed, !ownsGraphOp {
+        // Nothing to implement, nothing asked → skip the run entirely (a full run would burn
+        // a decompose turn to conclude "no work"). A run WITH an instruction still goes
+        // through — the Director may CREATE work mid-run — and a staged split/merge always
+        // runs: its pieces are the work.
+        if implementable.isEmpty, instruction.isEmpty, !ownsGraphOp {
             showChat(.director)
             if blankIDs.isEmpty {
                 narrateDirector("Nothing to implement — every node is built and current.")
                 status = "nothing to implement"
             } else {
-                // Blank nodes are the only pending work: ask rather than guess (the whole point of the fix).
                 let n = blankIDs.count
                 narrateDirector("\(n) node\(n == 1 ? " has" : "s have") no prompt yet — describe what \(n == 1 ? "it" : "each one") should do, then build. An empty node is left as-is, never guessed.")
                 status = "describe the empty node\(n == 1 ? "" : "s")"
             }
             return
         }
-        // Pre-flight: a missing/logged-out CLI refuses with the setup sheet + remedy instead of
-        // the old silent generic run failure (roadmap Task 2). Unknown health stays permissive.
+        // Pre-flight: a missing/logged-out CLI refuses with the setup sheet + remedy instead
+        // of a silent generic run failure. Unknown health stays permissive.
         guard isProviderReadyForNewWork(activeProviderID) else {
             surfaceProviderNotReady(); return
         }
         // The packs root: the materialized bundled packs, or the SZ_AGENT_PACKS override —
-        // without a valid root the run refuses up front with one honest line, never deep in.
-        guard let graphPacksRoot = Self.graphAgentPacksRoot() else {
+        // without a valid root the run refuses up front with one honest line.
+        guard let packsRoot = Self.graphAgentPacksRoot() else {
             status = "no agent packs — materialization failed and no SZ_AGENT_PACKS override"
             narrateDirector("Run not started — no agent packs: the bundled packs did not "
                 + "materialize and no valid SZ_AGENT_PACKS override is set.")
             return
         }
-        // The run loads the packs fresh from disk; the Plan panel's cache follows suit so a
-        // pack edit shows in both places at once.
+        // The run loads the packs fresh from disk; the Plan panel's cache follows suit.
         agentGraphPlanCache = nil
-        // The Director's run-graph variant, resolved NOW (env > persisted > pack default,
-        // with the one honest line when a stale choice falls back) — the strategy applies it
-        // to the build kind at load, where the variants are known.
-        let runGraphChoice = resolvedRunGraphVariant()
         let providerID = activeProviderID
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
-        // This run's WORK SET: the prompt nodes dirty at start (`dirty`, computed above for the
-        // no-op fast-path). It grows as the run's own tooling creates work (`noteRunCreatedWork`),
-        // and drives dispatch, the editor lock/pill, and the `ui_connect` guard. A node the user
-        // adds mid-run is never noted, so it stays out of the fleet.
+        // This run's WORK SET: the implementable nodes dirty at start. It grows as the run's
+        // own tooling creates work (`noteRunCreatedWork`); a node the user adds mid-run never joins.
         let workSet = implementable
-        // Claim ONLY what this run touches — atomically, refuse on contention (today's refuse-a-
-        // second-run semantics; an awaited acquire would let a second Build queue behind the first
-        // while `isRunning` still reads false). The claim also closes a latent race: previously
-        // nothing stopped a run while a chat turn streamed into a work-set node's transcript.
+        // Claim ONLY what this run touches — atomically, refuse on contention.
         var claimSet: Set<SZResourceID> = [.run, .transcript(.director)]
         for id in workSet {
             claimSet.insert(.node(id))
@@ -462,61 +351,43 @@ extension SZHost {
         runStartedMono = ContinuousClock.now
         runTurnLog = []
         runID = UUID()          // the run's trace identity (stamped into run-owned turns' events)
-        let graphRunThread = runID   // captured: the RUNS records' thread id, for the drain sweep below
         status = "running \(providerID)…"
         showChat(.director)                                  // a run narrates into the Director Agent tab
         let dirtyCount = runWorkSet.count
         narrateDirector(dirtyCount == 0
             ? "Run started (\(providerID)) — no nodes need implementing."
             : "Run started (\(providerID)) — implementing \(dirtyCount) node\(dirtyCount == 1 ? "" : "s")…")
+        // The RUNS thread id = the build traversal's own record id (its children share it).
+        let thread = UUID()
         runTask = Task { @MainActor in
-            // The run's per-node bookkeeping lasts one run — anything still owned by an in-flight
-            // graph op is cleared by its commit/rollback.
             defer {
                 // Release the CAPTURED claim, not `runClaim` — after an eager `cancelRun` this is
                 // the zombie task's idempotent second settle, and `runClaim` may already belong to
-                // a newer run (guarded so we never clobber it — including the sweep: an unguarded
-                // sweep here would fail a NEW run's queued steers when the zombie finally exits).
+                // a newer run (guarded so we never clobber it).
                 if runClaim == claim { sweepUnconsumedSteers() }
                 ledger.releaseAll(of: claim)
-                // The per-run state below belongs to whoever holds the claim NOW. A zombie settling after
-                // an eager `cancelRun` must not wipe a NEWER run's bookkeeping — for `dispatchPrompts`
-                // that would silently resurrect the promote bug this file's records exist to prevent
-                // (cancel, restart, re-brief mid-run → the record is gone → the flag clears).
                 if runClaim == claim {
                     runClaim = nil
                     runTask = nil
-                    runWorkSet = []        // run over → the work set is cleared (a node chat runs with it empty)
+                    runWorkSet = []        // run over → the work set is cleared
                     runStartedAt = nil
                     runStartedMono = nil
                     runTurnLog = []
                     runID = nil
                     dispatchPrompts = dispatchPrompts.filter { hiddenPieces.contains($0.key) }
                 }
-                // This run's RUNS records: every traversal seals itself as its engine
-                // returns, so this sweep is a no-op on healthy paths — the belt for an
-                // abnormal unwind, thread-scoped so a zombie can't touch a newer run's.
-                sealLeakedAgentGraphRuns(thread: graphRunThread)
+                // Every traversal seals itself as its engine returns; this sweep is the belt
+                // for an abnormal unwind, thread-scoped so a zombie can't touch a newer run's.
+                sealLeakedAgentGraphRuns(thread: thread)
                 flushAllTranscripts()      // run end = flush point (success, throw, or cancel)
                 persistAgentSessions()
             }
             do {
-                let context = makeOrchestrationContext(
-                    providerID: providerID, mcpPort: mcpPort,
-                    projectURL: projectURL, cacheDirectory: cacheDirectory,
-                    instruction: instruction, directorAlreadyBriefed: directorAlreadyBriefed,
-                    claim: claim)
-                let sessions = try await makeGraphOrchestrator(
-                    packsRoot: graphPacksRoot, variant: runGraphChoice).run(context)
-                // Remember each node's coding-agent session so a chat turn can resume it. A
-                // freshly-minted session replaces any disk-restored one → off probation.
-                for (node, sessionID) in sessions {
-                    agentSessions[node.uuidString] = SZAgentSession(providerID: providerID, sessionID: sessionID)
-                    restoredSessions[node.uuidString] = nil
-                }
+                try await runBuildDelivery(
+                    instruction: instruction, thread: thread, claim: claim,
+                    packsRoot: packsRoot, providerID: providerID, mcpPort: mcpPort,
+                    projectURL: projectURL, cacheDirectory: cacheDirectory)
                 status = "agent run complete"
-                // A plain run narrates its own completion (with a generated-vs-failed summary + per-node
-                // error pills); a split/merge run narrates at commit and owns its hidden-piece UX.
                 if !ownsGraphOp {
                     adoptRunRenderEndpoint()   // show what this run just built
                     let (done, failed) = surfaceUnresolvedNodes()
@@ -530,27 +401,381 @@ extension SZHost {
                 }
             } catch {
                 status = "agent run failed: \(error)"
-                // Still surface the unfinished nodes so a thrown/cancelled run also flags them.
                 if !ownsGraphOp {
                     let (done, failed) = surfaceUnresolvedNodes()
                     let narrationID = narrateDirector("Run failed: \(error). \(done) implemented, \(failed) unfinished.")
-                    // A failed run's time is the most worth seeing — same zombie guard as above.
                     if runClaim == claim { attachRunRollup(to: narrationID) }
                 }
                 print("[SZHost] agent run failed: \(error)")
             }
-            // Settle a staged split/merge — the one this run was started for, or one the Director staged
-            // mid-run. Runs on success, throw AND cancel (Stop cancels cooperatively, so the task still
-            // arrives here via the `catch`), which is what makes a cancelled op roll back instead of leak.
-            // Before the `defer`, which drops `dispatchPrompts` for anything no longer in `hiddenPieces`.
+            // Settle a staged split/merge — runs on success, throw AND cancel, which is what
+            // makes a cancelled op roll back instead of leak.
             drainPendingGraphOp()
         }
     }
 
-    /// The graph orchestrator's pack root: the `SZ_AGENT_PACKS` env override when set (an
-    /// existing directory — set-but-invalid refuses rather than silently falling back), else
-    /// the bundled packs' materialized, user-editable copy (SZHost+AgentPacks.swift). nil =
-    /// no packs anywhere; the run refuses with the status line in `startRun`.
+    // MARK: - The build delivery
+
+    /// The run as ONE delivery: load + validate the library, build the director's delivery
+    /// (its world minted with the run), and let the engine run the graph — the fleet is
+    /// served through `deliverFleet` while the dispatch node waits.
+    private func runBuildDelivery(
+        instruction: String, thread: UUID, claim: SZClaimToken, packsRoot: URL,
+        providerID: String, mcpPort: UInt16, projectURL: URL, cacheDirectory: URL
+    ) async throws {
+        let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
+        let loaded = SZAgentPackLoader.load(root: packsRoot)
+        var defects = loaded.defects
+        defects += await SZAgentPackLoader.validate(packs: loaded.packs, steps: steps)
+        guard defects.isEmpty else {
+            throw SZBuildRefused(detail: "the agent-pack library does not validate "
+                + "(\(defects.count) defect\(defects.count == 1 ? "" : "s")):\n"
+                + defects.map { "  · \($0)" }.sorted().joined(separator: "\n"))
+        }
+        guard let directorID = loaded.seats.director, let codingID = loaded.seats.coding,
+              let directorPack = loaded.packs.first(where: { $0.id == directorID }),
+              let codingPack = loaded.packs.first(where: { $0.id == codingID }),
+              let directorGraph = directorPack.graph, let codingGraph = codingPack.graph else {
+            throw SZBuildRefused(detail: "the seats did not resolve to graphs")
+        }
+        let directorAttachments = try await Self.attachments(of: directorPack, graph: directorGraph, steps: steps)
+        let codingAttachments = try await Self.attachments(of: codingPack, graph: codingGraph, steps: steps)
+
+        let renderer = SZBriefRenderer(packRoot: packsRoot)
+        let generation = resolvedGenerationSettings(for: providerID)
+        let router = SZIdentityRouter(choice: SZModelChoice(
+            providerID: providerID, model: generation.model,
+            reasoningEffort: generation.reasoningEffort))
+        // ONE query service per run: every delivery's asks funnel through it, so the
+        // journal is the run's whole ask history.
+        let queries = SZQueryService(renderer: renderer, router: router,
+                                    cacheDirectory: cacheDirectory)
+
+        // The run's live pieces the world closures and the fleet share.
+        let state = BuildState()
+        let roundCap = directorGraph.retryCap
+
+        let sighting = SZTraversalSighting(id: thread, agent: directorID)
+        beginAgentGraphRun(sighting, thread: thread)
+        let delivery = SZDelivery(
+            agent: directorID, message: "",
+            renderer: renderer, queries: queries,
+            world: { [weak self] in
+                guard let self else { return SZWorld() }
+                let graph = self.store.project?.graph
+                let candidates = (graph?.nodes ?? []).filter(\.needsImplementation).map(\.id)
+                let scoped = candidates.filter(self.runWorkSet.contains)
+                return SZWorld(
+                    graph: graph, statuses: self.nodeStatusLines, node: nil,
+                    resuming: self.agentSessions[SZChatScope.director.key] != nil,
+                    run: SZRun(workSet: scoped, round: state.round, roundCap: roundCap,
+                               steers: state.steers, instruction: instruction))
+            },
+            turn: { [weak self] order in
+                guard let self else { return SZTurnReport(failed: true, detail: "the host is gone") }
+                do {
+                    let result = try await self.runDirectorTurn(
+                        prompt: order.brief, session: order.session, providerID: providerID,
+                        mcpPort: mcpPort, projectURL: projectURL, cacheDirectory: cacheDirectory)
+                    return SZTurnReport(failed: result.outcome.failed, detail: result.outcome.message)
+                } catch {
+                    return SZTurnReport(failed: true, detail: String(describing: error))
+                }
+            },
+            effect: { [weak self] effect in await self?.perform(effect: effect) },
+            onNote: { [weak self] note in
+                self?.noteAgentGraphRun(thread, note)
+                Self.appendGraphTrace([
+                    "note": ["traversal": thread.uuidString, "ordinal": note.ordinal,
+                             "node": note.node, "phase": "\(note.phase)",
+                             "outcome": note.outcome ?? "",
+                             "detail": note.detail ?? ""] as [String: Any],
+                ])
+            })
+        delivery.fleet = { [weak self] orders, seat, progress in
+            guard let self else { return nil }
+            return await self.deliverFleet(
+                orders: orders, seat: seat, progress: progress,
+                state: state, thread: thread, claim: claim,
+                coding: (codingID, codingGraph, codingAttachments),
+                renderer: renderer, queries: queries, steps: steps, router: router,
+                providerID: providerID, mcpPort: mcpPort,
+                projectURL: projectURL, cacheDirectory: cacheDirectory)
+        }
+        let engine = SZGraphEngine(
+            agent: directorID, graph: directorGraph, attachments: directorAttachments,
+            host: delivery, steps: steps, router: router)
+        let result = await engine.run()
+        concludeAgentGraphRun(thread, SZTraversalEnding(result.conclusion))
+        switch result.conclusion {
+        case .ended: return
+        case .cancelled: throw CancellationError()
+        case .failed(_, let detail), .defect(_, let detail):
+            throw SZBuildRefused(detail: detail)
+        case .declined(_, let reason):
+            throw SZBuildRefused(detail: "the director graph declined the work"
+                + (reason.map { ": \($0)" } ?? ""))
+        }
+    }
+
+    /// The run's live pieces the world closures and the fleet share: the set supervisor,
+    /// the round the last set closed at, and the steers drained while a fleet was out.
+    @MainActor
+    final class BuildState {
+        var supervisor = SZDispatchSupervisor(bounds: SZHost.dispatchSupervisorBounds())
+        var round = 0
+        var steers: [String] = []
+        var pendingSteers: [String] = []
+    }
+
+    /// Declared outcomes per step node, attached at load — what the engine checks a step's
+    /// answer against. Validation already proved every wired outcome is declared.
+    private static func attachments(of pack: SZAgentPack, graph: SZAgentGraph,
+                                    steps: SZHostStepRunning) async throws -> [String: SZStepAttachment] {
+        var attached: [String: SZStepAttachment] = [:]
+        for node in graph.nodes {
+            guard case .step(let name) = node.form else { continue }
+            if let info = try await steps.declaration(agent: pack.id, step: name) {
+                attached[node.id] = SZStepAttachment(outcomes: Set(info.outcomes))
+            }
+        }
+        return attached
+    }
+
+    // MARK: - The fleet (what the waiting dispatch awaits)
+
+    /// One dispatch set, supervised end to end: the supervisor mints it, every order's
+    /// child delivery runs concurrently, each landing feeds `workSettled`, and the
+    /// watchdog races the group. Returns the set's one summary — or nil on stop, which the
+    /// engine's cancellation boundary turns into `.cancelled`.
+    private func deliverFleet(
+        orders workOrders: [SZWorkOrder], seat: String,
+        progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void,
+        state: BuildState, thread: UUID,
+        claim: SZClaimToken,
+        coding: (id: String, graph: SZAgentGraph, attachments: [String: SZStepAttachment]),
+        renderer: SZBriefRenderer, queries: SZQueryService, steps: SZHostStepRunning,
+        router: SZIdentityRouter, providerID: String, mcpPort: UInt16,
+        projectURL: URL, cacheDirectory: URL
+    ) async -> SZSettledSummary? {
+        // The Director's authored notes drained AT THE SEND, so a note authored during
+        // the traversal rides the orders it aimed at.
+        var notes: [String: String] = [:]
+        for (node, text) in takeDirectorMessages() {
+            notes[node.uuidString] = text
+        }
+        let minted = state.supervisor.handle(.dispatched(SZDispatchIntent(
+            target: seat, items: workOrders.map(\.node), notes: notes)))
+        var orders: [SZDispatchOrder] = []
+        var deadline: Duration?
+        var setID: Int?
+        for command in minted {
+            switch command {
+            case .deliverItems(let id, _, let sent): setID = id; orders = sent
+            case .armWatchdog(_, let after): deadline = after
+            default: break
+            }
+        }
+        guard let setID else {
+            // An empty dispatch settles instantly and honestly rather than parking the run.
+            return SZSettledSummary(setID: 0, from: seat, outcomes: [:],
+                                    round: state.supervisor.round)
+        }
+        // Before the fleet runs, so a promoted node's setup sees a permission the Director
+        // declared mid-run.
+        if let project = store.project {
+            await runtime?.requestDeclaredPermissions(for: project)
+        }
+
+        let generation = resolvedGenerationSettings(for: providerID)
+        var deliveries: [(order: SZDispatchOrder, engine: SZGraphEngine?, sighting: UUID)] = []
+        for order in orders {
+            let sighting = UUID()
+            guard let nodeID = SZNodeID(uuidString: order.node) else {
+                deliveries.append((order, nil, sighting))
+                continue
+            }
+            let scopeKey = SZChatScope.node(nodeID).key
+            let child = SZDelivery(
+                agent: coding.id, message: "",
+                extras: SZBriefExtras(
+                    preserveBehavior: hiddenPieces.contains(nodeID),
+                    // Cold-start briefs inline the library index so a first dispatch spends
+                    // no tool rounds fetching it; SZ_BRIEF_PREFETCH=0 reverts.
+                    libraryIndex: ProcessInfo.processInfo.environment["SZ_BRIEF_PREFETCH"] == "0"
+                        ? nil : SZHostBridge.libraryCategoriesBlock()),
+                renderer: renderer, queries: queries,
+                world: { [weak self] in
+                    guard let self else { return SZWorld() }
+                    return SZWorld(
+                        graph: self.store.project?.graph, statuses: self.nodeStatusLines,
+                        node: nodeID, resuming: self.agentSessions[scopeKey] != nil,
+                        assignment: SZAssignment(attempt: order.attempt, note: order.senderNote))
+                },
+                turn: { [weak self] turnOrder in
+                    guard let self else { return SZTurnReport(failed: true, detail: "the host is gone") }
+                    let workingDirectory = cacheDirectory.appending(path: "agent/\(nodeID.uuidString)")
+                    try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
+                    let request = SZAgentRunRequest(
+                        prompt: turnOrder.brief,
+                        workingDirectory: workingDirectory,
+                        packageDirectory: projectURL,
+                        cacheDirectory: cacheDirectory,
+                        mcpServerPort: mcpPort,
+                        allowedMCPTools: SZHostBridge.agentCallableToolNames,
+                        // `.resume` continues the node's own conversation (the reconcile
+                        // resume); `.spawn` starts cold — a fresh run's first dispatch
+                        // cold-starts by design.
+                        resumeSessionID: turnOrder.session == .resume
+                            ? self.agentSessions[scopeKey]?.sessionID : nil,
+                        model: turnOrder.choice.model,
+                        reasoningEffort: turnOrder.choice.reasoningEffort,
+                        fastMode: generation.fastMode ?? false,
+                        timeout: SZAgentTurnBudgets.codingTimeout,
+                        inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
+                    guard let provider = SZProviderRegistry.shared.provider(id: turnOrder.choice.providerID) else {
+                        return SZTurnReport(failed: true,
+                                            detail: "unknown provider: \(turnOrder.choice.providerID)")
+                    }
+                    do {
+                        let result = try await self.streamCodingAgent(
+                            node: nodeID, request: request, provider: provider, claim: claim)
+                        return SZTurnReport(failed: result.outcome.failed, detail: result.outcome.message)
+                    } catch {
+                        return SZTurnReport(failed: true, detail: String(describing: error))
+                    }
+                },
+                effect: { [weak self] effect in await self?.perform(effect: effect) },
+                onNote: { [weak self] note in self?.noteAgentGraphRun(sighting, note) })
+            deliveries.append((order, SZGraphEngine(
+                agent: coding.id, graph: coding.graph, attachments: coding.attachments,
+                host: child, steps: steps, router: router), sighting))
+        }
+        enum Land: Sendable {
+            case settled(node: String, outcome: String)
+            case watchdog
+        }
+        var summary: SZSettledSummary?
+        func absorb(_ commands: [SZDispatchSupervisor.Command]) {
+            for command in commands {
+                switch command {
+                case .amendTally(_, let settled, let total, let failed):
+                    // Relayed the moment each item lands — the dispatch card counts up
+                    // while the fleet works.
+                    progress(SZAgentGraphRun.Tally(settled: settled, total: total,
+                                                   failed: failed))
+                case .settled(let landed):
+                    summary = landed
+                    Self.appendGraphTrace([
+                        "settled": ["set": landed.setID, "round": landed.round,
+                                    "outcomes": landed.outcomes] as [String: Any],
+                    ])
+                case .deliverItems, .armWatchdog, .cancelItems:
+                    break   // delivery/timers/cancellation live in this function's group
+                }
+            }
+        }
+        // Split the deliveries BEFORE the group: an order naming a non-node settles
+        // instantly with the real reason; the rest become the group's children.
+        var runnable: [(node: String, sighting: UUID, engine: SZGraphEngine)] = []
+        for delivery in deliveries {
+            let node = delivery.order.node
+            absorb(state.supervisor.handle(.workDelivered(node: node, setID: setID)))
+            if let engine = delivery.engine {
+                beginAgentGraphRun(
+                    SZTraversalSighting(id: delivery.sighting, agent: coding.id, work: node),
+                    thread: thread)
+                runnable.append((node, delivery.sighting, engine))
+            } else {
+                absorb(state.supervisor.handle(.workSettled(
+                    node: node, setID: setID,
+                    outcome: "defect: '\(node)' is not a node id")))
+            }
+        }
+        func finish(_ summary: SZSettledSummary?) -> SZSettledSummary? {
+            // The set is over: advance the run's world — the round the reconcile brief
+            // states, and the steers its {{inbox}} folds — before the engine walks on.
+            state.round = state.supervisor.round
+            state.steers = state.pendingSteers
+            state.pendingSteers = []
+            return summary
+        }
+        if runnable.isEmpty {
+            return finish(summary)
+        }
+        let children = runnable
+        // Engines are MainActor; the group's children hop for each node step and park
+        // off-actor for the long awaits (the provider).
+        await withTaskGroup(of: Land.self) { group in
+            for child in children {
+                group.addTask { [weak self] in
+                    // The engine is MainActor-isolated; the child hops for each node step
+                    // and parks off-actor for the long awaits (the provider).
+                    let result = await child.engine.run()
+                    await self?.concludeAgentGraphRun(child.sighting, SZTraversalEnding(result.conclusion))
+                    return .settled(node: child.node,
+                                    outcome: Self.workOutcome(of: result.conclusion))
+                }
+            }
+            if let deadline {
+                group.addTask {
+                    try? await Task.sleep(for: deadline)
+                    // Fed even when cancelled at set closure — a closed set absorbs it.
+                    return .watchdog
+                }
+            }
+            for await land in group {
+                // A stop: sweep the set and bail — the engine's cancellation boundary
+                // owns the traversal's ending; no summary is synthesized.
+                if Task.isCancelled {
+                    absorb(state.supervisor.handle(.stopRequested))
+                    group.cancelAll()
+                    continue
+                }
+                // Steers the fleet raised while out (coding agents' messages to the
+                // Director) fold into the run's NEXT brief — drained continuously.
+                state.pendingSteers += takeDirectorInboxMessages()
+                switch land {
+                case .settled(let node, let outcome):
+                    absorb(state.supervisor.handle(.workSettled(node: node, setID: setID,
+                                                                outcome: outcome)))
+                case .watchdog:
+                    absorb(state.supervisor.handle(.watchdogFired(setID: setID)))
+                }
+                // The set closed (collected, synthesized, or stopped): cancel what
+                // remains — the stragglers and the sleeping watchdog.
+                if case .awaitingFleet = state.supervisor.state {} else { group.cancelAll() }
+            }
+        }
+        return finish(summary)
+    }
+
+    /// A work traversal's conclusion as its terminal outcome string — the dispatch card's
+    /// rule reads anything not `ok`-prefixed as a failure.
+    private nonisolated static func workOutcome(of conclusion: SZTraversalConclusion) -> String {
+        switch conclusion {
+        case .ended: "ok"
+        case .failed(_, let detail): "error: \(detail)"
+        case .cancelled: "cancelled"
+        case .declined(_, let reason): reason.map { "declined: \($0)" } ?? "declined"
+        case .defect(_, let detail): "defect: \(detail)"
+        }
+    }
+
+    /// One EFFECT a step requested with its outcome, landed on its host lane — after the
+    /// step returned, before edge routing, already validated by the engine.
+    func perform(effect: SZEffect) async {
+        switch effect {
+        case .requestBuild:
+            // A bare effect carries no instruction; the mailbox's chat adapter passes the
+            // user's message through its own effect closure instead.
+            mintRun(instruction: "")
+        }
+    }
+
+    /// The packs root: the `SZ_AGENT_PACKS` env override when set (an existing directory —
+    /// set-but-invalid refuses rather than silently falling back), else the bundled packs'
+    /// materialized, user-editable copy. nil = no packs anywhere.
     nonisolated static func graphAgentPacksRoot() -> URL? {
         let url: URL
         if let path = ProcessInfo.processInfo.environment["SZ_AGENT_PACKS"], !path.isEmpty {
@@ -565,61 +790,16 @@ extension SZHost {
     }
 
     /// The set supervisor's bounds. The per-set dispatch deadline mirrors the coding-turn
-    /// budgets (`SZAgentTurnBudgets`: `SZ_AGENT_TIMEOUT` wall + `SZ_AGENT_INACTIVITY_TIMEOUT`
-    /// grace), so the set's watchdog can never fire before a healthy turn's own budget would
-    /// have ended it. (Retry depth is no longer a bound here — the settled edge's leash in
-    /// the graph is the budget, and the gate refuses an unleashed settled loop at load.)
-    nonisolated static func graphOrchestratorBounds() -> SZThreadMachine.Bounds {
-        SZThreadMachine.Bounds(
+    /// budgets, so the watchdog can never fire before a healthy turn's own budget would
+    /// have ended it.
+    nonisolated static func dispatchSupervisorBounds() -> SZDispatchSupervisor.Bounds {
+        SZDispatchSupervisor.Bounds(
             dispatchDeadline: .seconds(SZAgentTurnBudgets.codingTimeout
                 + SZAgentTurnBudgets.codingInactivityTimeout))
     }
 
-    /// Build the graph orchestrator for one run: the host's step runtime behind the evaluation
-    /// and declaration seams, the identity router carrying the user's resolved generation
-    /// choices through the routing seam, and the resolved run-graph variant for the build kind.
-    private func makeGraphOrchestrator(packsRoot: URL, variant: String?) -> SZGraphDirectorStrategy {
-        let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
-        let generation = resolvedGenerationSettings(for: activeProviderID)
-        return SZGraphDirectorStrategy(
-            packsRoot: packsRoot,
-            steps: steps,
-            router: SZIdentityRouter(choice: SZModelChoice(
-                providerID: activeProviderID,
-                model: generation.model,
-                reasoningEffort: generation.reasoningEffort)),
-            bounds: Self.graphOrchestratorBounds(),
-            variant: variant,
-            declarations: { agent, step in try await steps.declaration(agent: agent, step: step) },
-            // The observation hooks feed the RUNS records (SZHost+GraphRuns.swift) — the
-            // primary evidence surface. `appendGraphTrace` rides beside the note/settled
-            // hooks as a debug shadow, gated behind SZ_GRAPH_TRACE=1.
-            onTraversal: { [weak self] sighting in
-                self?.beginAgentGraphRun(sighting)
-            },
-            onNote: { [weak self] id, note in
-                self?.noteAgentGraphRun(id, note)
-                Self.appendGraphTrace([
-                    "note": ["traversal": id.uuidString, "ordinal": note.ordinal,
-                             "node": note.node, "phase": "\(note.phase)",
-                             "outcome": note.outcome ?? "",
-                             "detail": note.detail ?? ""] as [String: Any],
-                ])
-            },
-            onConcluded: { [weak self] id, ending in
-                self?.concludeAgentGraphRun(id, ending)
-            },
-            onSettled: { summary in
-                Self.appendGraphTrace([
-                    "settled": ["set": summary.setID, "round": summary.round,
-                                "outcomes": summary.outcomes] as [String: Any],
-                ])
-            })
-    }
-
     /// One JSON line per graph-run event, under Application Support beside debug-turns —
-    /// the RUNS records' debug shadow, off unless SZ_GRAPH_TRACE=1 (each run appends; the
-    /// file is a debugging aid, the records are the record).
+    /// the RUNS records' debug shadow, off unless SZ_GRAPH_TRACE=1.
     static func appendGraphTrace(_ payload: [String: Any]) {
         guard ProcessInfo.processInfo.environment["SZ_GRAPH_TRACE"] == "1" else { return }
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
@@ -637,16 +817,15 @@ extension SZHost {
         }
     }
 
-    /// Cancel the in-flight Director run (the `Stop` HUD action). Task cancellation propagates into the
-    /// orchestrator's TaskGroup; nodes already promoted stay promoted.
+    /// Cancel the in-flight run (the `Stop` HUD action). Task cancellation propagates into
+    /// the fleet's task group; nodes already promoted stay promoted.
     func cancelRun() {
         runTask?.cancel()
         runTask = nil
-        // Eager release: composers and project ops unlock NOW, not when the cancelled task's CLI
-        // agents finally die (they can outlive cancellation by a long way). The zombie task's
-        // deferred releaseAll of the same token is an idempotent no-op; its still-streaming turns
-        // stay safe because the pump's delivery precondition also checks the scope's in-flight
-        // marker, so nothing new streams into a transcript a zombie is still writing.
+        // Eager release: composers and project ops unlock NOW, not when the cancelled task's
+        // CLI agents finally die. The zombie task's deferred releaseAll of the same token is
+        // an idempotent no-op; its still-streaming turns stay safe because the pump's
+        // delivery precondition also checks the scope's in-flight marker.
         if let claim = runClaim {
             sweepUnconsumedSteers()
             ledger.releaseAll(of: claim)
@@ -654,27 +833,17 @@ extension SZHost {
         }
         status = "run cancelled"
         narrateDirector("Run cancelled.")
-        // Settle a staged split/merge NOW rather than waiting on the cancelled task. Cancellation is
-        // cooperative and an agent's CLI can outlive it by a long way, so the task's own drain may be
-        // minutes off — while `isRunning` already reads false. Leaving the op staged strands the pieces,
-        // keeps the "Splitting" pill (which locks the node's composer via `activeScopeLocked`), and makes
-        // every later split refuse against a ghost. The drain is idempotent: whenever the zombie task
-        // finally reaches its own `drainPendingGraphOp()`, there is nothing left to settle.
+        // Settle a staged split/merge NOW rather than waiting on the cancelled task —
+        // leaving the op staged strands the pieces. The drain is idempotent.
         drainPendingGraphOp()
-        flushAllTranscripts()   // the cancelled task's defer also flushes, but don't rely on timing
+        flushAllTranscripts()
         persistAgentSessions()
     }
 
-    /// After a run, surface nodes that never finished. Node success is signalled ONLY by voluntary
-    /// agent MCP calls (`agent_compile_node` → promote, `agent_report_status`) — without this sweep,
-    /// a node the agent neither compiled nor reported a blocker for would stay `kind == .prompt` with
-    /// its pill silently falling through to Draft while the run claimed "Run complete."
-    /// Any node dirty at run start that's STILL `.prompt` here gets an error pill (an `.error` phase via
-    /// `recordNodeStatus`, which also fills the copyable-popover detail) + a Director-tab line. Won't
-    /// clobber a status the agent already reported (error / needsInput). One node is dirty but NOT failed:
-    /// a `.generated` node carrying `.intentChanged`, whose prompt moved after its agent was briefed —
-    /// it counts as implemented and gets an honest line instead. Returns (implemented, failed) for the
-    /// run summary.
+    /// After a run, surface nodes that never finished. Node success is signalled ONLY by
+    /// voluntary agent MCP calls; any work-set node still `.prompt` here gets an error pill
+    /// + a Director-tab line, unless its agent already explained itself. Returns
+    /// (implemented, failed) for the run summary.
     @discardableResult
     private func surfaceUnresolvedNodes() -> (implemented: Int, failed: Int) {
         var implemented = 0, failed = 0
@@ -682,16 +851,10 @@ extension SZHost {
             guard let node = store.project?.graph.node(id: id) else { continue }   // removed mid-run (merge)
             guard node.needsImplementation else { implemented += 1; continue }      // promoted → built & current
             let phase = nodeAgentState[id]?.phase ?? .idle
-            // Built, but its intent moved WHILE the agent was implementing it — `promoteStagedNode` kept the
-            // node dirty on purpose. The agent did its job against the brief it was given, so this is not a
-            // failure: narrate the truth and let the amber Outdated pill carry it, instead of a red pill
-            // claiming the agent never compiled it.
-            //
-            // Gate on the SAME evidence promote used, not on the flag alone. `.intentChanged` is also the
-            // ordinary state of a node whose prompt was edited BEFORE the run — if that node's agent then
-            // errored or never ran, the flag is still set and a flag-only test would count a total failure
-            // as implemented, skip its error pill, and report "run complete". An agent that reported a real
-            // problem always wins.
+            // Built, but its intent moved WHILE the agent was implementing it — not a
+            // failure: narrate the truth and let the amber Outdated pill carry it. Gate on
+            // the SAME evidence promote used, not the flag alone; an agent that reported a
+            // real problem always wins.
             let rebriefed = SZRebuildReason.afterPromote(
                 existing: node.rebuildReason, dispatchedPrompt: dispatchPrompts[id],
                 currentPrompt: node.prompt) == .intentChanged
@@ -710,9 +873,8 @@ extension SZHost {
         return (implemented, failed)
     }
 
-    /// The ledger resources one agent turn on `scope` occupies: the transcript (one turn per scope),
-    /// and for a node scope the node itself — so a mid-chat node reads as HELD to the mutation fence
-    /// and to other claimants, not just to the view layer's `isChatting` affordance.
+    /// The ledger resources one agent turn on `scope` occupies: the transcript (one turn per
+    /// scope), and for a node scope the node itself.
     static func turnResources(for scope: SZChatScope) -> Set<SZResourceID> {
         var resources: Set<SZResourceID> = [.transcript(scope)]
         if let node = scope.nodeID { resources.insert(.node(node)) }
@@ -728,10 +890,8 @@ extension SZHost {
         return "chat turn '\(scope.key)'"
     }
 
-    /// Drain the Director's queued `.steer` envelopes to nodes (mark processed) — called by the
-    /// reconcile loop after each reconcile turn so the next round starts fresh. Multiple steers to
-    /// one node fold in FIFO order, joined by a blank line, so `CodingReconcile.directorMessage`
-    /// stays one string and the strategy is untouched.
+    /// Drain the Director's queued `.steer` envelopes to nodes (mark processed) — folded
+    /// into each node's retry order. Multiple steers to one node fold in FIFO order.
     func takeDirectorMessages() -> [SZNodeID: String] {
         var taken: [SZNodeID: [String]] = [:]
         for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued {
@@ -742,8 +902,8 @@ extension SZHost {
         return taken.mapValues { $0.joined(separator: "\n\n") }
     }
 
-    /// Drain the coding agents' queued `.steer` envelopes TO the Director — rendered into the next
-    /// reconcile Director turn's prompt (the reverse lane of `takeDirectorMessages`). FIFO.
+    /// Drain the coding agents' queued `.steer` envelopes TO the Director — rendered into
+    /// the next reconcile brief's `{{inbox}}`. FIFO.
     func takeDirectorInboxMessages() -> [String] {
         var taken: [String] = []
         for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued
@@ -754,12 +914,19 @@ extension SZHost {
         return taken
     }
 
-    /// Fail every `.steer` still queued when its run ends (run-task defer AND eager cancel) — a steer
-    /// is run-scoped: leaving it queued would leak a dead run's steering into an unrelated next run
-    /// (the old dict's exact bug), and any `awaitProcessed` waiter must resume, not park forever.
+    /// Fail every `.steer` still queued when its run ends (run-task defer AND eager cancel) —
+    /// a steer is run-scoped: leaving it queued would leak a dead run's steering into an
+    /// unrelated next run, and any `awaitProcessed` waiter must resume, not park forever.
     func sweepUnconsumedSteers() {
         for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued {
             mailbox.markFailed(envelope.id, reason: "run ended before the steer was consumed")
         }
     }
+}
+
+/// A run that could not do its job — the library refused, the seats did not resolve, or
+/// the graph concluded on something other than `.ended`.
+struct SZBuildRefused: Error, CustomStringConvertible {
+    let detail: String
+    var description: String { detail }
 }

@@ -115,14 +115,11 @@ struct SZAgentGraphCanvasContent: View {
         }
     }
 
-    /// The one `start` stub, into the message node — the graph has a single door now, and
-    /// which kinds it accepts is said by that card's ports rather than by a fan of labelled
-    /// stubs. (This used to be one stub per entry-map key, with stacking for two kinds
-    /// sharing a node; the door made all of that unnecessary.) It keeps a pill, because a
-    /// bare stem says nothing: what arrives here is a MESSAGE, and the card sorts it.
+    /// The one `message` stub, into the door: what arrives is a MESSAGE — words — and the
+    /// door's code decides everything else.
     @ViewBuilder
     private func planEntryStub(placement: SZAgentGraphLayout.Placement) -> some View {
-        if let door = graph.messageNode?.id, let frame = placement.frames[door] {
+        if let door = graph.door?.id, let frame = placement.frames[door] {
             let end = SZAgentGraphLayout.inputPoint(frame)
             let start = CGPoint(x: end.x - 46, y: end.y)
             let z = max(zoom, 0.1)

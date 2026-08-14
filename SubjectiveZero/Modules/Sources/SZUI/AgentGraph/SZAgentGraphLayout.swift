@@ -3,13 +3,12 @@
 // sits (its frame). Pure and SwiftUI-free (CoreGraphics only) so it is unit-testable
 // headlessly — the house split, same as `SZGraphLayout` and `SZCanvasCamera`.
 //
-// The FACE is this era's one derivation: a node takes exactly one of three forms
-// (step / turn / dispatch), and there is no step-type library to look display facts up in —
-// icon, title and outcome rows all derive from the form plus the node's own title. A
-// compiled step's declared outcome set lives in SZAI (attached at pack load), which this
-// module may not import, so a step card draws the outcomes its graph file actually WIRES —
-// the truth the file carries — and a Run entry's produced outcome joins the rows if the
-// wiring never named it (`ensuring`), so the fired port always exists to light up.
+// The FACE is one derivation: a node takes exactly one of three forms (step / turn /
+// dispatch; the step at the reserved `door` id is the door), and icon, title and outcome
+// rows all derive from the form plus the node's own title. A compiled step's declared
+// outcome set lives in SZAI (attached at pack load), which this module may not import, so
+// a step card draws the outcomes its graph file actually WIRES, and a Run entry's produced
+// outcome joins the rows if the wiring never named it (`ensuring`).
 //
 // The frame algorithm is deliberately boring: rank by longest path from the entry over
 // FORWARD edges only, stack within a rank, done. Back edges (the bounded ones — the retry
@@ -21,16 +20,17 @@ import SZCore
 
 /// One node's card face — everything the renderers need that the graph model doesn't spell.
 public struct SZAgentGraphFace: Equatable, Sendable {
-    /// The three forms, re-stated flat so renderers can switch without pattern-matching
-    /// payloads they don't read.
-    public enum Form: Equatable, Sendable { case message, step, ask, turn, dispatch }
+    /// The forms, re-stated flat so renderers can switch without pattern-matching
+    /// payloads they don't read. `door` is the step at the reserved entry id — a step in
+    /// every mechanical way, told apart so the card can wear the door's identity.
+    public enum Form: Equatable, Sendable { case door, step, turn, dispatch }
     /// What the card's source affordance opens: the step's authored Swift, or the brief
     /// template that IS a turn's body. A value, not an action — the host resolves the file.
     public enum Source: Equatable, Sendable {
         case step(name: String)
         case brief(path: String)
         /// A dispatch's "body" is the graph it calls into — the pill LINKS to the target
-        /// seat's item graph rather than opening a file.
+        /// seat's graph rather than opening a file.
         case dispatch(target: String)
     }
     public var form: Form
@@ -95,64 +95,39 @@ public enum SZAgentGraphLayout {
     public static func face(of node: SZAgentGraph.Node, in graph: SZAgentGraph,
                             stepOutcomes: [String: [String]] = [:]) -> SZAgentGraphFace {
         switch node.form {
-        case .message:
-            // One port per kind the agent accepts, in CAUSE order — a build or request
-            // opens a thread, an item is its work, a settled reply answers it. Ordering
-            // lives here because the ports are the card's rows; the canvas used to own it
-            // when the doors were separate stubs.
-            let ports = graph.routes.keys
-                .sorted { messageRank($0) < messageRank($1) }
-                .map(\.rawValue)
-            return SZAgentGraphFace(form: .message, title: node.title ?? "On message",
-                                    symbol: "tray.and.arrow.down",
-                                    outcomes: ports.isEmpty ? ["chat"] : ports)
         case .step(let name):
+            // The door wears its identity; mechanically it is the same card — outcomes
+            // from the declaration when the host has it (declared order, wired first),
+            // its pill opening its Step.swift.
+            let door = node.id == SZAgentGraph.doorID
+            let form: SZAgentGraphFace.Form = door ? .door : .step
+            let symbol = door ? "tray.and.arrow.down" : "curlybraces"
+            let title = node.title ?? (door ? "On message" : name)
             let wired = wiredOutcomes(of: node.id, in: graph)
-            // The declaration wins when the host has it: declared order, wired first so a
-            // stable file keeps a stable card, then the edge-less answers.
             if let declared = stepOutcomes[node.id], !declared.isEmpty {
                 let ordered = wired + declared.filter { !wired.contains($0) }
-                return SZAgentGraphFace(form: .step, title: node.title ?? name,
-                                        symbol: "curlybraces",
+                return SZAgentGraphFace(form: form, title: title, symbol: symbol,
                                         outcomes: ordered,
                                         unwired: Set(declared).subtracting(wired),
                                         source: .step(name: name))
             }
-            return SZAgentGraphFace(form: .step, title: node.title ?? name,
-                                    symbol: "curlybraces",
+            return SZAgentGraphFace(form: form, title: title, symbol: symbol,
                                     outcomes: wired.isEmpty ? ["done"] : wired,
                                     source: .step(name: name))
-        case .ask(let ask):
-            // The declared answers, in the author's order — each is a port whether or not
-            // an edge is wired (an unwired ruling honestly ends the traversal, and dims).
-            return SZAgentGraphFace(form: .ask, title: node.title ?? briefName(ask.prompt),
-                                    symbol: "questionmark.bubble", outcomes: ask.outcomes,
-                                    unwired: Set(ask.outcomes)
-                                        .subtracting(wiredOutcomes(of: node.id, in: graph)),
-                                    source: .brief(path: ask.prompt))
         case .turn(let turn):
-            // Fixed process-truth rows, in the reading order the model documents.
-            return SZAgentGraphFace(form: .turn, title: node.title ?? briefName(turn.brief),
+            // Fixed process-truth rows, in the reading order the model documents. The
+            // brief is a stem; the pill opens its prompts file.
+            return SZAgentGraphFace(form: .turn, title: node.title ?? turn.brief,
                                     symbol: "text.bubble", outcomes: ["ok", "error"],
-                                    source: .brief(path: turn.brief))
+                                    source: .brief(path: "prompts/\(turn.brief).md.mustache"))
         case .dispatch(let dispatch):
-            // Send-and-conclude: one outcome, no out-edges.
+            // Fan out and WAIT; `settled` routes onward — dimmed when nothing is wired,
+            // the honest "its first settlement concludes".
             return SZAgentGraphFace(form: .dispatch, title: node.title ?? "→ \(dispatch.to)",
-                                    symbol: "arrow.triangle.branch", outcomes: ["sent"],
+                                    symbol: "arrow.triangle.branch", outcomes: ["settled"],
+                                    unwired: Set(["settled"])
+                                        .subtracting(wiredOutcomes(of: node.id, in: graph)),
                                     source: .dispatch(target: dispatch.to))
-        }
-    }
-
-    /// CAUSE order for the door's ports, not alphabetical: a `build`/`request` starts a
-    /// thread, `item` is its work, `settled` answers — in that order the ports face their
-    /// lanes.
-    static func messageRank(_ kind: SZMessageKind) -> Int {
-        switch kind {
-        case .message: 0
-        case .build: 1
-        case .request: 2
-        case .work: 3
-        case .steer: 4
         }
     }
 
@@ -171,16 +146,6 @@ public enum SZAgentGraphLayout {
     static func wiredOutcomes(of node: String, in graph: SZAgentGraph) -> [String] {
         var seen: Set<String> = []
         return graph.edges.filter { $0.from == node }.map(\.outcome).filter { seen.insert($0).inserted }
-    }
-
-    /// "prompts/decompose.md.mustache" → "decompose" — the brief IS the turn's body, so its
-    /// name is the honest default title.
-    static func briefName(_ path: String) -> String {
-        var name = path.split(separator: "/").last.map(String.init) ?? path
-        for suffix in [".mustache", ".md"] where name.hasSuffix(suffix) {
-            name = String(name.dropLast(suffix.count))
-        }
-        return name
     }
 
     // MARK: - Sizing
@@ -213,10 +178,10 @@ public enum SZAgentGraphLayout {
         spends && entry.startedAt != nil
     }
 
-    /// Which forms SPEND — the ones whose cards carry wall time. A compiled step settles in
-    /// sub-millisecond noise and reaches no agent; stats there would be decoration.
+    /// Which forms SPEND — the ones whose cards carry wall time. A mid-graph step settles
+    /// in sub-millisecond noise; the door may ask the model, so it counts.
     public static func spends(_ form: SZAgentGraphFace.Form) -> Bool {
-        form == .turn || form == .dispatch || form == .ask
+        form == .turn || form == .dispatch || form == .door
     }
 
     // MARK: - The Run view's chain
@@ -324,10 +289,10 @@ public enum SZAgentGraphLayout {
         return skipped
     }
 
-    /// The rank seed: the message node — the graph's one door, guaranteed by validation.
-    /// The fallback keeps layout total on a hand-broken file rather than crashing on it.
+    /// The rank seed: the door, guaranteed by validation. The fallback keeps layout total
+    /// on a hand-broken file rather than crashing on it.
     static func entryNode(of graph: SZAgentGraph) -> String {
-        graph.messageNode?.id ?? graph.nodes.first?.id ?? ""
+        graph.door?.id ?? graph.nodes.first?.id ?? ""
     }
 
     /// Longest-path depth from the seed, over forward edges only. Longest rather than
@@ -426,10 +391,9 @@ public enum SZAgentGraphLayout {
             }
         }
         guard reach.count > 1 else { return nil }
-        // Re-rooted at `id`, so the forecast carries NO message node — it is a fragment of
-        // a traversal already past its door, laid out from `id` by `lay(out:from:)`.
-        return SZAgentGraph(name: graph.name,
-                            nodes: graph.nodes.filter { reach.contains($0.id) },
+        // Re-rooted at `id` — a fragment of a traversal already past its door, laid out
+        // from `id` by `lay(out:from:)`.
+        return SZAgentGraph(nodes: graph.nodes.filter { reach.contains($0.id) },
                             edges: graph.edges.filter {
                                 $0.maxTraversals == nil
                                     && reach.contains($0.from) && reach.contains($0.to)

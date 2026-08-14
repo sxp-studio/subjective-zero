@@ -1,109 +1,90 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The one spec for agent facts: this file compiles twice. It compiles normally into SZCore,
-// and the SZFactGen build-tool plugin ALSO parses the sentinel-marked region below to
-// generate, at build time (never committed):
-//   - SZFactCatalog.generated.swift into SZCore (one SZFactRecord per fact field), and
-//   - SZStepSDKGenerated.swift into SZRuntime (the region's verbatim text, so the step SDK
-//     embeds the same source and decodes the same wire shape).
+// The spec of everything a step can read. It compiles into SZCore, and SZFactGen splices
+// the sentinel-marked region into the step SDK verbatim — one source on both sides of the
+// ABI.
 //
-// The region obeys a RIGID grammar the generator enforces with plain string ops
-// (Plugins/SZFactGenCore/SZFactGen.swift is the single home; any line it cannot classify
-// fails the build):
-//   - facts structs:  `public struct SZ<Kind>Facts: Codable, Sendable {`
-//   - one `public var name: Type` per line, preceded by exactly ONE `/// doc` line;
-//     types drawn from: Int, Bool, String, String?, [String], [String: String]
-//   - a trailing `// lazy` marker flags a heavy field the host materializes on first read
-//   - effect enums:   `public enum SZ<Kind>Effect: String, Codable, Sendable {` with plain
-//     undocumented cases; a kind may have NO effect enum, but never an empty one
-//   - free-floating doc lines, nesting, and anything else are build errors
-// Prose and derived conveniences live OUTSIDE the sentinels — extensions go below :end.
+// The model: a message is WORDS. Everything structural is world state, true between
+// messages (a run exists, an assignment stands, an op is staged). New machinery mints
+// world state; the message never grows.
+//
+// The consumer rule: every field's doc names the shipped reader. A fact nothing reads is
+// deleted. Growing the spec = add the field here, project it in SZWorld.
+//
+// Grammar (enforced by Plugins/SZFactGenCore, any other line fails the build): structs
+// `public struct SZ<Name>: Codable, Sendable {` (one must be SZFacts, the wire document);
+// one documented `public var name: Type` per line (Int, Int?, Bool, String, String?,
+// [String], UUID?, [UUID], [String: String], or an optional of a struct declared here);
+// `public init` blocks pass through unparsed; at most one `SZEffect` string enum.
+// Conveniences go below the end sentinel.
 import Foundation
 
 // SZFactGen:begin
 
-public struct SZBuildFacts: Codable, Sendable {
-    /// The work-set node ids still needing a healthy implementation (unimplemented or broken source; empty prompts excluded), graph order.
-    public var unimplemented: [String]
-    /// The dispatchable node ids of this run's work set.
-    public var workSet: [String]
-    /// Per-node lifecycle status, keyed by node id.
-    public var nodeStatuses: [String: String]
-    /// Per-node compile diagnostics from the last build, keyed by node id.
-    public var buildErrors: [String: String]
-    /// The 1-based settled re-entry count for this run.
-    public var round: Int
-    /// The round ceiling before the run gives up.
-    public var roundCap: Int
-    /// Whether the director has been briefed for this run.
-    public var briefed: Bool
-    /// Whether a project is open at all.
-    public var projectLoaded: Bool
-    /// The full project graph as JSON — heavy, so the host materializes it lazily, on first read.
-    public var graphJSON: String // lazy
-    /// Steering messages that arrived since the run began, oldest first.
-    public var steers: [String]
-    /// The build strategy this run asked for, verbatim as the host resolved it (env > the persisted choice > ""). The graph decides what the name means.
-    public var runVariant: String
-}
-
-public struct SZMessageFacts: Codable, Sendable {
-    /// The prose that opened this turn.
-    public var sentMessage: String
-    /// Whether this turn resumes an existing session.
+public struct SZFacts: Codable, Sendable {
+    /// The delivered message — what was said; "" when machinery knocks. Read by the doors' triage and every `{{message}}` brief.
+    public var message: String
+    /// The node this delivery is bound to (its scope); nil = a director/debug conversation. Read by `{{node}}` briefs and the blocker derivation.
+    public var node: UUID?
+    /// Whether this scope already has a session — the doors' cold-vs-resumed fork.
     public var resuming: Bool
-    /// Whether this turn left new unimplemented work behind.
-    public var draftedWork: Bool
-    /// The node id this message is seeded from, when it is anchored to one.
-    public var nodeSeed: String?
+    /// The granted build this delivery serves, while one is live; nil otherwise. The director door's `build` ruling.
+    public var run: SZRun?
+    /// The standing work assigned to this scope, surviving the retry loop; nil when none. The coding door's `implement`-vs-`continue` fork.
+    public var assignment: SZAssignment?
+
+    public init(message: String, node: UUID? = nil, resuming: Bool = false,
+                run: SZRun? = nil, assignment: SZAssignment? = nil) {
+        self.message = message
+        self.node = node
+        self.resuming = resuming
+        self.run = run
+        self.assignment = assignment
+    }
 }
 
-public struct SZWorkFacts: Codable, Sendable {
-    /// The 1-based dispatch attempt for this work message.
+public struct SZRun: Codable, Sendable {
+    /// The run's still-owed work — what a dispatch sends, and `hasWorkLeft`'s evidence.
+    public var workSet: [UUID]
+    /// The 1-based dispatch round — the reconcile brief's `{{round}}`.
+    public var round: Int
+    /// The retry budget, read off the settled edge's leash — the reconcile brief's `{{cap}}`.
+    public var roundCap: Int
+    /// Steering messages folded into the NEXT brief, oldest first — the reconcile brief's `{{inbox}}`.
+    public var steers: [String]
+    /// The run's standing instruction — the decompose brief's `{{instruction}}`.
+    public var instruction: String
+
+    public init(workSet: [UUID], round: Int, roundCap: Int, steers: [String],
+                instruction: String) {
+        self.workSet = workSet
+        self.round = round
+        self.roundCap = roundCap
+        self.steers = steers
+        self.instruction = instruction
+    }
+}
+
+public struct SZAssignment: Codable, Sendable {
+    /// The 1-based attempt this delivery is — the coding door's retry fork.
     public var attempt: Int
-    /// The note the sender attached to the handoff, when there is one.
-    public var senderNote: String?
-    /// What is blocking this work, when it is blocked.
-    public var blocker: String?
-    /// The session id to resume, when this continues earlier work on the node.
-    public var resumeSession: String?
+    /// The sender's note riding the handoff, when there is one — the work brief's `{{director_message}}`.
+    public var note: String?
+
+    public init(attempt: Int, note: String? = nil) {
+        self.attempt = attempt
+        self.note = note
+    }
 }
 
-public struct SZRequestFacts: Codable, Sendable {
-    /// The requested operation.
-    public var op: String
-    /// The node ids the request acts on.
-    public var nodes: [String]
-    /// The free-form instruction attached to the request, when there is one.
-    public var instruction: String?
-}
-
-public enum SZBuildEffect: String, Codable, Sendable {
-    case captureStatuses
-}
-
-public enum SZMessageEffect: String, Codable, Sendable {
+public enum SZEffect: String, Codable, Sendable {
     case requestBuild
-}
-
-public enum SZRequestEffect: String, Codable, Sendable {
-    case split
-    case merge
 }
 
 // SZFactGen:end
 
-extension SZBuildFacts {
-    /// Whether any work-set node still needs implementation. The predicate-named spelling
-    /// steps route on; `unimplemented` is its evidence.
-    public var hasWorkLeft: Bool { !unimplemented.isEmpty }
+extension SZFacts {
+    /// Whether the run still owes work — the work-left gate's predicate; `run.workSet` is
+    /// its evidence.
+    public var hasWorkLeft: Bool { !(run?.workSet.isEmpty ?? true) }
 }
 
-extension SZBuildFacts {
-    /// Whether the fleet is failing rather than progressing: some node reports a stuck
-    /// terminal status, or the last build left compile errors behind.
-    public var fleetIsFailing: Bool {
-        if !buildErrors.isEmpty { return true }
-        let stuck: Set<String> = ["stuck", "failed", "error"]
-        return nodeStatuses.values.contains { stuck.contains($0) }
-    }
-}

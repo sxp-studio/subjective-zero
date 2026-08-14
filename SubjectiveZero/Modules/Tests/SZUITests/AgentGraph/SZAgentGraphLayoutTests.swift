@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Agent Graph panel's geometry and face derivation, pinned headlessly — the frames the
 // canvas renders AND the follow-cam centres on, so a drift here moves both the picture and
-// the camera that chases it. The face tests pin this era's one derivation: three node
-// forms, no step-type library — icon/title/rows all come from the form + the node's title.
+// the camera that chases it. The face tests pin the derivation: three node forms (the step
+// at the reserved `door` id is the door), icon/title/rows all from the form + the node's
+// title.
 import CoreGraphics
 import Foundation
 import Testing
@@ -10,23 +11,23 @@ import SZCore
 @testable import SZUI
 
 private let graph = SZAgentGraph(
-    name: "build",
     nodes: [
-        SZAgentGraph.Node(id: "message", title: "On message", form: .message(.init())),
+        SZAgentGraph.Node(id: "door", form: .step(name: "door")),
         SZAgentGraph.Node(id: "check", title: "Work left?", form: .step(name: "work-left")),
         SZAgentGraph.Node(id: "retry", form: .step(name: "retrying")),
-        SZAgentGraph.Node(id: "implement", form: .turn(.init(brief: "prompts/implement.md.mustache"))),
-        SZAgentGraph.Node(id: "send", form: .dispatch(.init(to: "coding", items: "workSet"))),
+        SZAgentGraph.Node(id: "implement", form: .turn(.init(brief: "implement"))),
+        SZAgentGraph.Node(id: "send", form: .dispatch(.init(to: "coding"))),
     ],
     edges: [
-        SZAgentGraph.Edge(from: "message", outcome: "build", to: "check"),
-        SZAgentGraph.Edge(from: "message", outcome: "settled", to: "retry"),
+        SZAgentGraph.Edge(from: "door", outcome: "build", to: "check"),
+        SZAgentGraph.Edge(from: "door", outcome: "recover", to: "retry"),
         SZAgentGraph.Edge(from: "check", outcome: "yes", to: "implement"),
         SZAgentGraph.Edge(from: "check", outcome: "no", to: "retry"),
         SZAgentGraph.Edge(from: "implement", outcome: "ok", to: "send"),
         SZAgentGraph.Edge(from: "implement", outcome: "error", to: "check", maxTraversals: 2),
     ])
 
+private let doorFace = SZAgentGraphLayout.face(of: graph.node("door")!, in: graph)
 private let stepFace = SZAgentGraphLayout.face(of: graph.node("check")!, in: graph)
 private let turnFace = SZAgentGraphLayout.face(of: graph.node("implement")!, in: graph)
 private let dispatchFace = SZAgentGraphLayout.face(of: graph.node("send")!, in: graph)
@@ -38,17 +39,31 @@ private func entry(_ ordinal: Int, _ node: String, phase: SZAgentGraphRun.Entry.
 }
 
 private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
-    SZAgentGraphRun(id: UUID(), agent: "director", graphName: "build", kind: .build,
-                    startedAt: Date(timeIntervalSinceReferenceDate: 0),
-                    trace: entries)
+    let id = UUID()
+    return SZAgentGraphRun(id: id, agent: "director", thread: id,
+                           startedAt: Date(timeIntervalSinceReferenceDate: 0),
+                           trace: entries)
 }
 
-// MARK: - Faces (the era's derivation)
+// MARK: - Faces (the derivation)
+
+@Test func theDoorWearsItsIdentityOverAStepsAnatomy() {
+    // The door IS a step — same outcomes machinery, its pill opens its Step.swift — worn
+    // with the door's symbol and title.
+    #expect(doorFace.form == .door)
+    #expect(doorFace.title == "On message")
+    #expect(doorFace.symbol == "tray.and.arrow.down")
+    #expect(doorFace.outcomes == ["build", "recover"])   // wire order
+    #expect(doorFace.source == .step(name: "door"))
+    // The door may ask the model, so it carries wall time.
+    #expect(SZAgentGraphLayout.spends(.door))
+}
 
 @Test func aStepFaceDrawsItsWiredOutcomesUnderItsOwnTitle() {
     #expect(stepFace.form == .step)
     #expect(stepFace.title == "Work left?")            // the node's title wins
     #expect(stepFace.outcomes == ["yes", "no"])        // wire order, deduped
+    #expect(stepFace.source == .step(name: "work-left"))
     // Untitled → the step's folder name is the honest default.
     let retry = SZAgentGraphLayout.face(of: graph.node("retry")!, in: graph)
     #expect(retry.title == "retrying")
@@ -56,16 +71,23 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     #expect(retry.outcomes == ["done"])
 }
 
-@Test func aTurnFaceCarriesTheFixedProcessRowsAndItsBriefName() {
+@Test func aTurnFaceCarriesTheFixedProcessRowsAndItsBriefStem() {
     #expect(turnFace.form == .turn)
     #expect(turnFace.outcomes == ["ok", "error"])      // process truth, fixed order
-    #expect(turnFace.title == "implement")             // prompts/implement.md.mustache → implement
+    #expect(turnFace.title == "implement")             // the brief stem is the default title
+    #expect(turnFace.source == .brief(path: "prompts/implement.md.mustache"))
 }
 
-@Test func aDispatchFaceSendsAndConcludes() {
+@Test func aDispatchFaceWaitsForItsSettlement() {
     #expect(dispatchFace.form == .dispatch)
-    #expect(dispatchFace.outcomes == ["sent"])
+    #expect(dispatchFace.outcomes == ["settled"])
     #expect(dispatchFace.title == "→ coding")
+    // No settled edge wired → the port draws dimmed: its first settlement concludes.
+    #expect(dispatchFace.unwired == ["settled"])
+    var looped = graph
+    looped.edges.append(.init(from: "send", outcome: "settled", to: "check", maxTraversals: 2))
+    let wired = SZAgentGraphLayout.face(of: looped.node("send")!, in: looped)
+    #expect(wired.unwired.isEmpty)
 }
 
 @Test func aRunFaceGrowsTheOutcomeTheWiringNeverNamed() {
@@ -130,6 +152,7 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
 @Test func onlySpendingFormsCarryStats() {
     #expect(SZAgentGraphLayout.spends(.turn))
     #expect(SZAgentGraphLayout.spends(.dispatch))
+    #expect(SZAgentGraphLayout.spends(.door))
     #expect(!SZAgentGraphLayout.spends(.step))
 }
 
@@ -202,41 +225,17 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
 
 // MARK: - The plan's placement
 
-@Test func thePlanRanksFromTheMessageNodeOverForwardEdgesOnly() {
+@Test func thePlanRanksFromTheDoorOverForwardEdgesOnly() {
     let placement = SZAgentGraphLayout.lay(out: graph)
     let x = { (id: String) in placement.frames[id]!.minX }
-    // The door leads: every lane hangs off it, so nothing may sit left of the message node
-    // — that is the whole reason the entry map became a card.
-    #expect(x("message") < x("check"))
-    #expect(x("message") < x("retry"))
+    // The door leads: every lane hangs off it, so nothing may sit left of it.
+    #expect(x("door") < x("check"))
+    #expect(x("door") < x("retry"))
     // check → implement → send march right; the bounded back edge never drags `check`
-    // rightward, and the settled lane (`retry`) keeps its own honest rank.
+    // rightward.
     #expect(x("check") < x("implement"))
     #expect(x("implement") < x("send"))
     #expect(!placement.bounds.isNull)
-}
-
-@Test func theDoorDrawsOnePortPerRoutedKindInCauseOrder() {
-    let face = SZAgentGraphLayout.face(of: graph.node("message")!, in: graph)
-    #expect(face.form == .message)
-    #expect(face.outcomes == ["build"])
-    // Cause order across the deliverable kinds, not alphabet: work opens threads before
-    // conversation, and the fleet's items follow the request lane they serve.
-    let door = SZAgentGraph.Node(id: "m", form: .message(.init()))
-    let wide = SZAgentGraph(name: "wide", nodes: [
-        door,
-        .init(id: "a", form: .turn(.init(brief: "prompts/a.md.mustache"))),
-        .init(id: "b", form: .turn(.init(brief: "prompts/b.md.mustache"))),
-        .init(id: "c", form: .turn(.init(brief: "prompts/c.md.mustache"))),
-    ], edges: [
-        .init(from: "m", outcome: "message", to: "a"),
-        .init(from: "m", outcome: "work", to: "b"),
-        .init(from: "m", outcome: "request", to: "c"),
-    ])
-    let wideFace = SZAgentGraphLayout.face(of: door, in: wide)
-    #expect(wideFace.outcomes == ["message", "request", "work"])
-    // The door costs nothing, so it never carries a wall-time strip.
-    #expect(!SZAgentGraphLayout.spends(.message))
 }
 
 // MARK: - The projected future (the ghost wires)
@@ -286,9 +285,8 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     // already states, so it is dropped from the reachable set AND from the projection's
     // own edges.
     let future = SZAgentGraphLayout.projectedPlan(of: graph, from: "implement")
-    // A forecast is a fragment PAST the door, so it carries no message node at all — it is
-    // laid out from an explicit seed instead.
-    #expect(future?.messageNode == nil)
+    // A forecast is a fragment PAST the door — laid out from an explicit seed instead.
+    #expect(future?.door == nil)
     // `check` is only reachable back through the bounded edge — so neither it nor `retry`
     // behind it is drawn, and the forecast is the one stage that genuinely follows.
     #expect(future?.nodes.map(\.id) == ["implement", "send"])
@@ -303,29 +301,25 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     let bare = SZAgentGraphLayout.face(of: graph.node("check")!, in: graph)
     #expect(bare.unwired.isEmpty)
     // …then the declaration path: a gate whose `no` ends the run must SHOW the no,
-    // dimmed, instead of the port vanishing with its meaning.
+    // dimmed, instead of the port vanishing with its meaning. The door dims the same way —
+    // it is a step, so one rule covers both.
     let gate = SZAgentGraph.Node(id: "gate", title: "Still unresolved?", form: .step(name: "work-left"))
-    let lean = SZAgentGraph(name: "lean", nodes: [
-        .init(id: "message", form: .message(.init())),
+    let lean = SZAgentGraph(nodes: [
+        .init(id: "door", form: .step(name: "door")),
         gate,
-        .init(id: "fix", form: .turn(.init(brief: "prompts/fix.md.mustache"))),
+        .init(id: "fix", form: .turn(.init(brief: "fix"))),
     ], edges: [
-        .init(from: "message", outcome: "build", to: "gate"),
+        .init(from: "door", outcome: "build", to: "gate"),
         .init(from: "gate", outcome: "yes", to: "fix"),
     ])
     let face = SZAgentGraphLayout.face(of: gate, in: lean,
                                        stepOutcomes: ["gate": ["yes", "no"]])
     #expect(face.outcomes == ["yes", "no"])   // wired first, then the edge-less answers
     #expect(face.unwired == ["no"])
-    // The ask form dims the same way, from its own config — one rule, two forms.
-    let ask = SZAgentGraph.Node(id: "rule", form: .ask(.init(
-        prompt: "prompts/rule.md.mustache", outcomes: ["go", "hold"])))
-    var wired = lean
-    wired.nodes.append(ask)
-    wired.edges.append(.init(from: "fix", outcome: "ok", to: "rule"))
-    wired.edges.append(.init(from: "rule", outcome: "go", to: "gate"))
-    let askFace = SZAgentGraphLayout.face(of: ask, in: wired)
-    #expect(askFace.unwired == ["hold"])
+    let door = SZAgentGraphLayout.face(of: lean.node("door")!, in: lean,
+                                       stepOutcomes: ["door": ["build", "answer"]])
+    #expect(door.outcomes == ["build", "answer"])
+    #expect(door.unwired == ["answer"])
     // And the PLACEMENT sizes with the same enriched face — a card that gained a dimmed
     // row must gain the row's height, or its sockets slide off the labels.
     let oneRow = SZAgentGraphLayout.lay(out: lean).frames["gate"]!

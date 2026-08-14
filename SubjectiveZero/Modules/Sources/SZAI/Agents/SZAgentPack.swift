@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One decoded agent pack — the in-memory shape of an agent FOLDER: `agent.json` (identity +
-// seat) beside `graphs/*.json`, `prompts/*.md.mustache`, and `steps/<name>/Step.swift`. Pure
+// seat) beside `graph.json`, `prompts/*.md.mustache`, and `steps/<name>/Step.swift`. Pure
 // data: everything here was read off disk by `SZAgentPackLoader`, which also owns every
 // judgment about it (validation lives there, not here).
 import Foundation
@@ -12,10 +12,12 @@ public struct SZAgentPack: Sendable, Equatable {
     /// The seat this pack claims, if any. Seat arithmetic (exactly one holder per seat over
     /// the loaded set) is the loader's, at the library level.
     public var seat: SZAgentSeat?
-    /// The pack's graphs, sorted by name.
-    public var graphs: [SZAgentGraph]
+    /// THE graph — one per agent. nil only when `graph.json` is missing or broken (a
+    /// defect the loader reports; the pack still loads so its seat and siblings stay
+    /// visible).
+    public var graph: SZAgentGraph?
     /// Prompt inventory: pack-relative paths (`prompts/<file>.md.mustache`), sorted — the
-    /// namespace a turn node's `brief` must resolve in.
+    /// namespace a turn's `brief` stem must resolve in.
     public var prompts: [String]
     /// Each prompt's template text, keyed by its pack-relative path — read alongside the
     /// inventory so validation can scan a brief's `{{tokens}}` without a second disk pass.
@@ -36,12 +38,12 @@ public struct SZAgentPack: Sendable, Equatable {
     }
 
     public init(id: String, seat: SZAgentSeat? = nil,
-                graphs: [SZAgentGraph] = [],
+                graph: SZAgentGraph? = nil,
                 prompts: [String] = [], promptSources: [String: String] = [:],
                 steps: [StepFolder] = []) {
         self.id = id
         self.seat = seat
-        self.graphs = graphs
+        self.graph = graph
         self.prompts = prompts
         self.promptSources = promptSources
         self.steps = steps
@@ -49,13 +51,5 @@ public struct SZAgentPack: Sendable, Equatable {
 
     public func step(named name: String) -> StepFolder? {
         steps.first { $0.name == name }
-    }
-
-    /// The graph a `kind` delivery opens — the one whose message node carries that port.
-    /// There is deliberately no variant dimension here any more: a strategy is a ROUTE
-    /// inside the graph (a step choosing between lanes), not a choice of file, so the
-    /// loader refuses two graphs routing one kind rather than needing a named default.
-    public func graph(routing kind: SZMessageKind) -> SZAgentGraph? {
-        graphs.first { $0.handles(kind) }
     }
 }

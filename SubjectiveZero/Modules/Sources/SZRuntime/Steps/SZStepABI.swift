@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The frozen DECISION-STEP ABI, v4 — the async evolution of the step tier. A step is a
-// standalone `Step.swift` compiled and hot-reloaded exactly like a node's `Node.swift`; what
-// crosses the `dlopen` boundary is C-ABI, and the ergonomic SDK (`SZStep`, `SZCondition`,
-// `askModel`) is compiled INTO each step from the host-owned `SZStepSDK.source`.
+// The frozen DECISION-STEP ABI, v5 — the async step tier over the kind-free wire. A step is
+// a standalone `Step.swift` compiled and hot-reloaded exactly like a node's `Node.swift`;
+// what crosses the `dlopen` boundary is C-ABI, and the ergonomic SDK (`SZStep`, `ctx.ask`)
+// is compiled INTO each step from the host-owned `SZStepSDK.source`.
 //
-// v4's shape, and why:
+// The async shape (since v4), and why:
 // - Evaluation is ASYNC: `SZStepEvaluate` starts the step's body in a Task and returns a
 //   cancel token; the result arrives through a completion callback that fires EXACTLY ONCE
 //   (ok / cancelled / failed). A step may `await` — which is what admits `askModel`.
@@ -43,10 +43,13 @@ typealias SZStepAskFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<
 
 enum SZStepABI {
     /// Bumped on a breaking ABI change. The loader rejects a mismatch.
-    /// v4: async evaluation (completion callback + cancel token), eager facts snapshot in
-    /// the request, and the single `ask` outbound capability. (v3 was synchronous with a
-    /// lazy per-fact resolver.)
-    static let version: Int32 = 4
+    /// v5: the kind-free wire — the facts document is the ONE `SZFacts` shape (a message is
+    /// words; structure is world state), the declaration payload is `{outcomes}` (no facts
+    /// kind), and the teardown symbol is gone (steps are stateless; the loader treats a
+    /// missing symbol as a no-op). The C function shapes are unchanged from v4 — the bump
+    /// forces every cached dylib to recompile against the new SDK.
+    /// (v4: async evaluation + eager facts snapshot + the single `ask` capability.)
+    static let version: Int32 = 5
 
     static let apiVersionSymbol = "SZStepAPIVersion"
     static let declareSymbol = "SZStepDeclare"

@@ -84,7 +84,8 @@ struct SZAgentGraphCardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: SZNodeLayout.cornerRadius, style: .continuous)
-            .fill(face.form == .step ? SZAgentGraphStyle.stepFill : SZNodeCardStyle.cardFill))
+            .fill(face.form == .step || face.form == .door
+                ? SZAgentGraphStyle.stepFill : SZNodeCardStyle.cardFill))
         .overlay(RoundedRectangle(cornerRadius: SZNodeLayout.cornerRadius, style: .continuous)
             .strokeBorder(borderColor, lineWidth: emphasised ? 1.5 : 1))
         .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
@@ -119,7 +120,7 @@ struct SZAgentGraphCardView: View {
                     switch source {
                     case .step: "Open the step's Step.swift"
                     case .brief: "Open the brief template"
-                    case .dispatch(let target): "Open the \(target) seat's item graph"
+                    case .dispatch(let target): "Open the \(target) seat's graph"
                     }
                 }(),
                 action: { openSource(source) })
@@ -255,8 +256,8 @@ struct SZAgentGraphCardView: View {
                 Circle().fill(SZAgentGraphStyle.running).frame(width: 7, height: 7)
             }
         case .done:
-            statusBadge("checkmark", face.form == .step ? SZEdgeStyle.intentViolet
-                                                       : SZAgentGraphStyle.done)
+            statusBadge("checkmark", face.form == .step || face.form == .door
+                ? SZEdgeStyle.intentViolet : SZAgentGraphStyle.done)
         case .failed:
             statusBadge("xmark", SZAgentGraphStyle.failed)
         case .cancelled:
@@ -275,7 +276,8 @@ struct SZAgentGraphCardView: View {
 
     private var borderColor: Color {
         // A step's border is violet like its fill — the colour IS its identity.
-        let resting = face.form == .step ? SZAgentGraphStyle.stepStroke : SZNodeCardStyle.cardStroke
+        let resting = face.form == .step || face.form == .door
+            ? SZAgentGraphStyle.stepStroke : SZNodeCardStyle.cardStroke
         switch state.phase {
         case .none, .cancelled: return resting
         case .running: return SZAgentGraphStyle.running
@@ -403,7 +405,7 @@ enum SZAgentGraphStyle {
     /// ports take its own violet, and only the taken one is bright. For the rest, the
     /// dispatch card's rule generalized: `ok`-prefixed is done, error/failed/defect broke.
     static func colour(for outcome: String, in form: SZAgentGraphFace.Form? = nil) -> Color {
-        if form == .step { return SZEdgeStyle.intentViolet }
+        if form == .step || form == .door { return SZEdgeStyle.intentViolet }
         if outcome == "ok" || outcome.hasPrefix("ok:") { return done }
         if outcome == "error" || outcome.hasPrefix("error")
             || outcome.hasPrefix("failed") || outcome.hasPrefix("defect") { return failed }

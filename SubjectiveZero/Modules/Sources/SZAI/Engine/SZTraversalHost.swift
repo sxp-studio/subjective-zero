@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The engine's seams — small typed protocols, no closure bag, no silent no-op defaults: a
-// host that cannot fulfil a requirement does not compile, and tests drive the engine with
-// stubs of exactly these. (The previous architecture's 28-parameter capability struct with
-// twelve defaulted closures is the cautionary tale.)
+// The engine's seams — small typed protocols, no closure bag. One serving object (the
+// delivery) fulfils every lane; tests drive the engine with stubs of exactly these.
 import Foundation
 import SZCore
 
@@ -40,16 +38,15 @@ public struct SZTurnReport: Sendable {
     }
 }
 
-/// One unit of dispatched work the engine hands the host to send as a `.work` message.
+/// One unit of dispatched work the engine hands the delivery to send.
 public struct SZWorkOrder: Sendable, Equatable {
     public var node: String
     public init(node: String) { self.node = node }
 }
 
 /// How one step evaluation settled, mirrored across the SZAI/SZRuntime module boundary
-/// (SZAI may not import SZRuntime; the host's adapter translates). `effects` are the host
-/// actions the step requested alongside its outcome — the adapter splits them out of the
-/// wire envelope; a bare outcome carries none.
+/// (SZAI may not import SZRuntime; the host's adapter translates). `effects` are the raw
+/// requested effect names off the wire; the engine validates them against `SZEffect`.
 public struct SZStepReport: Sendable {
     public var outcome: String?
     public var effects: [String]
@@ -67,29 +64,21 @@ public struct SZStepReport: Sendable {
 /// The step-execution seam the runtime fulfils (via an SZApp adapter over SZStepRuntime).
 public protocol SZStepRunning: Sendable {
     /// Evaluate the compiled step `agent`/`step` against `factsJSON`, serving its model
-    /// asks through `ask` (the QueryService's executor). Never throws — every failure mode
-    /// is a field of the report.
+    /// asks through `ask`. Never throws — every failure mode is a field of the report.
     func evaluate(agent: String, step: String, factsJSON: String,
                   ask: @escaping @Sendable (String) async throws -> String) async -> SZStepReport
 }
 
-/// One traversal's identity, as the strategy announces it to observers the moment it
-/// starts: who entered which graph on which kind — and, for a dispatched item, the work
-/// item it handles. The id keys every later observation (notes, the conclusion, the
-/// dispatch tally) back to this traversal's record.
+/// One traversal's identity, announced to observers the moment it starts. The id keys
+/// every later observation (notes, the conclusion) back to this traversal's record.
 public struct SZTraversalSighting: Sendable, Equatable {
     public var id: UUID
     public var agent: String
-    public var graphName: String
-    public var kind: SZMessageKind
-    /// The dispatched node id for a `.work` traversal; nil for a director's.
+    /// The dispatched node id for a work child; nil otherwise.
     public var work: String?
-    public init(id: UUID, agent: String, graphName: String, kind: SZMessageKind,
-                work: String? = nil) {
+    public init(id: UUID, agent: String, work: String? = nil) {
         self.id = id
         self.agent = agent
-        self.graphName = graphName
-        self.kind = kind
         self.work = work
     }
 }
@@ -116,43 +105,30 @@ public struct SZTraversalNote: Sendable, Equatable {
     }
 }
 
-/// What every traversal needs from its host. `@MainActor`: the host is the app's observable
-/// object; test stubs annotate the same way. (`Sendable` is free for a MainActor class —
-/// it is what lets a step's ask closure carry the host reference across executors.)
+/// What one traversal needs from its delivery. `@MainActor`: the delivery is app state;
+/// test stubs annotate the same way.
 @MainActor
-public protocol SZTraversalHost: AnyObject, Sendable {
-    /// The kind-gated facts document for this traversal, rebuilt fresh at every read — the
-    /// engine hands it to steps (pinned per evaluation) and the brief renderer.
-    func factsJSON(kind: SZMessageKind) -> String
-    /// The values of a `[String]`-typed fact (a dispatch's `items:`), resolved from the
-    /// same snapshot `factsJSON` renders.
-    func itemsFact(named name: String, kind: SZMessageKind) -> [String]
-    /// Render a turn's brief template against the current facts + delivery payload. The
-    /// GATE lives behind this seam: rendered bytes must match the pinned fixtures.
-    func renderBrief(agent: String, template: String, kind: SZMessageKind) throws -> String
+public protocol SZTraversalServing: AnyObject, Sendable {
+    /// The delivery's facts, rebuilt fresh from the live world at every read — the engine
+    /// pins one per node visit (a step and its asks see one snapshot).
+    func facts() -> SZFacts
+    /// Render a turn or ask brief (a template stem) against the current world. The bytes
+    /// returned are the prompt the turn sends.
+    func render(template: String) throws -> String
     /// Run one full agent turn (session, tools, streaming — all host business).
     func runTurn(_ order: SZTurnOrder) async -> SZTurnReport
-    /// Serve one step's `askModel` request (render its template, route, complete, journal).
-    /// The ENGINE supplies `kind` (the graph's own — a settled re-entry renders as its
-    /// build graph's kind by construction) and `factsJSON` (the SAME pinned document the
-    /// evaluation was handed, so an ask never sees a world its step didn't). Throwing
-    /// `CancellationError` answers the ask as cancelled; other errors as failed.
-    func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
-                  requestJSON: String) async throws -> String
     /// Deliver one dispatch set and WAIT for it: send `orders` to the seat, report the
-    /// live tally through `progress` as items land, and return the set's one summary.
-    /// nil = this host cannot dispatch (a chat or item host — the pack gate keeps
-    /// dispatch nodes off those lanes, so reaching nil is a routing bug the engine
-    /// records as a defect). Cancellation propagates in: a cancelled delivery returns
-    /// nil and the engine concludes `.cancelled` at its boundary check.
+    /// live tally as items land, and return the set's one summary. nil ⇔ cancelled (or no
+    /// fleet behind this delivery — the engine records that as a defect).
     func deliver(orders: [SZWorkOrder], to seat: String,
                  progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
         async -> SZSettledSummary?
-    /// Perform one EFFECT a step requested with its outcome. The engine calls this AFTER
-    /// the step returned and BEFORE edge routing, in the step's own order, and only with
-    /// names it validated against the kind's effect set (an unknown name is a traversal
-    /// defect, never a perform).
-    func perform(effect: String, kind: SZMessageKind) async
+    /// Serve one step ask (render its template against the SAME snapshot the evaluation is
+    /// pinned to — the delivery guarantees it — then route, complete, journal). Throwing
+    /// `CancellationError` answers the ask as cancelled; other errors as failed.
+    func serveAsk(step: String, requestJSON: String) async throws -> String
+    /// Perform one validated effect, after the step returned and before its edge routes.
+    func perform(effect: SZEffect) async
     /// Trace push for the panel/RUNS record.
     func note(_ note: SZTraversalNote)
 }

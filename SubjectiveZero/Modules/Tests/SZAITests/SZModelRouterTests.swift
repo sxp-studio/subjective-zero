@@ -12,7 +12,7 @@ struct SZModelRouterTests {
         let router: any SZModelRouting = SZIdentityRouter(choice: choice)
 
         let resolved = router.resolve(SZModelCall(
-            class: .query, agent: "director", graph: "work", step: "verdict"))
+            class: .query, agent: "director", step: "verdict"))
         #expect(resolved.providerID == "provider-a")
         #expect(resolved.model == "model-x")
         #expect(resolved.reasoningEffort == "high")

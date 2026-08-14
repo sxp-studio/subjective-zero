@@ -175,11 +175,6 @@ final class SZHost {
     @ObservationIgnored var agentGraphPlanFill: Task<Void, Never>?
 
     func bumpAgentGraphPlanEpoch() { agentGraphPlanEpoch += 1 }
-    /// The user's persisted Director run-graph VARIANT choice (graph name over the director
-    /// pack's build-kind variants; `debug_set_orchestrator` writes it). Same app-state.json
-    /// home + restore story as the prefs below. nil = the pack default; `SZ_RUN_GRAPH`
-    /// outranks it per launch (see `resolvedRunGraphVariant`).
-    internal(set) var runGraphVariant: String? = SZAppStateIO.load()?.runGraphVariant
     /// Hot-reload watchers over the materialized packs' `steps/<name>/Step.swift`, keyed
     /// `agent/step` — armed once at pack materialization (SZHost+AgentPacks.swift).
     var stepWatchers: [String: SZSourceWatcher] = [:]
@@ -336,11 +331,11 @@ final class SZHost {
     /// panel consumes it exactly once (`consumeComposerDraft`) so a re-render can't stomp edits.
     internal(set) var pendingComposerDraft: SZComposerDraftInjection?
 
-    /// A run requested by `ui_run` DURING the Director Agent's own streaming chat turn — recorded
-    /// (starting it mid-turn would race the same transcript; the `recordedForReconcile` pattern)
-    /// and fired when that turn ends, with `directorAlreadyBriefed` so the run skips its decompose
-    /// turn (the chat turn was it). The value is the run's instruction ("" = none given).
-    var pendingDirectorRun: String?
+    /// THE MINTED RUN awaiting admission: `ui_run` mid-turn and the door's `requestBuild`
+    /// effect set it (a newer mint supersedes); the pump's head admits it the moment the
+    /// director transcript frees — ahead of any queued prose. The value is the run's
+    /// standing instruction ("" = none given).
+    var pendingRun: String?
 
     /// Scopes whose latest agent turn finished while the user was elsewhere — the tab's static
     /// unread dot, cleared when the tab is visited (`showChat`). During runs, node tabs finish at
@@ -417,11 +412,6 @@ final class SZHost {
     /// The sheet's cheap-tier re-check loop (~3s) — alive only while the sheet is open, so a just
     /// installed / just-logged-in CLI flips its card green without a manual Refresh.
     var providerHealthPollTask: Task<Void, Never>?
-    /// The graph orchestrator is THE orchestrator — strategy selection is retired. Constructed
-    /// per run in SZHost+Run.swift (it needs the packs root + step runtime). `SZ_ORCHESTRATOR`
-    /// is still READ, but only to warn once at launch when it names a retired value (see
-    /// `warnIfRetiredOrchestratorRequested`); the debug surfaces report the constant below.
-    static let orchestratorName = "graph"
     /// The compiled-step execution table for the graph orchestrator's condition steps — one
     /// instance for the host's lifetime, so a re-scheduled step coalesces into the runtime's
     /// latest-source-wins compile instead of rebuilding a cold table every run.
@@ -471,16 +461,6 @@ final class SZHost {
         return URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appending(path: "NodeLibrary")
     }
 
-    /// `SZ_ORCHESTRATOR` selected a strategy while three coexisted. The selection is retired;
-    /// the env var is read once at launch purely to tell a caller still setting it the truth.
-    private func warnIfRetiredOrchestratorRequested() {
-        guard let value = ProcessInfo.processInfo.environment["SZ_ORCHESTRATOR"],
-              value != Self.orchestratorName else { return }
-        print("[SZHost] SZ_ORCHESTRATOR=\(value): strategy selection is retired — the graph "
-            + "orchestrator is the path; pick a run-graph VARIANT instead (SZ_RUN_GRAPH, or "
-            + "debug_set_orchestrator)")
-    }
-
     /// Instantiate the runtime, vend the viewport render closure, open the launch project (env
     /// override → last open → first-launch sample copy; SZHost+ProjectLifecycle.swift), and start
     /// the app-level services. Loading is delegated to `switchProject` — launch is just the first
@@ -488,7 +468,6 @@ final class SZHost {
     func start(openingIfLaunchedWithFile launchFileURL: URL? = nil) async {
         guard !started else { return }
         started = true
-        warnIfRetiredOrchestratorRequested()
         // The bundled agent packs become the writable, watched packs root — before anything
         // (a run, the Plan panel, a debug tool) can ask for them.
         materializeAgentPacks()

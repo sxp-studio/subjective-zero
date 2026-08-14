@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Proof for the SZFactGen spike: the generated catalog in SZCore matches the spec field
-// for field, the generated facts section in SZRuntime is byte-verbatim spec text, the
-// generator is deterministic, and the rigid grammar fails loudly on every line shape it
-// must reject.
+// Proof for SZFactGen: the generated facts section in SZRuntime is byte-verbatim spec
+// text, the generator is deterministic, and the rigid grammar fails loudly on every line
+// shape it must reject.
 import Foundation
 import Testing
 @testable import SZCore
@@ -19,68 +18,30 @@ private func specSource() throws -> String {
     return try String(contentsOf: url, encoding: .utf8)
 }
 
-// MARK: - The catalog vs. the spec
+// MARK: - The parsed spec has the approved shape
 
-@Test func catalogMatchesTheSpecFieldForField() throws {
+@Test func theSpecParsesToTheApprovedShape() throws {
     let spec = try SZFactGen.parse(try specSource())
-    #expect(SZFactCatalog.all.count == spec.fields.count)
-    for (record, field) in zip(SZFactCatalog.all, spec.fields) {
-        #expect(record.name == field.name)
-        #expect(record.swiftType == field.swiftType)
-        #expect(record.kind == field.kind)
-        #expect(record.doc == field.doc)
-        #expect(record.lazy == field.lazy)
+    // The wire document and its typed groups, in file order.
+    let owners = Dictionary(grouping: spec.fields, by: \.owner)
+    #expect(Set(owners.keys) == ["SZFacts", "SZRun", "SZAssignment"])
+    #expect(owners["SZFacts"]?.map(\.name) == ["message", "node", "resuming", "run", "assignment"])
+    #expect(owners["SZRun"]?.map(\.name) == ["workSet", "round", "roundCap", "steers", "instruction"])
+    #expect(owners["SZAssignment"]?.map(\.name) == ["attempt", "note"])
+    // Typed-group references and the plain whitelist, spot-checked.
+    func field(_ name: String, _ owner: String) -> SZFactField? {
+        spec.fields.first { $0.name == name && $0.owner == owner }
     }
-}
-
-@Test func catalogHasTheApprovedShape() throws {
-    let all = SZFactCatalog.all
-    #expect(all.count == 22)
-    #expect(all.filter { $0.kind == "build" }.count == 11)
-    #expect(all.filter { $0.kind == "message" }.count == 4)
-    #expect(all.filter { $0.kind == "work" }.count == 4)
-    #expect(all.filter { $0.kind == "request" }.count == 3)
-
-    // graphJSON is the one heavy field; the // lazy marker must surface in its record.
-    let lazyRecords = all.filter(\.lazy)
-    #expect(lazyRecords.map(\.name) == ["graphJSON"])
-    #expect(lazyRecords.first?.swiftType == "String")
-    #expect(lazyRecords.first?.kind == "build")
-
-    // Spot checks across kinds, including the optional spelling.
-    func record(_ name: String, _ kind: String) -> SZFactRecord? {
-        all.first { $0.name == name && $0.kind == kind }
-    }
-    #expect(record("unimplemented", "build")?.swiftType == "[String]")
-    #expect(record("workSet", "build")?.swiftType == "[String]")
-    #expect(record("nodeStatuses", "build")?.swiftType == "[String: String]")
-    #expect(record("nodeSeed", "message")?.swiftType == "String?")
-    #expect(record("resumeSession", "work")?.swiftType == "String?")
-    #expect(record("nodes", "request")?.swiftType == "[String]")
-    // Every record carries a doc — the grammar makes doc-less vars unrepresentable.
-    #expect(all.allSatisfy { !$0.doc.isEmpty })
-}
-
-@Test func effectsParseAndTolerateAKindWithoutAnEnum() throws {
-    let spec = try SZFactGen.parse(try specSource())
-    let byKind = Dictionary(uniqueKeysWithValues: spec.effects.map { ($0.kind, $0.cases) })
-    #expect(byKind["build"] == ["captureStatuses"])
-    #expect(byKind["message"] == ["requestBuild"])
-    #expect(byKind["request"] == ["split", "merge"])
-    #expect(byKind["work"] == nil)   // work has facts but no effect enum — legal
-}
-
-@Test func effectCatalogMatchesTheSpecEnumForEnum() throws {
-    // The generated catalog compiled into SZCore mirrors the spec's effect enums exactly —
-    // what the traversal engine validates a step's requested effects against.
-    let spec = try SZFactGen.parse(try specSource())
-    #expect(SZEffectCatalog.byKind.count == spec.effects.count)
-    for effect in spec.effects {
-        #expect(SZEffectCatalog.byKind[effect.kind] == effect.cases)
-        #expect(SZEffectCatalog.cases(kind: effect.kind) == effect.cases)
-    }
-    // A kind with no effect enum answers the empty set, never nil-crashes.
-    #expect(SZEffectCatalog.cases(kind: "work") == [])
+    #expect(field("run", "SZFacts")?.swiftType == "SZRun?")
+    #expect(field("assignment", "SZFacts")?.swiftType == "SZAssignment?")
+    #expect(field("node", "SZFacts")?.swiftType == "UUID?")
+    #expect(field("workSet", "SZRun")?.swiftType == "[UUID]")
+    #expect(field("note", "SZAssignment")?.swiftType == "String?")
+    // Every field carries a doc — the grammar makes doc-less vars unrepresentable, which
+    // is where the consumer rule lives.
+    #expect(spec.fields.allSatisfy { !$0.doc.isEmpty })
+    // The one effect with a live consumer.
+    #expect(spec.effectCases == ["requestBuild"])
 }
 
 // MARK: - The runtime constant vs. the spec
@@ -92,30 +53,26 @@ private func specSource() throws -> String {
     #expect(SZStepSDKGenerated.factsSection == spec.regionText)
     #expect(SZStepSDKGenerated.factsSection.hasPrefix(SZFactGen.beginSentinel))
     #expect(SZStepSDKGenerated.factsSection.hasSuffix(SZFactGen.endSentinel))
-    #expect(SZStepSDKGenerated.factsSection.contains("public struct SZBuildFacts: Codable, Sendable {"))
-    // The region alone must be enough for a step to decode the wire shape — the derived
-    // conveniences stay below the end sentinel and out of the SDK.
-    #expect(!SZStepSDKGenerated.factsSection.contains("hasWorkLeft"))
+    #expect(SZStepSDKGenerated.factsSection.contains("public struct SZFacts: Codable, Sendable {"))
+    // The conveniences live below the end sentinel and ride the SDK separately.
+    #expect(!SZStepSDKGenerated.factsSection.contains("var hasWorkLeft"))
+    #expect(SZStepSDKGenerated.conveniences.contains("hasWorkLeft"))
 }
 
 // MARK: - Determinism
 
 @Test func generationIsDeterministic() throws {
     let source = try specSource()
-    #expect(try SZFactGen.catalogSource(from: source) == SZFactGen.catalogSource(from: source))
     #expect(try SZFactGen.factsSectionSource(from: source) == SZFactGen.factsSectionSource(from: source))
     // And stable across independently re-read bytes, not just repeated calls.
     let again = try specSource()
-    #expect(try SZFactGen.catalogSource(from: source) == SZFactGen.catalogSource(from: again))
+    #expect(try SZFactGen.factsSectionSource(from: source) == SZFactGen.factsSectionSource(from: again))
 }
 
-@Test func generatedSourcesCarryNoTimestamps() throws {
-    let source = try specSource()
-    let catalog = try SZFactGen.catalogSource(from: source)
-    let section = try SZFactGen.factsSectionSource(from: source)
-    for year in ["202", "Date", "date:"] {
-        #expect(!catalog.contains(year))
-        #expect(!section.contains(year))
+@Test func generatedSourceCarriesNoTimestamps() throws {
+    let section = try SZFactGen.factsSectionSource(from: try specSource())
+    for marker in ["202", "Date(", "date:"] {
+        #expect(!section.contains(marker))
     }
 }
 
@@ -125,9 +82,17 @@ private func spec(_ body: String) -> String {
     "// SZFactGen:begin\n\(body)\n// SZFactGen:end\n"
 }
 
+/// The smallest legal region — the root document with one field.
+private let minimalRoot = """
+public struct SZFacts: Codable, Sendable {
+    /// Fine.
+    public var message: String
+}
+"""
+
 @Test func missingSentinelsAreErrors() {
     #expect(throws: SZFactGenFailure.missingSentinel("// SZFactGen:begin")) {
-        try SZFactGen.parse("public struct SZBuildFacts: Codable, Sendable {\n}\n")
+        try SZFactGen.parse("public struct SZFacts: Codable, Sendable {\n}\n")
     }
     #expect(throws: SZFactGenFailure.missingSentinel("// SZFactGen:end")) {
         try SZFactGen.parse("// SZFactGen:begin\n")
@@ -135,19 +100,18 @@ private func spec(_ body: String) -> String {
 }
 
 @Test func aSentinelInsideTheRegionFailsLoudlyInsteadOfTruncating() {
-    // The author meant the region to span both structs; the stray end sentinel between them
-    // would silently truncate the spec at line 6 — the second struct drifting out of the
-    // catalog while still compiling everywhere. The duplicate must be loud, never quiet.
+    // A stray end sentinel would silently truncate the spec — the struct below it drifting
+    // out of the SDK while still compiling everywhere. The duplicate must be loud.
     let truncated = """
     // SZFactGen:begin
-    public struct SZBuildFacts: Codable, Sendable {
+    public struct SZFacts: Codable, Sendable {
         /// Fine.
-        public var round: Int
+        public var message: String
     }
     // SZFactGen:end
-    public struct SZMessageFacts: Codable, Sendable {
+    public struct SZRun: Codable, Sendable {
         /// Silently lost without the stray-sentinel check.
-        public var resuming: Bool
+        public var round: Int
     }
     // SZFactGen:end
     """
@@ -155,13 +119,7 @@ private func spec(_ body: String) -> String {
         try SZFactGen.parse(truncated)
     }
 
-    // A second BEGIN below the region is the same mistake in the other spelling.
-    let doubledBegin = spec("""
-    public struct SZBuildFacts: Codable, Sendable {
-        /// Fine.
-        public var round: Int
-    }
-    """) + "// SZFactGen:begin\n"
+    let doubledBegin = spec(minimalRoot) + "// SZFactGen:begin\n"
     #expect(throws: SZFactGenFailure.straySentinel(line: 7, sentinel: "// SZFactGen:begin")) {
         try SZFactGen.parse(doubledBegin)
     }
@@ -169,9 +127,9 @@ private func spec(_ body: String) -> String {
 
 @Test func unclassifiableLinesAreErrors() {
     let bad = spec("""
-    public struct SZBuildFacts: Codable, Sendable {
+    public struct SZFacts: Codable, Sendable {
         /// Fine.
-        public var workLeft: Int
+        public var message: String
         let sneaky = 1
     }
     """)
@@ -182,21 +140,21 @@ private func spec(_ body: String) -> String {
 
 @Test func varWithoutDocIsAnError() {
     let bad = spec("""
-    public struct SZBuildFacts: Codable, Sendable {
-        public var workLeft: Int
+    public struct SZFacts: Codable, Sendable {
+        public var message: String
     }
     """)
-    #expect(throws: SZFactGenFailure.varWithoutDoc(line: 3, name: "workLeft")) {
+    #expect(throws: SZFactGenFailure.varWithoutDoc(line: 3, name: "message")) {
         try SZFactGen.parse(bad)
     }
 }
 
 @Test func doubledDocIsAnError() {
     let bad = spec("""
-    public struct SZBuildFacts: Codable, Sendable {
+    public struct SZFacts: Codable, Sendable {
         /// One.
         /// Two.
-        public var workLeft: Int
+        public var message: String
     }
     """)
     #expect(throws: SZFactGenFailure.doubledDoc(line: 4)) { try SZFactGen.parse(bad) }
@@ -204,7 +162,7 @@ private func spec(_ body: String) -> String {
 
 @Test func danglingDocIsAnError() {
     let bad = spec("""
-    public struct SZBuildFacts: Codable, Sendable {
+    public struct SZFacts: Codable, Sendable {
         /// Documents nothing.
     }
     """)
@@ -213,7 +171,7 @@ private func spec(_ body: String) -> String {
 
 @Test func typeOutsideTheWhitelistIsAnError() {
     let bad = spec("""
-    public struct SZBuildFacts: Codable, Sendable {
+    public struct SZFacts: Codable, Sendable {
         /// Sneaky.
         public var when: Date
     }
@@ -223,65 +181,92 @@ private func spec(_ body: String) -> String {
     }
 }
 
-@Test func onlyOptionalStringIsAllowed() {
-    let bad = spec("""
-    public struct SZMessageFacts: Codable, Sendable {
+@Test func aStructTypedFieldMustNameADeclaredStructAndBeOptional() {
+    // A reference to a struct the region never declares is a typo, not tolerance.
+    let unknown = spec("""
+    public struct SZFacts: Codable, Sendable {
         /// Sneaky.
-        public var count: Int?
+        public var run: SZGhost?
     }
     """)
-    #expect(throws: SZFactGenFailure.unsupportedType(line: 4, type: "Int?")) {
-        try SZFactGen.parse(bad)
+    #expect(throws: SZFactGenFailure.unknownStructType(line: 4, type: "SZGhost?")) {
+        try SZFactGen.parse(unknown)
     }
+    // A NON-optional group is refused: outside its moment the group is nil, never zeroed.
+    let nonOptional = spec("""
+    public struct SZFacts: Codable, Sendable {
+        /// Sneaky.
+        public var run: SZRun
+    }
+
+    public struct SZRun: Codable, Sendable {
+        /// Fine.
+        public var round: Int
+    }
+    """)
+    #expect(throws: SZFactGenFailure.unsupportedType(line: 4, type: "SZRun")) {
+        try SZFactGen.parse(nonOptional)
+    }
+}
+
+@Test func initBlocksPassThroughUnparsed() throws {
+    // A struct may declare public inits — opaque to the grammar, compiler-checked on both
+    // sides; the fields around them still parse.
+    let withInit = spec("""
+    public struct SZFacts: Codable, Sendable {
+        /// Fine.
+        public var message: String
+
+        public init(message: String,
+                    extra: Int = 0) {
+            self.message = message
+        }
+
+        /// Also fine.
+        public var resuming: Bool
+    }
+    """)
+    let parsed = try SZFactGen.parse(withInit)
+    #expect(parsed.fields.map(\.name) == ["message", "resuming"])
+}
+
+@Test func theRootDocumentIsRequired() {
+    let noRoot = spec("""
+    public struct SZRun: Codable, Sendable {
+        /// Fine.
+        public var round: Int
+    }
+    """)
+    #expect(throws: SZFactGenFailure.missingRoot) { try SZFactGen.parse(noRoot) }
 }
 
 @Test func effectEnumRulesHold() {
     // A raw-valued case breaks the plain-case grammar.
-    let rawValue = spec("""
-    public struct SZBuildFacts: Codable, Sendable {
-        /// Fine.
-        public var workLeft: Int
-    }
+    let rawValue = spec(minimalRoot + """
 
-    public enum SZBuildEffect: String, Codable, Sendable {
-        case captureStatuses = "capture"
+
+    public enum SZEffect: String, Codable, Sendable {
+        case requestBuild = "build"
     }
     """)
-    #expect(throws: SZFactGenFailure.malformedCase(line: 8, text: "case captureStatuses = \"capture\"")) {
+    #expect(throws: SZFactGenFailure.malformedCase(line: 8, text: "case requestBuild = \"build\"")) {
         try SZFactGen.parse(rawValue)
     }
     // An empty effect enum must be omitted, not declared.
-    let empty = spec("""
-    public struct SZBuildFacts: Codable, Sendable {
-        /// Fine.
-        public var workLeft: Int
-    }
+    let empty = spec(minimalRoot + """
 
-    public enum SZBuildEffect: String, Codable, Sendable {
+
+    public enum SZEffect: String, Codable, Sendable {
     }
     """)
-    #expect(throws: SZFactGenFailure.emptyEffectEnum(line: 8, name: "SZBuildEffect")) {
+    #expect(throws: SZFactGenFailure.emptyEffectEnum(line: 8)) {
         try SZFactGen.parse(empty)
-    }
-    // An effect enum whose kind has no facts struct is a typo, not tolerance.
-    let orphan = spec("""
-    public struct SZBuildFacts: Codable, Sendable {
-        /// Fine.
-        public var workLeft: Int
-    }
-
-    public enum SZCharEffect: String, Codable, Sendable {
-        case requestBuild
-    }
-    """)
-    #expect(throws: SZFactGenFailure.effectWithoutFacts(line: 10, name: "SZCharEffect")) {
-        try SZFactGen.parse(orphan)
     }
 }
 
 @Test func unterminatedDeclarationIsAnError() {
-    let bad = "// SZFactGen:begin\npublic struct SZBuildFacts: Codable, Sendable {\n// SZFactGen:end\n"
-    #expect(throws: SZFactGenFailure.unterminatedDeclaration(name: "SZBuildFacts")) {
+    let bad = "// SZFactGen:begin\npublic struct SZFacts: Codable, Sendable {\n// SZFactGen:end\n"
+    #expect(throws: SZFactGenFailure.unterminatedDeclaration(name: "SZFacts")) {
         try SZFactGen.parse(bad)
     }
 }
@@ -289,37 +274,33 @@ private func spec(_ body: String) -> String {
 @Test func docOutsideAStructIsAnError() {
     let bad = spec("""
     /// Free-floating prose belongs above the begin sentinel.
-    public struct SZBuildFacts: Codable, Sendable {
-        /// Fine.
-        public var workLeft: Int
-    }
-    """)
+    """ + "\n" + minimalRoot)
     #expect(throws: SZFactGenFailure.docOutsideStruct(line: 2)) { try SZFactGen.parse(bad) }
 }
 
 // MARK: - The compiled side of the spec
 
 @Test func derivedConveniencesReadTheFacts() throws {
-    var facts = SZBuildFacts(
-        unimplemented: ["a", "b"], workSet: ["a", "b"], nodeStatuses: ["a": "implementing"],
-        buildErrors: [:], round: 1, roundCap: 3, briefed: true, projectLoaded: true,
-        graphJSON: "{}", steers: [], runVariant: ""
-    )
+    var facts = SZFacts(message: "go",
+                        run: SZRun(workSet: [UUID()], round: 1, roundCap: 2,
+                                   steers: [], instruction: ""))
     #expect(facts.hasWorkLeft)
-    #expect(!facts.fleetIsFailing)
-    facts.unimplemented = []
-    facts.nodeStatuses["a"] = "stuck"
+    facts.run?.workSet = []
     #expect(!facts.hasWorkLeft)
-    #expect(facts.fleetIsFailing)
-    facts.nodeStatuses["a"] = "done"
-    facts.buildErrors["b"] = "error: missing symbol"
-    #expect(facts.fleetIsFailing)
+    facts.run = nil
+    #expect(!facts.hasWorkLeft)
 }
 
-@Test func factsStructsRoundTripAsCodable() throws {
-    let chat = SZMessageFacts(sentMessage: "hi", resuming: false, draftedWork: true, nodeSeed: nil)
-    let data = try JSONEncoder().encode(chat)
-    let back = try JSONDecoder().decode(SZMessageFacts.self, from: data)
-    #expect(back.sentMessage == "hi")
-    #expect(back.nodeSeed == nil)
+@Test func factsRoundTripAsCodable() throws {
+    let node = UUID()
+    let facts = SZFacts(message: "hi", node: node, resuming: true,
+                        assignment: SZAssignment(attempt: 2, note: "use Rec.709"))
+    let data = try JSONEncoder().encode(facts)
+    let back = try JSONDecoder().decode(SZFacts.self, from: data)
+    #expect(back.message == "hi")
+    #expect(back.node == node)
+    #expect(back.resuming)
+    #expect(back.run == nil)
+    #expect(back.assignment?.attempt == 2)
+    #expect(back.assignment?.note == "use Rec.709")
 }
