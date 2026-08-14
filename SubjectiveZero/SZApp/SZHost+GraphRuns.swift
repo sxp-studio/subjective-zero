@@ -27,7 +27,7 @@ extension SZHost {
     func beginAgentGraphRun(_ sighting: SZTraversalSighting) {
         let record = SZAgentGraphRun(id: sighting.id, agent: sighting.agent,
                                      graphName: sighting.graphName, kind: sighting.kind,
-                                     thread: sighting.kind == .chat ? nil : runID,
+                                     thread: sighting.kind == .message ? nil : runID,
                                      work: sighting.work)
         agentGraphRuns = SZAgentGraphRun.ordered(agentGraphRuns + [record])
     }

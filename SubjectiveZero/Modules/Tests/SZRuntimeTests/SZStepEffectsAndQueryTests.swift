@@ -31,13 +31,13 @@ private let chatFacts = #"{"sentMessage": "hey", "resuming": false, "draftedWork
 
 /// An effect-emitting router, still one line — the authoring bar the wire had to clear.
 private let effectRouter = """
-let step = SZChatRouter("answer", "build") { _ in .outcome("build", effects: ["requestBuild"]) }
+let step = SZMessageRouter("answer", "build") { _ in .outcome("build", effects: ["requestBuild"]) }
 """
 
 /// The mixed closure: a bare string literal in one branch, an effect answer in the other —
 /// both spellings at home in ONE body (`SZAnswer`'s string-literal conformance).
 private let mixedRouter = """
-let step = SZChatRouter("answer", "build") { ctx in
+let step = SZMessageRouter("answer", "build") { ctx in
     if ctx.resuming { return "answer" }
     return .outcome("build", effects: ["requestBuild"])
 }
@@ -46,7 +46,7 @@ let step = SZChatRouter("answer", "build") { ctx in
 /// The spike's askModel router, unchanged — the QueryService integration drives it.
 private let classifyRouter = """
 struct Ruling: Codable { let kind: String }
-let step = SZChatRouter("answer", "build") { ctx in
+let step = SZMessageRouter("answer", "build") { ctx in
     try await ctx.askModel(template: "classify-reply", as: Ruling.self).kind
 }
 """
@@ -105,8 +105,8 @@ struct SZStepEffectsAndQueryTests {
             })
 
         let result = await loader.evaluate(factsJSON: chatFacts) { requestJSON in
-            try await service.serve(agent: "coding", graph: "chat", step: "classify",
-                                    kind: .chat, factsJSON: chatFacts,
+            try await service.serve(agent: "coding", graph: "message", step: "classify",
+                                    kind: .message, factsJSON: chatFacts,
                                     requestJSON: requestJSON)
         }
         #expect(result == .outcome("build"))

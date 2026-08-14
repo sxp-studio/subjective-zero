@@ -148,9 +148,9 @@ public enum SZAgentGraphLayout {
     /// lanes.
     static func messageRank(_ kind: SZMessageKind) -> Int {
         switch kind {
-        case .build: 0
-        case .request: 1
-        case .chat: 2
+        case .message: 0
+        case .build: 1
+        case .request: 2
         case .work: 3
         case .steer: 4
         }

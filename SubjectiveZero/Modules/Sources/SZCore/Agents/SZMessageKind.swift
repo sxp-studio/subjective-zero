@@ -13,10 +13,13 @@ import Foundation
 /// era's dispatch concluded on send. A dispatch now waits for its set, so the reply is the
 /// dispatch node's own outcome, not a message.)
 public enum SZMessageKind: String, Codable, Sendable, CaseIterable {
-    /// One reply on a scope's transcript.
-    case chat
-    /// Open a fleet thread over the project's work set (the Build press, or a chat turn's
-    /// requestBuild effect). Supersedable while queued.
+    /// Human prose — ONE kind for everything someone says, whoever they say it to. What a
+    /// message MEANS is not a kind: the graph rules on content (the triage ask), so "answer
+    /// me" and "build this" arrive identically and part ways inside the picture.
+    case message
+    /// The granted build — machine provenance, minted when a run is actually started (the
+    /// Build press, or a `message` whose triage ruled `implement`). Carries the standing
+    /// instruction into the build lane. Supersedable while queued.
     case build
     /// One dispatched unit of a run's work set — a node's coding assignment, addressed to
     /// the seat that implements it.
@@ -32,5 +35,5 @@ public enum SZMessageKind: String, Codable, Sendable, CaseIterable {
     /// the message form's declared outcome set, so "that is not a kind" and "steer may
     /// never be routed" are both refused by the ordinary undeclared-outcome check.
     public static let deliverable: Set<SZMessageKind> =
-        [.chat, .build, .work, .request]
+        [.message, .build, .work, .request]
 }

@@ -7,6 +7,6 @@
     { "id": "answer", "title": "Answer", "turn": { "brief": "prompts/chat.md.mustache", "tools": [], "session": "message" } }
   ],
   "edges": [
-    { "from": "message", "outcome": "chat", "to": "answer" }
+    { "from": "message", "outcome": "message", "to": "answer" }
   ]
 }

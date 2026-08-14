@@ -13,13 +13,14 @@ Shipped packs: `SZAI/Resources/Agents/`. Tutorial: [AUTHORING.md](AUTHORING.md).
 ## The message vocabulary
 
 One enum, `SZMessageKind`, spoken everywhere — queue intent, message-node port, delivery record.
-A graph's **message node** is its one door: a delivered message leaves by the port bearing its own
-kind.
+A graph's **message node** is its one door: a delivery leaves by the port bearing its kind — and
+for prose, that is where classification STOPS being provenance and becomes content: the `message`
+port routes into a triage ask that rules on what was said.
 
 | message | means | who sends it |
 |---|---|---|
-| `chat` | one reply on a scope's transcript | the user, or a tool |
-| `build` | open a fleet thread over the project's work set | the Build press, `ui_build`, a chat turn's requestBuild effect |
+| `message` | human prose — ONE kind for everything someone says; what it MEANS is ruled inside the graph (the triage ask), never by the kind | the user, or a tool speaking prose |
+| `build` | the granted build, carrying the standing instruction into the build lane | the Build press, `ui_run`, or a `message` whose triage ruled `implement` |
 | `work` | one node's coding assignment, dispatched off the run's work set | a director graph's dispatch node |
 | `request` | a structured proxied operation (split/merge …) | `ui_split_node`, `ui_merge_nodes` — routed on payload, never prose |
 | `steer` | a note folded into the recipient's NEXT brief | the user, mid-run |

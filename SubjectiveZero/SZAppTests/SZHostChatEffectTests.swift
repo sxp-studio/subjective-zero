@@ -18,7 +18,7 @@ struct SZHostChatEffectTests {
 
     @Test func theRequestBuildEffectLandsOnTheQueuedRunLane() async {
         let host = SZHost()
-        await host.perform(effect: "requestBuild", kind: .chat)
+        await host.perform(effect: "requestBuild", kind: .message)
         // Queued (a bare effect name carries no instruction); the bare host's pump could
         // not start it (no MCP server), so the request must still be waiting.
         #expect(host.pendingDirectorRun == "")
@@ -39,7 +39,7 @@ struct SZHostChatEffectTests {
         let claim = SZClaimToken(label: "test run")
         #expect(host.ledger.tryAcquire([.run], as: claim))
         defer { host.ledger.releaseAll(of: claim) }
-        await host.perform(effect: "requestBuild", kind: .chat)
+        await host.perform(effect: "requestBuild", kind: .message)
         #expect(host.pendingDirectorRun == nil)
         #expect(host.store.messages(for: .director).contains {
             $0.text.contains("requestBuild") && $0.text.contains("skipped")

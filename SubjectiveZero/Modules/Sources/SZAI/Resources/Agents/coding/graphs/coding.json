@@ -20,7 +20,7 @@
   "edges": [
     { "from": "message", "outcome": "work", "to": "retrying" },
     { "from": "message", "outcome": "request", "to": "request-op" },
-    { "from": "message", "outcome": "chat", "to": "resuming" },
+    { "from": "message", "outcome": "message", "to": "resuming" },
     { "from": "resuming", "outcome": "no", "to": "chat" },
     { "from": "resuming", "outcome": "yes", "to": "chat-resumed" },
 

@@ -46,14 +46,14 @@ public struct SZBuildFacts: Codable, Sendable {
     public var runVariant: String
 }
 
-public struct SZChatFacts: Codable, Sendable {
-    /// The user message that opened this chat turn.
+public struct SZMessageFacts: Codable, Sendable {
+    /// The prose that opened this turn.
     public var sentMessage: String
     /// Whether this turn resumes an existing session.
     public var resuming: Bool
-    /// Whether this chat turn left new unimplemented work behind.
+    /// Whether this turn left new unimplemented work behind.
     public var draftedWork: Bool
-    /// The node id this chat is seeded from, when it is anchored to one.
+    /// The node id this message is seeded from, when it is anchored to one.
     public var nodeSeed: String?
 }
 
@@ -81,7 +81,7 @@ public enum SZBuildEffect: String, Codable, Sendable {
     case captureStatuses
 }
 
-public enum SZChatEffect: String, Codable, Sendable {
+public enum SZMessageEffect: String, Codable, Sendable {
     case requestBuild
 }
 

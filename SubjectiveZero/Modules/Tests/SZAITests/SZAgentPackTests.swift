@@ -239,7 +239,7 @@ private func cleanup(_ root: URL) {
     // Merging kinds into one file is ALLOWED, never required: an agent may still spread
     // its lanes over several documents as long as each kind has one destination.
     var director = directorPack(graph: turnGraph(name: "run"))
-    director.graphs["talk"] = turnGraph(name: "talk", kind: "chat")
+    director.graphs["talk"] = turnGraph(name: "talk", kind: "message")
     let root = try makeRoot([director, codingPack()])
     defer { cleanup(root) }
     let loaded = SZAgentPackLoader.load(root: root)
@@ -248,7 +248,7 @@ private func cleanup(_ root: URL) {
 
     let pack = try #require(loaded.packs.first { $0.id == "director-a" })
     #expect(pack.graph(routing: .build)?.name == "run")
-    #expect(pack.graph(routing: .chat)?.name == "talk")
+    #expect(pack.graph(routing: .message)?.name == "talk")
     #expect(pack.graph(routing: .work) == nil)
 }
 
@@ -332,7 +332,7 @@ private func cleanup(_ root: URL) {
 @Test func unfilledAndContestedSeatsAreLibraryDefects() async throws {
     // Nobody claims a seat: both report unfilled, and the assignment stays empty.
     let seatless = try makeRoot([ScratchPack(folder: "solo",
-                                             graphs: ["chat": turnGraph(name: "chat", kind: "chat",
+                                             graphs: ["chat": turnGraph(name: "chat", kind: "message",
                                                                         brief: "prompts/p.md.mustache")],
                                              prompts: ["p.md.mustache"])])
     defer { cleanup(seatless) }
@@ -407,11 +407,11 @@ private func cleanup(_ root: URL) {
     defer { cleanup(root) }
     let loaded = SZAgentPackLoader.load(root: root)
     let chatty = StubSteps(infos: [
-        "director-a/route": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
+        "director-a/route": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "message"),
     ])
     let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: chatty)
     #expect(defects == [.stepFactsMismatch(agent: "director-a", graph: "run", node: "route",
-                                           step: "route", declared: "chat")])
+                                           step: "route", declared: "message")])
 
     // A declaration WITHOUT a facts kind is refused too: every SDK path stamps the kind,
     // so an unstamped declaration is hand-rolled — the very case the gate exists for.
@@ -504,9 +504,9 @@ private let shippedPacksRoot = URL(filePath: #filePath)
 /// these claims, field for field — edit a shipped step and both sides move together.
 private let shippedPackSteps = StubSteps(infos: [
     "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
-    "director/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
+    "director/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "message"),
     "coding/retrying": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "work"),
-    "coding/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
+    "coding/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "message"),
     "coding/request-op": SZStepDeclarationInfo(outcomes: ["split", "merge"], facts: "request"),
 ])
 
@@ -535,8 +535,8 @@ private let shippedPackSteps = StubSteps(infos: [
     let director = try #require(loaded.packs.first { $0.id == "director" })
     #expect(director.graphs.map(\.name) == ["director"])
     let graph = try #require(director.graph(routing: .build))
-    #expect(Set(graph.routes.keys) == [.chat, .build])
-    #expect(graph.routes[.chat] == "resuming")
+    #expect(Set(graph.routes.keys) == [.message, .build])
+    #expect(graph.routes[.message] == "triage")
     // V1 ships ONE build lane — a work message routes straight into decompose, and the
     // retry round is the dispatch's own leashed settled edge. No strategy router: a
     // preference is not a decision, and anyone who wants variant lanes authors them
@@ -551,28 +551,24 @@ private let shippedPackSteps = StubSteps(infos: [
     #expect(graph.edge(from: "reconcile", outcome: "ok")?.to == "implement")
 }
 
-/// The chat lane: the cold/resumed fork feeds the `route-reply` ruling, whose outcomes all
-/// END the traversal — `build`'s work is the `requestBuild` EFFECT (performed before edge
-/// routing), so no outcome needs an edge. It now lives in the same document as the build
-/// lane, and stays lane-pure because nothing joins the two.
-@Test func theShippedChatLaneRoutesBothTurnsIntoRouteReply() throws {
+/// The message lane: TRIAGE rules on the prose first — `answer` routes into the resuming
+/// fork whose turns END the traversal, `implement` fires the requestBuild effect as pure
+/// config and ends at the ask. No post-turn ruling exists; what an agent says never routes.
+@Test func theShippedMessageLaneTriagesBeforeAnyTurn() throws {
     let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     let director = try #require(loaded.packs.first { $0.id == "director" })
-    let graph = try #require(director.graph(routing: .chat))
+    let graph = try #require(director.graph(routing: .message))
+    #expect(graph.node("triage")?.form == .ask(.init(
+        prompt: "prompts/triage.md.mustache",
+        outcomes: ["answer", "implement"],
+        effects: ["implement": ["requestBuild"]])))
+    #expect(graph.edge(from: "triage", outcome: "answer")?.to == "resuming")
+    #expect(graph.edge(from: "triage", outcome: "implement") == nil)   // effect + end
     #expect(graph.edge(from: "resuming", outcome: "no")?.to == "cold")
     #expect(graph.edge(from: "resuming", outcome: "yes")?.to == "resumed")
-    #expect(graph.edge(from: "cold", outcome: "ok")?.to == "route-reply")
-    #expect(graph.edge(from: "resumed", outcome: "ok")?.to == "route-reply")
-    // route-reply is the shipped ASK node — the declarative ruling: prompt file in, one
-    // structured completion, and only `build` carries the effect. Pure config, no Swift.
-    #expect(graph.node("route-reply")?.form == .ask(.init(
-        prompt: "prompts/route-reply.md.mustache",
-        outcomes: ["answer", "build", "plan"],
-        effects: ["build": ["requestBuild"]])))
-    for outcome in ["answer", "build", "plan"] {
-        #expect(graph.edge(from: "route-reply", outcome: outcome) == nil)
-    }
-    #expect(graph.kinds(reaching: "route-reply") == [.chat])
+    #expect(graph.edge(from: "cold", outcome: "ok") == nil)      // the turn's ending is the end
+    #expect(graph.edge(from: "resumed", outcome: "ok") == nil)
+    #expect(graph.kinds(reaching: "triage") == [.message])
 }
 
 /// The rule the whole change exists to enforce, asserted over the library generically — no

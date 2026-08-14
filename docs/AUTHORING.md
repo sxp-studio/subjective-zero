@@ -77,8 +77,8 @@ turn uses it — briefs are read per render, no relaunch. Templates use `{{token
 from a closed, per-kind namespace; a token nothing substitutes is refused at load, never shipped
 to a model as a literal.
 
-> **Which lanes are live today.** The director's build and `chat` lanes, the coding agent's `work`
-> and `chat` lanes, and the debug agent's `chat` are all traversed — every conversation in the app
+> **Which lanes are live today.** The director's build and `message` lanes, the coding agent's `work`
+> and `message` lanes, and the debug agent's `message` are all traversed — every conversation in the app
 > now walks its agent's graph and lands in the RUNS list. The coding agent's `request` lane ships
 > and validates but nothing routes to it yet: the split/merge path still renders from the host's
 > own copy. Editing that brief changes nothing until it is routed; the lane is there so the routing
@@ -149,11 +149,11 @@ referenced step through the real toolchain — without spending a token:
 
 ```
 agent coding · seat: coding · 3 steps · 12 prompts
-  graph coding · chat · request · work · 10 nodes
+  graph coding · message · request · work · 10 nodes
 agent debug · no seat · 0 steps · 1 prompt
-  graph debug · chat · 2 nodes
+  graph debug · message · 2 nodes
 agent director · seat: director · 2 steps · 6 prompts
-  graph director · build · chat · 9 nodes
+  graph director · build · message · 9 nodes
 verdict: validates — 3 agents, zero defects
 ```
 

@@ -53,16 +53,16 @@ struct SZAgentGraphTests {
 
     @Test func theDoorsPortsAreTheGraphsRoutes() throws {
         let json = #"""
-        {"name": "chat",
+        {"name": "message",
          "nodes": [{"id": "message", "onMessage": {}},
                    {"id": "reply", "turn": {"brief": "prompts/chat.md.mustache", "session": "message"}}],
-         "edges": [{"from": "message", "outcome": "chat", "to": "reply"}]}
+         "edges": [{"from": "message", "outcome": "message", "to": "reply"}]}
         """#
         let graph = try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
         // The entry map is not stored any more — it is READ OFF the door's out-edges, which
         // is exactly why the door draws and the map never could.
-        #expect(graph.routes == [.chat: "reply"])
-        #expect(graph.handles(.chat))
+        #expect(graph.routes == [.message: "reply"])
+        #expect(graph.handles(.message))
         #expect(!graph.handles(.build))
         #expect(graph.messageNode?.id == "message")
         #expect(graph.defects().isEmpty)
@@ -164,8 +164,8 @@ struct SZAgentGraphTests {
         // Steps and briefs are typed to ONE kind's facts, so a node serving two lanes has
         // no checkable type — merging kinds into a file must not merge them into a node.
         var graph = makeBuildGraph()
-        graph.edges.append(.init(from: "message", outcome: "chat", to: "plan"))
-        #expect(graph.defects().contains(.laneImpure(node: "plan", lanes: ["build", "chat"])))
+        graph.edges.append(.init(from: "message", outcome: "message", to: "plan"))
+        #expect(graph.defects().contains(.laneImpure(node: "plan", lanes: ["build", "message"])))
     }
 
     @Test func aSettledLoopIsOneLaneAndMustBeLeashed() {

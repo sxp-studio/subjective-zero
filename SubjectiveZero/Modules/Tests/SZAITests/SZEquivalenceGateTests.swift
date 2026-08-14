@@ -144,15 +144,15 @@ struct SZEquivalenceGateTests {
 
         // — chat framings —
         out["chat-director-cold.md"] = try renderer.render(
-            agent: "director", template: "prompts/chat.md.mustache", kind: .chat,
+            agent: "director", template: "prompts/chat.md.mustache", kind: .message,
             factsJSON: factsJSON(["sentMessage": "make it warmer and add a soft glow",
                                   "resuming": false, "graphJSON": base]))
         out["chat-director-resumed.md"] = try renderer.render(
-            agent: "director", template: "prompts/chat-resumed.md.mustache", kind: .chat,
+            agent: "director", template: "prompts/chat-resumed.md.mustache", kind: .message,
             factsJSON: factsJSON(["sentMessage": "now dim the highlights a little",
                                   "resuming": true, "graphJSON": base]))
         out["chat-node-cold.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-chat.md.mustache", kind: .chat,
+            agent: "coding", template: "prompts/node-chat.md.mustache", kind: .message,
             factsJSON: factsJSON(["sentMessage": "add a strength slider",
                                   "resuming": false, "nodeSeed": grayID.uuidString]),
             delivery: SZBriefDelivery(

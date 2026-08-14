@@ -1,32 +1,124 @@
 {
   "name": "director",
   "label": "Director",
-  "hint": "Every message the director receives and what it does with each: a chat turn routed by its own ruling; a build decomposed into typed contracts, its fleet awaited at the dispatch and reconciled around the settled loop.",
+  "hint": "Every message the director receives and what it does with it: prose triaged by content \u2014 answered in conversation, or granted as a build whose fleet is awaited at the dispatch and reconciled around the settled loop.",
   "nodes": [
-    { "id": "message", "title": "On message", "onMessage": {} },
-
-    { "id": "resuming", "title": "Resuming?", "step": "resuming" },
-    { "id": "cold", "title": "Cold turn", "turn": { "brief": "prompts/chat.md.mustache" } },
-    { "id": "resumed", "title": "Resumed turn", "turn": { "brief": "prompts/chat-resumed.md.mustache", "session": "message" } },
-    { "id": "route-reply", "title": "Route the reply", "ask": { "prompt": "prompts/route-reply.md.mustache", "outcomes": ["answer", "build", "plan"], "effects": { "build": ["requestBuild"] } } },
-
-    { "id": "decompose", "title": "Decompose", "turn": { "brief": "prompts/decompose.md.mustache" } },
-    { "id": "implement", "title": "Implement", "dispatch": { "to": "coding", "items": "workSet" } },
-    { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
-    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "prompts/reconcile.md.mustache", "session": "message" } }
+    {
+      "id": "message",
+      "title": "On message",
+      "onMessage": {}
+    },
+    {
+      "id": "triage",
+      "title": "What's asked?",
+      "ask": {
+        "prompt": "prompts/triage.md.mustache",
+        "outcomes": [
+          "answer",
+          "implement"
+        ],
+        "effects": {
+          "implement": [
+            "requestBuild"
+          ]
+        }
+      }
+    },
+    {
+      "id": "resuming",
+      "title": "Resuming?",
+      "step": "resuming"
+    },
+    {
+      "id": "cold",
+      "title": "Cold turn",
+      "turn": {
+        "brief": "prompts/chat.md.mustache"
+      }
+    },
+    {
+      "id": "resumed",
+      "title": "Resumed turn",
+      "turn": {
+        "brief": "prompts/chat-resumed.md.mustache",
+        "session": "message"
+      }
+    },
+    {
+      "id": "decompose",
+      "title": "Decompose",
+      "turn": {
+        "brief": "prompts/decompose.md.mustache"
+      }
+    },
+    {
+      "id": "implement",
+      "title": "Implement",
+      "dispatch": {
+        "to": "coding",
+        "items": "workSet"
+      }
+    },
+    {
+      "id": "unresolved",
+      "title": "Still unresolved?",
+      "step": "work-left"
+    },
+    {
+      "id": "reconcile",
+      "title": "Reconcile",
+      "turn": {
+        "brief": "prompts/reconcile.md.mustache",
+        "session": "message"
+      }
+    }
   ],
   "edges": [
-    { "from": "message", "outcome": "chat", "to": "resuming" },
-    { "from": "message", "outcome": "build", "to": "decompose" },
-
-    { "from": "resuming", "outcome": "no", "to": "cold" },
-    { "from": "resuming", "outcome": "yes", "to": "resumed" },
-    { "from": "cold", "outcome": "ok", "to": "route-reply" },
-    { "from": "resumed", "outcome": "ok", "to": "route-reply" },
-
-    { "from": "decompose", "outcome": "ok", "to": "implement" },
-    { "from": "implement", "outcome": "settled", "to": "unresolved", "maxTraversals": 2 },
-    { "from": "unresolved", "outcome": "yes", "to": "reconcile" },
-    { "from": "reconcile", "outcome": "ok", "to": "implement" }
+    {
+      "from": "message",
+      "outcome": "message",
+      "to": "triage"
+    },
+    {
+      "from": "message",
+      "outcome": "build",
+      "to": "decompose"
+    },
+    {
+      "from": "triage",
+      "outcome": "answer",
+      "to": "resuming"
+    },
+    {
+      "from": "resuming",
+      "outcome": "no",
+      "to": "cold"
+    },
+    {
+      "from": "resuming",
+      "outcome": "yes",
+      "to": "resumed"
+    },
+    {
+      "from": "decompose",
+      "outcome": "ok",
+      "to": "implement"
+    },
+    {
+      "from": "implement",
+      "outcome": "settled",
+      "to": "unresolved",
+      "maxTraversals": 2
+    },
+    {
+      "from": "unresolved",
+      "outcome": "yes",
+      "to": "reconcile"
+    },
+    {
+      "from": "reconcile",
+      "outcome": "ok",
+      "to": "implement"
+    }
   ]
 }

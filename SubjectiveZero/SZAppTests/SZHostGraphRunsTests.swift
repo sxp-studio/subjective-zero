@@ -155,7 +155,7 @@ import SZCore
     host.beginAgentGraphRun(SZTraversalSighting(id: item, agent: "coding",
                                                 graphName: "coding", kind: .work, work: "n1"))
     host.beginAgentGraphRun(SZTraversalSighting(id: chat, agent: "coding",
-                                                graphName: "coding", kind: .chat))
+                                                graphName: "coding", kind: .message))
 
     func record(_ id: UUID) throws -> SZAgentGraphRun {
         try #require(host.agentGraphRuns.first { $0.id == id })

@@ -257,9 +257,9 @@ struct SZAgentGraphRunRow: View {
     /// facts, so the row draws what it carries: what KIND of traversal this was.
     static func glyph(for run: SZAgentGraphRun) -> String {
         switch run.kind {
+        case .message: "bubble.left"
         case .build: "play.circle"
         case .work: "wrench.and.screwdriver"
-        case .chat: "bubble.left"
         case .request: "envelope"
         case .steer: "arrow.triangle.turn.up.right.diamond"
         }

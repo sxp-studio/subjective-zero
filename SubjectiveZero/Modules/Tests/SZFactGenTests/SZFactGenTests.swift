@@ -37,7 +37,7 @@ private func specSource() throws -> String {
     let all = SZFactCatalog.all
     #expect(all.count == 22)
     #expect(all.filter { $0.kind == "build" }.count == 11)
-    #expect(all.filter { $0.kind == "chat" }.count == 4)
+    #expect(all.filter { $0.kind == "message" }.count == 4)
     #expect(all.filter { $0.kind == "work" }.count == 4)
     #expect(all.filter { $0.kind == "request" }.count == 3)
 
@@ -54,7 +54,7 @@ private func specSource() throws -> String {
     #expect(record("unimplemented", "build")?.swiftType == "[String]")
     #expect(record("workSet", "build")?.swiftType == "[String]")
     #expect(record("nodeStatuses", "build")?.swiftType == "[String: String]")
-    #expect(record("nodeSeed", "chat")?.swiftType == "String?")
+    #expect(record("nodeSeed", "message")?.swiftType == "String?")
     #expect(record("resumeSession", "work")?.swiftType == "String?")
     #expect(record("nodes", "request")?.swiftType == "[String]")
     // Every record carries a doc — the grammar makes doc-less vars unrepresentable.
@@ -65,7 +65,7 @@ private func specSource() throws -> String {
     let spec = try SZFactGen.parse(try specSource())
     let byKind = Dictionary(uniqueKeysWithValues: spec.effects.map { ($0.kind, $0.cases) })
     #expect(byKind["build"] == ["captureStatuses"])
-    #expect(byKind["chat"] == ["requestBuild"])
+    #expect(byKind["message"] == ["requestBuild"])
     #expect(byKind["request"] == ["split", "merge"])
     #expect(byKind["work"] == nil)   // work has facts but no effect enum — legal
 }
@@ -145,7 +145,7 @@ private func spec(_ body: String) -> String {
         public var round: Int
     }
     // SZFactGen:end
-    public struct SZChatFacts: Codable, Sendable {
+    public struct SZMessageFacts: Codable, Sendable {
         /// Silently lost without the stray-sentinel check.
         public var resuming: Bool
     }
@@ -225,7 +225,7 @@ private func spec(_ body: String) -> String {
 
 @Test func onlyOptionalStringIsAllowed() {
     let bad = spec("""
-    public struct SZChatFacts: Codable, Sendable {
+    public struct SZMessageFacts: Codable, Sendable {
         /// Sneaky.
         public var count: Int?
     }
@@ -317,9 +317,9 @@ private func spec(_ body: String) -> String {
 }
 
 @Test func factsStructsRoundTripAsCodable() throws {
-    let chat = SZChatFacts(sentMessage: "hi", resuming: false, draftedWork: true, nodeSeed: nil)
+    let chat = SZMessageFacts(sentMessage: "hi", resuming: false, draftedWork: true, nodeSeed: nil)
     let data = try JSONEncoder().encode(chat)
-    let back = try JSONDecoder().decode(SZChatFacts.self, from: data)
+    let back = try JSONDecoder().decode(SZMessageFacts.self, from: data)
     #expect(back.sentMessage == "hi")
     #expect(back.nodeSeed == nil)
 }

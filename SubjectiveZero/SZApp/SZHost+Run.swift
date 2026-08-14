@@ -347,7 +347,7 @@ extension SZHost {
     /// perform seam — after the step returned, before edge routing, the name already
     /// validated against the kind's effect set.
     func perform(effect: String, kind: SZMessageKind) async {
-        if effect == SZChatEffect.requestBuild.rawValue {
+        if effect == SZMessageEffect.requestBuild.rawValue {
             // Queued on the `pendingDirectorRun` lane (`queueChatRequestedBuild`): a chat
             // effect fires while its own delivery still holds the Director transcript, so a
             // direct start would refuse against our own claim. A bare effect name carries no

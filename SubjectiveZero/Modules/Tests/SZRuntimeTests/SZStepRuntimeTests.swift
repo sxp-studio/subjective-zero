@@ -33,7 +33,7 @@ private func schedule(_ runtime: SZStepRuntime, key: SZStepKey, source: String) 
 private func fixedOutcomeStep(_ outcome: String) -> String {
     """
     struct Fixed: SZStep {
-        func evaluate(_ ctx: SZContext<SZChatFacts>) async throws -> String { "\(outcome)" }
+        func evaluate(_ ctx: SZContext<SZMessageFacts>) async throws -> String { "\(outcome)" }
     }
     let step = Fixed()
     """
@@ -45,7 +45,7 @@ let step = SZBuildCondition { $0.hasWorkLeft }
 
 /// Parks inside an ask until the host's runner settles it — the watchdog's prey.
 private let blockingAskStep = """
-let step = SZChatRouter("done") { ctx in
+let step = SZMessageRouter("done") { ctx in
     _ = try await ctx.askModel(template: "block", as: [String: String].self)
     return "done"
 }

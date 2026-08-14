@@ -65,7 +65,7 @@ let step = SZBuildCondition { $0.hasWorkLeft }
 
 private let classifyRouter = """
 struct Ruling: Codable { let kind: String }
-let step = SZChatRouter("answer", "build") { ctx in
+let step = SZMessageRouter("answer", "build") { ctx in
     try await ctx.askModel(template: "classify-reply", as: Ruling.self).kind
 }
 """
@@ -73,7 +73,7 @@ let step = SZChatRouter("answer", "build") { ctx in
 /// Blocks inside an ask until the host's runner releases it — the in-flight body for the
 /// cancellation and drain tests.
 private let blockingAskStep = """
-let step = SZChatRouter("done") { ctx in
+let step = SZMessageRouter("done") { ctx in
     _ = try await ctx.askModel(template: "block", as: [String: String].self)
     return "done"
 }
@@ -82,8 +82,8 @@ let step = SZChatRouter("done") { ctx in
 /// Reports the SDK-side layout of the request struct, interpolation-free.
 private let layoutProbeStep = """
 struct LayoutProbe: SZStep {
-    var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: ["layout"], facts: SZChatFacts.kindName) }
-    func evaluate(_ ctx: SZContext<SZChatFacts>) async throws -> String {
+    var declaration: SZStepDeclaration { SZStepDeclaration(outcomes: ["layout"], facts: SZMessageFacts.kindName) }
+    func evaluate(_ ctx: SZContext<SZMessageFacts>) async throws -> String {
         let parts = [
             MemoryLayout<SZStepEvalRequestRaw>.size,
             MemoryLayout<SZStepEvalRequestRaw>.alignment,
@@ -229,7 +229,7 @@ struct SZStepABIv4SpikeTests {
     @Test func aStepDeclaringNothingReadsAsNil() async throws {
         let loader = try loadStep("""
         struct Quiet: SZStep {
-            func evaluate(_ ctx: SZContext<SZChatFacts>) async throws -> String { "spoke" }
+            func evaluate(_ ctx: SZContext<SZMessageFacts>) async throws -> String { "spoke" }
         }
         let step = Quiet()
         """)

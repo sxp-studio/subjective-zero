@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The director's CHAT GRAPH end-to-end through the real engine and the real chat-bound
-// host adapter, over the SHIPPED pack (graph + templates): the resuming fork renders the
-// SAME bytes the retired direct render calls produced, the turn streams through the
-// injected runner, and the route-reply ruling ends the traversal — answer/plan bare,
-// build with the requestBuild effect. `resuming` is the one scripted step; route-reply is
-// an ASK NODE now — engine-native, no compiled step — so what this suite pins is the whole
-// declarative lane: the pack's route-reply template rendered against the live facts, ONE
-// completion served through the real query service, the {"outcome"} ruling routed, and
-// only `build` carrying the effect.
+// The director's MESSAGE LANE end-to-end through the real engine and the real
+// message-bound host adapter, over the SHIPPED pack (graph + templates): the TRIAGE ask
+// rules on the prose FIRST (answer → the resuming fork → a turn whose brief bytes match
+// the retired direct render calls; implement → the requestBuild effect and a turn-less
+// end), one completion served through the real query service per ruling, with the repair
+// loop behind it.
 import Foundation
 import Synchronization
 import Testing
@@ -89,7 +86,7 @@ private final class ChatWorld {
          turnDrafts: Bool = false) throws {
         let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
         let director = try #require(loaded.packs.first { $0.id == "director" })
-        let graph = try #require(director.graph(routing: .chat))
+        let graph = try #require(director.graph(routing: .message))
         let attachments = [
             "resuming": SZStepAttachment(outcomes: ["yes", "no"]),
         ]
@@ -120,7 +117,7 @@ private final class ChatWorld {
                 return SZTurnReport(failed: false)
             },
             effect: { name, kind in
-                #expect(kind == .chat)
+                #expect(kind == .message)
                 effects.append(name)
             })
         self.box = box
@@ -138,10 +135,12 @@ private final class ChatWorld {
 @MainActor
 struct SZChatGraphTraversalTests {
 
-    @Test func aColdTurnRendersTheChatBriefBytesAndSpawnsFresh() async throws {
+    @Test func anAnswerRulingRunsTheColdTurnWithThePinnedBriefBytes() async throws {
         let world = try ChatWorld(resuming: false)
-        let result = await world.engine.run(kind: .chat)
-        #expect(result.conclusion == .ended(node: "route-reply", outcome: "answer"))
+        let result = await world.engine.run(kind: .message)
+        // Triage first, turn second, and the turn's ending IS the traversal's — no
+        // post-turn ruling exists any more.
+        #expect(result.conclusion == .ended(node: "cold", outcome: "ok"))
         let turns = world.turns.values
         #expect(turns.count == 1)
         #expect(turns.first?.session == .spawn)
@@ -150,12 +149,17 @@ struct SZChatGraphTraversalTests {
         #expect(turns.first?.brief
             == SZDirectorPrompt.renderChat(graph: world.box.graph, message: "make it warmer"))
         #expect(world.effects.values.isEmpty)
+        // The triage completion carries the user's prose into the pack's template.
+        let prompts = world.queryPrompts.values
+        #expect(prompts.count == 1)
+        #expect(prompts.first?.contains("make it warmer") == true)
+        #expect(prompts.first?.contains(#"{"outcome": "answer"}"#) == true)
     }
 
-    @Test func aResumedTurnRendersTheResumedBriefOverItsSession() async throws {
+    @Test func anAnswerRulingRunsTheResumedBriefOverItsSession() async throws {
         let world = try ChatWorld(resuming: true)
-        let result = await world.engine.run(kind: .chat)
-        #expect(result.conclusion == .ended(node: "route-reply", outcome: "answer"))
+        let result = await world.engine.run(kind: .message)
+        #expect(result.conclusion == .ended(node: "resumed", outcome: "ok"))
         let turns = world.turns.values
         #expect(turns.count == 1)
         #expect(turns.first?.session == .message)
@@ -163,38 +167,30 @@ struct SZChatGraphTraversalTests {
             == SZDirectorPrompt.renderResumedChat(graph: world.box.graph, message: "make it warmer"))
     }
 
-    @Test func aTypedBuildRulingFiresTheEffectThroughOneServedQuery() async throws {
-        let world = try ChatWorld(resuming: false, rulingReply: #"{"outcome": "build"}"#)
-        let result = await world.engine.run(kind: .chat)
-        #expect(result.conclusion == .ended(node: "route-reply", outcome: "build"))
+    @Test func anImplementRulingFiresTheBuildAndRunsNoTurn() async throws {
+        // The front-door triage: "build this" never spends a conversational turn — the
+        // ruling fires the requestBuild effect and the traversal ends at the ask.
+        let world = try ChatWorld(resuming: false, rulingReply: #"{"outcome": "implement"}"#)
+        let result = await world.engine.run(kind: .message)
+        #expect(result.conclusion == .ended(node: "triage", outcome: "implement"))
         #expect(world.effects.values == ["requestBuild"])
-        // One completion, rendered from the PACK's route-reply template against the live
-        // facts — the user's message travels into the classification ask.
-        let prompts = world.queryPrompts.values
-        #expect(prompts.count == 1)
-        #expect(prompts.first?.contains("make it warmer") == true)
-        #expect(prompts.first?.contains(#"{"outcome": "answer"}"#) == true)
-    }
-
-    @Test func aPlanRulingEndsTheTraversalWithNoEffect() async throws {
-        let world = try ChatWorld(resuming: false, rulingReply: #"{"outcome": "plan"}"#)
-        let result = await world.engine.run(kind: .chat)
-        #expect(result.conclusion == .ended(node: "route-reply", outcome: "plan"))
-        #expect(world.effects.values.isEmpty)
+        #expect(world.turns.values.isEmpty)
+        #expect(world.queryPrompts.values.count == 1)
     }
 
     @Test func aMalformedRulingIsRepairedOnceThenRuled() async throws {
-        // The ask form's repair loop: prose first, the typed object on the re-ask — two
-        // completions total, the second carrying the repair framing.
+        // The ask form's repair loop: prose first, prose again — two completions total,
+        // the second carrying the repair framing, then an honest defect.
         let world = try ChatWorld(resuming: false, rulingReply: "let me think about that")
-        let result = await world.engine.run(kind: .chat)
+        let result = await world.engine.run(kind: .message)
         guard case .defect(let node, _) = result.conclusion else {
             Issue.record("prose twice must defect honestly, got \(result.conclusion)")
             return
         }
-        #expect(node == "route-reply")
+        #expect(node == "triage")
         #expect(world.queryPrompts.values.count == 2)
         #expect(world.queryPrompts.values.last?.contains("previous reply did not decode") == true)
         #expect(world.effects.values.isEmpty)
+        #expect(world.turns.values.isEmpty)
     }
 }

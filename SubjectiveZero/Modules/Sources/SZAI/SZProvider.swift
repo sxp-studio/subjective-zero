@@ -139,6 +139,10 @@ public struct SZAgentOutcome: Sendable, Equatable {
 public struct SZAgentRunResult: Sendable {
     public var process: SZProcessResult
     public var outcome: SZAgentOutcome
+    public init(process: SZProcessResult, outcome: SZAgentOutcome) {
+        self.process = process
+        self.outcome = outcome
+    }
 }
 
 /// A classified piece of a provider's output stream, for the chat transcript. `thinking` and

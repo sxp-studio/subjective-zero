@@ -55,7 +55,7 @@ enum SZStepSDK {
         static var kindName: String { get }
     }
     extension SZBuildFacts: SZFactsKind { public static var kindName: String { "build" } }
-    extension SZChatFacts: SZFactsKind { public static var kindName: String { "chat" } }
+    extension SZMessageFacts: SZFactsKind { public static var kindName: String { "message" } }
     extension SZWorkFacts: SZFactsKind { public static var kindName: String { "work" } }
     extension SZRequestFacts: SZFactsKind { public static var kindName: String { "request" } }
 
@@ -305,7 +305,7 @@ enum SZStepSDK {
     /// A question whose answer IS data — one outcome per branch, named up front because the
     /// graph draws an edge from each:
     ///
-    ///     let step = SZChatRouter("answer", "build") {
+    ///     let step = SZMessageRouter("answer", "build") {
     ///         try await $0.askModel(template: "classify-reply", as: Ruling.self).kind
     ///     }
     public struct SZRouter<Facts: SZFactsKind>: SZStep {
@@ -317,7 +317,7 @@ enum SZStepSDK {
         }
         /// The effect-emitting spelling, still one line:
         ///
-        ///     let step = SZChatRouter("answer", "build") { _ in
+        ///     let step = SZMessageRouter("answer", "build") { _ in
         ///         .outcome("build", effects: ["requestBuild"])
         ///     }
         ///
@@ -336,11 +336,11 @@ enum SZStepSDK {
 
     /// One spelling per kind — the graph kind is part of the step's name, nothing else.
     public typealias SZBuildCondition = SZCondition<SZBuildFacts>
-    public typealias SZChatCondition = SZCondition<SZChatFacts>
+    public typealias SZMessageCondition = SZCondition<SZMessageFacts>
     public typealias SZWorkCondition = SZCondition<SZWorkFacts>
     public typealias SZRequestCondition = SZCondition<SZRequestFacts>
     public typealias SZBuildRouter = SZRouter<SZBuildFacts>
-    public typealias SZChatRouter = SZRouter<SZChatFacts>
+    public typealias SZMessageRouter = SZRouter<SZMessageFacts>
     public typealias SZWorkRouter = SZRouter<SZWorkFacts>
     public typealias SZRequestRouter = SZRouter<SZRequestFacts>
 

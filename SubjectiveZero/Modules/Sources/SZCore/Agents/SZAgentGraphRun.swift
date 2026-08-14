@@ -186,9 +186,13 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         id = try c.decode(UUID.self, forKey: .id)
         agent = try c.decode(String.self, forKey: .agent)
         graphName = try c.decode(String.self, forKey: .graphName)
-        // Tolerant of retired kinds: a `settled`-era archive record reads as build-lane
-        // history rather than sinking the whole sidecar.
-        kind = (try? c.decodeIfPresent(SZMessageKind.self, forKey: .kind)) ?? nil ?? .build
+        // Tolerant of retired kinds, by their old spellings: a pre-rename archive reads as
+        // what it WAS ("chat" was prose, "item" was work, "settled" was the build's reply)
+        // rather than sinking the whole sidecar or mislabeling its history.
+        let rawKind = try c.decodeIfPresent(String.self, forKey: .kind)
+        kind = rawKind.flatMap(SZMessageKind.init(rawValue:))
+            ?? ["chat": .message, "item": .work, "settled": .build][rawKind ?? ""]
+            ?? .build
         thread = try c.decodeIfPresent(UUID.self, forKey: .thread)
         work = try c.decodeIfPresent(String.self, forKey: .work)
             ?? c.decodeIfPresent(String.self, forKey: .item)

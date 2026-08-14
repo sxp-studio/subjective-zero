@@ -231,7 +231,7 @@ struct SZGraphEngineTests {
     @Test func anUnroutedKindDefectsAtTheDoorBeforeAnyWorkRuns() async throws {
         let host = StubHost()
         let engine = makeEngine(host: host, steps: StubSteps(answers: [:]))
-        let result = await engine.run(kind: .chat)
+        let result = await engine.run(kind: .message)
         guard case .defect(let node, let detail) = result.conclusion else {
             Issue.record("expected a defect, got \(result.conclusion)")
             return
@@ -240,7 +240,7 @@ struct SZGraphEngineTests {
         // shows the message arriving and failing — rather than a traversal with no notes
         // at all, which used to leave a routing bug with nothing to point at.
         #expect(node == "message")
-        #expect(detail.contains("chat"))
+        #expect(detail.contains("message"))
         #expect(host.notes.map(\.node) == ["message", "message"])
         #expect(host.notes.last?.phase == .failed)
         // Nothing behind the door ran.

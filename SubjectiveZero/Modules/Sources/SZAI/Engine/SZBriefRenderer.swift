@@ -173,7 +173,7 @@ public struct SZBriefRenderer: Sendable {
         switch kind {
         case .build:
             ["graph", "instruction", "toolbelt", "round", "cap", "blockers", "inbox"]
-        case .chat:
+        case .message:
             ["graph", "message", "toolbelt", "node", "contract", "source"]
         case .work:
             ["node", "prompt", "inputs", "outputs", "boundary", "abi", "reference", "schema",
@@ -193,7 +193,7 @@ public struct SZBriefRenderer: Sendable {
     /// runtime state, so a valid pack carries them all.
     static func requiredPartials(kind: SZMessageKind) -> [String: [String]] {
         switch kind {
-        case .build, .chat:
+        case .build, .message:
             ["toolbelt": [toolbeltPartial]]
         case .work:
             ["reference": [referencePreservePartial, referenceInlinePartial,
@@ -243,7 +243,7 @@ public struct SZBriefRenderer: Sendable {
             }
             try add("inbox") { SZDirectorPrompt.inboxLines(try require(facts.steers, fact: "steers")) }
 
-        case .chat:
+        case .message:
             try add("graph") { try graphSummary(facts) }
             try add("message") { try require(facts.sentMessage, fact: "sentMessage") }
             try add("toolbelt") { try template(agent, Self.toolbeltPartial) }

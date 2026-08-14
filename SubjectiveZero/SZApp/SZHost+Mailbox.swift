@@ -196,7 +196,7 @@ extension SZHost {
                     (try? String(contentsOf: nodeDir.appending(path: "Node.swift"), encoding: .utf8))
                     ?? "(this node has no Node.swift yet)"
             }
-            let result = try await runChatTraversal(
+            let (result, ack) = try await runChatTraversal(
                 scope: scope, message: expanded, existing: existing, providerID: providerID,
                 nodeSeed: scope.nodeID?.uuidString, delivery: delivery) { order in
                     var prompt = order.brief
@@ -204,6 +204,9 @@ extension SZHost {
                     if !messageAttachments.isEmpty { prompt += Self.attachmentManifest(messageAttachments) }
                     return try await runDeliveredTurn(order, prompt: prompt)
                 }
+            // A turn-less ruling's one line — the triage `implement` ack, in the bubble
+            // the delivery already opened.
+            if let ack { reply(ack) }
             if Task.isCancelled {
                 // The per-turn Stop: a user choice, not a failure — the killed resume is still
                 // resumable, and the message WAS delivered (its turn ran).
@@ -296,7 +299,7 @@ extension SZHost {
         scope: SZChatScope, message: String, existing: SZAgentSession?, providerID: String,
         nodeSeed: String?, delivery: SZBriefDelivery,
         turn: @escaping @MainActor (SZTurnOrder) async throws -> SZAgentRunResult
-    ) async throws -> SZAgentRunResult {
+    ) async throws -> (result: SZAgentRunResult, ack: String?) {
         guard let packsRoot = Self.graphAgentPacksRoot() else {
             throw SZChatTraversalFailure(detail: "no agent packs — the bundled packs did not "
                 + "materialize and no valid SZ_AGENT_PACKS override is set")
@@ -304,10 +307,10 @@ extension SZHost {
         let loaded = SZAgentPackLoader.load(root: packsRoot)
         guard let agentID = Self.chatAgentID(for: scope, seats: loaded.seats),
               let pack = loaded.packs.first(where: { $0.id == agentID }),
-              let graph = pack.graph(routing: .chat) else {
+              let graph = pack.graph(routing: .message) else {
             throw SZChatTraversalFailure(
                 detail: "no agent answers \(turnLabel(for: scope)) chat — its pack is missing "
-                    + "or routes no 'chat' message")
+                    + "or routes no 'message' kind")
         }
         // Attach the chat graph's step declarations (compiled once; the host's step runtime
         // caches across turns). A step that will not compile refuses HERE, loudly — the same
@@ -337,7 +340,7 @@ extension SZHost {
         // A chat reply is a traversal like any other: it gets its record, so the RUNS list
         // and the panel's canvas show a routed reply the same way they show a build.
         let sighting = SZTraversalSighting(id: UUID(), agent: pack.id,
-                                            graphName: graph.name, kind: .chat)
+                                            graphName: graph.name, kind: .message)
         beginAgentGraphRun(sighting)
         let host = SZChatTraversalHost(
             message: message, resuming: existing != nil, nodeSeed: nodeSeed, delivery: delivery,
@@ -356,7 +359,7 @@ extension SZHost {
             },
             effect: { [weak self] effect, kind in
                 guard let self else { return }
-                if effect == SZChatEffect.requestBuild.rawValue {
+                if effect == SZMessageEffect.requestBuild.rawValue {
                     // The graph's way to start a run — the SAME queued lane a mid-turn
                     // `ui_run` uses, with the user's message riding as the run's
                     // instruction (the turn that ruled `build` did the shaping).
@@ -368,7 +371,7 @@ extension SZHost {
             onNote: { [weak self] note in self?.noteAgentGraphRun(sighting.id, note) })
         let outcome = await SZGraphEngine(
             agent: pack.id, graph: graph, attachments: attachments,
-            host: host, steps: steps, router: router).run(kind: .chat)
+            host: host, steps: steps, router: router).run(kind: .message)
         concludeAgentGraphRun(sighting.id, SZTraversalEnding(outcome.conclusion))
         // The turn's own throw (Stop, zombie claim, stale session) resumes performChatTurn's
         // existing catch handling untouched.
@@ -379,9 +382,18 @@ extension SZHost {
                 throw CancellationError()
             case .failed(let node, let detail), .defect(let node, let detail):
                 throw SZChatTraversalFailure(detail: "chat graph '\(node)': \(detail)")
-            case .ended(let node, let outcome):
+            case .ended(let node, let endOutcome):
+                // Turn-LESS endings are a real lane now: the triage ask ruling `implement`
+                // fires the requestBuild effect and ends — the run is the reply. Synthesize
+                // an ok result so the delivery settles, with the ack as its one line.
+                if node == "triage" || endOutcome == "implement" {
+                    return (SZAgentRunResult(
+                        process: SZProcessResult(exitCode: 0, output: ""),
+                        outcome: SZAgentOutcome(sessionID: nil, failed: false)),
+                        ack: "(build requested — starting a run)")
+                }
                 throw SZChatTraversalFailure(detail:
-                    "the chat graph ended at '\(node)' (\(outcome)) without running a turn")
+                    "the chat graph ended at '\(node)' (\(endOutcome)) without running a turn")
             case .declined(let node, let reason):
                 throw SZChatTraversalFailure(detail: "the chat graph declined at '\(node)'"
                     + (reason.map { ": \($0)" } ?? ""))
@@ -397,7 +409,7 @@ extension SZHost {
                 to: scope)
             flushTranscript(scope)
         }
-        return result
+        return (result, ack: nil)
     }
 
     /// The `requestBuild` chat effect's landing: queue the run on the SAME `pendingDirectorRun`

@@ -229,12 +229,12 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
         .init(id: "b", form: .turn(.init(brief: "prompts/b.md.mustache"))),
         .init(id: "c", form: .turn(.init(brief: "prompts/c.md.mustache"))),
     ], edges: [
-        .init(from: "m", outcome: "chat", to: "a"),
+        .init(from: "m", outcome: "message", to: "a"),
         .init(from: "m", outcome: "work", to: "b"),
         .init(from: "m", outcome: "request", to: "c"),
     ])
     let wideFace = SZAgentGraphLayout.face(of: door, in: wide)
-    #expect(wideFace.outcomes == ["request", "chat", "work"])
+    #expect(wideFace.outcomes == ["message", "request", "work"])
     // The door costs nothing, so it never carries a wall-time strip.
     #expect(!SZAgentGraphLayout.spends(.message))
 }
