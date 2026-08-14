@@ -56,7 +56,7 @@ enum SZStepSDK {
     }
     extension SZBuildFacts: SZFactsKind { public static var kindName: String { "build" } }
     extension SZChatFacts: SZFactsKind { public static var kindName: String { "chat" } }
-    extension SZItemFacts: SZFactsKind { public static var kindName: String { "item" } }
+    extension SZWorkFacts: SZFactsKind { public static var kindName: String { "work" } }
     extension SZRequestFacts: SZFactsKind { public static var kindName: String { "request" } }
 
     // MARK: - Errors
@@ -337,11 +337,11 @@ enum SZStepSDK {
     /// One spelling per kind — the graph kind is part of the step's name, nothing else.
     public typealias SZBuildCondition = SZCondition<SZBuildFacts>
     public typealias SZChatCondition = SZCondition<SZChatFacts>
-    public typealias SZItemCondition = SZCondition<SZItemFacts>
+    public typealias SZWorkCondition = SZCondition<SZWorkFacts>
     public typealias SZRequestCondition = SZCondition<SZRequestFacts>
     public typealias SZBuildRouter = SZRouter<SZBuildFacts>
     public typealias SZChatRouter = SZRouter<SZChatFacts>
-    public typealias SZItemRouter = SZRouter<SZItemFacts>
+    public typealias SZWorkRouter = SZRouter<SZWorkFacts>
     public typealias SZRequestRouter = SZRouter<SZRequestFacts>
 
     // MARK: - Entry points

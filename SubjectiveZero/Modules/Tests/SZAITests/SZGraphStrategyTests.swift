@@ -51,9 +51,9 @@ private func makePackRoot() throws -> URL {
     try write("director/steps/work-left/Step.swift", "// outcomes scripted in tests\n")
 
     try write("coding/agent.json", #"{"id": "coding", "seat": "coding"}"#)
-    try write("coding/graphs/item.json", """
+    try write("coding/graphs/work.json", """
     {
-      "name": "item",
+      "name": "work",
       "nodes": [
         { "id": "message", "onMessage": {} },
         { "id": "retrying", "step": "retrying" },
@@ -61,7 +61,7 @@ private func makePackRoot() throws -> URL {
         { "id": "continue", "turn": { "brief": "prompts/node-reconcile.md.mustache", "session": "message" } }
       ],
       "edges": [
-        { "from": "message", "outcome": "item", "to": "retrying" },
+        { "from": "message", "outcome": "work", "to": "retrying" },
         { "from": "retrying", "outcome": "no", "to": "implement" },
         { "from": "retrying", "outcome": "yes", "to": "continue" }
       ]
@@ -77,7 +77,7 @@ private func makePackRoot() throws -> URL {
 private let scriptedDeclarations: SZGraphDirectorStrategy.StepDeclarations = { agent, step in
     switch (agent, step) {
     case ("director", "work-left"): SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build")
-    case ("coding", "retrying"): SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "item")
+    case ("coding", "retrying"): SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "work")
     default: nil
     }
 }

@@ -162,10 +162,10 @@ public struct SZAgentGraphPanel: View {
     /// thread. They are already in `runs` — the sidebar nests them under the same thread —
     /// so showing the fleet on the canvas is a filter, not new plumbing.
     private func subagents(of record: SZAgentGraphRun?) -> [SZAgentGraphRun] {
-        guard let record, let thread = record.thread, record.kind != .item else { return [] }
+        guard let record, let thread = record.thread, record.kind != .work else { return [] }
         // Oldest first: the band should not reshuffle as items settle, and `runs` is
         // ordered live-first for the sidebar's benefit, not this one's.
-        return runs.filter { $0.thread == thread && $0.kind == .item }
+        return runs.filter { $0.thread == thread && $0.kind == .work }
             .sorted { $0.startedAt < $1.startedAt }
     }
 
@@ -174,7 +174,7 @@ public struct SZAgentGraphPanel: View {
     /// refuses those, so only an archived record could carry one).
     private func navigate(toSeat seat: String) {
         guard let target = planAgents.first(where: { $0.seat == seat }) else { return }
-        let itemGraph = target.graphs.first { $0.graph.handles(.item) }
+        let itemGraph = target.graphs.first { $0.graph.handles(.work) }
         mode = .plan
         selectedRunID = nil
         selectedAgentID = target.id

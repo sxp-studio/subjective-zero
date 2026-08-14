@@ -109,7 +109,7 @@ private func directorPack(graph: String = runGraph()) -> ScratchPack {
 
 private func codingPack() -> ScratchPack {
     ScratchPack(folder: "coding-b", seat: "coding",
-                graphs: ["work": turnGraph(name: "work", kind: "item",
+                graphs: ["work": turnGraph(name: "work", kind: "work",
                                            brief: "prompts/impl.md.mustache")],
                 prompts: ["impl.md.mustache"])
 }
@@ -249,7 +249,7 @@ private func cleanup(_ root: URL) {
     let pack = try #require(loaded.packs.first { $0.id == "director-a" })
     #expect(pack.graph(routing: .build)?.name == "run")
     #expect(pack.graph(routing: .chat)?.name == "talk")
-    #expect(pack.graph(routing: .item) == nil)
+    #expect(pack.graph(routing: .work) == nil)
 }
 
 @Test func aRetiredDefaultsKeyIsRefusedByName() throws {
@@ -467,7 +467,7 @@ private func cleanup(_ root: URL) {
     #expect(report.contains("agent director-a · seat: director"))
     #expect(report.contains("agent coding-b · seat: coding"))
     #expect(report.contains("graph run · build"))
-    #expect(report.contains("graph work · item"))
+    #expect(report.contains("graph work · work"))
 }
 
 @Test func checkReportsLoadsWhenDefectsRemain() async throws {
@@ -504,11 +504,8 @@ private let shippedPacksRoot = URL(filePath: #filePath)
 /// these claims, field for field — edit a shipped step and both sides move together.
 private let shippedPackSteps = StubSteps(infos: [
     "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
-    "director/nodes-failing": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "build"),
     "director/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
-    "director/strategy": SZStepDeclarationInfo(outcomes: ["agentic", "procedural", "recovery"],
-                                               facts: "build"),
-    "coding/retrying": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "item"),
+    "coding/retrying": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "work"),
     "coding/resuming": SZStepDeclarationInfo(outcomes: ["yes", "no"], facts: "chat"),
     "coding/request-op": SZStepDeclarationInfo(outcomes: ["split", "merge"], facts: "request"),
 ])
@@ -540,31 +537,18 @@ private let shippedPackSteps = StubSteps(infos: [
     let graph = try #require(director.graph(routing: .build))
     #expect(Set(graph.routes.keys) == [.chat, .build])
     #expect(graph.routes[.chat] == "resuming")
-    #expect(graph.routes[.build] == "strategy")
-    // The strategies, as ports on one step — and the retry loop as the dispatch's own
-    // leashed settled edge, the message's whole journey one connected walk.
-    #expect(graph.edge(from: "strategy", outcome: "agentic")?.to == "decompose")
-    #expect(graph.edge(from: "strategy", outcome: "procedural")?.to == "work-left")
-    #expect(graph.edge(from: "strategy", outcome: "recovery")?.to == "nodes-failing")
+    // V1 ships ONE build lane — a work message routes straight into decompose, and the
+    // retry round is the dispatch's own leashed settled edge. No strategy router: a
+    // preference is not a decision, and anyone who wants variant lanes authors them
+    // (the runVariant fact stays as that seam).
+    #expect(graph.routes[.build] == "decompose")
+    #expect(graph.edge(from: "decompose", outcome: "ok")?.to == "implement")
     let settled = try #require(graph.edge(from: "implement", outcome: "settled"))
     #expect(settled.to == "unresolved")
-    #expect(settled.maxTraversals == 2)   // the leash IS the old rounds cap
-    // Procedural's dispatch has NO settled edge — its first settlement ends the run.
-    #expect(graph.edge(from: "implement-once", outcome: "settled") == nil)
-}
-
-/// The recovery strategy: gated on `nodes-failing`, whose "yes" routes to a reconcile turn
-/// and then the dispatch, and whose unwired "no" ends the run untouched. Reachable from the
-/// build port AND the settled re-entry, which is what makes it a recovery loop.
-@Test func theShippedRecoveryStrategyGatesOnTheFailingFleet() throws {
-    let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
-    let director = try #require(loaded.packs.first { $0.id == "director" })
-    let graph = try #require(director.graph(routing: .build))
-    #expect(graph.node("nodes-failing")?.form == .step(name: "nodes-failing"))
-    #expect(graph.edge(from: "nodes-failing", outcome: "yes")?.to == "reconcile")
-    #expect(graph.edge(from: "nodes-failing", outcome: "no") == nil)   // healthy fleet → end
+    #expect(settled.maxTraversals == 2)   // the leash IS the retry budget
+    #expect(graph.edge(from: "unresolved", outcome: "yes")?.to == "reconcile")
+    #expect(graph.edge(from: "unresolved", outcome: "no") == nil)   // resolved fleet → end
     #expect(graph.edge(from: "reconcile", outcome: "ok")?.to == "implement")
-    #expect(graph.kinds(reaching: "nodes-failing") == [.build])
 }
 
 /// The chat lane: the cold/resumed fork feeds the `route-reply` ruling, whose outcomes all
@@ -644,14 +628,14 @@ private let shippedPackSteps = StubSteps(infos: [
         {{instruction}}
         """,
         "coding/agent.json": #"{ "id": "coding", "seat": "coding" }"#,
-        "coding/graphs/item.json": """
+        "coding/graphs/work.json": """
         {
-          "name": "item",
+          "name": "work",
           "nodes": [
             { "id": "message", "onMessage": {} },
             { "id": "implement", "turn": { "brief": "prompts/implement.md.mustache" } }
           ],
-          "edges": [ { "from": "message", "outcome": "item", "to": "implement" } ]
+          "edges": [ { "from": "message", "outcome": "work", "to": "implement" } ]
         }
         """,
         "coding/prompts/implement.md.mustache": """

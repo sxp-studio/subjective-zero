@@ -36,10 +36,10 @@ private func entry(_ ordinal: Int, node: String = "step",
     // An item traversal started while the build runs must not take the head — the head is
     // what the panel follows, and the build is the thread's spine.
     let build = run(10, live: true)
-    let item = run(90, live: true, kind: .item)
+    let item = run(90, live: true, kind: .work)
     #expect(SZAgentGraphRun.ordered([item, build]).map(\.id) == [build.id, item.id])
     // Among ENDED records the kind means nothing — newest still wins.
-    let older = run(10), newerItem = run(90, kind: .item)
+    let older = run(10), newerItem = run(90, kind: .work)
     #expect(SZAgentGraphRun.ordered([older, newerItem]).map(\.id) == [newerItem.id, older.id])
 }
 
@@ -70,14 +70,14 @@ private func entry(_ ordinal: Int, node: String = "step",
 @Test func eachBudgetIsCappedOnItsOwn() {
     // The whole point: item traversals outnumber builds many to one, and a burst of them
     // must not evict a single recorded build.
-    let items = (1...40).map { run(Double($0), kind: .item) }
+    let items = (1...40).map { run(Double($0), kind: .work) }
     let builds = (1...3).map { run(Double(100 + $0)) }
     let capped = SZAgentGraphRun.capped(SZAgentGraphRun.ordered(items + builds),
                                         builds: 20, others: 30)
-    #expect(capped.filter { $0.kind == .item }.count == 30)
+    #expect(capped.filter { $0.kind == .work }.count == 30)
     #expect(capped.filter { $0.kind == .build }.count == 3)
     // And the items that went are the oldest ones.
-    #expect(capped.filter { $0.kind == .item }
+    #expect(capped.filter { $0.kind == .work }
         .allSatisfy { $0.startedAt.timeIntervalSinceReferenceDate > 10 })
 }
 

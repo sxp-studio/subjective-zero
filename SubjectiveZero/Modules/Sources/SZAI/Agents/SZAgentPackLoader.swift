@@ -55,10 +55,10 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
     case seatContested(seat: SZAgentSeat, holders: [String])
     /// A dispatch's `to` names no seat any loaded agent holds.
     case unknownDispatchSeat(agent: String, graph: String, node: String, seat: String)
-    /// The dispatch target exists but has no graph handling `.item` — every sent item
-    /// would arrive unhandled.
-    case dispatchTargetCannotHandleItems(agent: String, graph: String, node: String,
-                                         seat: String, holder: String)
+    /// The dispatch target exists but has no graph routing `.work` — every dispatched
+    /// message would arrive unhandled.
+    case dispatchTargetCannotHandleWork(agent: String, graph: String, node: String,
+                                        seat: String, holder: String)
     /// A dispatch's `items` fact is unknown for the graph's kind, or not `[String]`-typed.
     case dispatchItemsFact(agent: String, graph: String, node: String, fact: String,
                            detail: String)
@@ -101,8 +101,8 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
             "the \(seat.rawValue) seat is contested: \(holders.joined(separator: ", "))"
         case .unknownDispatchSeat(let agent, let graph, let node, let seat):
             "\(agent)/graphs/\(graph) node '\(node)': dispatches to '\(seat)', a seat no loaded agent holds"
-        case .dispatchTargetCannotHandleItems(let agent, let graph, let node, let seat, let holder):
-            "\(agent)/graphs/\(graph) node '\(node)': dispatches to '\(seat)' (\(holder)), which has no graph handling 'item'"
+        case .dispatchTargetCannotHandleWork(let agent, let graph, let node, let seat, let holder):
+            "\(agent)/graphs/\(graph) node '\(node)': dispatches to '\(seat)' (\(holder)), which has no graph routing 'work'"
         case .dispatchItemsFact(let agent, let graph, let node, let fact, let detail):
             "\(agent)/graphs/\(graph) node '\(node)': items fact '\(fact)' — \(detail)"
         case .undeclaredStepOutcome(let agent, let graph, let node, let outcome, let declared):
@@ -393,9 +393,9 @@ public enum SZAgentPackLoader {
                 if targetSeat.map(filledSeats.contains) != true {
                     defects.append(.unknownDispatchSeat(agent: pack.id, graph: graph.name,
                                                         node: node.id, seat: dispatch.to))
-                } else if let holder, holder.graph(routing: .item) == nil {
+                } else if let holder, holder.graph(routing: .work) == nil {
                     // A seat that cannot receive items makes every dispatch a dead letter.
-                    defects.append(.dispatchTargetCannotHandleItems(
+                    defects.append(.dispatchTargetCannotHandleWork(
                         agent: pack.id, graph: graph.name, node: node.id,
                         seat: dispatch.to, holder: holder.id))
                 }

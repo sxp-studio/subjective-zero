@@ -162,41 +162,41 @@ struct SZEquivalenceGateTests {
         // — the node-compile family (.item deliveries against the graph's typed boundary) —
         let itemFacts = try factsJSON(["attempt": 1, "graphJSON": base])
         out["coding-compile-cold.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .item,
-            factsJSON: itemFacts, delivery: SZBriefDelivery(item: grayID.uuidString))
+            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
+            factsJSON: itemFacts, delivery: SZBriefDelivery(work: grayID.uuidString))
         let inline = try renderer.render(
-            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .item,
+            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
             factsJSON: itemFacts,
-            delivery: SZBriefDelivery(item: grayID.uuidString, libraryIndex: libraryIndexText))
+            delivery: SZBriefDelivery(work: grayID.uuidString, libraryIndex: libraryIndexText))
         out["coding-compile-inline.md"] = inline
         // opencode's tool-namespacing is a provider transform applied to the rendered brief —
         // the same real byte transform the recorder pinned.
         out["coding-compile-inline-opencode.md"] = SZOpenCodeProvider.namespacedSubZTools(in: inline)
         out["coding-compile-preserve.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .item,
+            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
             factsJSON: itemFacts,
-            delivery: SZBriefDelivery(item: grayID.uuidString, preserveBehavior: true))
+            delivery: SZBriefDelivery(work: grayID.uuidString, preserveBehavior: true))
         out["coding-compile-contracted.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .item,
+            agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
             factsJSON: factsJSON(["attempt": 1,
                                   "graphJSON": encoded(fixtureGraph(grayContract: kitchenSinkContract))]),
-            delivery: SZBriefDelivery(item: grayID.uuidString))
+            delivery: SZBriefDelivery(work: grayID.uuidString))
 
         // — the re-grounding retry briefs (.item re-deliveries) —
         out["coding-reconcile-with-note.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-reconcile.md.mustache", kind: .item,
+            agent: "coding", template: "prompts/node-reconcile.md.mustache", kind: .work,
             factsJSON: factsJSON(["attempt": 2, "graphJSON": base, "blocker": grayStatus,
                                   "senderNote": "Use Rec.709 luma weights."]),
-            delivery: SZBriefDelivery(item: grayID.uuidString))
+            delivery: SZBriefDelivery(work: grayID.uuidString))
         out["coding-reconcile-plain.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-reconcile.md.mustache", kind: .item,
+            agent: "coding", template: "prompts/node-reconcile.md.mustache", kind: .work,
             factsJSON: factsJSON(["attempt": 3, "graphJSON": base, "blocker": grayStatus]),
-            delivery: SZBriefDelivery(item: grayID.uuidString))
+            delivery: SZBriefDelivery(work: grayID.uuidString))
         // No reported status → the renderer's fallback blocker, same words as before.
         out["coding-reconcile-bare.md"] = try renderer.render(
-            agent: "coding", template: "prompts/node-reconcile.md.mustache", kind: .item,
+            agent: "coding", template: "prompts/node-reconcile.md.mustache", kind: .work,
             factsJSON: factsJSON(["attempt": 2, "graphJSON": base]),
-            delivery: SZBriefDelivery(item: grayID.uuidString))
+            delivery: SZBriefDelivery(work: grayID.uuidString))
 
         // — the director's build-kind briefs —
         out["director-decompose.md"] = try renderer.render(

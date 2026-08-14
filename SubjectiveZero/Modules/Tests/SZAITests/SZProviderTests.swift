@@ -1083,8 +1083,8 @@ private let piRPCCatalogLoggedOut = """
     let facts = String(decoding: try JSONSerialization.data(
         withJSONObject: ["attempt": 1, "graphJSON": graphJSON]), as: UTF8.self)
     let prompt = try SZBriefRenderer(packRoot: packsRoot).render(
-        agent: "coding", template: "prompts/node-compile.md.mustache", kind: .item,
-        factsJSON: facts, delivery: SZBriefDelivery(item: node.uuidString))
+        agent: "coding", template: "prompts/node-compile.md.mustache", kind: .work,
+        factsJSON: facts, delivery: SZBriefDelivery(work: node.uuidString))
     // the tiers: search narrows, index browses, card confirms, source commits
     for tool in ["agent_library_index", "agent_library_card", "agent_library_source"] {
         #expect(prompt.contains(tool), "coding prompt should mention \(tool)")

@@ -54,8 +54,8 @@ private final class StubHost: SZTraversalHost {
     /// what was sent.
     var summaries: [SZSettledSummary?] = []
     var progressTallies: [SZAgentGraphRun.Tally] = []
-    var delivered: [(orders: [SZItemOrder], seat: String)] = []
-    func deliver(orders: [SZItemOrder], to seat: String,
+    var delivered: [(orders: [SZWorkOrder], seat: String)] = []
+    func deliver(orders: [SZWorkOrder], to seat: String,
                  progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
         async -> SZSettledSummary? {
         delivered.append((orders, seat))
@@ -157,7 +157,7 @@ struct SZGraphEngineTests {
         #expect(result.conclusion == .ended(node: "implement", outcome: "settled"))
         #expect(host.delivered.count == 1)
         #expect(host.delivered[0].seat == "coding")
-        #expect(host.delivered[0].orders == [SZItemOrder(node: "node-a"), SZItemOrder(node: "node-b")])
+        #expect(host.delivered[0].orders == [SZWorkOrder(node: "node-a"), SZWorkOrder(node: "node-b")])
         // The turn went out rendered, with the router's choice attached.
         #expect(host.turnsSeen.count == 1)
         #expect(host.turnsSeen[0].brief == "rendered:prompts/decompose.md.mustache")
@@ -375,7 +375,7 @@ struct SZGraphEngineTests {
             func serveAsk(agent: String, step: String, kind: SZMessageKind, factsJSON: String,
                           requestJSON: String) async throws -> String { throw CancellationError() }
             func perform(effect: String, kind: SZMessageKind) async {}
-            func deliver(orders: [SZItemOrder], to seat: String,
+            func deliver(orders: [SZWorkOrder], to seat: String,
                          progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
                 async -> SZSettledSummary? { nil }
             func note(_ note: SZTraversalNote) {}

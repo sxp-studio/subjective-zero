@@ -57,14 +57,14 @@ public struct SZChatFacts: Codable, Sendable {
     public var nodeSeed: String?
 }
 
-public struct SZItemFacts: Codable, Sendable {
-    /// The 1-based dispatch attempt for this work item.
+public struct SZWorkFacts: Codable, Sendable {
+    /// The 1-based dispatch attempt for this work message.
     public var attempt: Int
     /// The note the sender attached to the handoff, when there is one.
     public var senderNote: String?
-    /// What is blocking this item, when it is blocked.
+    /// What is blocking this work, when it is blocked.
     public var blocker: String?
-    /// The session id to resume, when the item continues earlier work.
+    /// The session id to resume, when this continues earlier work on the node.
     public var resumeSession: String?
 }
 

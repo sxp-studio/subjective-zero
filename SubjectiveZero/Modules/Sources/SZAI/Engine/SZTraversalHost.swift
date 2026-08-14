@@ -40,8 +40,8 @@ public struct SZTurnReport: Sendable {
     }
 }
 
-/// One work item the engine hands the host to send as an `.item` message.
-public struct SZItemOrder: Sendable, Equatable {
+/// One unit of dispatched work the engine hands the host to send as a `.work` message.
+public struct SZWorkOrder: Sendable, Equatable {
     public var node: String
     public init(node: String) { self.node = node }
 }
@@ -82,15 +82,15 @@ public struct SZTraversalSighting: Sendable, Equatable {
     public var agent: String
     public var graphName: String
     public var kind: SZMessageKind
-    /// The dispatched work item (a node id) for an `.item` traversal; nil for a director's.
-    public var item: String?
+    /// The dispatched node id for a `.work` traversal; nil for a director's.
+    public var work: String?
     public init(id: UUID, agent: String, graphName: String, kind: SZMessageKind,
-                item: String? = nil) {
+                work: String? = nil) {
         self.id = id
         self.agent = agent
         self.graphName = graphName
         self.kind = kind
-        self.item = item
+        self.work = work
     }
 }
 
@@ -145,7 +145,7 @@ public protocol SZTraversalHost: AnyObject, Sendable {
     /// dispatch nodes off those lanes, so reaching nil is a routing bug the engine
     /// records as a defect). Cancellation propagates in: a cancelled delivery returns
     /// nil and the engine concludes `.cancelled` at its boundary check.
-    func deliver(orders: [SZItemOrder], to seat: String,
+    func deliver(orders: [SZWorkOrder], to seat: String,
                  progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
         async -> SZSettledSummary?
     /// Perform one EFFECT a step requested with its outcome. The engine calls this AFTER

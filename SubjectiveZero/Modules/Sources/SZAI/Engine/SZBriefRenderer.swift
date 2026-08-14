@@ -37,8 +37,8 @@ public enum SZBriefRenderError: Error, Sendable, CustomStringConvertible {
     case missingFact(String)
     /// The template needs delivery context the message did not carry.
     case missingDelivery(String)
-    /// An `.item` delivery names a node the facts' graph does not contain.
-    case unknownItemNode(String)
+    /// A `.work` delivery names a node the facts' graph does not contain.
+    case unknownWorkNode(String)
 
     public var description: String {
         switch self {
@@ -47,7 +47,7 @@ public enum SZBriefRenderError: Error, Sendable, CustomStringConvertible {
         case .unreadableFacts(let detail): "unreadable facts document: \(detail)"
         case .missingFact(let name): "the facts document carries no '\(name)'"
         case .missingDelivery(let name): "the delivery carries no '\(name)'"
-        case .unknownItemNode(let node): "the facts' graph has no node '\(node)'"
+        case .unknownWorkNode(let node): "the facts' graph has no node '\(node)'"
         }
     }
 }
@@ -59,12 +59,12 @@ public struct SZBriefDelivery: Sendable {
     /// A build's free-text instruction (the chat trigger); nil/empty renders the explicit
     /// no-instruction fallback.
     public var instruction: String?
-    /// An `.item` delivery's target node id.
-    public var item: String?
-    /// The item is a piece STAGED by a split/merge: its reference is the original's source,
+    /// A `.work` delivery's target node id.
+    public var work: String?
+    /// The work is a piece STAGED by a split/merge: its reference is the original's source,
     /// quoted in its seed prompt — the brief flips to the preserve-behavior framing.
     public var preserveBehavior: Bool
-    /// The assembled node-library index to inline into a cold item brief (flips both the
+    /// The assembled node-library index to inline into a cold work brief (flips both the
     /// reference and the contract-schema sections to their inlined variants).
     public var libraryIndex: String?
     /// Node-anchored chat context, read by the host: the seed node's current contract JSON
@@ -119,11 +119,11 @@ public struct SZBriefDelivery: Sendable {
         }
     }
 
-    public init(instruction: String? = nil, item: String? = nil, preserveBehavior: Bool = false,
+    public init(instruction: String? = nil, work: String? = nil, preserveBehavior: Bool = false,
                 libraryIndex: String? = nil, nodeContract: String? = nil,
                 nodeSource: String? = nil, graphOp: GraphOp? = nil) {
         self.instruction = instruction
-        self.item = item
+        self.work = work
         self.preserveBehavior = preserveBehavior
         self.libraryIndex = libraryIndex
         self.nodeContract = nodeContract
@@ -175,7 +175,7 @@ public struct SZBriefRenderer: Sendable {
             ["graph", "instruction", "toolbelt", "round", "cap", "blockers", "inbox"]
         case .chat:
             ["graph", "message", "toolbelt", "node", "contract", "source"]
-        case .item:
+        case .work:
             ["node", "prompt", "inputs", "outputs", "boundary", "abi", "reference", "schema",
              "blocker", "director_message"]
         case .request:
@@ -195,7 +195,7 @@ public struct SZBriefRenderer: Sendable {
         switch kind {
         case .build, .chat:
             ["toolbelt": [toolbeltPartial]]
-        case .item:
+        case .work:
             ["reference": [referencePreservePartial, referenceInlinePartial,
                            referenceLibraryPartial],
              "schema": [schemaInlinePartial, schemaFetchPartial]]
@@ -251,8 +251,8 @@ public struct SZBriefRenderer: Sendable {
             try add("contract") { try require(delivery.nodeContract, delivery: "nodeContract") }
             try add("source") { try require(delivery.nodeSource, delivery: "nodeSource") }
 
-        case .item:
-            let plan = try itemPlan(facts: facts, delivery: delivery)
+        case .work:
+            let plan = try workPlan(facts: facts, delivery: delivery)
             add("node") { plan.node.id.uuidString }
             add("prompt") { SZPromptTemplate.defused(plan.node.prompt ?? plan.node.title) }
             add("inputs") { plan.inputs.map(\.name).joined(separator: ", ") }
@@ -326,19 +326,19 @@ public struct SZBriefRenderer: Sendable {
 
     // MARK: - Value assembly
 
-    /// The fallback blocker for a re-delivered item that reported no status. The previous
+    /// The fallback blocker for re-delivered work that reported no status. The previous
     /// orchestrator used these exact words; the reconcile fixtures pin them.
     static let fallbackBlocker = "the previous attempt did not finish"
 
-    /// An `.item` brief's plan: the target node plus its typed boundary — the contract's
+    /// A `.work` brief's plan: the target node plus its typed boundary — the contract's
     /// declared ports, or texture ports derived from the graph wiring for a contract-less
     /// node (`SZGraph+DerivedPorts`, the one home for the derivation).
-    private func itemPlan(facts: Facts, delivery: SZBriefDelivery) throws
+    private func workPlan(facts: Facts, delivery: SZBriefDelivery) throws
         -> (node: SZNode, inputs: [SZPort], outputs: [SZPort], permissions: [SZEntitlement]) {
-        let item = try require(delivery.item, delivery: "item")
+        let work = try require(delivery.work, delivery: "work")
         let graph = try graph(facts)
-        guard let id = SZNodeID(uuidString: item), let node = graph.node(id: id) else {
-            throw SZBriefRenderError.unknownItemNode(item)
+        guard let id = SZNodeID(uuidString: work), let node = graph.node(id: id) else {
+            throw SZBriefRenderError.unknownWorkNode(work)
         }
         let inputs = node.contract?.inputs
             ?? graph.derivedDataInputPorts(of: id)
@@ -395,7 +395,7 @@ public struct SZBriefRenderer: Sendable {
         // chat
         var sentMessage: String?
         var nodeSeed: String?
-        // item
+        // work
         var blocker: String?
         var senderNote: String?
 

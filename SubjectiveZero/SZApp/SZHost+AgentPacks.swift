@@ -144,16 +144,21 @@ extension SZHost {
         return loaded.packs.first { $0.id == id }
     }
 
-    /// The strategies the director's build lane OFFERS, read off the graph: the outcomes
-    /// wired out of whatever node its `build` port routes to. No compiler needed — the
-    /// wiring is the offer, and a strategy nothing routes is not on the menu.
+    /// The strategies the director's build lane OFFERS: the outcomes wired out of the
+    /// build port's head node, when that head is a ROUTER (a step or ask). A turn or
+    /// dispatch head means the lane has no strategy dimension at all — the shipped pack's
+    /// shape, where a build goes straight to decompose. No compiler needed: the wiring is
+    /// the offer, and a strategy nothing routes is not on the menu.
     ///
-    /// ADVISORY, never a gate (see `resolvedRunGraphVariant`): the deciding step owns its
+    /// ADVISORY, never a gate (see `resolvedRunGraphVariant`): a deciding step owns its
     /// own fallback, so refusing a name here could reject one the pack would have honoured.
     func directorBuildStrategyNames() -> [String] {
         guard let pack = loadedDirectorPack(), let graph = pack.graph(routing: .build),
-              let head = graph.routes[.build] else { return [] }
-        return graph.edges.filter { $0.from == head }.map(\.outcome).sorted()
+              let head = graph.routes[.build], let node = graph.node(head) else { return [] }
+        switch node.form {
+        case .step, .ask: return graph.edges.filter { $0.from == head }.map(\.outcome).sorted()
+        case .message, .turn, .dispatch: return []
+        }
     }
 
     /// The strategy the NEXT run asks for: env > persisted > whatever the pack defaults to

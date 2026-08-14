@@ -2,6 +2,7 @@
 // The `debug_*` MCP surface — verify + operate (docs/MCP.md). Read build errors, snapshot the live
 // graph, freeze the clock. One extension per surface (BUILD_SPEC.md MCP+*.swift pattern); `agent_*`
 // and `ui_*` live in their own sibling files. (Frame capture is `agent_view_frame` in SZMCP+Agent.swift.)
+import AppKit
 import Foundation
 import SZAI
 import SZCore
@@ -33,6 +34,7 @@ extension SZHostBridge {
                  ]),
             tool("debug_set_paused", "Freeze or resume the render clock (mirrors the HUD Pause/Play button). `paused:true` freezes time + frame index so successive `agent_view_frame`s render the same instant — the deterministic way to A/B an input (e.g. sweep a slider and compare frames without the camera/animation drifting between captures). `paused:false` resumes. Idempotent; returns the applied `paused`.",
                  properties: ["paused": ["type": "boolean", "description": "true = pause, false = resume"]]),
+            tool("debug_quit", "Quit the app cleanly, exactly like ⌘Q (windows close, state persists, the camera stops). Test-bus only — the way an automated drive ends a session instead of resorting to kill signals that skip teardown. Replies before terminating."),
             tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, kind handlers, seats, dispatch targets + items facts, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes and facts kind) compile every step folder a graph references through the real toolchain first — expect seconds, not milliseconds, on a pack with steps. Omit `path` for the live packs root (the materialized bundled packs, or SZ_AGENT_PACKS).",
                  properties: ["path": ["type": "string", "description": "absolute path to a pack root (a directory of agent folders)"]]),
         ]
@@ -52,6 +54,7 @@ extension SZHostBridge {
         case "debug_set_orchestrator": return try debugSetOrchestrator(arguments)
         case "debug_fail_node_once":   return try debugFailNodeOnce(arguments)
         case "debug_set_paused":       return try debugSetPaused(arguments)
+        case "debug_quit":             return debugQuit()
         case "debug_check_pack":       return debugCheckPack(arguments)
         default: return nil
         }
@@ -72,6 +75,16 @@ extension SZHostBridge {
     /// handler is synchronous, so the loader's async report is awaited on a detached task and
     /// joined here. Step-attached checks compile every step folder through the real runtime
     /// (one swiftc each) — a check with steps is seconds, not milliseconds, and honestly so.
+    /// The automated drive's ⌘Q: reply, then terminate through the ordinary AppKit path on
+    /// the next runloop turn — windows close, state persists, capture devices stop. Never a
+    /// signal: SIGKILL skips exactly the teardown a drive needs to have happened.
+    private func debugQuit() -> String {
+        DispatchQueue.main.async {
+            NSApplication.shared.terminate(nil)
+        }
+        return SZJSONRPC.encode(["quitting": true])
+    }
+
     private func debugCheckPack(_ arguments: [String: Any]) -> String {
         guard let root = arguments.string("path").map({ URL(filePath: $0) })
             ?? SZHost.graphAgentPacksRoot() else {

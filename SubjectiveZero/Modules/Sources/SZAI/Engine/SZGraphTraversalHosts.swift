@@ -2,7 +2,7 @@
 // The engine's SZTraversalHost adapters, one per ROLE. The DIRECTOR- and ITEM-bound hosts
 // read the live `SZOrchestrationContext` the host builds at `startRun`: the director host
 // projects the build facts and runs Director turns through the host's injected runner; an
-// item host (one per dispatched order) projects that order's item facts and assembles each
+// work host (one per dispatched order) projects that order's work facts and assembles each
 // coding turn's request exactly as the previous dispatch did. The CHAT-bound host serves a
 // single delivered chat turn instead — closure-injected (no run, no context), because the
 // app builds it per delivery.
@@ -11,13 +11,13 @@
 // deterministic `.sortedKeys` bytes. They are LOCAL Encodable documents rather than the spec
 // structs themselves for two honest reasons: the spec structs expose no public initializer
 // (their memberwise init is internal to SZCore, and the generated region's grammar forbids
-// declaring one), and the item document additionally carries `graphJSON` — the item briefs
+// declaring one), and the work document additionally carries `graphJSON` — the work briefs
 // project the live graph, exactly as the equivalence gate stubbed it; the spec gains the field
 // when the host projection lands.
 import Foundation
 import SZCore
 
-/// The coding sessions one run collects, shared across its item hosts — what the strategy
+/// The coding sessions one run collects, shared across its work hosts — what the strategy
 /// returns so the host can chat-resume each node's agent, and what a `.message` turn resumes.
 @MainActor
 final class SZGraphRunSessions {
@@ -54,7 +54,7 @@ final class SZDirectorTraversalHost: SZTraversalHost {
     /// The motor's fleet-delivery closure, assigned right after init (the motor cannot
     /// exist yet while this host is being built). nil would mean a dispatch with no
     /// fleet behind it — the engine records that honestly as a defect.
-    var fleet: ((_ orders: [SZItemOrder], _ seat: String,
+    var fleet: ((_ orders: [SZWorkOrder], _ seat: String,
                  _ progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
                 async -> SZSettledSummary?)?
 
@@ -90,7 +90,7 @@ final class SZDirectorTraversalHost: SZTraversalHost {
         self.steers = steers
     }
 
-    func deliver(orders: [SZItemOrder], to seat: String,
+    func deliver(orders: [SZWorkOrder], to seat: String,
                  progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
         async -> SZSettledSummary? {
         await fleet?(orders, seat, progress)
@@ -308,7 +308,7 @@ public final class SZChatTraversalHost: SZTraversalHost {
 
     /// A chat delivery has no fleet — the pack gate keeps dispatch nodes off lanes whose
     /// kind carries no [String] items fact, so this nil is a backstop, not a path.
-    public func deliver(orders: [SZItemOrder], to seat: String,
+    public func deliver(orders: [SZWorkOrder], to seat: String,
                         progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
         async -> SZSettledSummary? { nil }
 
@@ -322,7 +322,7 @@ public final class SZChatTraversalHost: SZTraversalHost {
 /// generation settings, the coding budgets); the session captured from the result is what a
 /// `.message` turn resumes.
 @MainActor
-final class SZItemTraversalHost: SZTraversalHost {
+final class SZWorkTraversalHost: SZTraversalHost {
     private let context: SZOrchestrationContext
     private let renderer: SZBriefRenderer
     private let order: SZDispatchOrder
@@ -348,7 +348,7 @@ final class SZItemTraversalHost: SZTraversalHost {
         self.onNote = onNote
     }
 
-    /// The item projection, spec-shaped plus `graphJSON` (see the header).
+    /// The work projection, spec-shaped plus `graphJSON` (see the header).
     private struct ItemFactsDocument: Encodable {
         var attempt: Int
         var senderNote: String?
@@ -369,7 +369,7 @@ final class SZItemTraversalHost: SZTraversalHost {
     }
 
     func itemsFact(named name: String, kind: SZMessageKind) -> [String] {
-        []   // no [String]-typed item fact exists; the pack gate keeps dispatches off item graphs
+        []   // no [String]-typed work fact exists; the pack gate keeps dispatches off work lanes
     }
 
     func renderBrief(agent: String, template: String, kind: SZMessageKind) throws -> String {
@@ -379,7 +379,7 @@ final class SZItemTraversalHost: SZTraversalHost {
         try renderer.render(agent: agent, template: template, kind: kind,
                             factsJSON: factsJSON(kind: kind),
                             delivery: SZBriefDelivery(
-                                item: nodeID.uuidString,
+                                work: nodeID.uuidString,
                                 preserveBehavior: context.stagedPieces().contains(nodeID),
                                 libraryIndex: context.libraryIndexText))
     }
@@ -442,7 +442,7 @@ final class SZItemTraversalHost: SZTraversalHost {
     }
 
     /// An item traversal has no fleet of its own — a coding agent never dispatches.
-    func deliver(orders: [SZItemOrder], to seat: String,
+    func deliver(orders: [SZWorkOrder], to seat: String,
                  progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
         async -> SZSettledSummary? { nil }
 

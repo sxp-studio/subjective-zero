@@ -24,7 +24,7 @@
 //    variable. The host resolves those, exactly once, at its own boundary.
 import Foundation
 
-/// One dispatched work item as the machine orders it delivered: the node, which attempt
+/// One dispatched unit of work as the machine orders it delivered: the node, which attempt
 /// this delivery is (stamped from the machine's own per-item count), and the sender's
 /// note when there is one.
 public struct SZDispatchOrder: Sendable, Equatable {
@@ -118,11 +118,11 @@ public struct SZThreadMachine: Sendable {
     public enum Event: Sendable, Equatable {
         /// A dispatch node fired: mint the set and order delivery.
         case dispatched(SZDispatchIntent)
-        /// One item's work actually began (its member traversal opened).
-        case itemDelivered(node: String, setID: Int)
-        /// One item's terminal outcome, keyed to ITS OWN set — never matched by node
+        /// One work message's traversal actually opened.
+        case workDelivered(node: String, setID: Int)
+        /// One work message's terminal outcome, keyed to ITS OWN set — never matched by node
         /// id, which a re-dispatch makes ambiguous.
-        case itemSettled(node: String, setID: Int, outcome: String)
+        case workSettled(node: String, setID: Int, outcome: String)
         /// The watchdog the machine armed for this set fired.
         case watchdogFired(setID: Int)
         /// The user (or the host's teardown) wants everything over, now.
@@ -202,14 +202,14 @@ public struct SZThreadMachine: Sendable {
             return [.deliverItems(setID: set.id, target: set.target, orders: orders),
                     .armWatchdog(setID: set.id, after: bounds.dispatchDeadline)]
 
-        case .itemDelivered(let node, let setID):
+        case .workDelivered(let node, let setID):
             guard case .awaitingFleet = state, var set = openSet, set.id == setID,
                   set.members.contains(node) else { return [] }
             set.delivered.insert(node)
             openSet = set
             return []
 
-        case .itemSettled(let node, let setID, let outcome):
+        case .workSettled(let node, let setID, let outcome):
             // Keyed by set id, and only while the item is genuinely outstanding: a
             // late outcome against a closed set, a foreign set, or an already settled
             // member is dropped — exactly one outcome per item, one summary per set.

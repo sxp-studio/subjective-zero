@@ -22,7 +22,7 @@ import SZCore
     // An item traversal starts while the build record is still live — the build must keep
     // the head of the list (it is what the panel follows).
     host.beginAgentGraphRun(SZTraversalSighting(id: item, agent: "coding", graphName: "item",
-                                                kind: .item, item: "node-1"))
+                                                kind: .work, work: "node-1"))
     #expect(host.agentGraphRuns.map(\.id) == [build, item])
 
     // The dispatch waits INSIDE the build traversal now, so the tally lands through the
@@ -42,7 +42,7 @@ import SZCore
     #expect(buildRecord.trace.last?.tally == SZAgentGraphRun.Tally(settled: 1, total: 1, failed: 1))
     #expect(buildRecord.trace.map(\.outcome) == ["yes", "settled"])   // notes replaced, not appended
     let itemRecord = try #require(sealed.first { $0.id == item })
-    #expect(itemRecord.item == "node-1")
+    #expect(itemRecord.work == "node-1")
     #expect(itemRecord.conclusion == .failed(reason: "the turn threw"))
     #expect(itemRecord.trace.first?.detail == "the turn threw")
 
@@ -80,11 +80,11 @@ import SZCore
     let itemA = UUID(), itemB = UUID()
     var records: [String: UUID] = ["node-a": itemA, "node-b": itemB]
     host.beginAgentGraphRun(SZTraversalSighting(id: itemA, agent: "coding", graphName: "item",
-                                                kind: .item, item: "node-a"))
+                                                kind: .work, work: "node-a"))
     host.beginAgentGraphRun(SZTraversalSighting(id: itemB, agent: "coding", graphName: "item",
-                                                kind: .item, item: "node-b"))
-    _ = machine.handle(.itemDelivered(node: "node-a", setID: setID))
-    _ = machine.handle(.itemDelivered(node: "node-b", setID: setID))
+                                                kind: .work, work: "node-b"))
+    _ = machine.handle(.workDelivered(node: "node-a", setID: setID))
+    _ = machine.handle(.workDelivered(node: "node-b", setID: setID))
 
     // The machine's motor, host-side: tallies amend the SENDER's record; a cancel order
     // lands as the cancelled item traversal's own conclusion (cancellation is cooperative —
@@ -112,7 +112,7 @@ import SZCore
             }
         }
     }
-    execute(machine.handle(.itemSettled(node: "node-a", setID: setID, outcome: "ok")))
+    execute(machine.handle(.workSettled(node: "node-a", setID: setID, outcome: "ok")))
     host.concludeAgentGraphRun(itemA, .ended)
     execute(machine.handle(.watchdogFired(setID: setID)))
     // The set closed: the waiting traversal walks on and seals — after its fleet, never
@@ -153,7 +153,7 @@ import SZCore
     host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director",
                                                 graphName: "director", kind: .build))
     host.beginAgentGraphRun(SZTraversalSighting(id: item, agent: "coding",
-                                                graphName: "coding", kind: .item, item: "n1"))
+                                                graphName: "coding", kind: .work, work: "n1"))
     host.beginAgentGraphRun(SZTraversalSighting(id: chat, agent: "coding",
                                                 graphName: "coding", kind: .chat))
 

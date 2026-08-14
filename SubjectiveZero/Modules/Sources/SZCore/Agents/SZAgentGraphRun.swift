@@ -27,8 +27,8 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     /// it causes, across every agent, share one id; the RUNS list groups by it. nil = a
     /// standalone traversal.
     public var thread: UUID?
-    /// For an `.item` traversal: the dispatched work item (a node id) it handles.
-    public var item: String?
+    /// For a `.work` traversal: the dispatched node id it handles.
+    public var work: String?
     public var startedAt: Date
     /// nil while the traversal is still under way — the record is LIVE. Live records are
     /// never persisted (a crash mid-traversal loses the record; the transcript survives).
@@ -40,14 +40,14 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     public var isLive: Bool { endedAt == nil }
 
     public init(id: UUID, agent: String, graphName: String, kind: SZMessageKind,
-                thread: UUID? = nil, item: String? = nil, startedAt: Date = Date(),
+                thread: UUID? = nil, work: String? = nil, startedAt: Date = Date(),
                 endedAt: Date? = nil, trace: [Entry] = [], conclusion: Conclusion? = nil) {
         self.id = id
         self.agent = agent
         self.graphName = graphName
         self.kind = kind
         self.thread = thread
-        self.item = item
+        self.work = work
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.trace = trace
@@ -176,7 +176,9 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     // MARK: - Codable (tolerant like the entry)
 
     private enum CodingKeys: String, CodingKey {
-        case id, agent, graphName, kind, thread, item, startedAt, endedAt, trace, conclusion
+        case id, agent, graphName, kind, thread, work, startedAt, endedAt, trace, conclusion
+        /// The field's pre-rename spelling — read for tolerance, never written.
+        case item
     }
 
     public init(from decoder: Decoder) throws {
@@ -188,7 +190,8 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         // history rather than sinking the whole sidecar.
         kind = (try? c.decodeIfPresent(SZMessageKind.self, forKey: .kind)) ?? nil ?? .build
         thread = try c.decodeIfPresent(UUID.self, forKey: .thread)
-        item = try c.decodeIfPresent(String.self, forKey: .item)
+        work = try c.decodeIfPresent(String.self, forKey: .work)
+            ?? c.decodeIfPresent(String.self, forKey: .item)
         startedAt = try c.decode(Date.self, forKey: .startedAt)
         endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
         trace = try c.decodeIfPresent([Entry].self, forKey: .trace) ?? []
@@ -202,7 +205,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         try c.encode(graphName, forKey: .graphName)
         try c.encode(kind, forKey: .kind)
         try c.encodeIfPresent(thread, forKey: .thread)
-        try c.encodeIfPresent(item, forKey: .item)
+        try c.encodeIfPresent(work, forKey: .work)
         try c.encode(startedAt, forKey: .startedAt)
         try c.encodeIfPresent(endedAt, forKey: .endedAt)
         try c.encode(trace, forKey: .trace)
@@ -266,7 +269,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
 
     /// List order: live first (a traversing record is what the panel should be showing),
     /// then by start, newest first. Among the LIVE ones a BUILD traversal leads: a build
-    /// runs for minutes while items come and go, and the head of the list is what the panel
+    /// runs for minutes while work comes and goes, and the head of the list is what the panel
     /// follows — an item starting mid-build must not take the canvas off the thread's spine.
     public static func ordered(_ runs: [SZAgentGraphRun]) -> [SZAgentGraphRun] {
         runs.sorted {
@@ -277,7 +280,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     }
 
     /// Cap the history (~50) — never a live record, whatever the burst. Two budgets rather
-    /// than one: item traversals outnumber build traversals many to one, so a shared cap
+    /// than one: work traversals outnumber build traversals many to one, so a shared cap
     /// would let one busy afternoon evict every recorded build from the list AND from
     /// `runs.json`. Order-independent: the victim is the OLDEST ENDED record of its budget
     /// by its own clock, so the cap holds whatever list it is handed.

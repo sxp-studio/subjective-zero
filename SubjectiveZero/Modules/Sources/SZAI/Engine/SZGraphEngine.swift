@@ -9,7 +9,7 @@
 // - step:     compiled async code; the ONLY home of routing intelligence (it may askModel).
 // - turn:     a full agent turn; mechanically dumb — `ok`/`error`, nothing else. A turn's
 //             content never routes; the VERDICT-prose-scanning era is unrepresentable.
-// - dispatch: resolve the items fact, hand the host the orders, and WAIT — the host
+// - dispatch: resolve the items fact, fan one `work` message per element, and WAIT — the host
 //             supervises the set (SZThreadMachine) and returns its one settled summary;
 //             the node then produces `settled` and routes its edge like any other. A
 //             retry round is the settled edge looping back under a `maxTraversals`
@@ -41,7 +41,7 @@ public struct SZStepAttachment: Sendable {
 public struct SZTraversalResult: Sendable {
     public var conclusion: SZTraversalConclusion
     /// Item orders a dispatch sent (empty otherwise) — the machine opens a set from these.
-    public var sent: [SZItemOrder]
+    public var sent: [SZWorkOrder]
     /// The seat those orders address, straight off the dispatch node.
     public var sentTarget: String?
     public var notes: [SZTraversalNote]
@@ -71,7 +71,7 @@ public struct SZGraphEngine {
     /// boundary and concludes as `.cancelled` — never a defect, never caught-and-continued.
     public func run(kind: SZMessageKind) async -> SZTraversalResult {
         var notes: [SZTraversalNote] = []
-        var sent: [SZItemOrder] = []
+        var sent: [SZWorkOrder] = []
         var sentTarget: String?
         var ordinal = 0
         struct EdgeKey: Hashable { let from: String; let outcome: String }
@@ -257,7 +257,7 @@ public struct SZGraphEngine {
 
             case .dispatch(let dispatch):
                 let items = host.itemsFact(named: dispatch.items, kind: kind)
-                let orders = items.map { SZItemOrder(node: $0) }
+                let orders = items.map { SZWorkOrder(node: $0) }
                 sent += orders
                 sentTarget = dispatch.to
                 // The visit is RUNNING for the whole fleet phase — the card pulses and

@@ -114,7 +114,7 @@ struct SZAgentGraphRunList: View {
         // NOT the build traversal: that one ended the moment it dispatched. The thread's
         // verdict belongs to the newest DIRECTOR traversal — a settled re-entry, when the
         // fleet came back and the graph ruled on what it found.
-        let director = entry.traversals.first { $0.kind != .item } ?? entry.traversals[0]
+        let director = entry.traversals.first { $0.kind != .work } ?? entry.traversals[0]
         let live = entry.traversals.contains(where: \.isLive)
         let began = entry.traversals.map(\.startedAt).min() ?? director.startedAt
         let ended = entry.traversals.compactMap(\.endedAt).max()
@@ -258,7 +258,7 @@ struct SZAgentGraphRunRow: View {
     static func glyph(for run: SZAgentGraphRun) -> String {
         switch run.kind {
         case .build: "play.circle"
-        case .item: "wrench.and.screwdriver"
+        case .work: "wrench.and.screwdriver"
         case .chat: "bubble.left"
         case .request: "envelope"
         case .steer: "arrow.triangle.turn.up.right.diamond"
@@ -328,7 +328,7 @@ struct SZAgentGraphRunRow: View {
         // row itself stays relative. The raw pack id and graph STEM live here too, so the
         // strings the row displays as names stay reachable in their authored spelling.
         .help("\(run.agent)/\(run.graphName) · \(run.kind.rawValue)"
-              + (run.item.map { " · \($0.prefix(8))" } ?? "")
+              + (run.work.map { " · \($0.prefix(8))" } ?? "")
               + " · \(run.startedAt.formatted(date: .abbreviated, time: .standard))")
     }
 

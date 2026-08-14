@@ -27,8 +27,8 @@ private func sampleRecords() -> [SZAgentGraphRun] {
                at: Date(timeIntervalSinceReferenceDate: 130))
     build.seal(conclusion: .ended, at: Date(timeIntervalSinceReferenceDate: 131))
 
-    var item = SZAgentGraphRun(id: UUID(), agent: "coding", graphName: "item", kind: .item,
-                               thread: thread, item: UUID().uuidString,
+    var item = SZAgentGraphRun(id: UUID(), agent: "coding", graphName: "item", kind: .work,
+                               thread: thread, work: UUID().uuidString,
                                startedAt: Date(timeIntervalSinceReferenceDate: 200))
     item.seal(conclusion: .failed(reason: "the turn threw"),
               at: Date(timeIntervalSinceReferenceDate: 210))
@@ -46,7 +46,7 @@ private func sampleRecords() -> [SZAgentGraphRun] {
                  at: Date(timeIntervalSinceReferenceDate: 301))
     stopped.seal(conclusion: .cancelled, at: Date(timeIntervalSinceReferenceDate: 305))
 
-    var defect = SZAgentGraphRun(id: UUID(), agent: "coding", graphName: "item", kind: .item,
+    var defect = SZAgentGraphRun(id: UUID(), agent: "coding", graphName: "item", kind: .work,
                                  startedAt: Date(timeIntervalSinceReferenceDate: 400))
     defect.seal(conclusion: .defect(detail: "unknown node mid-traversal"),
                 at: Date(timeIntervalSinceReferenceDate: 401))

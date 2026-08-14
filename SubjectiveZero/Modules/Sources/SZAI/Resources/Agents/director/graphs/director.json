@@ -1,7 +1,7 @@
 {
   "name": "director",
   "label": "Director",
-  "hint": "Every message the director receives and what it does with each: a chat turn routed by its own ruling; a build opened under the chosen strategy, its fleet awaited at the dispatch and reconciled around the settled loop.",
+  "hint": "Every message the director receives and what it does with each: a chat turn routed by its own ruling; a build decomposed into typed contracts, its fleet awaited at the dispatch and reconciled around the settled loop.",
   "nodes": [
     { "id": "message", "title": "On message", "onMessage": {} },
 
@@ -10,38 +10,23 @@
     { "id": "resumed", "title": "Resumed turn", "turn": { "brief": "prompts/chat-resumed.md.mustache", "session": "message" } },
     { "id": "route-reply", "title": "Route the reply", "ask": { "prompt": "prompts/route-reply.md.mustache", "outcomes": ["answer", "build", "plan"], "effects": { "build": ["requestBuild"] } } },
 
-    { "id": "strategy", "title": "Strategy", "step": "strategy" },
-
     { "id": "decompose", "title": "Decompose", "turn": { "brief": "prompts/decompose.md.mustache" } },
     { "id": "implement", "title": "Implement", "dispatch": { "to": "coding", "items": "workSet" } },
     { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
-    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "prompts/reconcile.md.mustache", "session": "message" } },
-
-    { "id": "work-left", "title": "Work left?", "step": "work-left" },
-    { "id": "implement-once", "title": "Implement once", "dispatch": { "to": "coding", "items": "workSet" } },
-
-    { "id": "nodes-failing", "title": "Nodes failing?", "step": "nodes-failing" }
+    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "prompts/reconcile.md.mustache", "session": "message" } }
   ],
   "edges": [
     { "from": "message", "outcome": "chat", "to": "resuming" },
-    { "from": "message", "outcome": "build", "to": "strategy" },
+    { "from": "message", "outcome": "build", "to": "decompose" },
 
     { "from": "resuming", "outcome": "no", "to": "cold" },
     { "from": "resuming", "outcome": "yes", "to": "resumed" },
     { "from": "cold", "outcome": "ok", "to": "route-reply" },
     { "from": "resumed", "outcome": "ok", "to": "route-reply" },
 
-    { "from": "strategy", "outcome": "agentic", "to": "decompose" },
-    { "from": "strategy", "outcome": "procedural", "to": "work-left" },
-    { "from": "strategy", "outcome": "recovery", "to": "nodes-failing" },
-
     { "from": "decompose", "outcome": "ok", "to": "implement" },
     { "from": "implement", "outcome": "settled", "to": "unresolved", "maxTraversals": 2 },
     { "from": "unresolved", "outcome": "yes", "to": "reconcile" },
-    { "from": "reconcile", "outcome": "ok", "to": "implement" },
-
-    { "from": "work-left", "outcome": "yes", "to": "implement-once" },
-
-    { "from": "nodes-failing", "outcome": "yes", "to": "reconcile" }
+    { "from": "reconcile", "outcome": "ok", "to": "implement" }
   ]
 }

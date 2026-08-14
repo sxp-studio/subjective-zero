@@ -41,7 +41,7 @@ struct SZThreadMachineTests {
 
     @Test func attemptsAccumulateAcrossSets() {
         var (machine, set1) = machineWithOpenSet(["a"])
-        _ = machine.handle(.itemSettled(node: "a", setID: set1, outcome: "error: no"))
+        _ = machine.handle(.workSettled(node: "a", setID: set1, outcome: "error: no"))
         let second = machine.handle(.dispatched(SZDispatchIntent(target: "coding", items: ["a"])))
         guard case .deliverItems(_, _, let orders) = second.first else {
             Issue.record("expected deliverItems"); return
@@ -65,10 +65,10 @@ struct SZThreadMachineTests {
 
     @Test func theLastItemLandingClosesTheSetWithOneSummary() {
         var (machine, setID) = machineWithOpenSet()
-        let first = machine.handle(.itemSettled(node: "a", setID: setID, outcome: "ok"))
+        let first = machine.handle(.workSettled(node: "a", setID: setID, outcome: "ok"))
         #expect(first == [.amendTally(setID: setID, settled: 1, total: 2, failed: 0)])
 
-        let second = machine.handle(.itemSettled(node: "b", setID: setID, outcome: "error: boom"))
+        let second = machine.handle(.workSettled(node: "b", setID: setID, outcome: "error: boom"))
         #expect(second == [
             .amendTally(setID: setID, settled: 2, total: 2, failed: 1),
             .settled(SZSettledSummary(setID: setID, from: "coding",
@@ -81,11 +81,11 @@ struct SZThreadMachineTests {
 
     @Test func roundCountsClosedSets() {
         var (machine, set1) = machineWithOpenSet(["a"])
-        _ = machine.handle(.itemSettled(node: "a", setID: set1, outcome: "ok"))
+        _ = machine.handle(.workSettled(node: "a", setID: set1, outcome: "ok"))
         var (m2, set2) = (machine, 0)
         let commands = m2.handle(.dispatched(SZDispatchIntent(target: "coding", items: ["a"])))
         if case .deliverItems(let id, _, _) = commands.first { set2 = id }
-        let closing = m2.handle(.itemSettled(node: "a", setID: set2, outcome: "ok"))
+        let closing = m2.handle(.workSettled(node: "a", setID: set2, outcome: "ok"))
         guard case .settled(let summary) = closing.last else {
             Issue.record("expected a summary"); return
         }
@@ -94,17 +94,17 @@ struct SZThreadMachineTests {
 
     @Test func aLateSettleAgainstAClosedSetIsAbsorbed() {
         var (machine, setID) = machineWithOpenSet(["a"])
-        _ = machine.handle(.itemSettled(node: "a", setID: setID, outcome: "ok"))
-        #expect(machine.handle(.itemSettled(node: "a", setID: setID, outcome: "ok")) == [])
-        #expect(machine.handle(.itemSettled(node: "a", setID: 99, outcome: "ok")) == [])
+        _ = machine.handle(.workSettled(node: "a", setID: setID, outcome: "ok"))
+        #expect(machine.handle(.workSettled(node: "a", setID: setID, outcome: "ok")) == [])
+        #expect(machine.handle(.workSettled(node: "a", setID: 99, outcome: "ok")) == [])
     }
 
     @Test func aSecondOutcomeForTheSameItemIsDropped() {
         var (machine, setID) = machineWithOpenSet()
-        _ = machine.handle(.itemSettled(node: "a", setID: setID, outcome: "ok"))
+        _ = machine.handle(.workSettled(node: "a", setID: setID, outcome: "ok"))
         // The duplicate must not close the set nor overwrite the first outcome.
-        #expect(machine.handle(.itemSettled(node: "a", setID: setID, outcome: "error: x")) == [])
-        let closing = machine.handle(.itemSettled(node: "b", setID: setID, outcome: "ok"))
+        #expect(machine.handle(.workSettled(node: "a", setID: setID, outcome: "error: x")) == [])
+        let closing = machine.handle(.workSettled(node: "b", setID: setID, outcome: "ok"))
         guard case .settled(let summary) = closing.last else {
             Issue.record("expected a summary"); return
         }
@@ -115,7 +115,7 @@ struct SZThreadMachineTests {
 
     @Test func theWatchdogSynthesizesStragglersAndCancelsThemFirst() {
         var (machine, setID) = machineWithOpenSet()
-        _ = machine.handle(.itemSettled(node: "a", setID: setID, outcome: "ok"))
+        _ = machine.handle(.workSettled(node: "a", setID: setID, outcome: "ok"))
         let fired = machine.handle(.watchdogFired(setID: setID))
         // Cancel BEFORE the summary ships — the machine's stated order.
         guard case .cancelItems(let cancelledSet, let nodes) = fired.first else {
@@ -135,7 +135,7 @@ struct SZThreadMachineTests {
 
     @Test func aWatchdogAgainstAClosedSetIsAbsorbed() {
         var (machine, setID) = machineWithOpenSet(["a"])
-        _ = machine.handle(.itemSettled(node: "a", setID: setID, outcome: "ok"))
+        _ = machine.handle(.workSettled(node: "a", setID: setID, outcome: "ok"))
         #expect(machine.handle(.watchdogFired(setID: setID)) == [])
     }
 
@@ -143,14 +143,14 @@ struct SZThreadMachineTests {
 
     @Test func stopSweepsTheOpenSetAndSynthesizesNothing() {
         var (machine, setID) = machineWithOpenSet()
-        _ = machine.handle(.itemSettled(node: "a", setID: setID, outcome: "ok"))
+        _ = machine.handle(.workSettled(node: "a", setID: setID, outcome: "ok"))
         let stopped = machine.handle(.stopRequested)
         // The outstanding item is cancelled; no summary ships — the waiting traversal is
         // being cancelled, and a stopped conversation just ends.
         #expect(stopped == [.cancelItems(setID: setID, nodes: ["b"])])
         #expect(machine.state == .stopped)
         // Absorbing: everything after the stop is a no-op.
-        #expect(machine.handle(.itemSettled(node: "b", setID: setID, outcome: "ok")) == [])
+        #expect(machine.handle(.workSettled(node: "b", setID: setID, outcome: "ok")) == [])
         #expect(machine.handle(.dispatched(SZDispatchIntent(target: "coding", items: ["c"]))) == [])
     }
 

@@ -18,8 +18,9 @@ public enum SZMessageKind: String, Codable, Sendable, CaseIterable {
     /// Open a fleet thread over the project's work set (the Build press, or a chat turn's
     /// requestBuild effect). Supersedable while queued.
     case build
-    /// One dispatched work item, addressed to one agent.
-    case item
+    /// One dispatched unit of a run's work set — a node's coding assignment, addressed to
+    /// the seat that implements it.
+    case work
     /// A structured proxied operation (split/merge …) — routed on its payload, never prose.
     case request
     /// A note folded into the recipient's NEXT brief. The one kind that is never delivered
@@ -31,5 +32,5 @@ public enum SZMessageKind: String, Codable, Sendable, CaseIterable {
     /// the message form's declared outcome set, so "that is not a kind" and "steer may
     /// never be routed" are both refused by the ordinary undeclared-outcome check.
     public static let deliverable: Set<SZMessageKind> =
-        [.chat, .build, .item, .request]
+        [.chat, .build, .work, .request]
 }

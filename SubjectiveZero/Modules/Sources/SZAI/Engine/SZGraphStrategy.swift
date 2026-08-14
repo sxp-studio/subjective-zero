@@ -128,15 +128,15 @@ public struct SZGraphDirectorStrategy: SZOrchestrating {
         guard let buildGraph = directorPack.graph(routing: .build) else {
             throw SZGraphOrchestratorError.missingGraph(agent: directorPack.id, kind: .build)
         }
-        guard let itemGraph = codingPack.graph(routing: .item) else {
-            throw SZGraphOrchestratorError.missingGraph(agent: codingPack.id, kind: .item)
+        guard let workGraph = codingPack.graph(routing: .work) else {
+            throw SZGraphOrchestratorError.missingGraph(agent: codingPack.id, kind: .work)
         }
         let motor = Motor(
             strategy: self, context: context,
             director: Role(agent: directorPack.id, graph: buildGraph,
                            attachments: try await attachments(of: directorPack, graph: buildGraph)),
-            coding: Role(agent: codingPack.id, graph: itemGraph,
-                         attachments: try await attachments(of: codingPack, graph: itemGraph)))
+            coding: Role(agent: codingPack.id, graph: workGraph,
+                         attachments: try await attachments(of: codingPack, graph: workGraph)))
         return try await motor.run()
     }
 
@@ -262,7 +262,7 @@ extension SZGraphDirectorStrategy {
         /// item traversal runs concurrently, each landing feeds `itemSettled`, and the
         /// machine's watchdog races the group. Returns the set's one summary — or nil on
         /// stop, which the engine's cancellation boundary turns into `.cancelled`.
-        private func deliver(orders itemOrders: [SZItemOrder], to seat: String,
+        private func deliver(orders workOrders: [SZWorkOrder], to seat: String,
                              progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
             async -> SZSettledSummary? {
             // The Director's authored notes drained AT THE SEND, so a note authored during
@@ -272,7 +272,7 @@ extension SZGraphDirectorStrategy {
                 notes[node.uuidString] = text
             }
             let minted = machine.handle(.dispatched(SZDispatchIntent(
-                target: seat, items: itemOrders.map(\.node), notes: notes)))
+                target: seat, items: workOrders.map(\.node), notes: notes)))
             var orders: [SZDispatchOrder] = []
             var deadline: Duration?
             var setID: Int?
@@ -305,7 +305,7 @@ extension SZGraphDirectorStrategy {
                 // sighting — parallel items interleave on the main actor, and the id is
                 // what un-shuffles them into per-record traces.
                 let note = strategy.onNote
-                let host = SZItemTraversalHost(
+                let host = SZWorkTraversalHost(
                     context: context, renderer: renderer, order: order, nodeID: nodeID,
                     sessions: sessions, registry: strategy.registry,
                     graphName: coding.graph.name, queries: queries,
@@ -341,14 +341,14 @@ extension SZGraphDirectorStrategy {
             var runnable: [(node: String, sighting: UUID, engine: SZGraphEngine)] = []
             for delivery in deliveries {
                 let node = delivery.order.node
-                absorb(machine.handle(.itemDelivered(node: node, setID: setID)))
+                absorb(machine.handle(.workDelivered(node: node, setID: setID)))
                 if let engine = delivery.engine {
                     strategy.onTraversal(SZTraversalSighting(
                         id: delivery.sighting, agent: coding.agent,
-                        graphName: coding.graph.name, kind: .item, item: node))
+                        graphName: coding.graph.name, kind: .work, work: node))
                     runnable.append((node, delivery.sighting, engine))
                 } else {
-                    absorb(machine.handle(.itemSettled(
+                    absorb(machine.handle(.workSettled(
                         node: node, setID: setID,
                         outcome: "defect: '\(node)' is not a node id")))
                 }
@@ -365,10 +365,10 @@ extension SZGraphDirectorStrategy {
                     group.addTask {
                         // The engine is MainActor-isolated; the child hops for each node
                         // step and parks off-actor for the long awaits (the provider).
-                        let result = await child.engine.run(kind: .item)
+                        let result = await child.engine.run(kind: .work)
                         await concluded(child.sighting, SZTraversalEnding(result.conclusion))
                         return .settled(node: child.node,
-                                        outcome: Self.itemOutcome(of: result.conclusion))
+                                        outcome: Self.workOutcome(of: result.conclusion))
                     }
                 }
                 if let deadline {
@@ -393,7 +393,7 @@ extension SZGraphDirectorStrategy {
                     pendingSteers += context.takeDirectorInbox()
                     switch land {
                     case .settled(let node, let outcome):
-                        absorb(machine.handle(.itemSettled(node: node, setID: setID,
+                        absorb(machine.handle(.workSettled(node: node, setID: setID,
                                                            outcome: outcome)))
                     case .watchdog:
                         absorb(machine.handle(.watchdogFired(setID: setID)))
@@ -430,10 +430,10 @@ extension SZGraphDirectorStrategy {
             }
         }
 
-        /// An item traversal's conclusion as its terminal outcome string — the dispatch
+        /// A work traversal's conclusion as its terminal outcome string — the dispatch
         /// card's rule reads anything not `ok`-prefixed as a failure, so every non-ended
         /// class carries its detail. Nonisolated: computed by the delivery's children.
-        private nonisolated static func itemOutcome(of conclusion: SZTraversalConclusion) -> String {
+        private nonisolated static func workOutcome(of conclusion: SZTraversalConclusion) -> String {
             switch conclusion {
             case .ended: "ok"
             case .failed(_, let detail): "error: \(detail)"

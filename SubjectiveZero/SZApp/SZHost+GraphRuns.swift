@@ -28,7 +28,7 @@ extension SZHost {
         let record = SZAgentGraphRun(id: sighting.id, agent: sighting.agent,
                                      graphName: sighting.graphName, kind: sighting.kind,
                                      thread: sighting.kind == .chat ? nil : runID,
-                                     item: sighting.item)
+                                     work: sighting.work)
         agentGraphRuns = SZAgentGraphRun.ordered(agentGraphRuns + [record])
     }
 
@@ -44,29 +44,29 @@ extension SZHost {
     func concludeAgentGraphRun(_ id: UUID, _ ending: SZTraversalEnding) {
         guard let i = agentGraphRuns.firstIndex(where: { $0.id == id }) else { return }
         agentGraphRuns[i].seal(conclusion: SZAgentGraphRun.Conclusion(ending))
-        surfaceItemFailure(agentGraphRuns[i], ending)
+        surfaceWorkFailure(agentGraphRuns[i], ending)
         agentGraphRuns = SZAgentGraphRun.capped(SZAgentGraphRun.ordered(agentGraphRuns))
         persistAgentGraphRuns()
     }
 
-    /// A failed item traversal knows WHY it failed; without this the post-run sweep paints
+    /// A failed work traversal knows WHY it failed; without this the post-run sweep paints
     /// the node with its generic "never compiled this node or reported a blocker" line and
     /// the reason is lost. Keyed on the traversal's own conclusion, so it covers every
     /// graph — a retryless strategy that ends at its first settlement included.
     ///
     /// An agent's OWN report always wins: a coding agent that said `needsInput` with its
     /// question keeps saying that. Only a node whose agent never reported takes this word.
-    /// A cancelled item says nothing at all — a stopped run is not a failed node.
-    private func surfaceItemFailure(_ record: SZAgentGraphRun, _ ending: SZTraversalEnding) {
-        guard record.kind == .item, let id = record.item, let node = UUID(uuidString: id),
-              let message = Self.itemFailureMessage(ending) else { return }
+    /// Cancelled work says nothing at all — a stopped run is not a failed node.
+    private func surfaceWorkFailure(_ record: SZAgentGraphRun, _ ending: SZTraversalEnding) {
+        guard record.kind == .work, let id = record.work, let node = UUID(uuidString: id),
+              let message = Self.workFailureMessage(ending) else { return }
         let reported = nodeAgentState[node]?.phase
         guard reported != .error, reported != .needsInput else { return }
         recordNodeStatus(node: node, phase: .error, message: message)
     }
 
-    /// The node-facing sentence for an item ending, or nil when the node should stay quiet.
-    nonisolated static func itemFailureMessage(_ ending: SZTraversalEnding) -> String? {
+    /// The node-facing sentence for a work ending, or nil when the node should stay quiet.
+    nonisolated static func workFailureMessage(_ ending: SZTraversalEnding) -> String? {
         switch ending {
         case .ended, .cancelled: nil
         case .failed(let reason): reason
@@ -145,12 +145,14 @@ extension SZHost {
                     graphs: pack.graphs.map { .init(name: $0.name, graph: $0) },
                     // The front door each seat mostly exists for: the Director's build
                     // graph, the coding seat's item graph, else whatever comes first.
-                    defaultGraphName: (pack.graph(routing: .build) ?? pack.graph(routing: .item)
+                    defaultGraphName: (pack.graph(routing: .build) ?? pack.graph(routing: .work)
                         ?? pack.graphs.first)?.name ?? "",
                     seat: pack.seat?.rawValue,
                     // Only the agent that opens builds carries a strategy chip, and only
-                    // when one was actually requested — an unasked run says nothing.
-                    activeStrategy: pack.seat == .director ? activeRunGraphVariant() : nil)
+                    // when its lane actually OFFERS strategies and one was requested — the
+                    // shipped agentic-only pack shows nothing.
+                    activeStrategy: pack.seat == .director && !directorBuildStrategyNames().isEmpty
+                        ? activeRunGraphVariant() : nil)
             }
         }
         agentGraphPlanCache = agents

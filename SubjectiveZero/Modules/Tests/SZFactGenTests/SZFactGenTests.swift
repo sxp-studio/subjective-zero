@@ -38,7 +38,7 @@ private func specSource() throws -> String {
     #expect(all.count == 22)
     #expect(all.filter { $0.kind == "build" }.count == 11)
     #expect(all.filter { $0.kind == "chat" }.count == 4)
-    #expect(all.filter { $0.kind == "item" }.count == 4)
+    #expect(all.filter { $0.kind == "work" }.count == 4)
     #expect(all.filter { $0.kind == "request" }.count == 3)
 
     // graphJSON is the one heavy field; the // lazy marker must surface in its record.
@@ -55,7 +55,7 @@ private func specSource() throws -> String {
     #expect(record("workSet", "build")?.swiftType == "[String]")
     #expect(record("nodeStatuses", "build")?.swiftType == "[String: String]")
     #expect(record("nodeSeed", "chat")?.swiftType == "String?")
-    #expect(record("resumeSession", "item")?.swiftType == "String?")
+    #expect(record("resumeSession", "work")?.swiftType == "String?")
     #expect(record("nodes", "request")?.swiftType == "[String]")
     // Every record carries a doc — the grammar makes doc-less vars unrepresentable.
     #expect(all.allSatisfy { !$0.doc.isEmpty })
@@ -67,7 +67,7 @@ private func specSource() throws -> String {
     #expect(byKind["build"] == ["captureStatuses"])
     #expect(byKind["chat"] == ["requestBuild"])
     #expect(byKind["request"] == ["split", "merge"])
-    #expect(byKind["item"] == nil)   // item has facts but no effect enum — legal
+    #expect(byKind["work"] == nil)   // work has facts but no effect enum — legal
 }
 
 @Test func effectCatalogMatchesTheSpecEnumForEnum() throws {
@@ -80,7 +80,7 @@ private func specSource() throws -> String {
         #expect(SZEffectCatalog.cases(kind: effect.kind) == effect.cases)
     }
     // A kind with no effect enum answers the empty set, never nil-crashes.
-    #expect(SZEffectCatalog.cases(kind: "item") == [])
+    #expect(SZEffectCatalog.cases(kind: "work") == [])
 }
 
 // MARK: - The runtime constant vs. the spec

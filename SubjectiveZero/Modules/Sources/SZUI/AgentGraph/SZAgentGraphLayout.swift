@@ -131,7 +131,7 @@ public enum SZAgentGraphLayout {
         case .build: 0
         case .request: 1
         case .chat: 2
-        case .item: 3
+        case .work: 3
         case .steer: 4
         }
     }

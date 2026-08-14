@@ -1,7 +1,7 @@
 {
   "name": "coding",
   "label": "Coding",
-  "hint": "Everything one node's coding agent is asked to do: a dispatched work item (cold, or continuing after a blocker), a structured split/merge request, and a direct chat about the node it owns.",
+  "hint": "Everything one node's coding agent is asked to do: a dispatched piece of work (cold, or continuing after a blocker), a structured split/merge request, and a direct chat about the node it owns.",
   "nodes": [
     { "id": "message", "title": "On message", "onMessage": {} },
 
@@ -18,7 +18,7 @@
     { "id": "chat-resumed", "title": "Resumed chat", "turn": { "brief": "prompts/node-chat-resumed.md.mustache", "session": "message" } }
   ],
   "edges": [
-    { "from": "message", "outcome": "item", "to": "retrying" },
+    { "from": "message", "outcome": "work", "to": "retrying" },
     { "from": "message", "outcome": "request", "to": "request-op" },
     { "from": "message", "outcome": "chat", "to": "resuming" },
     { "from": "resuming", "outcome": "no", "to": "chat" },

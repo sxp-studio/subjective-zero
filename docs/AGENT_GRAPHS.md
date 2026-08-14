@@ -20,7 +20,7 @@ kind.
 |---|---|---|
 | `chat` | one reply on a scope's transcript | the user, or a tool |
 | `build` | open a fleet thread over the project's work set | the Build press, `ui_build`, a chat turn's requestBuild effect |
-| `item` | one dispatched work item | a director graph's dispatch node |
+| `work` | one node's coding assignment, dispatched off the run's work set | a director graph's dispatch node |
 | `request` | a structured proxied operation (split/merge …) | `ui_split_node`, `ui_merge_nodes` — routed on payload, never prose |
 | `steer` | a note folded into the recipient's NEXT brief | the user, mid-run |
 
@@ -101,7 +101,7 @@ unrepresentable:
 | `"step": "<folder>"` | the compiled `Step.swift` in the agent's pack | whatever the step's own exported declaration names |
 | `"ask": { "prompt", "outcomes", "effects"? }` | a structured model query authored as data — the prompt file is the question | its declared `outcomes`; the reply's `{"outcome": …}` routes, repaired once on a shape mismatch |
 | `"turn": { "brief", "session"?, "tools"? }` | a full agent turn; the mustache brief IS the body | fixed `ok` / `error` — process truth only, content never routes |
-| `"dispatch": { "to", "items" }` | fan work out — one `item` message per element of the `items` fact — and **wait for the set** | `settled`, when the last item lands (or the watchdog synthesizes the stragglers) |
+| `"dispatch": { "to", "items" }` | fan work out — one `work` message per element of the `items` fact — and **wait for the set** | `settled`, when the last lands (or the watchdog synthesizes the stragglers) |
 
 **A dispatch waits.** The traversal holds at the node while the fleet works — the card is live,
 its sub-agent lanes ticking under it — and when the set closes it produces `settled` and routes
@@ -139,28 +139,27 @@ Merging kinds into one file is therefore allowed and never required. What it buy
 deduplication: the director's three build strategies share `reconcile`, `implement` and
 `nodes-failing`, which would have to be triplicated across separate variant files.
 
-## Strategies: a route, not a file
+## Strategies: authorable, not shipped
 
-A build **strategy** is a step at the head of the build lane, not a choice of document. The
-director's `strategy` step is one line:
+V1 ships ONE build lane: a work message routes straight into `decompose`, the fleet is awaited at
+`implement`, and the leashed settled edge buys the reconcile rounds. There is no strategy router
+in the shipped pack — a preference is not a decision, and a card that always answers the same
+thing is noise.
+
+Variant lanes remain a PACK EDIT away. The seam is the `runVariant` build fact: the host passes
+`SZ_RUN_GRAPH` (env, per launch) > the persisted choice (`debug_set_orchestrator`) through
+verbatim, and a pack that wants strategies puts a router step at the head of its build lane:
 
 ```swift
-let step = SZBuildRouter("agentic", "procedural", "recovery") {
-    ["procedural", "recovery"].contains($0.runVariant) ? $0.runVariant : "agentic"
+// director/steps/strategy/Step.swift
+let step = SZBuildRouter("agentic", "procedural") {
+    $0.runVariant == "procedural" ? "procedural" : "agentic"
 }
 ```
 
-Its three ports route into three lanes that share nodes wherever their wiring agrees:
-**agentic** (decompose → dispatch, whose leashed settled edge buys the reconcile rounds; the
-default the step falls back to), **procedural** (token-free and contract-first — no planning
-turn, and its own dispatch carries no settled edge, so the first settlement concludes), and
-**recovery** (gated on `nodes-failing`: a failing fleet gets a reconcile turn and a re-dispatch
-through the same loop; a healthy fleet ends the run untouched).
-
-The requested name reaches the step as the `runVariant` fact: `SZ_RUN_GRAPH` (env, per launch) >
-the persisted choice (`debug_set_orchestrator`). The host does **not** validate it — the step owns
-the fallback, and refusing a name here could overrule a pack that would have honoured it — but a
-name the wiring does not offer gets one honest status line, and the canvas shows which port fired.
+— one port per lane, the default living in the `?:`. The host never validates the name (the step
+owns its fallback); when a build lane's head is a router, the sidebar marks the requested strategy
+on the agent's graph row.
 
 ## Steps: one Step.swift, typed to its kind
 
@@ -226,7 +225,7 @@ edges, undeclared outcomes, unbounded cycles, the door's cardinality, reachabili
 turn briefs (the template exists; every `{{token}}` is
 one the LANE's assembly substitutes; every partial a token renders from ships in the pack — no
 literal token reaches a model from a turn brief; an `askModel` template is resolved at RUN time and
-is not scanned, so a typo there ships literally), dispatch targets (a held seat whose holder handles `item`)
+is not scanned, so a typo there ships literally), dispatch targets (a held seat whose holder routes `work`)
 and items facts (catalogued, `[String]`-typed), and — through the step seam — each compiled step's
 declared outcomes and facts kind, checked against the one lane that reaches it. With no step provider those checks are **skipped and the report
 says so**; they never pass silently.
@@ -252,7 +251,7 @@ a step opens its `Step.swift`, a turn opens its brief, and a dispatch links into
 
 ## RUNS records and the panel
 
-Every message an agent receives — a Build press, each dispatched item, each chat reply — is ONE
+Every message an agent receives — a Build press, each dispatched piece of work, each chat reply — is ONE
 record, an `SZAgentGraphRun`: who received which kind, the ordered trace of the whole journey
 (running → done/failed, outcome, detail — a dispatch visit carrying its fleet's tally, live on
 the entry while the set works), and the conclusion. The trace opens at the door, so a record's
@@ -263,12 +262,12 @@ trace, and the conclusions survive a relaunch while a crash mid-traversal loses 
 keeps the transcript. The history caps per budget, never evicting a live record.
 
 A chat record carries **no thread**, even when delivered mid-build: a node outside the work set can
-be chatted while the fleet runs, and the list's thread header picks the newest non-item traversal
+be chatted while the fleet runs, and the list's thread header picks the newest non-work traversal
 as the thread's decider — so a chat joining the group would paint its own ending as the build's.
 
 The list names the **agent** ("Director", "Coding"), with the graph's authored `label` on the line
 below and the raw pack id / file stem in the tooltip. On the canvas, a dispatch card carries a band
-of its sub-agents: one lane per dispatched item, each naming the node that agent is on right now,
+of its sub-agents: one lane per dispatched work message, each naming the node that agent is on right now,
 its running clock, and a pulsing `live` badge — swapped for a conclusion badge and a frozen clock
 as each settles, so the band drains from working to done while the fleet lands.
 

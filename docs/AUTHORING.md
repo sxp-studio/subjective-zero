@@ -30,38 +30,39 @@ launch — that copy is yours to edit, and it wins until an app update ships a n
 
 Nothing calls an agent directly. Everything is a message, and every graph opens at its **message
 node** — its one door, with a port per kind it accepts: `chat` (answer this), `build` (open a
-fleet thread), `item` (one node's slice of the work), `request` (a structured operation in your
+fleet thread), `work` (one node's coding assignment), `request` (a structured operation in your
 name). A delivery leaves by the port bearing its own name — and when work you dispatched
 finishes, the reply lands at the WAITING dispatch node as its own `settled` outcome, not as a
 new message.
 
-Here is a whole build strategy — the `procedural` lane of the shipped `director/graphs/director.json`:
+Here is the shipped build lane — the heart of `director/graphs/director.json`:
 
 ```jsonc
 {
   "nodes": [
     { "id": "message", "title": "On message", "onMessage": {} },
-    { "id": "strategy", "title": "Strategy", "step": "strategy" },
-    { "id": "work-left", "title": "Work left?", "step": "work-left" },
-    { "id": "implement-once", "title": "Implement once", "dispatch": { "to": "coding", "items": "workSet" } }
+    { "id": "decompose", "title": "Decompose", "turn": { "brief": "prompts/decompose.md.mustache" } },
+    { "id": "implement", "title": "Implement", "dispatch": { "to": "coding", "items": "workSet" } },
+    { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
+    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "prompts/reconcile.md.mustache", "session": "message" } }
   ],
   "edges": [
-    { "from": "message", "outcome": "build", "to": "strategy" },
-    { "from": "strategy", "outcome": "procedural", "to": "work-left" },
-    { "from": "work-left", "outcome": "yes", "to": "implement-once" }
+    { "from": "message", "outcome": "build", "to": "decompose" },
+    { "from": "decompose", "outcome": "ok", "to": "implement" },
+    { "from": "implement", "outcome": "settled", "to": "unresolved", "maxTraversals": 2 },
+    { "from": "unresolved", "outcome": "yes", "to": "reconcile" },
+    { "from": "reconcile", "outcome": "ok", "to": "implement" }
   ]
 }
 ```
 
-Read it: a `build` delivery leaves the door by its `build` port into `strategy`, a compiled router;
-its `procedural` port routes to `work-left`, a compiled condition; `yes` routes to `implement-once`,
-which sends one `item` message per work-set node and **waits for the whole set** — the traversal
-holds at the dispatch while the fleet works, and settlement is the node's own `settled` outcome.
-`no` has no edge, so a clean project ends the run right there; that is not an error, it is the
-graph's honest ending. And `implement-once` wires no `settled` edge, so the first settlement
-concludes — "no retry" is spelled by leaving the port unwired, while the agentic lane's `implement`
-loops its settled edge back through the reconcile gate under a `maxTraversals: 2` leash: the leash
-IS the retry budget.
+Read it: a `build` delivery leaves the door by its `build` port into the decompose turn; `ok`
+routes to `implement`, which sends one `work` message per work-set node and **waits for the whole
+set** — the traversal holds at the dispatch while the fleet works, and settlement is the node's
+own `settled` outcome. The settled edge loops back through the `unresolved` gate under a
+`maxTraversals: 2` leash — the leash IS the retry budget — and a gate answering `no` has no edge,
+so a resolved fleet ends the run right there. That is not an error; it is the graph's honest
+ending.
 
 A node is one of exactly five forms: the **message** door (no body — the delivered kind is the
 outcome), a **step** (compiled code, its outcomes exported by the step itself), an **ask** (a
@@ -76,7 +77,7 @@ turn uses it — briefs are read per render, no relaunch. Templates use `{{token
 from a closed, per-kind namespace; a token nothing substitutes is refused at load, never shipped
 to a model as a literal.
 
-> **Which lanes are live today.** The director's build and `chat` lanes, the coding agent's `item`
+> **Which lanes are live today.** The director's build and `chat` lanes, the coding agent's `work`
 > and `chat` lanes, and the debug agent's `chat` are all traversed — every conversation in the app
 > now walks its agent's graph and lands in the RUNS list. The coding agent's `request` lane ships
 > and validates but nothing routes to it yet: the split/merge path still renders from the host's
@@ -109,6 +110,34 @@ error attached until the reply fits (or the step throws honestly). Save a `Step.
 app recompiles and swaps it in place — the same hot reload render nodes get; a broken edit keeps
 the previous build answering while the compiler's words surface at the next run's gate.
 
+## Ask the model from code
+
+The ask NODE covers the declarative case; when a ruling needs computation around it, the same
+one-question contract is available inside a step. This is the whole shape — call the provider,
+await the typed answer, act on it:
+
+```swift
+// director/steps/triage/Step.swift
+struct Verdict: Codable {
+    enum Call: String, Codable { case retry, park }
+    let call: Call
+}
+let step = SZBuildRouter("retry", "park") { ctx in
+    let verdict = try await ctx.askModel(template: "triage", as: Verdict.self)
+    return verdict.call.rawValue
+}
+```
+
+`askModel` names a pack template (`prompts/triage.md.mustache`), which the HOST renders against
+the same facts snapshot the evaluation holds, runs as ONE stateless completion through the routed
+provider, and decodes into your `Codable` type — re-asking once with the decode error attached
+when the reply doesn't fit, then throwing honestly. The step never sees a provider, never names a
+model, and never assembles a prompt string; what it does with the answer is ordinary Swift — here
+the enum routes, but any facts-weighing logic can sit before or after the ask, and an outcome may
+carry effects (`.outcome("retry", effects: [...])`). (This exact step is compiled through the real
+toolchain and driven, repair loop included, by `SZRuntimeTests/SZAskModelExampleTests` — if the
+SDK drifts, the tutorial fails before you do.)
+
 ## The loop
 
 ```
@@ -120,11 +149,11 @@ referenced step through the real toolchain — without spending a token:
 
 ```
 agent coding · seat: coding · 3 steps · 12 prompts
-  graph coding · chat · item · request · 10 nodes
+  graph coding · chat · request · work · 10 nodes
 agent debug · no seat · 0 steps · 1 prompt
   graph debug · chat · 2 nodes
-agent director · seat: director · 4 steps · 6 prompts
-  graph director · build · chat · 13 nodes
+agent director · seat: director · 2 steps · 6 prompts
+  graph director · build · chat · 9 nodes
 verdict: validates — 3 agents, zero defects
 ```
 
@@ -135,7 +164,7 @@ A defect names the file and the fix, and they are collected — one bad graph ne
 siblings' defects nor unseats its pack. Some of what the gate refuses: an edge on an outcome the
 step never declares; a step compiled against one kind wired into a lane of another; a brief naming
 a token its lane cannot substitute, or a partial the pack does not carry; a dispatch to a seat
-nobody holds, or whose holder handles no `item`; two of an agent's graphs routing one kind; a node
+nobody holds, or whose holder routes no `work`; two of an agent's graphs routing one kind; a node
 the door cannot reach; a node two lanes can reach; an unbounded cycle.
 
 ## Your own pack, from scratch
@@ -177,15 +206,15 @@ Look at the graph and sharpen each unimplemented node's prompt.
 { "id": "coding", "seat": "coding" }
 ```
 
-`my-packs/coding/graphs/item.json`
+`my-packs/coding/graphs/work.json`
 ```json
 {
-  "name": "item",
+  "name": "work",
   "nodes": [
     { "id": "message", "onMessage": {} },
     { "id": "implement", "turn": { "brief": "prompts/implement.md.mustache" } }
   ],
-  "edges": [ { "from": "message", "outcome": "item", "to": "implement" } ]
+  "edges": [ { "from": "message", "outcome": "work", "to": "implement" } ]
 }
 ```
 
@@ -200,31 +229,37 @@ Implement node {{node}}: {{prompt}}
 with `SZ_AGENT_PACKS=…/my-packs` and Build runs it. (This exact recipe is pinned by a test that
 loads these very bytes through the loader — if the rules drift, the tutorial fails before you do.)
 
-## A worked change: gate the build on a failing fleet
+## A worked change: a strategy router
 
-The shipped `recovery` strategy is this recipe, and it is two small edits. The step:
+The shipped pack has one build lane, but strategies are a pack edit away. Say you want a
+token-free `procedural` lane beside the default. One step:
 
 ```swift
-// director/steps/nodes-failing/Step.swift
-let step = SZBuildCondition { $0.fleetIsFailing }
+// director/steps/strategy/Step.swift
+let step = SZBuildRouter("agentic", "procedural") {
+    $0.runVariant == "procedural" ? "procedural" : "agentic"
+}
 ```
 
-The wiring — inside `director/graphs/director.json` — hangs it off the strategy router and joins
-the agentic lane's existing retry loop, reusing the pack's reconcile brief:
+And the wiring — inside `director/graphs/director.json` — re-points the door's `build` port at
+the router and adds the new lane (a work gate and a dispatch with NO settled edge, so its first
+settlement concludes):
 
 ```jsonc
-{ "id": "nodes-failing", "step": "nodes-failing" },
+{ "id": "strategy", "title": "Strategy", "step": "strategy" },
+{ "id": "work-left", "title": "Work left?", "step": "work-left" },
+{ "id": "implement-once", "title": "Implement once", "dispatch": { "to": "coding", "items": "workSet" } },
 
-{ "from": "strategy",      "outcome": "recovery", "to": "nodes-failing" },
-{ "from": "nodes-failing", "outcome": "yes",      "to": "reconcile" },
-{ "from": "reconcile",     "outcome": "ok",       "to": "implement" }
+{ "from": "message", "outcome": "build", "to": "strategy" },
+{ "from": "strategy", "outcome": "agentic", "to": "decompose" },
+{ "from": "strategy", "outcome": "procedural", "to": "work-left" },
+{ "from": "work-left", "outcome": "yes", "to": "implement-once" }
 ```
 
-A healthy fleet answers `no` — no edge, run over, zero tokens. A failing one gets a reconcile turn
-(`session: "message"` continues the director's own session mid-run) and a re-dispatch through
-`implement`, whose leashed `settled` edge walks the traversal back to the gate when the fleet
-lands. The new strategy appears on the menu by being wired: nothing in `agent.json` names it, and
-nothing in Swift knows it exists.
+Save both, and `SZ_RUN_GRAPH=procedural` (or `debug_set_orchestrator`) reaches the router as the
+`runVariant` fact — the default lives in the step's own `?:`, the host never second-guesses the
+name, and the requested strategy shows on the agent's graph row. Nothing in `agent.json` names
+any of it, and nothing in Swift knows it exists.
 
 Reach a node from two ports of DIFFERENT kinds — `chat` and `build`, say — and the gate refuses
 it (`laneImpure`): a node reads one kind's facts.

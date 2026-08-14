@@ -21,10 +21,8 @@ private let shippedPacksRoot = URL(filePath: #filePath)
 /// encodes with sorted keys). Mirrors SZAITests' `shippedPackSteps` claims exactly.
 private let pinnedDeclarations: [String: String] = [
     "director/work-left": #"{"facts":"build","outcomes":["yes","no"]}"#,
-    "director/nodes-failing": #"{"facts":"build","outcomes":["yes","no"]}"#,
     "director/resuming": #"{"facts":"chat","outcomes":["yes","no"]}"#,
-    "director/strategy": #"{"facts":"build","outcomes":["agentic","procedural","recovery"]}"#,
-    "coding/retrying": #"{"facts":"item","outcomes":["yes","no"]}"#,
+    "coding/retrying": #"{"facts":"work","outcomes":["yes","no"]}"#,
     "coding/resuming": #"{"facts":"chat","outcomes":["yes","no"]}"#,
     "coding/request-op": #"{"facts":"request","outcomes":["split","merge"]}"#,
 ]

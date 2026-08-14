@@ -418,7 +418,7 @@ struct SZAgentSubagentLane: View {
                     .font(.system(size: 8))
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(run.item?.prefix(8) ?? "item")
+                    Text(run.work?.prefix(8) ?? "work")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
