@@ -81,7 +81,9 @@ struct SZAgentGraphRunList: View {
                     threadHeader(entry, expanded: expandedThreads.contains(entry.id),
                                  selected: entry.traversals.contains { $0.id == shownID })
                     if expandedThreads.contains(entry.id) {
-                        ForEach(entry.traversals) { traversal in
+                        // The LEADER reads first — the thread is its story — then the
+                        // children in dispatch order, stable like the canvas band.
+                        ForEach(members(of: entry)) { traversal in
                             SZAgentGraphRunRow(run: traversal, names: names,
                                                selected: traversal.id == shownID,
                                                indented: true) { onPick(traversal) }
@@ -93,6 +95,15 @@ struct SZAgentGraphRunList: View {
                                        indented: false) { onPick(traversal) }
                 }
             }
+        }
+    }
+
+    /// A thread's member rows, in reading order: the leader, then its children oldest
+    /// first (the order they were dispatched).
+    private func members(of entry: Entry) -> [SZAgentGraphRun] {
+        entry.traversals.sorted {
+            if $0.leadsThread != $1.leadsThread { return $0.leadsThread }
+            return $0.startedAt < $1.startedAt
         }
     }
 

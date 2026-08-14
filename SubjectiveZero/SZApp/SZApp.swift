@@ -794,6 +794,10 @@ struct SZApp: App {
             SZAgentGraphPanel(planAgents: host.agentGraphPlanAgents(),
                               runs: host.agentGraphRuns,
                               resolveGraph: { [weak host] in host?.agentGraphResolve($0) },
+                              nodeTitle: { [weak host] id in
+                                  guard let nodeID = SZNodeID(uuidString: id) else { return nil }
+                                  return host?.store.project?.graph.node(id: nodeID)?.title
+                              },
                               openStepSource: { [weak host] in host?.openPackSource(agent: $0, source: $1) })
         }
     }

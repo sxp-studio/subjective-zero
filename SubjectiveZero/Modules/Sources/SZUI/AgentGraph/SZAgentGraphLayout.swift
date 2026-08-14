@@ -254,10 +254,11 @@ public enum SZAgentGraphLayout {
 
     // MARK: - The call band
 
-    /// One sub-agent lane's height, and the gap between the dispatch card and its band.
+    /// One sub-agent lane's height, and the gap between the dispatch card and its band —
+    /// sized to clear the card's source pill, which hangs 27pt below the bottom edge.
     public static let laneHeight: CGFloat = 30
     public static let laneGap: CGFloat = 4
-    static let bandGap: CGFloat = 10
+    static let bandGap: CGFloat = 34
 
     /// Where a dispatch's sub-agents are drawn: a stack of lanes in the VERTICAL AIR under
     /// the dispatch card, one per dispatched item. Under, not inline between ranks — an

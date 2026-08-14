@@ -61,6 +61,9 @@ public struct SZAgentGraphPanel: View {
     /// A record's OWN graph. nil = the pack library no longer carries it (an archive from a
     /// build whose agents have since changed) — the canvas says so and stops.
     private let resolveGraph: (SZAgentGraphRun) -> SZAgentGraph?
+    /// A work node's display title, resolved against the live project — the sub-agent
+    /// lanes name the node, not its id. nil = the node is gone; the lane falls back.
+    private let nodeTitle: (String) -> String?
 
     @State private var mode: SZAgentGraphPanelMode = .plan
     /// The run the user PICKED, if any. nil = follow the head of the list, which is how the
@@ -97,10 +100,12 @@ public struct SZAgentGraphPanel: View {
     public init(planAgents: [SZAgentGraphPlanAgent],
                 runs: [SZAgentGraphRun] = [],
                 resolveGraph: @escaping (SZAgentGraphRun) -> SZAgentGraph? = { _ in nil },
+                nodeTitle: @escaping (String) -> String? = { _ in nil },
                 openStepSource: ((String, SZAgentGraphFace.Source) -> Void)? = nil) {
         self.planAgents = planAgents
         self.runs = runs
         self.resolveGraph = resolveGraph
+        self.nodeTitle = nodeTitle
         self.openStepSource = openStepSource
     }
 
@@ -324,6 +329,14 @@ public struct SZAgentGraphPanel: View {
                                   drawsFileSources: openStepSource != nil,
                                   record: displayed.record,
                                   items: subagents(of: displayed.record),
+                                  nodeTitle: nodeTitle,
+                                  // A lane is a door into its own record — the same pick
+                                  // rule the RUNS rows use.
+                                  onPickItem: { run in
+                                      selectedRunID = run.id
+                                      mode = .run
+                                      following = run.isLive
+                                  },
                                   mode: effectiveMode,
                                   zoom: camera.zoom, nudges: nudges,
                                   onNudge: { id, delta in nudges[id, default: .zero] = delta })

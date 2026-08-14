@@ -25,6 +25,10 @@ struct SZAgentGraphCanvasContent: View {
     /// instead of only counting it. Empty in the Plan view and for a record that dispatched
     /// nothing.
     var items: [SZAgentGraphRun] = []
+    /// A work node's display title (the lanes name nodes, not ids); nil falls back.
+    var nodeTitle: (String) -> String? = { _ in nil }
+    /// A lane click shows that record — wired to the panel's selection.
+    var onPickItem: (SZAgentGraphRun) -> Void = { _ in }
     let mode: SZAgentGraphPanelMode
     let zoom: CGFloat
     let nudges: [String: CGSize]
@@ -229,7 +233,9 @@ struct SZAgentGraphCanvasContent: View {
     private func callBand(under frame: CGRect) -> some View {
         let lanes = SZAgentGraphLayout.callBand(under: frame, lanes: items.count)
         ForEach(Array(zip(items, lanes)), id: \.0.id) { item, laneFrame in
-            SZAgentSubagentLane(run: item)
+            SZAgentSubagentLane(run: item,
+                                title: item.work.flatMap(nodeTitle),
+                                action: { onPickItem(item) })
                 .frame(width: laneFrame.width, height: laneFrame.height)
                 .offset(x: laneFrame.minX, y: laneFrame.minY)
         }
@@ -407,6 +413,10 @@ struct SZAgentGraphSocket: View {
 /// the sidebar's one-second `TimelineView` cadence for the same reason.
 struct SZAgentSubagentLane: View {
     let run: SZAgentGraphRun
+    /// The work node's display title; nil (node gone / no resolver) falls back to its id.
+    var title: String? = nil
+    /// Show this record — the lane is a door into its own run.
+    var action: () -> Void = {}
 
     /// Where this agent is: the last entry still running, else the last one it finished.
     private var currentNode: String? {
@@ -414,14 +424,15 @@ struct SZAgentSubagentLane: View {
     }
 
     var body: some View {
+        Button(action: action) {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 5) {
                 Image(systemName: "hammer")
                     .font(.system(size: 8))
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(run.work?.prefix(8) ?? "work")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    Text(title ?? run.work.map { String($0.prefix(8)) } ?? "work")
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     Text(currentNode ?? "—")
@@ -451,6 +462,9 @@ struct SZAgentSubagentLane: View {
             .overlay(RoundedRectangle(cornerRadius: 5)
                 .stroke(run.isLive ? SZAgentGraphStyle.live.opacity(0.45)
                                    : Color.white.opacity(0.08), lineWidth: 1))
+            .contentShape(Rectangle())
         }
+        }
+        .buttonStyle(.plain)
     }
 }
