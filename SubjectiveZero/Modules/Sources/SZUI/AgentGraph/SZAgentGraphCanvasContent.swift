@@ -10,6 +10,9 @@ import SZCore
 /// where the frames come from (the plan's ranked layout vs the record's unrolled chain).
 struct SZAgentGraphCanvasContent: View {
     let graph: SZAgentGraph
+    /// Declared outcomes per step node, host-resolved — lets a card show the answers no
+    /// edge leaves (dimmed: an unwired answer ends the run). Empty until declarations warm.
+    var stepOutcomes: [String: [String]] = [:]
     /// Opens a card's authored source; nil hides every source pill.
     var openSource: ((SZAgentGraphFace.Source) -> Void)? = nil
     /// Whether FILE pills (step, brief) are offered — false when no host can open one.
@@ -68,8 +71,9 @@ struct SZAgentGraphCanvasContent: View {
             let point = SZAgentGraphLayout.outcomePoint(frame, outcome: outcome, in: face,
                                                         subheader: subheader)
             // A dot follows its row: once a node has decided, the port it did NOT take
-            // recedes with its label rather than staying bright.
-            let faded = decided && fired != outcome
+            // recedes with its label rather than staying bright — and an UNWIRED port is
+            // born dim, the visible spelling of "this answer ends the run here".
+            let faded = (decided && fired != outcome) || face.unwired.contains(outcome)
             SZAgentGraphSocket(colour: SZAgentGraphStyle.colour(for: outcome, in: face.form),
                                faded: faded)
                 .position(x: point.x, y: point.y)
@@ -82,7 +86,7 @@ struct SZAgentGraphCanvasContent: View {
     /// on the plan's single card, which is exactly the ambiguity the Run view exists to
     /// resolve. The plan answers "what is the graph"; the run answers "what happened".
     private var planView: some View {
-        let placement = nudged(SZAgentGraphLayout.lay(out: graph))
+        let placement = nudged(SZAgentGraphLayout.lay(out: graph, stepOutcomes: stepOutcomes))
         return ZStack(alignment: .topLeading) {
             ForEach(graph.edges.indices, id: \.self) { i in
                 let edge = graph.edges[i]
@@ -94,14 +98,14 @@ struct SZAgentGraphCanvasContent: View {
             }
             ForEach(graph.nodes) { node in
                 if let frame = placement.frames[node.id] {
-                    card(SZAgentGraphLayout.face(of: node, in: graph), state: .notRun,
+                    card(SZAgentGraphLayout.face(of: node, in: graph, stepOutcomes: stepOutcomes), state: .notRun,
                          frame: frame)
                         .gesture(drag(node.id))
                 }
             }
             ForEach(graph.nodes) { node in
                 if let frame = placement.frames[node.id] {
-                    socketLayer(face: SZAgentGraphLayout.face(of: node, in: graph), frame: frame)
+                    socketLayer(face: SZAgentGraphLayout.face(of: node, in: graph, stepOutcomes: stepOutcomes), frame: frame)
                 }
             }
             .allowsHitTesting(false)
@@ -142,17 +146,18 @@ struct SZAgentGraphCanvasContent: View {
     @ViewBuilder
     private var runView: some View {
         if let record {
-            let frames = SZAgentGraphLayout.runFrames(for: record, graph: graph)
+            let frames = SZAgentGraphLayout.runFrames(for: record, graph: graph,
+                                                      stepOutcomes: stepOutcomes)
             // POSITIONS, not ordinals, index the frames: ordinals are the producer's naming
             // and nothing here may assume they are 1…n — the panel renders what it was
             // handed rather than crashing on a slipped invariant.
             ZStack(alignment: .topLeading) {
                 ForEach(Array(record.trace.enumerated()), id: \.element.id) { position, entry in
-                    let face = SZAgentGraphLayout.runFace(for: entry, in: graph)
+                    let face = SZAgentGraphLayout.runFace(for: entry, in: graph, stepOutcomes: stepOutcomes)
                     let frame = frames[position]
                     if position > 0 {
                         let prev = record.trace[position - 1]
-                        let prevFace = SZAgentGraphLayout.runFace(for: prev, in: graph)
+                        let prevFace = SZAgentGraphLayout.runFace(for: prev, in: graph, stepOutcomes: stepOutcomes)
                         let prevOutcome = SZAgentGraphLayout.terminalPort(prev.outcome, in: prevFace)
                         SZAgentGraphWire(
                             path: (SZAgentGraphLayout.outcomePoint(
@@ -170,7 +175,7 @@ struct SZAgentGraphCanvasContent: View {
                     if face.form == .dispatch { callBand(under: frame) }
                 }
                 ForEach(Array(record.trace.enumerated()), id: \.element.id) { position, entry in
-                    let face = SZAgentGraphLayout.runFace(for: entry, in: graph)
+                    let face = SZAgentGraphLayout.runFace(for: entry, in: graph, stepOutcomes: stepOutcomes)
                     socketLayer(face: face, frame: frames[position],
                                 fired: entry.outcome, decided: entry.outcome != nil,
                                 subheader: hasSubheader(entry, record))
@@ -181,7 +186,7 @@ struct SZAgentGraphCanvasContent: View {
                     origin(into: firstFrame)
                 }
                 if let last = record.trace.last, let lastFrame = frames.last {
-                    let lastFace = SZAgentGraphLayout.runFace(for: last, in: graph)
+                    let lastFace = SZAgentGraphLayout.runFace(for: last, in: graph, stepOutcomes: stepOutcomes)
                     // The record's CONCLUSION picks the terminal — every ending is
                     // classified, and each classification gets its honest capsule. Still
                     // traversing = the future.
@@ -235,12 +240,12 @@ struct SZAgentGraphCanvasContent: View {
 
     private func hasSubheader(_ entry: SZAgentGraphRun.Entry, _ record: SZAgentGraphRun) -> Bool {
         SZAgentGraphLayout.hasSubheader(entry, in: record,
-                                        face: SZAgentGraphLayout.runFace(for: entry, in: graph))
+                                        face: SZAgentGraphLayout.runFace(for: entry, in: graph, stepOutcomes: stepOutcomes))
     }
 
     private func entryState(_ entry: SZAgentGraphRun.Entry,
                             _ record: SZAgentGraphRun) -> SZAgentGraphCardState {
-        let face = SZAgentGraphLayout.runFace(for: entry, in: graph)
+        let face = SZAgentGraphLayout.runFace(for: entry, in: graph, stepOutcomes: stepOutcomes)
         return SZAgentGraphCardState(phase: entry.phase, outcome: entry.outcome,
                                      detail: entry.detail,
                                      tally: entry.tally)
@@ -280,7 +285,7 @@ struct SZAgentGraphCanvasContent: View {
     private func futureLayer(from last: SZAgentGraphRun.Entry, frame: CGRect,
                              face liveFace: SZAgentGraphFace, subheader: Bool) -> some View {
         if let future = SZAgentGraphLayout.projectedPlan(of: graph, from: last.node) {
-            let placement = SZAgentGraphLayout.lay(out: future)
+            let placement = SZAgentGraphLayout.lay(out: future, stepOutcomes: stepOutcomes)
             if let entryFrame = placement.frames[last.node] {
                 let dx = frame.midX - entryFrame.midX
                 let dy = frame.midY - entryFrame.midY

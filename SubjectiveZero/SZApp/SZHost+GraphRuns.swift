@@ -130,6 +130,7 @@ extension SZHost {
     /// Cached because view bodies read it hot; the cache is dropped wherever the
     /// user-editable materialized tree can move — pack materialization and each run start.
     func agentGraphPlanAgents() -> [SZAgentGraphPlanAgent] {
+        _ = agentGraphPlanEpoch   // observe: the async declaration fill re-renders readers
         if let cached = agentGraphPlanCache { return cached }
         var agents: [SZAgentGraphPlanAgent] = []
         if let root = Self.graphAgentPacksRoot() {
@@ -156,7 +157,40 @@ extension SZHost {
             }
         }
         agentGraphPlanCache = agents
+        fillAgentGraphStepOutcomes(into: agents)
         return agents
+    }
+
+    /// Attach the compiled steps' declared outcome sets to the cached plan, asynchronously:
+    /// declarations come from the step runtime (a compile on first sight, cached after), so
+    /// the panel renders immediately with wired ports and gains the unwired ones — the
+    /// dimmed "this answer ends the run" ports — as the declarations warm.
+    private func fillAgentGraphStepOutcomes(into agents: [SZAgentGraphPlanAgent]) {
+        guard let root = Self.graphAgentPacksRoot() else { return }
+        agentGraphPlanFill?.cancel()
+        agentGraphPlanFill = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let steps = SZHostStepRunning(packsRoot: root, runtime: stepRuntime)
+            var enriched = agents
+            for (a, agent) in enriched.enumerated() {
+                for (g, entry) in agent.graphs.enumerated() {
+                    var outcomes: [String: [String]] = [:]
+                    for node in entry.graph.nodes {
+                        guard case .step(let name) = node.form else { continue }
+                        if let info = try? await steps.declaration(agent: agent.id, step: name) {
+                            outcomes[node.id] = info.outcomes
+                        }
+                        if Task.isCancelled { return }
+                    }
+                    enriched[a].graphs[g].stepOutcomes = outcomes
+                }
+            }
+            // The cache may have been invalidated (packs re-materialized, a run started)
+            // while we compiled — enrich only the world we were asked about.
+            guard !Task.isCancelled, agentGraphPlanCache?.map(\.id) == enriched.map(\.id) else { return }
+            agentGraphPlanCache = enriched
+            bumpAgentGraphPlanEpoch()
+        }
     }
 
     /// A record's own graph, resolved through the same library the Plan view browses. nil =

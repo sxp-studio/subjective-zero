@@ -297,3 +297,40 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     // Nothing follows the last stage — no ghost at all; the terminal speaks instead.
     #expect(SZAgentGraphLayout.projectedPlan(of: graph, from: "send") == nil)
 }
+
+@Test func aDeclaredButUnwiredOutcomeDrawsAsADimmedPort() {
+    // `check` declares yes/no; the fixture wires both — so first prove the fallback…
+    let bare = SZAgentGraphLayout.face(of: graph.node("check")!, in: graph)
+    #expect(bare.unwired.isEmpty)
+    // …then the declaration path: a gate whose `no` ends the run must SHOW the no,
+    // dimmed, instead of the port vanishing with its meaning.
+    let gate = SZAgentGraph.Node(id: "gate", title: "Still unresolved?", form: .step(name: "work-left"))
+    let lean = SZAgentGraph(name: "lean", nodes: [
+        .init(id: "message", form: .message(.init())),
+        gate,
+        .init(id: "fix", form: .turn(.init(brief: "prompts/fix.md.mustache"))),
+    ], edges: [
+        .init(from: "message", outcome: "build", to: "gate"),
+        .init(from: "gate", outcome: "yes", to: "fix"),
+    ])
+    let face = SZAgentGraphLayout.face(of: gate, in: lean,
+                                       stepOutcomes: ["gate": ["yes", "no"]])
+    #expect(face.outcomes == ["yes", "no"])   // wired first, then the edge-less answers
+    #expect(face.unwired == ["no"])
+    // The ask form dims the same way, from its own config — one rule, two forms.
+    let ask = SZAgentGraph.Node(id: "rule", form: .ask(.init(
+        prompt: "prompts/rule.md.mustache", outcomes: ["go", "hold"])))
+    var wired = lean
+    wired.nodes.append(ask)
+    wired.edges.append(.init(from: "fix", outcome: "ok", to: "rule"))
+    wired.edges.append(.init(from: "rule", outcome: "go", to: "gate"))
+    let askFace = SZAgentGraphLayout.face(of: ask, in: wired)
+    #expect(askFace.unwired == ["hold"])
+    // And the PLACEMENT sizes with the same enriched face — a card that gained a dimmed
+    // row must gain the row's height, or its sockets slide off the labels.
+    let oneRow = SZAgentGraphLayout.lay(out: lean).frames["gate"]!
+    let grown = SZAgentGraphLayout.lay(out: lean,
+                                       stepOutcomes: ["gate": ["yes", "no"]]).frames["gate"]!
+    #expect(grown.height == oneRow.height + SZNodeLayout.rowHeight)
+    #expect(grown.height == SZAgentGraphLayout.size(of: face).height)
+}

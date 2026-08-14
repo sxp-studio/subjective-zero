@@ -32,10 +32,16 @@ public struct SZAgentGraphPlanAgent: Identifiable, Equatable, Sendable {
     public struct Graph: Equatable, Sendable {
         public var name: String
         public var graph: SZAgentGraph
+        /// Declared outcomes per STEP node id, from the compiled steps' own exports —
+        /// resolved host-side (SZUI may not reach the compiler) and filled in asynchronously
+        /// as declarations warm. Empty until then: a card falls back to its wired ports.
+        public var stepOutcomes: [String: [String]]
 
-        public init(name: String, graph: SZAgentGraph) {
+        public init(name: String, graph: SZAgentGraph,
+                    stepOutcomes: [String: [String]] = [:]) {
             self.name = name
             self.graph = graph
+            self.stepOutcomes = stepOutcomes
         }
     }
 
@@ -150,12 +156,17 @@ public struct SZAgentGraphPanel: View {
     private var displayed: Displayed? {
         if effectiveMode == .run {
             guard let shown, let graph = resolveGraph(shown) else { return nil }
+            // The same join the naming makes: the record's agent+graph back to the plan
+            // entry, for the declared outcomes the record itself never carries.
+            let outcomes = planAgents.first { $0.id == shown.agent }?
+                .graphs.first { $0.name == shown.graphName }?.stepOutcomes ?? [:]
             return Displayed(key: shown.id.uuidString, graph: graph, record: shown,
-                             agent: shown.agent)
+                             agent: shown.agent, stepOutcomes: outcomes)
         }
         guard let planAgent, let planGraph else { return nil }
         return Displayed(key: "\(planAgent.id)/\(planGraph.name)", graph: planGraph.graph,
-                         record: nil, agent: planAgent.id)
+                         record: nil, agent: planAgent.id,
+                         stepOutcomes: planGraph.stepOutcomes)
     }
 
     /// The sub-agent traversals a shown record dispatched: the ITEM records sharing its
@@ -196,6 +207,8 @@ public struct SZAgentGraphPanel: View {
         var record: SZAgentGraphRun?
         /// Whose pack the drawn graph belongs to — what the source affordance opens under.
         var agent: String
+        /// The compiled steps' declared outcomes, for the cards' unwired ports.
+        var stepOutcomes: [String: [String]] = [:]
     }
 
     public var body: some View {
@@ -335,6 +348,7 @@ public struct SZAgentGraphPanel: View {
     /// World space — the mode split and both renderers live in the content view.
     private func content(_ displayed: Displayed) -> some View {
         SZAgentGraphCanvasContent(graph: displayed.graph,
+                                  stepOutcomes: displayed.stepOutcomes,
                                   // A file pill is drawn only when a host can actually open
                                   // it; dispatch LINKS are the panel's own business, so they
                                   // stand whether or not one is wired.
@@ -476,7 +490,8 @@ public struct SZAgentGraphPanel: View {
 
     private func centreIfNeeded() {
         guard !centred, viewSize.height > 0, let displayed else { return }
-        let bounds = SZAgentGraphLayout.lay(out: displayed.graph).bounds
+        let bounds = SZAgentGraphLayout.lay(out: displayed.graph,
+                                            stepOutcomes: displayed.stepOutcomes).bounds
         guard !bounds.isNull else { return }
         // 130, not a slimmer margin: the Run view hangs its `start` capsule ~90pt LEFT of
         // the entry card, and the initial framing must include it rather than clip it.
@@ -494,7 +509,8 @@ public struct SZAgentGraphPanel: View {
     private func followActiveEntry() {
         guard following, effectiveMode == .run, shown?.isLive == true, viewSize.height > 0,
               let displayed, let record = displayed.record,
-              let frame = SZAgentGraphLayout.runFrames(for: record, graph: displayed.graph).last
+              let frame = SZAgentGraphLayout.runFrames(for: record, graph: displayed.graph,
+                                                       stepOutcomes: displayed.stepOutcomes).last
         else { return }
         withAnimation(.easeInOut(duration: 0.3)) {
             camera.offset = CGSize(width: viewSize.width / 2 - camera.zoom * frame.midX,

@@ -169,6 +169,12 @@ final class SZHost {
     /// Not observed: the panel fills this DURING body evaluation, and an observed write
     /// there invalidates the view that just read it (a wasted render per invalidation).
     @ObservationIgnored var agentGraphPlanCache: [SZAgentGraphPlanAgent]?
+    /// Bumped when the plan cache is ENRICHED off the main path (step declarations landing
+    /// asynchronously) — the observable poke that re-renders panels reading the cache.
+    private(set) var agentGraphPlanEpoch = 0
+    @ObservationIgnored var agentGraphPlanFill: Task<Void, Never>?
+
+    func bumpAgentGraphPlanEpoch() { agentGraphPlanEpoch += 1 }
     /// The user's persisted Director run-graph VARIANT choice (graph name over the director
     /// pack's build-kind variants; `debug_set_orchestrator` writes it). Same app-state.json
     /// home + restore story as the prefs below. nil = the pack default; `SZ_RUN_GRAPH`

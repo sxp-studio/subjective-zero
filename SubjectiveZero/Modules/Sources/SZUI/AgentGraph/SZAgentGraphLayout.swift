@@ -38,14 +38,18 @@ public struct SZAgentGraphFace: Equatable, Sendable {
     public var symbol: String
     /// The rows the card draws, in display order.
     public var outcomes: [String]
+    /// Declared outcomes NO edge leaves — the graph's "this answer ends the run here",
+    /// drawn dimmed so the ending is visible instead of the port simply vanishing.
+    public var unwired: Set<String>
     public var source: Source?
 
     public init(form: Form, title: String, symbol: String, outcomes: [String],
-                source: Source? = nil) {
+                unwired: Set<String> = [], source: Source? = nil) {
         self.form = form
         self.title = title
         self.symbol = symbol
         self.outcomes = outcomes
+        self.unwired = unwired
         self.source = source
     }
 
@@ -85,7 +89,11 @@ public enum SZAgentGraphLayout {
     // MARK: - Faces
 
     /// The card face of one node: derived from its form + its own title, nothing stored.
-    public static func face(of node: SZAgentGraph.Node, in graph: SZAgentGraph) -> SZAgentGraphFace {
+    /// `stepOutcomes` carries the compiled steps' declared outcome sets (host-resolved);
+    /// with it a step card shows EVERY answer it can give — the unwired ones dimmed, since
+    /// an outcome with no edge is how a graph spells "this ends the run".
+    public static func face(of node: SZAgentGraph.Node, in graph: SZAgentGraph,
+                            stepOutcomes: [String: [String]] = [:]) -> SZAgentGraphFace {
         switch node.form {
         case .message:
             // One port per kind the agent accepts, in CAUSE order — a build or request
@@ -100,15 +108,27 @@ public enum SZAgentGraphLayout {
                                     outcomes: ports.isEmpty ? ["chat"] : ports)
         case .step(let name):
             let wired = wiredOutcomes(of: node.id, in: graph)
+            // The declaration wins when the host has it: declared order, wired first so a
+            // stable file keeps a stable card, then the edge-less answers.
+            if let declared = stepOutcomes[node.id], !declared.isEmpty {
+                let ordered = wired + declared.filter { !wired.contains($0) }
+                return SZAgentGraphFace(form: .step, title: node.title ?? name,
+                                        symbol: "curlybraces",
+                                        outcomes: ordered,
+                                        unwired: Set(declared).subtracting(wired),
+                                        source: .step(name: name))
+            }
             return SZAgentGraphFace(form: .step, title: node.title ?? name,
                                     symbol: "curlybraces",
                                     outcomes: wired.isEmpty ? ["done"] : wired,
                                     source: .step(name: name))
         case .ask(let ask):
             // The declared answers, in the author's order — each is a port whether or not
-            // an edge is wired (an unwired ruling honestly ends the traversal).
+            // an edge is wired (an unwired ruling honestly ends the traversal, and dims).
             return SZAgentGraphFace(form: .ask, title: node.title ?? briefName(ask.prompt),
                                     symbol: "questionmark.bubble", outcomes: ask.outcomes,
+                                    unwired: Set(ask.outcomes)
+                                        .subtracting(wiredOutcomes(of: node.id, in: graph)),
                                     source: .brief(path: ask.prompt))
         case .turn(let turn):
             // Fixed process-truth rows, in the reading order the model documents.
@@ -139,11 +159,12 @@ public enum SZAgentGraphLayout {
     /// A Run entry's face: the plan face grown to include the outcome it actually produced,
     /// or a total fallback when the trace names a node the graph no longer carries.
     public static func runFace(for entry: SZAgentGraphRun.Entry,
-                               in graph: SZAgentGraph?) -> SZAgentGraphFace {
+                               in graph: SZAgentGraph?,
+                               stepOutcomes: [String: [String]] = [:]) -> SZAgentGraphFace {
         guard let graph, let node = graph.node(entry.node) else {
             return .fallback(node: entry.node, outcome: entry.outcome)
         }
-        return face(of: node, in: graph).ensuring(entry.outcome)
+        return face(of: node, in: graph, stepOutcomes: stepOutcomes).ensuring(entry.outcome)
     }
 
     /// A step's drawable outcome set: what its graph file wires, first-wire order, deduped.
@@ -204,11 +225,12 @@ public enum SZAgentGraphLayout {
     /// y = 0 so mixed heights share a spine. Sized by the same `size(of:)` the plan uses.
     /// Pure and here (not in the renderer) so the panel's follow-cam and the canvas content
     /// can never disagree about where the live card sits.
-    public static func runFrames(for record: SZAgentGraphRun, graph: SZAgentGraph?) -> [CGRect] {
+    public static func runFrames(for record: SZAgentGraphRun, graph: SZAgentGraph?,
+                                 stepOutcomes: [String: [String]] = [:]) -> [CGRect] {
         var x: CGFloat = 0
         var frames: [CGRect] = []
         for entry in record.trace {
-            let face = runFace(for: entry, in: graph)
+            let face = runFace(for: entry, in: graph, stepOutcomes: stepOutcomes)
             let size = size(of: face, subheader: hasSubheader(entry, in: record, face: face),
                             stats: hasStats(entry, spends: spends(face.form)))
             frames.append(CGRect(origin: CGPoint(x: x, y: -size.height / 2), size: size))
@@ -227,14 +249,16 @@ public enum SZAgentGraphLayout {
         public var bounds: CGRect
     }
 
-    public static func lay(out graph: SZAgentGraph) -> Placement {
-        lay(out: graph, from: entryNode(of: graph))
+    public static func lay(out graph: SZAgentGraph,
+                           stepOutcomes: [String: [String]] = [:]) -> Placement {
+        lay(out: graph, from: entryNode(of: graph), stepOutcomes: stepOutcomes)
     }
 
     /// Laid out from an explicit seed — what the Run view's forecast needs, since a
     /// projection is a fragment of a traversal already past its door and carries no message
     /// node to seed from.
-    public static func lay(out graph: SZAgentGraph, from seed: String) -> Placement {
+    public static func lay(out graph: SZAgentGraph, from seed: String,
+                           stepOutcomes: [String: [String]] = [:]) -> Placement {
         let ranks = ranks(of: graph, from: seed)
         // Within a rank, order by DECLARATION order in the file. Stable, and it hands the
         // author a real lever: reordering the `nodes` array reorders the column.
@@ -246,7 +270,9 @@ public enum SZAgentGraphLayout {
         let bypassed = bypassedRanks(of: graph, ranks: ranks)
         var frames: [String: CGRect] = [:]
         for (rank, nodes) in byRank {
-            let sizes = nodes.map { size(of: face(of: $0, in: graph)) }
+            // SIZED WITH THE SAME FACE THE RENDERER DRAWS — an enriched card (declared
+            // outcomes attached) must grow its frame, or its sockets slide off the rows.
+            let sizes = nodes.map { size(of: face(of: $0, in: graph, stepOutcomes: stepOutcomes)) }
             let total = sizes.reduce(0) { $0 + $1.height } + nodeGap * CGFloat(max(0, nodes.count - 1))
             // A rank something SKIPS over lifts off the main line, so the bypassing wire has
             // clear air instead of being drawn straight through the card it is bypassing.
