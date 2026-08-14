@@ -31,6 +31,13 @@ struct SZAgentGraphNaming: Equatable {
     static func doorRuling(_ run: SZAgentGraphRun) -> String {
         run.trace.first?.outcome ?? "…"
     }
+
+    /// The row's glyph: the AGENT'S own identity (the director's eyeglasses, the coding
+    /// seat's hammer), falling back to the structural glyph for an agent the library
+    /// dropped.
+    func symbol(_ run: SZAgentGraphRun) -> String {
+        agents.first { $0.id == run.agent }?.symbol ?? SZAgentGraphRunRow.glyph(for: run)
+    }
 }
 
 /// The RUNS section: thread groups and standalone traversals, the live one first (see
@@ -147,7 +154,7 @@ struct SZAgentGraphRunList: View {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 5) {
-                                Image(systemName: SZAgentGraphRunRow.glyph(for: director))
+                                Image(systemName: names.symbol(director))
                                     .font(.system(size: 9))
                                     .foregroundStyle(.secondary)
                                 // WHO, not which file: the agent leads the row and the
@@ -273,7 +280,7 @@ struct SZAgentGraphRunRow: View {
                     VStack(alignment: .leading, spacing: 2) {
                         // WHAT was traversed, and how long ago it ended.
                         HStack(spacing: 5) {
-                            Image(systemName: Self.glyph(for: run))
+                            Image(systemName: names.symbol(run))
                                 .font(.system(size: 9))
                                 .foregroundStyle(selected ? .primary : .secondary)
                             Text(names.agentTitle(run))

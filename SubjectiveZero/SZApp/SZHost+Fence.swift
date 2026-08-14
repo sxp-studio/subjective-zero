@@ -34,7 +34,14 @@ extension SZHost {
                 return "node '\(title)' is mid-\(op.lowercased()) — the operation settles when its run ends (or Stop the run)"
             }
             guard let holder = ledger.holder(of: .node(id)) else { continue }
-            if origin == .agent, let runClaim, holder == runClaim { continue }   // the run's own fleet work
+            if origin == .agent {
+                if let runClaim, holder == runClaim { continue }   // the run's own fleet work
+                // A node held by its OWN scope's in-flight turn: the delivery claim exists
+                // to stop everyone ELSE — the agent mutating the node mid-turn IS that
+                // turn's work (the claim holds node + transcript together, so the match
+                // identifies the turn, not a bystander).
+                if ledger.holder(of: .transcript(.node(id))) == holder { continue }
+            }
             if origin == .user, !userLockDenies(holder: holder, node: id) { continue }
             return "node '\(title)' is held by \(holder.label) — wait for it to finish or stop it"
         }
@@ -93,6 +100,8 @@ extension SZHost {
                 guard let holder = self.ledger.holder(of: .node(id)) else { continue }
                 if holder == self.runClaim { continue }       // the run mutates its own work set
                 if holder == self.graphOpClaim { continue }   // op machinery settles its own staging
+                if self.ledger.holder(of: .transcript(.node(id))) == holder { continue }
+                    // ↑ the node's own in-flight turn — the agent rule the fence permits
                 return "node \(id.uuidString.prefix(8)) is held by \(holder.label)"
             }
             return nil
