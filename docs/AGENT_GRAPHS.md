@@ -245,7 +245,10 @@ traversal concludes `cancelled`.
 
 Bundled resources are sealed inside a signed .app, so at start the host **materializes**
 the pack tree into `~/Library/Application Support/SubjectiveZero/agents/` — the writable
-copy everything reads (`SZ_AGENT_PACKS` overrides the root wholesale). Prompts need no
+copy everything reads (`SZ_AGENT_PACKS` overrides the root wholesale). Ours-or-theirs is
+decided by content: a manifest beside the root hashes every byte the host wrote, so an
+unedited copy follows the bundle in either direction (update or downgrade) while a file
+you edited stays yours. Prompts need no
 watcher — briefs are read per render. Step sources are compiled code, so each
 `steps/<name>/Step.swift` is watched: save → recompile → swap on green, keep the old
 module on red. In the Agent Graph panel every card carries its **source pill**: a step —

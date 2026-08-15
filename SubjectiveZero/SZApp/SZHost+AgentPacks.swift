@@ -6,12 +6,16 @@
 //
 // MATERIALIZED rather than read in place: bundled resources live inside the app bundle,
 // which is read-only in an installed, signed .app — so the WRITABLE copy is the one the
-// user edits, and it survives relaunches. A file refreshes when the bundle ships a NEWER
-// copy (an app update); a user edit, being newer than the bundle's mtime, wins until then.
-// Prompt templates need no watcher: SZBriefRenderer reads them from disk per render, so a
-// saved edit reaches the very next turn. Step sources DO need one — a step is compiled
-// code, and the step runtime swaps modules on green.
+// user edits, and it survives relaunches. Ours-or-theirs is decided by CONTENT, not by
+// mtime: the manifest beside the root records a hash of every byte we wrote, so a copy
+// still holding those bytes is ours and follows the bundle in EITHER direction (an update,
+// a downgrade, a stale debug build sharing this Application Support), while a copy the
+// user changed is theirs and stays. Prompt templates need no watcher: SZBriefRenderer
+// reads them from disk per render, so a saved edit reaches the very next turn. Step
+// sources DO need one — a step is compiled code, and the step runtime swaps modules on
+// green.
 import AppKit
+import CryptoKit
 import Foundation
 import SZAI
 import SZCore
@@ -28,10 +32,8 @@ extension SZHost {
             .appending(path: "SubjectiveZero/agents")
     }
 
-    /// Copy the bundled pack tree into the materialized root — per-file mtime freshness
-    /// (bundle newer → refresh; user edit newer → keep; `copyItem` preserves the bundle's
-    /// mtime, so an unchanged copy is never re-taken), then prune what the bundle no longer
-    /// ships and arm the step watchers. Called once at `start`, before anything reads packs.
+    /// Sync every bundled pack into the materialized root (see `syncAgentPack`), then arm
+    /// the step watchers. Called once at `start`, before anything reads packs.
     func materializeAgentPacks() {
         guard let bundled = SZAgentPackLoader.bundledRoot else {
             print("[SZHost] no bundled agent packs to materialize")
@@ -39,63 +41,100 @@ extension SZHost {
         }
         let fm = FileManager.default
         let root = Self.materializedAgentPacksRoot
-        func mtime(_ url: URL) -> Date? {
-            (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
-        }
         for agent in ((try? fm.contentsOfDirectory(atPath: bundled.path)) ?? []).sorted() {
             let bundledAgent = bundled.appending(path: agent)
             var isDirectory: ObjCBool = false
             guard fm.fileExists(atPath: bundledAgent.path, isDirectory: &isDirectory),
                   isDirectory.boolValue else { continue }
             do {
-                let shipped = try Self.relativeFilePaths(under: bundledAgent)
-                let dest = root.appending(path: agent)
-                for relative in shipped.sorted() {
-                    let from = bundledAgent.appending(path: relative)
-                    let to = dest.appending(path: relative)
-                    try fm.createDirectory(at: to.deletingLastPathComponent(),
-                                           withIntermediateDirectories: true)
-                    let bundleDate = mtime(from) ?? .distantPast
-                    if mtime(to).map({ $0 < bundleDate }) ?? true {
-                        try? fm.removeItem(at: to)
-                        try fm.copyItem(at: from, to: to)
-                    }
-                }
-                // PRUNE what a PREVIOUS materialization wrote and this bundle no longer
-                // ships — a renamed graph or brief would otherwise stay load-visible forever
-                // (a variant the pack never meant, a brief nothing renders).
-                //
-                // Only that. A file the bundle never wrote is the USER'S — the authoring
-                // tutorial has them add a graph and a step folder INSIDE the shipped
-                // director pack, and deleting those at next launch would take their work
-                // and, if `agent.json` still named the variant, refuse every Build after.
-                // The manifest of what we wrote lives beside the copy for exactly this.
-                let shippedSet = Set(shipped)
-                let previous = Self.materializedManifest(for: agent)
-                for stale in previous.subtracting(shippedSet).sorted() {
-                    try? fm.removeItem(at: dest.appending(path: stale))
-                    print("[SZHost] agent packs: removed \(agent)/\(stale) — the bundle no longer ships it")
-                }
-                // Sweep EMPTY directories bottom-up — the dirs stale removals emptied, this
-                // pass or any past one. An empty dir holds no user work, but it reads as a
-                // step folder to every folder-scanning consumer (check_pack counts it,
-                // validate refuses it as sourceless); a dir holding ANY file stays.
-                if let walker = fm.enumerator(at: dest, includingPropertiesForKeys: [.isDirectoryKey]) {
-                    let dirs = walker.compactMap { $0 as? URL }
-                        .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-                    for dir in dirs.sorted(by: { $0.path.count > $1.path.count }) {
-                        if (try? fm.contentsOfDirectory(atPath: dir.path))?.isEmpty == true {
-                            try? fm.removeItem(at: dir)
-                        }
-                    }
-                }
-                Self.writeMaterializedManifest(shippedSet, for: agent)
+                let manifest = try Self.syncAgentPack(
+                    from: bundledAgent, to: root.appending(path: agent),
+                    previous: Self.materializedManifest(for: agent),
+                    log: { print("[SZHost] agent packs: \(agent)/\($0)") })
+                Self.writeMaterializedManifest(manifest, for: agent)
             } catch {
                 print("[SZHost] agent pack \(agent): could not materialize — \(error)")
             }
         }
         agentGraphPlanCache = nil   // the plan library re-reads the materialized tree
         armAgentPackStepWatchers()
+    }
+
+    /// Bring one materialized agent folder in line with its bundled original, and return
+    /// the manifest to record — path → hash of the bytes WE wrote there.
+    ///
+    /// Per shipped file, ours-or-theirs by content: a copy whose bytes still hash to what
+    /// we last wrote is OURS and is refreshed whenever the bundle's bytes differ — newer or
+    /// older, so two builds sharing this root can never leave a pack half of each; a copy
+    /// that no longer matches was edited by the user and stays, its recorded hash kept so
+    /// it stays theirs until it once more reads as ours. A file we have no hash for (a
+    /// manifest from before hashes were recorded, or a user file the bundle now also
+    /// ships) falls back to mtime — bundle newer refreshes, else keep — and is recorded only
+    /// once we have written it, so a guess never claims their bytes as ours.
+    ///
+    /// Then PRUNE what a PREVIOUS materialization wrote and this bundle no longer ships — a
+    /// renamed graph or brief would otherwise stay load-visible forever (a variant the
+    /// pack never meant, a brief nothing renders). Only that: a file the bundle never wrote
+    /// is the USER'S — the authoring tutorial has them add a graph and a step folder INSIDE
+    /// the shipped director pack, and deleting those would take their work. Finally sweep
+    /// the directories the removals emptied — an empty dir holds no user work, but reads
+    /// as a step folder to every folder-scanning consumer.
+    nonisolated static func syncAgentPack(from bundledAgent: URL, to dest: URL,
+                                          previous: [String: String],
+                                          log: (String) -> Void = { _ in }) throws -> [String: String] {
+        let fm = FileManager.default
+        func mtime(_ url: URL) -> Date? {
+            (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        }
+        var manifest: [String: String] = [:]
+        let shipped = try relativeFilePaths(under: bundledAgent)
+        for relative in shipped.sorted() {
+            let from = bundledAgent.appending(path: relative)
+            let to = dest.appending(path: relative)
+            try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let bundleBytes = try Data(contentsOf: from)
+            let bundleHash = contentHash(bundleBytes)
+            let existing = try? Data(contentsOf: to)
+            let recorded = previous[relative]
+            let refresh: Bool
+            if let existing {
+                if let recorded, !recorded.isEmpty {
+                    let ours = contentHash(existing) == recorded
+                    refresh = ours && existing != bundleBytes
+                    if !ours { manifest[relative] = recorded; continue }
+                } else {
+                    refresh = (mtime(to) ?? .distantPast) < (mtime(from) ?? .distantPast)
+                    if !refresh { continue }
+                }
+            } else {
+                refresh = true
+            }
+            if refresh {
+                try? fm.removeItem(at: to)
+                try fm.copyItem(at: from, to: to)
+                if existing != nil { log("refreshed \(relative)") }
+            }
+            manifest[relative] = bundleHash
+        }
+        let shippedSet = Set(shipped)
+        for stale in Set(previous.keys).subtracting(shippedSet).sorted() {
+            try? fm.removeItem(at: dest.appending(path: stale))
+            log("removed \(stale) — the bundle no longer ships it")
+        }
+        if let walker = fm.enumerator(at: dest, includingPropertiesForKeys: [.isDirectoryKey]) {
+            let dirs = walker.compactMap { $0 as? URL }
+                .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            for dir in dirs.sorted(by: { $0.path.count > $1.path.count }) {
+                if (try? fm.contentsOfDirectory(atPath: dir.path))?.isEmpty == true {
+                    try? fm.removeItem(at: dir)
+                }
+            }
+        }
+        return manifest
+    }
+
+    nonisolated static func contentHash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Every regular file under `root`, as root-relative paths (no directories).
@@ -181,28 +220,37 @@ extension SZHost {
 }
 
 extension SZHost {
-    /// What the last materialization wrote for one agent, so a prune can tell OUR stale
-    /// copies from the user's own additions. Absent (first run, or an older build) reads as
-    /// empty — the conservative direction: nothing of theirs is ever taken on a guess.
-    /// Beside the packs root, never inside it: the root is enumerated as a pack library,
-    /// and host bookkeeping filed there would read as an agent that will not load.
+    /// What the last materialization wrote for one agent — path → hash of the bytes we
+    /// wrote — so a sync can tell OUR copies from the user's own additions and edits. A
+    /// manifest from before hashes were recorded (a bare path list) reads with EMPTY
+    /// hashes: known to be ours once, content unknown, so those files take the mtime rule.
+    /// Absent (first run) reads as empty — the conservative direction: nothing of theirs
+    /// is ever taken on a guess. Beside the packs root, never inside it: the root is
+    /// enumerated as a pack library, and host bookkeeping filed there would read as an
+    /// agent that will not load.
     static func materializedManifestURL(for agent: String) -> URL {
         materializedAgentPacksRoot.deletingLastPathComponent()
             .appending(path: "agent-pack-manifests/\(agent).json")
     }
 
-    static func materializedManifest(for agent: String) -> Set<String> {
-        let url = materializedManifestURL(for: agent)
-        guard let data = try? Data(contentsOf: url),
-              let paths = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(paths)
+    static func materializedManifest(for agent: String) -> [String: String] {
+        materializedManifest(at: materializedManifestURL(for: agent))
     }
 
-    static func writeMaterializedManifest(_ paths: Set<String>, for agent: String) {
+    nonisolated static func materializedManifest(at url: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: url) else { return [:] }
+        if let hashes = try? JSONDecoder().decode([String: String].self, from: data) { return hashes }
+        guard let paths = try? JSONDecoder().decode([String].self, from: data) else { return [:] }
+        return Dictionary(uniqueKeysWithValues: paths.map { ($0, "") })
+    }
+
+    static func writeMaterializedManifest(_ manifest: [String: String], for agent: String) {
         let url = materializedManifestURL(for: agent)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
-        guard let data = try? JSONEncoder().encode(paths.sorted()) else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(manifest) else { return }
         try? data.write(to: url, options: .atomic)
     }
 }
