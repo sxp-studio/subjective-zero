@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The query service — where a step's `askModel` becomes a real completion. One serve is the
-// whole exchange: decode the SDK's ask request, render the named template exactly like a
+// whole exchange: decode the kit's ask request, render the named template exactly like a
 // brief (same pack-relative resolution, same facts document the evaluation was pinned to),
 // append the host-owned repair wrapper on a retry, route through the model-routing seam
 // (`class: .query`), run ONE stateless completion — no MCP, no session, no tools — and
@@ -19,7 +19,7 @@ public typealias SZQueryExecutor =
 /// Everything serving one ask can refuse. `CancellationError` is never wrapped — it must
 /// reach the step's ask as a cancellation, not a failure.
 public enum SZQueryError: Error, CustomStringConvertible {
-    /// The ask request JSON would not decode — an SDK/host drift, not a model failure.
+    /// The ask request JSON would not decode — a kit/host drift, not a model failure.
     case unreadableRequest(detail: String)
     /// The routed provider id is not in the registry.
     case unknownProvider(String)
@@ -54,8 +54,8 @@ public final class SZQueryService {
     private let cacheDirectory: URL
     private let executor: SZQueryExecutor
     private let onRecord: @MainActor @Sendable (SZQueryRecord) -> Void
-    /// Every exchange this service ran, in order — the strategy's `onQuery` hook mirrors it
-    /// live; the host can persist it later.
+    /// Every exchange this service ran, in order. Test observability today (the effects/
+    /// query suites assert what a step asked); nothing in the app reads it back yet.
     public private(set) var journal: [SZQueryRecord] = []
 
     public init(renderer: SZBriefRenderer,
@@ -73,7 +73,7 @@ public final class SZQueryService {
         self.onRecord = onRecord
     }
 
-    // MARK: - The request as the SDK sends it (mirror of the step SDK's SZAskRequest)
+    // MARK: - The request as the kit sends it (mirror of the step kit's SZAskRequest)
 
     private struct AskRequest: Decodable {
         struct Repair: Decodable {
@@ -109,9 +109,8 @@ public final class SZQueryService {
         // re-rendered ask so the model sees the question and why its last answer failed.
         if request.attempt > 0, let repair = request.repair {
             prompt += "\n" + SZPromptTemplate.render(SZPrompts.askRepair, [
-                // Defused: these are MODEL-controlled text, and render walks an unordered
-                // dictionary — a live token inside a substituted value would expand or not
-                // depending on the process hash seed.
+                // Defused: these are MODEL-controlled text — a live token inside a
+                // substituted value must ship as words, never expand.
                 "error": SZPromptTemplate.defused(repair.error),
                 "previousReply": SZPromptTemplate.defused(repair.previousReply),
             ])

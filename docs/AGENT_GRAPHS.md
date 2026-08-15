@@ -7,7 +7,7 @@ run by one engine. There is no message kind anywhere: what a delivery *means* is
 by the agent's own door, in code you can open.
 
 Model: `SZCore/Agents/SZAgentGraph.swift` (+ `SZAgentGraphRun.swift`, `SZSeatAssignment.swift`).
-Facts: `SZCore/AgentFacts/` (`SZFacts.swift` is the spec, `SZWorld.swift` the host
+Facts: `SZCore/Agents/` (`SZFacts.swift` is the spec, `SZWorld.swift` the host
 projection). Supervision: `SZCore/Supervision/SZDispatchSupervisor.swift`. Loader +
 validation: `SZAI/Agents/SZAgentPackLoader.swift`. Engine: `SZAI/Engine/SZGraphEngine.swift`
 (+ `SZBriefRenderer.swift`, `SZQueryService.swift`). Delivery: `SZApp/SZDelivery.swift` +
@@ -32,7 +32,7 @@ token) — a fact nothing reads is deleted, not kept warm.
 
 **One message is one traversal.** Nothing re-enters a graph: a dispatch waits for its
 fleet and settles onward over its own edge, so the whole journey from delivery to
-conclusion is a single connected walk — and the RUNS list maps one row to one message
+conclusion is a single connected traversal — and the RUNS list maps one row to one message
 received.
 
 **Vocabulary.** A build is a **thread**: the build traversal and the work children it
@@ -102,12 +102,19 @@ let step = SZStep(outcomes: ["build", "answer", "answer-resumed", "implement"]) 
 
 Every line is a real decision: a grant goes straight to work (re-triaging it would spend a
 token to maybe drop a build), prose is triaged by the model, and an `implement` ruling
-mints the run. The coding agent's whole decision surface is four lines:
+mints the run. The coding agent's whole decision surface is one file, same shape:
+assigned work is deterministic (a retry continues the node's session), and the user's
+prose is judged by its own pack-local `triage` ask — a change request takes the `edit`
+lane (a work order re-grounded on the node's live files), a question stays conversation:
 
 ```swift
 // coding/steps/door/Step.swift
-let step = SZStep(outcomes: ["implement", "continue", "chat", "chat-resumed"]) { ctx in
+struct Ruling: Codable { let outcome: String }
+
+let step = SZStep(outcomes: ["implement", "continue", "edit", "chat", "chat-resumed"]) { ctx in
     if let job = ctx.assignment { return job.attempt > 1 ? "continue" : "implement" }
+    let ruling = try await ctx.ask("triage", as: Ruling.self)
+    if ruling.outcome == "edit" { return "edit" }
     return ctx.resuming ? "chat-resumed" : "chat"
 }
 ```
@@ -137,7 +144,7 @@ let step = SZStep(outcomes: ["yes", "no"]) { $0.hasWorkLeft ? "yes" : "no" }
 
 `ctx` is the delivery's facts plus one capability, exhaustively: `message` (the words),
 `node`, `resuming`, `run`, `assignment`, `hasWorkLeft`, and `ask`. The host compiles the
-file beside an **assembled SDK** (`SZRuntime/Steps/SZStepSDK.swift`, step ABI v5) whose
+file beside an **assembled kit** (`SZRuntime/Steps/SZStepKit.swift`, step ABI v5) whose
 middle section is the facts spec itself, so both sides of the ABI decode the same wire
 shape and spellings like `hasWorkLeft` exist exactly once. The compiled module **exports
 its declaration** (its outcomes); the pack gate reads it to validate every outcome-labeled
@@ -145,7 +152,7 @@ edge. A step body may `await`; it cannot mutate the host.
 
 ### ask and the repair loop
 
-The SDK's one capability beyond facts: a step may ask one model question.
+The kit's one capability beyond facts: a step may ask one model question.
 
 ```swift
 try await ctx.ask("triage", as: Ruling.self)
@@ -172,10 +179,10 @@ instruction. Effects are performed after the step returns and before its edge ro
 
 ## Facts: one spec, compiled twice
 
-`SZCore/AgentFacts/SZFacts.swift` is the single spec of everything a step can read:
+`SZCore/Agents/SZFacts.swift` is the single spec of everything a step can read:
 `SZFacts` (the wire document — message, node, resuming, and the typed optional groups
 `SZRun` / `SZAssignment`) and `SZEffect`. The SZFactGen build-tool plugin splices the
-sentinel-marked region verbatim into the step SDK, so a step compiles against the very
+sentinel-marked region verbatim into the step kit, so a step compiles against the very
 source the app compiled. **Adding a fact is two edits**: the documented `public var` line
 in the spec (its doc comment must name the consumer), and the projection in `SZWorld` —
 which also carries the host-side-only values (the typed project graph, the statuses) that

@@ -453,7 +453,7 @@ private let shippedPackSteps = StubSteps(infos: [
         outcomes: ["build", "answer", "answer-resumed", "implement"]),
     "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"]),
     "coding/door": SZStepDeclarationInfo(
-        outcomes: ["implement", "continue", "chat", "chat-resumed"]),
+        outcomes: ["implement", "continue", "edit", "chat", "chat-resumed"]),
     "debug/door": SZStepDeclarationInfo(outcomes: ["answer"]),
 ])
 

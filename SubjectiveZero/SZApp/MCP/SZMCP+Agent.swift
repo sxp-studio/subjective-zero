@@ -145,7 +145,14 @@ extension SZHostBridge {
     /// framing (`reference-inline`), and the two must not ship together (they disagree on how to
     /// spend the deeper tiers).
     nonisolated static func libraryIndexText() -> String {
-        SZAgentLibraryText.index(categories: libraryCategoriesBlock() ?? "(the library is empty)")
+        let categories = libraryCategoriesBlock() ?? "(the library is empty)"
+        // The framing template lives in the coding pack (the ONE home for agent prose;
+        // the equivalence gate pins the bytes). No packs, or a render refusal → the bare
+        // categories block, which is the payload's substance — degrade, never invent.
+        guard let root = SZHost.graphAgentPacksRoot() else { return categories }
+        let coding = SZAgentPackLoader.load(root: root).seats.coding ?? "coding"
+        return (try? SZBriefRenderer(packRoot: root).libraryIndex(agent: coding, categories: categories))
+            ?? categories
     }
 
     /// The categories block for inlining into cold-start coding briefs

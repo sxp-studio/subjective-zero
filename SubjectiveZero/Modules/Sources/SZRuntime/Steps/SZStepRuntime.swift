@@ -223,7 +223,7 @@ public final class SZStepRuntime {
     /// Drop the runtime's handle on `key`: the entry leaves the table, and a compile still in
     /// flight for it is discarded when it lands (the entry-identity check in `finishCompile`).
     /// The mapped module itself stays mapped — the loader never unmaps by design; what
-    /// retirement means at that tier is teardown + deleting the on-disk copy, and dropping
+    /// retirement means at that tier is deleting the on-disk copy, and dropping
     /// the loader here simply stops routing anything else to it.
     public func unload(key: SZStepKey) {
         entries[key] = nil

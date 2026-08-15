@@ -18,7 +18,7 @@
 // containing Swift/ObjC metadata (dlclose would be a no-op unmap at best), and the drain's
 // last completion necessarily fires with dylib frames still on the stack, so a real unmap
 // there could never be sound. The handle is deliberately leaked (one small mapping per hot
-// reload); teardown + deleting the on-disk copy are what retirement actually does, and
+// reload); deleting the on-disk copy is what retirement actually does, and
 // co-residency safety comes from the unique module name per build, not from unloading.
 import Foundation
 
@@ -41,7 +41,6 @@ final class SZStepModule: @unchecked Sendable {
     private let handle: UnsafeMutableRawPointer
     let evaluateFn: SZStepABI.EvaluateFn
     let cancelFn: SZStepABI.CancelFn
-    private let teardownFn: SZStepABI.TeardownFn?
     private let copy: URL
 
     private let lock = NSLock()
@@ -50,11 +49,10 @@ final class SZStepModule: @unchecked Sendable {
     private var closed = false
 
     init(handle: UnsafeMutableRawPointer, evaluateFn: SZStepABI.EvaluateFn,
-         cancelFn: SZStepABI.CancelFn, teardownFn: SZStepABI.TeardownFn?, copy: URL) {
+         cancelFn: SZStepABI.CancelFn, copy: URL) {
         self.handle = handle
         self.evaluateFn = evaluateFn
         self.cancelFn = cancelFn
-        self.teardownFn = teardownFn
         self.copy = copy
     }
 
@@ -89,8 +87,8 @@ final class SZStepModule: @unchecked Sendable {
         if shouldClose { scheduleClose() }
     }
 
-    /// Forward a cancel if the module is still open. After close, teardown has run and the
-    /// evaluation this token named has settled — dropping the cancel is the correct answer.
+    /// Forward a cancel if the module is still open. After close, the evaluation this
+    /// token named has settled — dropping the cancel is the correct answer.
     func cancelIfOpen(_ token: UInt64) {
         lock.lock()
         let fn = closed ? nil : cancelFn as SZStepABI.CancelFn?
@@ -103,14 +101,13 @@ final class SZStepModule: @unchecked Sendable {
         return retired && !closed
     }
 
-    /// Close OFF the caller's stack: the drain's last completion arrives on a frame that is
-    /// still inside the dylib, and teardown must not run under it.
+    /// Close OFF the caller's stack: the drain's last completion arrives on a frame that
+    /// is still inside the dylib.
     private func scheduleClose() {
         Task.detached { [self] in close() }
     }
 
     private func close() {
-        teardownFn?()
         // NO dlclose — see the header. The handle is leaked by design; the on-disk copy goes.
         _ = handle
         try? FileManager.default.removeItem(at: copy)
@@ -191,8 +188,6 @@ public final class SZStepLoader: @unchecked Sendable {
         guard let cancelSym = dlsym(handle, SZStepABI.cancelSymbol) else {
             throw discard(.missingSymbol(SZStepABI.cancelSymbol))
         }
-        let teardown = dlsym(handle, SZStepABI.teardownSymbol)
-            .map { unsafeBitCast($0, to: SZStepABI.TeardownFn.self) }
         var declared: String?
         if let declareSym = dlsym(handle, SZStepABI.declareSymbol) {
             let declareFn = unsafeBitCast(declareSym, to: SZStepABI.DeclareFn.self)
@@ -203,7 +198,6 @@ public final class SZStepLoader: @unchecked Sendable {
             handle: handle,
             evaluateFn: unsafeBitCast(evaluateSym, to: SZStepABI.EvaluateFn.self),
             cancelFn: unsafeBitCast(cancelSym, to: SZStepABI.CancelFn.self),
-            teardownFn: teardown,
             copy: copy)
 
         lock.lock()

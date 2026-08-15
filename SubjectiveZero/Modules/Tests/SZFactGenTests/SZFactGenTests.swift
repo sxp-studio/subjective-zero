@@ -14,7 +14,7 @@ private func specSource() throws -> String {
         .deletingLastPathComponent()   // SZFactGenTests
         .deletingLastPathComponent()   // Tests
         .deletingLastPathComponent()   // Modules
-        .appending(path: "Sources/SZCore/AgentFacts/SZFacts.swift")
+        .appending(path: "Sources/SZCore/Agents/SZFacts.swift")
     return try String(contentsOf: url, encoding: .utf8)
 }
 
@@ -50,13 +50,13 @@ private func specSource() throws -> String {
     let source = try specSource()
     let spec = try SZFactGen.parse(source)
     // The generated constant compiled into SZRuntime is the spec region byte for byte.
-    #expect(SZStepSDKGenerated.factsSection == spec.regionText)
-    #expect(SZStepSDKGenerated.factsSection.hasPrefix(SZFactGen.beginSentinel))
-    #expect(SZStepSDKGenerated.factsSection.hasSuffix(SZFactGen.endSentinel))
-    #expect(SZStepSDKGenerated.factsSection.contains("public struct SZFacts: Codable, Sendable {"))
-    // The conveniences live below the end sentinel and ride the SDK separately.
-    #expect(!SZStepSDKGenerated.factsSection.contains("var hasWorkLeft"))
-    #expect(SZStepSDKGenerated.conveniences.contains("hasWorkLeft"))
+    #expect(SZStepKitGenerated.factsSection == spec.regionText)
+    #expect(SZStepKitGenerated.factsSection.hasPrefix(SZFactGen.beginSentinel))
+    #expect(SZStepKitGenerated.factsSection.hasSuffix(SZFactGen.endSentinel))
+    #expect(SZStepKitGenerated.factsSection.contains("public struct SZFacts: Codable, Sendable {"))
+    // The conveniences live below the end sentinel and ride the kit separately.
+    #expect(!SZStepKitGenerated.factsSection.contains("var hasWorkLeft"))
+    #expect(SZStepKitGenerated.conveniences.contains("hasWorkLeft"))
 }
 
 // MARK: - Determinism
@@ -101,7 +101,7 @@ public struct SZFacts: Codable, Sendable {
 
 @Test func aSentinelInsideTheRegionFailsLoudlyInsteadOfTruncating() {
     // A stray end sentinel would silently truncate the spec — the struct below it drifting
-    // out of the SDK while still compiling everywhere. The duplicate must be loud.
+    // out of the kit while still compiling everywhere. The duplicate must be loud.
     let truncated = """
     // SZFactGen:begin
     public struct SZFacts: Codable, Sendable {

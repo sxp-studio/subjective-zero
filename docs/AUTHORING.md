@@ -37,15 +37,22 @@ Here is the whole shipped coding agent's decision surface:
 
 ```swift
 // coding/steps/door/Step.swift
-let step = SZStep(outcomes: ["implement", "continue", "chat", "chat-resumed"]) { ctx in
+struct Ruling: Codable { let outcome: String }
+
+let step = SZStep(outcomes: ["implement", "continue", "edit", "chat", "chat-resumed"]) { ctx in
     if let job = ctx.assignment { return job.attempt > 1 ? "continue" : "implement" }
+    let ruling = try await ctx.ask("triage", as: Ruling.self)
+    if ruling.outcome == "edit" { return "edit" }
     return ctx.resuming ? "chat-resumed" : "chat"
 }
 ```
 
 Assigned work forks on the attempt — a retry continues the node's own session,
-re-grounded on its blocker; anything else is conversation, forked on whether this scope
-already knows us. Four lines, and you have read everything this agent will ever decide.
+re-grounded on its blocker. Anything else is the user's prose, and the MODEL judges it
+through the pack's own `triage` template: a change request against the node takes the
+`edit` lane — a work order, re-grounded on the node's live contract and source every
+turn — and a question stays conversation, forked on whether this scope already knows us.
+One file, and you have read everything this agent will ever decide.
 
 And here is the shipped director's build lane — the heart of `director/graph.json`:
 
@@ -87,7 +94,11 @@ wait, settle onward).
 **Change the words.** Every turn names a brief: edit `prompts/decompose.md.mustache` and
 the next turn uses it — briefs are read per render, no relaunch. Templates use `{{token}}`
 substitution from one closed table; a token nothing substitutes is refused at load, and
-nothing ever ships to a model with a literal `{{token}}` left in it.
+nothing ever ships to a model with a literal `{{token}}` left in it. (The SHIPPED packs'
+briefs are byte-pinned by `SZBriefPinTests` — a deliberate prose change in the repo
+re-records its pin, `SZ_RECORD_BRIEF_PINS=1 swift test --filter SZBriefPinTests`, and
+commits the fixture diff with the template change. Your materialized or `SZ_AGENT_PACKS`
+copies are yours; the pins guard the shipped bytes.)
 
 **Change the flow.** Add a node, wire an edge, remove one. Outcomes are ports: the step
 declares what it can answer, the graph decides where each answer goes, and an answer with
@@ -132,7 +143,7 @@ does with the answer is ordinary Swift, and an outcome may carry an effect
 (`.outcome("implement", effects: [.requestBuild])` — the shipped director door's own
 line, which mints a run with the user's message as its instruction). (This exact step is
 compiled through the real toolchain and driven, repair loop included, by
-`SZRuntimeTests/SZAskModelExampleTests` — if the SDK drifts, the tutorial fails before
+`SZRuntimeTests/SZAskModelExampleTests` — if the kit drifts, the tutorial fails before
 you do.)
 
 ## The loop
@@ -145,8 +156,8 @@ edit  →  debug_check_pack  →  build
 every referenced step through the real toolchain — without spending a token:
 
 ```
-agent coding · seat: coding · 1 step · 12 prompts
-  graph · door: implement · continue · chat · chat-resumed · 5 nodes
+agent coding · seat: coding · 1 step · 14 prompts
+  graph · door: implement · continue · edit · chat · chat-resumed · 6 nodes
 agent debug · no seat · 1 step · 1 prompt
   graph · door: answer · 2 nodes
 agent director · seat: director · 2 steps · 6 prompts
@@ -242,14 +253,16 @@ launch with `SZ_AGENT_PACKS=…/my-packs` and Build runs it.
 ## A worked change: third-strike escalation
 
 Say attempt 3 on a node should stop resuming the same stuck session and start over with a
-sharper framing. One line in the coding door:
+sharper framing. Two lines in the coding door — the guard and its declared outcome:
 
 ```swift
-let step = SZStep(outcomes: ["implement", "continue", "escalate", "chat", "chat-resumed"]) { ctx in
+let step = SZStep(outcomes: ["implement", "continue", "escalate", "edit", "chat", "chat-resumed"]) { ctx in
     if let job = ctx.assignment {
         if job.attempt > 2 { return "escalate" }
         return job.attempt > 1 ? "continue" : "implement"
     }
+    let ruling = try await ctx.ask("triage", as: Ruling.self)
+    if ruling.outcome == "edit" { return "edit" }
     return ctx.resuming ? "chat-resumed" : "chat"
 }
 ```

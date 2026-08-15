@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The prompt assembler — the ONE place a template becomes the bytes a turn (or ask) sends.
-// Host internals, not SDK surface: pack authors see templates and tokens; steps see ctx.
+// Host internals, not kit surface: pack authors see templates and tokens; steps see ctx.
 //
 // ONE flat table: token → recipe over (message text, world, extras). Every token has one
 // meaning; a few recipes select their source by what the world carries (a staged op's
 // boundary vs the graph's), which is data selection, not a kind. A token is only computed
 // when the template mentions it, and after substitution any leftover `{{token}}` throws —
-// a literal token can never ship to a model.
+// a literal token can never ship to a model. That refusal judges AUTHORED text only
+// (templates and partials): every value carrying outside words — user prose, node
+// titles/prompts, agent statuses, file contents — is `defused` on its way in, so data
+// that happens to spell a token neither expands nor trips the check.
 //
-// THE GATE lives on this output: SZEquivalenceGateTests pins these bytes against fixtures
-// recorded from the previous orchestrator. Value assembly reuses the shared builders
+// THE PINS live on this output: SZBriefPinTests pins every shipped brief's bytes; a
+// deliberate prose change re-records its pin there. Value assembly reuses the shared builders
 // (SZDirectorPrompt, SZBoundaryPrompt, SZGraphPrompts, SZAgentDocs) — one home per value.
 import Foundation
 import SZCore
@@ -177,35 +180,39 @@ public struct SZBriefRenderer: Sendable {
             return value
         }
 
-        // — the world —
-        try add("graph") { SZDirectorPrompt.graphSummary(try need(world.graph, "graph", "a project")) }
-        add("message") { message }
+        // — the world — (values built on outside words are defused: a user asking about
+        // "{{node}}", a node title or agent status spelling a token, must ship as words)
+        try add("graph") { SZPromptTemplate.defused(
+            SZDirectorPrompt.graphSummary(try need(world.graph, "graph", "a project"))) }
+        add("message") { SZPromptTemplate.defused(message) }
         try add("toolbelt") { try template(agent, Self.toolbeltPartial) }
         try add("node") { try need(world.node, "node", "a bound node").uuidString }
         try add("round") { String(try need(world.run, "round", "a live run").round) }
         try add("cap") { String(try need(world.run, "cap", "a live run").roundCap) }
         try add("blockers") {
             let run = try need(world.run, "blockers", "a live run")
-            return SZDirectorPrompt.blockerLines(
+            return SZPromptTemplate.defused(SZDirectorPrompt.blockerLines(
                 graph: try need(world.graph, "blockers", "a project"),
-                unresolved: run.workSet, statuses: world.statuses)
+                unresolved: run.workSet, statuses: world.statuses))
         }
-        try add("inbox") { SZDirectorPrompt.inboxLines(try need(world.run, "inbox", "a live run").steers) }
+        try add("inbox") { SZPromptTemplate.defused(
+            SZDirectorPrompt.inboxLines(try need(world.run, "inbox", "a live run").steers)) }
 
         // — the sender's instruction: a staged op's steer, else the run's standing one —
         add("instruction") {
             if let op = extras.graphOp {
-                return SZGraphPrompts.steerBlock(op.instruction,
-                                                verb: op.constituents.isEmpty ? "split" : "merge")
+                return SZPromptTemplate.defused(SZGraphPrompts.steerBlock(op.instruction,
+                                                verb: op.constituents.isEmpty ? "split" : "merge"))
             }
-            return SZDirectorPrompt.instructionLine(world.run?.instruction ?? "")
+            return SZPromptTemplate.defused(SZDirectorPrompt.instructionLine(world.run?.instruction ?? ""))
         }
 
         // — the node chat's cold seed (host-read files) —
-        try add("contract") { try need(extras.nodeContract, "contract", "the node's contract file") }
+        try add("contract") { SZPromptTemplate.defused(
+            try need(extras.nodeContract, "contract", "the node's contract file")) }
         try add("source") {
-            if let op = extras.graphOp { return SZGraphPrompts.sourceBlock(op.source) }
-            return try need(extras.nodeSource, "source", "the node's source file")
+            if let op = extras.graphOp { return SZPromptTemplate.defused(SZGraphPrompts.sourceBlock(op.source)) }
+            return SZPromptTemplate.defused(try need(extras.nodeSource, "source", "the node's source file"))
         }
 
         // — the work brief: the bound node against its typed boundary —
@@ -259,16 +266,21 @@ public struct SZBriefRenderer: Sendable {
         }
 
         // — the split/merge seed bundle —
-        try add("original") { try need(extras.graphOp?.original, "original", "a staged op") }
-        try add("intent") { try need(extras.graphOp?.intent, "intent", "a staged op") }
+        try add("original") { SZPromptTemplate.defused(
+            try need(extras.graphOp?.original, "original", "a staged op")) }
+        try add("intent") { SZPromptTemplate.defused(
+            try need(extras.graphOp?.intent, "intent", "a staged op")) }
         try add("stage") { String(try need(extras.graphOp?.stage, "stage", "a staged split")) }
         try add("count") { String(try need(extras.graphOp, "count", "a staged op").count) }
         try add("constituents") {
-            try need(extras.graphOp, "constituents", "a staged op").constituents
-                .map { "- \($0.title): \($0.intent)\n\(SZGraphPrompts.sourceBlock($0.source))" }
-                .joined(separator: "\n\n")
+            SZPromptTemplate.defused(
+                try need(extras.graphOp, "constituents", "a staged op").constituents
+                    .map { "- \($0.title): \($0.intent)\n\(SZGraphPrompts.sourceBlock($0.source))" }
+                    .joined(separator: "\n\n"))
         }
 
+        // With every data-borne value defused above, anything still spelling `{{token}}`
+        // was AUTHORED — by this template or a partial it pulled in — and must not ship.
         let rendered = SZPromptTemplate.render(text, values)
         let leftover = SZPromptTemplate.tokens(in: rendered)
         guard leftover.isEmpty else {

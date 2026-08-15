@@ -20,6 +20,10 @@ final class SZMCPServer: @unchecked Sendable {
     /// here attributes to that turn exactly, parallel agents included. nil on the standing buses
     /// (whose calls fall back to the bridge's attribution rule).
     let traceContext: SZTraceContext?
+    /// The turn's claim token, same story as `traceContext`: the port is the identity, so calls
+    /// arriving here carry their turn's claim into the mutation fence (`SZToolCaller`). nil on the
+    /// standing buses — an unidentified caller gets no self-turn exemption.
+    let caller: SZClaimToken?
     private let listener: NWListener
     private let bridge: SZHostBridge
     private let queue = DispatchQueue(label: "studio.sxp.subz.mcp")
@@ -35,18 +39,19 @@ final class SZMCPServer: @unchecked Sendable {
     /// quietly. The host starts its agent bus above the port the full bus took.
     @MainActor
     static func start(bridge: SZHostBridge, surface: SZHostBridge.Surface = .full,
-                      from: UInt16 = 42100, traceContext: SZTraceContext? = nil) throws -> SZMCPServer {
+                      from: UInt16 = 42100, traceContext: SZTraceContext? = nil,
+                      caller: SZClaimToken? = nil) throws -> SZMCPServer {
         var lastError: Error?
         for candidate in max(from, 42100)..<UInt16(42200) {
             do { return try SZMCPServer(port: candidate, bridge: bridge, surface: surface,
-                                        traceContext: traceContext) }
+                                        traceContext: traceContext, caller: caller) }
             catch { lastError = error }
         }
         throw lastError ?? SZMCPError.message("no free MCP port in \(from)–42199")
     }
 
     private init(port: UInt16, bridge: SZHostBridge, surface: SZHostBridge.Surface,
-                 traceContext: SZTraceContext?) throws {
+                 traceContext: SZTraceContext?, caller: SZClaimToken?) throws {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             throw SZMCPError.message("invalid MCP port \(port)")
         }
@@ -54,6 +59,7 @@ final class SZMCPServer: @unchecked Sendable {
         self.bridge = bridge
         self.surface = surface
         self.traceContext = traceContext
+        self.caller = caller
         // LOOPBACK ONLY. Plain `NWListener(using: .tcp, on:)` binds every interface (lsof shows
         // `*:<port>`), so on a shared network any host could drive this bus — and its tools include
         // `ui_run`, which spawns a coding agent that writes and executes code with no approval gate.
@@ -66,7 +72,7 @@ final class SZMCPServer: @unchecked Sendable {
         self.listener.newConnectionHandler = { [bridge] connection in
             connection.start(queue: DispatchQueue(label: "studio.sxp.subz.mcp.conn.\(port)"))
             Self.receive(on: connection, bridge: bridge, surface: surface, identity: identity,
-                         traceContext: traceContext, buffer: SZLineBuffer())
+                         traceContext: traceContext, caller: caller, buffer: SZLineBuffer())
         }
         let startup = SZMCPStartupProbe()
         // A busy port surfaces here, not from init — fail startup so the caller can try another port.
@@ -100,7 +106,8 @@ final class SZMCPServer: @unchecked Sendable {
 
     private static func receive(on connection: NWConnection, bridge: SZHostBridge,
                                surface: SZHostBridge.Surface, identity: String,
-                               traceContext: SZTraceContext?, buffer: SZLineBuffer) {
+                               traceContext: SZTraceContext?, caller: SZClaimToken?,
+                               buffer: SZLineBuffer) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, isComplete, error in
             if let data, !data.isEmpty {
                 for line in buffer.appendAndExtractLines(data) {
@@ -111,7 +118,7 @@ final class SZMCPServer: @unchecked Sendable {
                     Task {
                         if let response = await handle(line: line, bridge: bridge,
                                                       surface: surface, identity: identity,
-                                                      traceContext: traceContext) {
+                                                      traceContext: traceContext, caller: caller) {
                             connection.send(content: Data((response + "\n").utf8), completion: .contentProcessed { _ in })
                         }
                         done.signal()
@@ -121,14 +128,14 @@ final class SZMCPServer: @unchecked Sendable {
             }
             guard !isComplete, error == nil else { connection.cancel(); return }
             receive(on: connection, bridge: bridge, surface: surface, identity: identity,
-                    traceContext: traceContext, buffer: buffer)
+                    traceContext: traceContext, caller: caller, buffer: buffer)
         }
     }
 
     /// Decode one JSON-RPC request and produce its response string (nil for notifications).
     private static func handle(line: String, bridge: SZHostBridge,
                               surface: SZHostBridge.Surface, identity: String,
-                              traceContext: SZTraceContext?) async -> String? {
+                              traceContext: SZTraceContext?, caller: SZClaimToken?) async -> String? {
         let request = (try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]) ?? [:]
         let id = request["id"] ?? NSNull()
         guard let method = request["method"] as? String else {
@@ -152,10 +159,19 @@ final class SZMCPServer: @unchecked Sendable {
             // Cross the actor boundary as Data (Sendable), not [String: Any]; re-decode on the main actor.
             let argsData = (try? JSONSerialization.data(withJSONObject: params["arguments"] ?? [:])) ?? Data("{}".utf8)
             do {
-                let result = try await MainActor.run {
+                let result: SZMCPToolResult
+                if SZHostBridge.offMainToolNames.contains(name) {
+                    // A declared-off-main tool (a long compile pass) runs on THIS task —
+                    // never inside the MainActor hop, where it would wedge every tool call.
                     let arguments = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
-                    return try bridge.callTool(name: name, arguments: arguments, surface: surface,
-                                               forcedContext: traceContext)
+                    result = try await bridge.callOffMainTool(name: name, arguments: arguments,
+                                                              surface: surface)
+                } else {
+                    result = try await MainActor.run {
+                        let arguments = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
+                        return try bridge.callTool(name: name, arguments: arguments, surface: surface,
+                                                   forcedContext: traceContext, caller: caller)
+                    }
                 }
                 let payload: [String: Any]
                 switch result {

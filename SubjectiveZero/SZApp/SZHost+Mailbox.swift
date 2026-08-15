@@ -163,11 +163,13 @@ extension SZHost {
             let expanded = SZMentionExpansion.agentText(
                 text, nodes: (store.project?.graph.nodes ?? []).map { (id: $0.id, title: $0.title) })
             let messageAttachments = envelope.message.attachments
-            // A node chat's cold seed needs the node's current files. Read only when there
-            // is no session to resume: the resumed brief mentions neither token, and the
-            // renderer computes only what a brief actually mentions.
+            // A node delivery carries the node's current files on EVERY message — the cold
+            // chat seed needs them once, and the edit lane re-grounds on them each turn
+            // (after an edit, a session's memory of the files is stale by construction).
+            // The renderer computes only what a brief mentions, so lanes that don't ask
+            // (the bare resumed chat) cost nothing beyond these two reads.
             var extras = SZBriefExtras()
-            if case .node(let nodeID) = scope, existing == nil {
+            if case .node(let nodeID) = scope {
                 let nodeDir = projectURL.appending(path: "nodes/\(nodeID.uuidString)")
                 extras.nodeContract =
                     (try? String(contentsOf: nodeDir.appending(path: "node-contract.json"), encoding: .utf8))
@@ -260,7 +262,7 @@ extension SZHost {
     /// Returns the turn's own run result so `performChatTurn`'s post-processing stays as
     /// it was. A traversal that never reached its turn throws instead — except the honest
     /// turn-less ending after `requestBuild` fired, which returns the ack line.
-    private func runProseDelivery(
+    func runProseDelivery(
         scope: SZChatScope, message: String, existing: SZAgentSession?, providerID: String,
         extras: SZBriefExtras,
         turn: @escaping @MainActor (SZTurnOrder) async throws -> SZAgentRunResult
@@ -279,6 +281,18 @@ extension SZHost {
         // Attach the graph's step declarations (compiled once; the host's step runtime
         // caches across turns). A step that will not compile refuses HERE, loudly.
         let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
+        // The same gate the build lane holds: a graph only traverses out of a library that
+        // validates. Chat is where an EDITED pack first runs, and shape defects (an
+        // unleashed cycle, a dangling edge) exist only in `validate` — skipping it here
+        // would let a broken graph traverse unbounded. Compiles are cached, so this costs
+        // once per edit, not per message.
+        var defects = loaded.defects
+        defects += await SZAgentPackLoader.validate(packs: loaded.packs, steps: steps)
+        guard defects.isEmpty else {
+            throw SZChatTraversalFailure(detail: "the agent-pack library does not validate "
+                + "(\(defects.count) defect\(defects.count == 1 ? "" : "s")):\n"
+                + defects.map { "  · \($0)" }.sorted().joined(separator: "\n"))
+        }
         var attachments: [String: SZStepAttachment] = [:]
         for node in graph.nodes {
             guard case .step(let name) = node.form else { continue }

@@ -558,9 +558,10 @@ extension SZHostBridge {
         let instruction = arguments.string("instruction") ?? ""
         // Called from the Director Agent's OWN streaming chat turn: starting now would race that
         // turn on the same transcript (deliver's one-in-flight-marker-per-scope invariant), so the
-        // run is MINTED and admitted at the pump's head when that turn's claim frees.
+        // run is MINTED — the door's `requestBuild` lane, one home for supersede + narration —
+        // and admitted at the pump's head when that turn's claim frees.
         if host.chatInFlight.contains(SZChatScope.directorKey) {
-            host.pendingRun = instruction
+            host.mintRun(instruction: instruction)
             return SZJSONRPC.encode(["status": "queued",
                                      "detail": "the run starts when your current turn ends"])
         }

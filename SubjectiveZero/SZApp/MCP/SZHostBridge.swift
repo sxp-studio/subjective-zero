@@ -87,10 +87,33 @@ final class SZHostBridge {
         }
     }
 
+    /// Tool names that touch NO main-actor host state and run OFF the main actor —
+    /// `SZMCPServer` dispatches these before its MainActor hop, so a long tool (a full
+    /// pack compile pass) can never wedge the app. Membership is a promise: a listed
+    /// tool may read only nonisolated statics and its own arguments.
+    nonisolated static let offMainToolNames: Set<String> = ["debug_check_pack"]
+
+    /// The off-main dispatch lane: the same withholding rails as `callTool`, then the
+    /// tool as plain async work on the calling connection's task.
+    nonisolated func callOffMainTool(name: String, arguments: [String: Any],
+                                     surface: Surface) async throws -> SZMCPToolResult {
+        guard !Self.debugToolNames.contains(name) || surface.exposesDebugTools else {
+            throw SZMCPError.message("\(name) is not available to agents")
+        }
+        guard !Self.agentWithheldToolNames.contains(name) || surface == .full else {
+            throw SZMCPError.message("\(name) is not available to agents")
+        }
+        switch name {
+        case "debug_check_pack": return .text(await Self.debugCheckPack(arguments))
+        default: throw SZMCPError.message("unknown off-main tool: \(name)")
+        }
+    }
+
     /// Dispatch one `tools/call`, trying each surface in turn. Image tools (which return an inline image,
     /// not text) are tried first; the text surfaces stay `String?` and are wrapped in `.text`.
     func callTool(name: String, arguments: [String: Any], surface: Surface = .full,
-                  forcedContext: SZTraceContext? = nil) throws -> SZMCPToolResult {
+                  forcedContext: SZTraceContext? = nil,
+                  caller: SZClaimToken? = nil) throws -> SZMCPToolResult {
         // Withheld, not merely unlisted: knowing the name from somewhere else must not be enough.
         guard !Self.debugToolNames.contains(name) || surface.exposesDebugTools else {
             throw SZMCPError.message("\(name) is not available to agents")
@@ -110,7 +133,11 @@ final class SZHostBridge {
         // the observed. `span` records thrown handlers too — a failing call still took time.
         let traceContext = Self.debugToolNames.contains(name)
             ? nil : (forcedContext ?? (surface == .agent ? host.traceContext(for: arguments) : nil))
-        return try SZTrace.$context.withValue(traceContext) {
+        // The caller's claim rides the same way as the trace context: bound (even when nil — an
+        // unidentified call must SHADOW any ambient identity, never inherit one) so the mutation
+        // fence downstream can tell a turn touching its own held node from a bystander.
+        return try SZToolCaller.$claim.withValue(caller) {
+        try SZTrace.$context.withValue(traceContext) {
             // The span closes with the RESULT's approximate context weight (chars/4): every tool
             // result feeds straight back into the agent's context, and these payloads — library
             // reads, doc pages, compile output — are most of what a turn's "in" count is made of.
@@ -130,6 +157,7 @@ final class SZHostBridge {
                 if let result = try handleUITool(name: name, arguments: arguments) { return .text(result) }
                 throw SZMCPError.message("unknown tool: \(name)")
             }
+        }
         }
     }
 

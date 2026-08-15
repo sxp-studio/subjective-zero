@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The AUTHORING.md "Ask the model from code" sample, compiled through the REAL toolchain
-// and driven end to end — the doc and this test carry the same bytes, so if the SDK drifts
+// and driven end to end — the doc and this test carry the same bytes, so if the kit drifts
 // the tutorial fails before a reader does. What the sample demonstrates is the whole ask
 // contract from a step's side: ONE typed model question, awaited, the reply decoded into
 // the step's own type (with the host's repair loop on a shape mismatch), and the answer

@@ -80,8 +80,11 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     /// Quit gate: rescue an untitled project before its temp files are cleaned up (saved projects
     /// autosave, so they quit silently). Skipped while a run/chat owns the graph — Save As can't run
     /// then anyway, and the untitled project is already autosaved, so a mid-run quit loses nothing.
+    /// Also skipped for `debug_quit` (`quitSkipsUntitledRescue`): a drive has no human to answer
+    /// the prompt, and parking terminate on it wedges the automated session.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let host, host.isUntitledProject, !host.isBusyForProjectOps else { return .terminateNow }
+        guard let host, host.isUntitledProject, !host.isBusyForProjectOps,
+              !host.quitSkipsUntitledRescue else { return .terminateNow }
         Task { @MainActor in
             let proceed = await host.confirmSaveOrDiscardIfUnsaved(actionName: "quitting")
             sender.reply(toApplicationShouldTerminate: proceed)

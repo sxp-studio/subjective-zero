@@ -107,9 +107,12 @@ extension SZHost {
         guard let staged else { return nil }
         store.mutate { $0.graph = staged.graph }
         let mergedID = staged.mergedID
-        if let contract = store.project?.graph.node(id: mergedID)?.contract {
-            store.updateNode(id: mergedID, prompt: SZGraphPrompts.merge(
-                constituents: constituents, contract: contract, instruction: instruction))
+        if let contract = store.project?.graph.node(id: mergedID)?.contract,
+           let prompt = renderSeed(template: "merge", graphOp: SZBriefExtras.GraphOp(
+                count: constituents.count,
+                constituents: constituents.map { .init(title: $0.title, intent: $0.intent, source: $0.source) },
+                contract: contract, instruction: instruction)) {
+            store.updateNode(id: mergedID, prompt: prompt)
         }
 
         if run {
@@ -204,15 +207,37 @@ extension SZHost {
         persistGraphEditAndReload(action: reason)
     }
 
-    /// Author each split stage's seed prompt from the SZAI template (SZCore stays prose-free). Every stage
+    /// Author each split stage's seed prompt from the coding pack's template. Every stage
     /// gets the same `instruction`, so they divide the work along the seam the user actually asked for.
     private func seedSplitPrompts(_ pieceIDs: [SZNodeID], original: String, intent: String,
                                   source: String?, instruction: String?) {
         for (k, pid) in pieceIDs.enumerated() {
-            guard let contract = store.project?.graph.node(id: pid)?.contract else { continue }
-            store.updateNode(id: pid, prompt: SZGraphPrompts.splitStage(
-                original: original, intent: intent, stage: k + 1, count: pieceIDs.count,
-                source: source, contract: contract, instruction: instruction))
+            guard let contract = store.project?.graph.node(id: pid)?.contract,
+                  let prompt = renderSeed(template: "split-stage", graphOp: SZBriefExtras.GraphOp(
+                      original: original, intent: intent, stage: k + 1, count: pieceIDs.count,
+                      source: source, contract: contract, instruction: instruction)) else { continue }
+            store.updateNode(id: pid, prompt: prompt)
+        }
+    }
+
+    /// Render one of the coding pack's SEED briefs (`split-stage` / `merge`) — stage-time
+    /// authoring written into the piece's prompt, through the same renderer + pack templates
+    /// every other brief uses (the pack is the ONE home for agent prose; the equivalence gate
+    /// pins these bytes). A missing root or a render refusal skips the seed with a status
+    /// line — the piece then carries its drafted contract and no prompt, never invented prose.
+    private func renderSeed(template: String, graphOp: SZBriefExtras.GraphOp) -> String? {
+        guard let root = Self.graphAgentPacksRoot() else {
+            status = "no agent packs — the \(template) seed could not render"
+            return nil
+        }
+        let coding = SZAgentPackLoader.load(root: root).seats.coding ?? "coding"
+        do {
+            return try SZBriefRenderer(packRoot: root).render(
+                agent: coding, template: template, message: "",
+                world: SZWorld(), extras: SZBriefExtras(graphOp: graphOp))
+        } catch {
+            status = "the \(template) seed did not render: \(error)"
+            return nil
         }
     }
 

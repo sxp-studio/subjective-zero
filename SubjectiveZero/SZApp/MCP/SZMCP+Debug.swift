@@ -52,7 +52,8 @@ extension SZHostBridge {
         case "debug_fail_node_once":   return try debugFailNodeOnce(arguments)
         case "debug_set_paused":       return try debugSetPaused(arguments)
         case "debug_quit":             return debugQuit()
-        case "debug_check_pack":       return debugCheckPack(arguments)
+        // debug_check_pack never lands here — SZMCPServer routes it down the off-main lane
+        // (SZHostBridge.offMainToolNames) before the MainActor hop.
         default: return nil
         }
     }
@@ -74,33 +75,43 @@ extension SZHostBridge {
     /// (one swiftc each) — a check with steps is seconds, not milliseconds, and honestly so.
     /// The automated drive's ⌘Q: reply, then terminate through the ordinary AppKit path on
     /// the next runloop turn — windows close, state persists, capture devices stop. Never a
-    /// signal: SIGKILL skips exactly the teardown a drive needs to have happened.
+    /// signal: SIGKILL skips exactly the teardown a drive needs to have happened. And never
+    /// a PROMPT: the untitled-rescue dialog (`applicationShouldTerminate`) waits for a human
+    /// no drive has — an automated quit skips it (the untitled project is autosaved; ending
+    /// deterministically is this tool's whole contract).
     private func debugQuit() -> String {
+        host.quitSkipsUntitledRescue = true
         DispatchQueue.main.async {
             NSApplication.shared.terminate(nil)
         }
         return SZJSONRPC.encode(["quitting": true])
     }
 
-    private func debugCheckPack(_ arguments: [String: Any]) -> String {
+    /// OFF-MAIN by declaration (`SZHostBridge.offMainToolNames`): the check reads only the
+    /// packs root and compiles through the main-actor-free step provider, and a full compile
+    /// pass takes seconds — on the main actor it would wedge every tool call and ⌘Q with it.
+    nonisolated static func debugCheckPack(_ arguments: [String: Any]) async -> String {
         guard let root = arguments.string("path").map({ URL(filePath: $0) })
             ?? SZHost.graphAgentPacksRoot() else {
             return "no packs root — the bundled packs did not materialize and no SZ_AGENT_PACKS "
                 + "override is set; pass `path` to a pack root (a directory of agent folders)"
         }
-        final class Box: @unchecked Sendable { var report = "" }
-        let box = Box()
-        let done = DispatchSemaphore(value: 0)
-        Task.detached {
-            box.report = await SZAgentPackLoader.check(root: root, steps: SZPackStepProvider(root: root))
-            done.signal()
+        // The deadline is an async RACE, not a blocking wait: a pathological Step.swift can
+        // hang swiftc, and a hung check must degrade to one honest sentence — stalling at
+        // worst this connection's call, never a thread.
+        return await withTaskGroup(of: String?.self) { group in
+            group.addTask {
+                await SZAgentPackLoader.check(root: root, steps: SZPackStepProvider(root: root))
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(300))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+                ?? "check timed out after 300s — a step compile is likely wedged; the report was abandoned"
         }
-        // A deadline, because this thread is the bridge: a pathological Step.swift can hang
-        // swiftc, and a hung check must degrade to one honest sentence, not stall the bus.
-        guard done.wait(timeout: .now() + 300) == .success else {
-            return "check timed out after 300s — a step compile is likely wedged; the report was abandoned"
-        }
-        return box.report
     }
 
     /// The check tool's step seam: each step folder compiles through the real toolchain —

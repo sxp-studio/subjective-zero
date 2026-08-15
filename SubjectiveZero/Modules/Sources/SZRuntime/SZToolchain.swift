@@ -36,11 +36,11 @@ public struct SZToolchain {
                     modulePrefix: "SZNode_", product: "Node.dylib")
     }
 
-    /// Compile a decision step's `Step.swift` into `Step.dylib` — same pipeline, the step
-    /// SDK as the support blob, its own module prefix.
+    /// Compile a decision step's `Step.swift` into `Step.dylib` — same pipeline, SZStepKit
+    /// as the support blob, its own module prefix.
     public func compile(stepSource: URL, into buildDir: URL) throws -> URL {
         try compile(source: stepSource, into: buildDir,
-                    supportFileName: SZStepSDK.fileName, supportSource: SZStepSDK.source,
+                    supportFileName: SZStepKit.fileName, supportSource: SZStepKit.source,
                     modulePrefix: "SZStep_", product: "Step.dylib")
     }
 

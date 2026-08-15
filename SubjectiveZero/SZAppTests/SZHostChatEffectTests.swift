@@ -32,6 +32,27 @@ struct SZHostChatEffectTests {
         #expect(host.pendingRun == "something else")
     }
 
+    @Test func aNotReadyHostAnswersWaitingAndTheSlotSurvives() {
+        let host = SZHost()
+        // No MCP server, no project: not READY — never a terminal refusal. The mint's
+        // pump pass leaves the slot for the release that can finally admit it.
+        #expect(host.startRun(instruction: "warmer") == .waiting)
+        host.mintRun(instruction: "warmer")
+        #expect(host.pendingRun == "warmer")
+    }
+
+    @Test func admissionWaitsOutAHeldDirectorTranscript() {
+        let host = SZHost()
+        let turn = SZClaimToken(label: "director chat")
+        #expect(host.ledger.tryAcquire([.transcript(.director)], as: turn))
+        host.mintRun(instruction: "later")
+        // Deferred, not dropped: the held transcript blocks admission and the slot stays;
+        // the release re-fires the pump (and, bare, parks at waiting again).
+        #expect(host.pendingRun == "later")
+        host.ledger.releaseAll(of: turn)
+        #expect(host.pendingRun == "later")
+    }
+
     @Test func mintingDuringAnActiveRunSkipsWithOneNarratedLine() {
         let host = SZHost()
         let claim = SZClaimToken(label: "test run")

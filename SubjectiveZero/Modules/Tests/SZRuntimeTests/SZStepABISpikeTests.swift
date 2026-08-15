@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// P0 proving ground for step ABI v4: real swiftc → codesign → dlopen round-trips exercising
+// P0 proving ground for the step ABI: real swiftc → codesign → dlopen round-trips exercising
 // the async evaluation contract — sync one-liners, `ctx.ask` typed rulings with repair
 // retry, cancellation mid-flight, swap-with-drain hot reload, and the layout pin that keeps
-// the host's request struct byte-matched with the SDK's copy.
+// the host's request struct byte-matched with the kit's copy.
 import Testing
 import Foundation
 import Synchronization
@@ -28,7 +28,7 @@ private func loadStep(_ source: String, into loader: SZStepLoader? = nil) throws
     return target
 }
 
-/// The host-side mirror of the SDK's ask request, for asserting what a step sent.
+/// The host-side mirror of the kit's ask request, for asserting what a step sent.
 private struct AskRequest: Decodable {
     struct Repair: Decodable { let error: String; let previousReply: String }
     let template: String
@@ -79,7 +79,7 @@ let step = SZStep(outcomes: ["done"]) { ctx in
 }
 """
 
-/// Reports the SDK-side layout of the request struct, interpolation-free.
+/// Reports the kit-side layout of the request struct, interpolation-free.
 private let layoutProbeStep = """
 let step = SZStep(outcomes: ["layout"]) { _ in
     let parts = [

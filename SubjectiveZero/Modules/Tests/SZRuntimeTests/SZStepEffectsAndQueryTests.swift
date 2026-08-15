@@ -81,7 +81,7 @@ struct SZStepEffectsAndQueryTests {
         let loader = try loadStep(classifyStep)
 
         // The real query service as the ask runner; only the completion is scripted —
-        // garbage prose first, the ruling on the repair retry, so the SDK's repair loop and
+        // garbage prose first, the ruling on the repair retry, so the kit's repair loop and
         // the service's repair wrapper are proven together.
         let prompts = Mutex<[String]>([])
         let service = SZQueryService(

@@ -16,11 +16,21 @@
 import Foundation
 import SZCore
 
+/// The tool call's caller, bound task-locally by `SZHostBridge.callTool` for the duration of one
+/// dispatch — same idiom as `SZTrace.context`. A per-TURN agent listener knows whose turn it serves
+/// (its port is the identity) and carries that turn's claim token; the shared buses carry nil.
+/// The fence and the store backstop read it to tell "the turn mutating its own held node" from a
+/// bystander on the same origin.
+enum SZToolCaller {
+    @TaskLocal static var claim: SZClaimToken?
+}
+
 extension SZHost {
-    /// Who is asking for a mutation. `.agent` is the MCP `ui_*` surface (the Director / the fleet —
-    /// a raw TCP connection carries no finer identity); `.user` is the editor UI and host-internal
-    /// user actions. The one rule difference: an agent may mutate nodes the RUN holds (steering its
-    /// own fleet's work is the run's whole point); a user may not (those cards are locked).
+    /// Who is asking for a mutation. `.agent` is the MCP `ui_*` surface (the Director / the fleet;
+    /// the CALLER, when a per-turn listener carries it, is `SZToolCaller.claim`); `.user` is the
+    /// editor UI and host-internal user actions. The rule differences: an agent may mutate nodes
+    /// the RUN holds (steering its own fleet's work is the run's whole point) and nodes its OWN
+    /// turn holds; a user may not (those cards are locked).
     enum SZMutationOrigin { case user, agent }
 
     /// The authoritative lock check for fenced mutations. Returns a human refusal naming the
@@ -36,11 +46,11 @@ extension SZHost {
             guard let holder = ledger.holder(of: .node(id)) else { continue }
             if origin == .agent {
                 if let runClaim, holder == runClaim { continue }   // the run's own fleet work
-                // A node held by its OWN scope's in-flight turn: the delivery claim exists
-                // to stop everyone ELSE — the agent mutating the node mid-turn IS that
-                // turn's work (the claim holds node + transcript together, so the match
-                // identifies the turn, not a bystander).
-                if ledger.holder(of: .transcript(.node(id))) == holder { continue }
+                // The caller's own turn holds this node: mutating it mid-turn IS the turn's work.
+                // Only a match against the CALLER's token passes — a different agent (a Director
+                // turn, another node's agent, an outside drive) presents no claim or someone
+                // else's, and is refused like anyone.
+                if let caller = SZToolCaller.claim, holder == caller { continue }
             }
             if origin == .user, !userLockDenies(holder: holder, node: id) { continue }
             return "node '\(title)' is held by \(holder.label) — wait for it to finish or stop it"
@@ -87,7 +97,9 @@ extension SZHost {
     /// DELIBERATELY ORIGIN-BLIND, and therefore strictly weaker than `fenceDenial` — do not "tighten"
     /// it to `userLockDenies`. A store op carries no `SZMutationOrigin`, so the backstop can only
     /// catch what NO origin would permit; the agent rule is the permissive one, hence the `runClaim`
-    /// skip. Routing it through the user rule would assert-fail on the fleet's own legitimate writes:
+    /// and caller skips (the caller's identity DOES reach here — `SZToolCaller` rides the tool
+    /// call's stack into the store op). Routing it through the user rule would assert-fail on the
+    /// fleet's own legitimate writes:
     /// a run holds its work set, and a coding agent's `ui_update_node` lands on a node that is still
     /// `kind == .prompt` until it compiles and promotes.
     ///
@@ -100,8 +112,9 @@ extension SZHost {
                 guard let holder = self.ledger.holder(of: .node(id)) else { continue }
                 if holder == self.runClaim { continue }       // the run mutates its own work set
                 if holder == self.graphOpClaim { continue }   // op machinery settles its own staging
-                if self.ledger.holder(of: .transcript(.node(id))) == holder { continue }
-                    // ↑ the node's own in-flight turn — the agent rule the fence permits
+                if holder == SZToolCaller.claim { continue }  // the caller's own turn — the agent
+                                                              // rule the fence permits (task-local
+                                                              // rides into the store op's stack)
                 return "node \(id.uuidString.prefix(8)) is held by \(holder.label)"
             }
             return nil

@@ -1,6 +1,5 @@
 {
   "label": "Debug",
-  "hint": "One read-only conversational turn: answer from the delivered graph projection, with no tools and no side effects.",
   "nodes": [
     { "id": "door", "title": "On message", "step": "door" },
     { "id": "answer", "title": "Answer", "turn": { "brief": "chat", "tools": [], "session": "resume" } }

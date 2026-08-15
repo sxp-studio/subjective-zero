@@ -76,7 +76,7 @@ final class SZHostStepRunning: SZStepRunning, SZStepProviding {
         }
     }
 
-    /// The SDK's success payload, split: a bare outcome string rides through untouched
+    /// The kit's success payload, split: a bare outcome string rides through untouched
     /// (byte-for-byte — the loader stays dumb and so does this for effect-less steps); an
     /// answer that requested effects arrives as the `{"effects": […], "outcome": "…"}`
     /// envelope, which no bare outcome can be mistaken for (outcomes are names, not JSON

@@ -1,0 +1,11 @@
+<!-- brief pin; never edit by hand; re-record deliberately: SZ_RECORD_BRIEF_PINS=1 swift test --filter SZBriefPinTests -->
+Classify what the user is asking for, so the host can route it. Answer ONLY with one JSON
+object, no prose and no code fences: {"outcome": "answer"} or {"outcome": "implement"}.
+
+- "answer" — a question, a conversation, or shaping/planning work: anything served with words
+  or plan edits, without running the coding fleet.
+- "implement" — the user wants the graph (or part of it) BUILT NOW: implement it, run it, make
+  it real.
+
+## The user's message
+make it warmer and add a soft glow

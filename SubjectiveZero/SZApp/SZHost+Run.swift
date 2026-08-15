@@ -96,16 +96,18 @@ extension SZHost {
             : nil
         recordTurnPrompt(request.prompt, for: assistantID)
         // And the turn's OWN agent listener: a raw TCP connection carries no caller identity, so
-        // without this, parallel coding agents' node-less tool calls (library/doc reads) are
-        // unattributable and drop their spans. The per-turn port IS the identity — every call this
-        // agent makes attributes exactly. Falls back to the shared agent bus (heuristic
-        // attribution) if no port is free; torn down with the turn.
+        // the per-turn port IS the identity — it carries the turn's trace context (parallel coding
+        // agents' node-less tool calls attribute exactly) AND the turn's claim token (the mutation
+        // fence lets a turn edit the node it holds, and only a carried token proves whose turn is
+        // calling). Falls back to the shared agent bus (heuristic attribution, no fence identity)
+        // if no port is free; torn down with the turn.
         var request = request
         var turnListener: SZMCPServer?
-        if let traceContext, request.mcpServerPort != nil, let bridge = hostBridge {
+        if request.mcpServerPort != nil, let bridge = hostBridge {
             turnListener = try? SZMCPServer.start(bridge: bridge, surface: .agent,
                                                   from: (agentMCPServer?.port ?? 42100) + 1,
-                                                  traceContext: traceContext)
+                                                  traceContext: traceContext,
+                                                  caller: claim ?? selfClaim)
             if let turnListener { request.mcpServerPort = turnListener.port }
         }
         defer { turnListener?.stop() }
@@ -192,7 +194,8 @@ extension SZHost {
     @MainActor
     func runDirectorTurn(
         prompt: String, session: SZAgentGraph.Turn.Session, providerID: String,
-        mcpPort: UInt16, projectURL: URL, cacheDirectory: URL
+        mcpPort: UInt16, projectURL: URL, cacheDirectory: URL,
+        claim: SZClaimToken? = nil
     ) async throws -> SZAgentRunResult {
         guard let provider = SZProviderRegistry.shared.provider(id: providerID) else {
             throw SZMCPError.message("unknown provider: \(providerID)")
@@ -208,8 +211,11 @@ extension SZHost {
             resumeSessionID: session == .resume ? agentSessions[scope.key]?.sessionID : nil,
             model: generation.model, reasoningEffort: generation.reasoningEffort,
             fastMode: generation.fastMode ?? false, timeout: 300)
+        // Under the CAPTURED claim like the fleet path — never the live `runClaim`: a zombie
+        // director turn resuming after cancel-and-restart would otherwise adopt the NEW run's
+        // claim, pass deliver's holder guard, and stream into a transcript someone else owns.
         let result = try await deliver(scope: scope, request: request, provider: provider,
-                                       claim: runClaim).result
+                                       claim: claim ?? runClaim).result
         // The run re-reads the graph rather than the reply, so a mid-turn provider death
         // would otherwise vanish — land it in the Director tab like a coding turn's error line.
         if result.outcome.failed, let detail = await providerFailureDetail(result: result, provider: provider) {
@@ -263,28 +269,44 @@ extension SZHost {
         pumpMailboxes()   // fires now if the transcript is free; else the next release re-fires
     }
 
+    /// How a `startRun` attempt ended: `started` (the run is live), `waiting` (a transient
+    /// claim holds the resources — retry on the next release), or `refused` (terminal — the
+    /// reason was narrated once; retrying cannot help).
+    enum RunStart { case started, waiting, refused }
+
     /// Pump head: admit the minted run the moment it can claim what it needs. Structural
     /// ordering: the run always beats the next queued Director message to the freed
-    /// transcript, and a start refused by a transient claim retries on the next release.
+    /// transcript. A `waiting` start keeps the slot and retries QUIETLY on the next
+    /// release; a terminal refusal narrated once and clears the slot — without this,
+    /// every pump pass would replay the refusal ("nothing to implement" forever, the
+    /// provider sheet re-presenting per pass).
     func admitPendingRunIfPossible() {
         guard let instruction = pendingRun, !isRunning,
               ledger.holder(of: .transcript(.director)) == nil else { return }
-        startRun(instruction: instruction)
-        if isRunning { pendingRun = nil }
+        switch startRun(instruction: instruction, narrateContention: false) {
+        case .started, .refused: pendingRun = nil
+        case .waiting: break
+        }
     }
 
     /// Start a run over the current graph with the active provider (the Build press and
     /// `ui_run`'s direct entry). One run at a time — the single choke point every entry
     /// shares; a second Build while one is live is refused by the claim.
-    func startRun(instruction: String = "") {
-        guard !isRunning else { return }
+    /// `narrateContention` quiets ONLY the transient claim-contention line — the admission
+    /// path auto-retries that case, so per-attempt narration would be advice to a user who
+    /// has nothing to do.
+    @discardableResult
+    func startRun(instruction: String = "", narrateContention: Bool = true) -> RunStart {
+        guard !isRunning else { return .waiting }
         // Land any prompt the user is mid-typing before we read the graph or claim a node.
         flushPendingPromptEdit()
         // Was this run STARTED FOR a staged split/merge? Then it narrates at commit and owns the
         // hidden-piece UX. A plain run that a Director later stages an op inside still narrates itself.
         let ownsGraphOp = hasStagedGraphOp
         guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {
-            print("[SZHost] cannot run — MCP server or project not ready"); return
+            // NOT-READY, not refused: print-only, and the slot survives — a mint that
+            // raced project load fires when the pump next wakes with a project there.
+            print("[SZHost] cannot run — MCP server or project not ready"); return .waiting
         }
         // This run's WORK SET candidates: the nodes dirty right now. An undescribed prompt
         // node is NOT handed to the fleet — an empty prompt is "undecided", not "build
@@ -310,12 +332,13 @@ extension SZHost {
                 narrateDirector("\(n) node\(n == 1 ? " has" : "s have") no prompt yet — describe what \(n == 1 ? "it" : "each one") should do, then build. An empty node is left as-is, never guessed.")
                 status = "describe the empty node\(n == 1 ? "" : "s")"
             }
-            return
+            return .refused
         }
         // Pre-flight: a missing/logged-out CLI refuses with the setup sheet + remedy instead
         // of a silent generic run failure. Unknown health stays permissive.
+        // Terminal for the admission path above all others: this "narration" is a SHEET.
         guard isProviderReadyForNewWork(activeProviderID) else {
-            surfaceProviderNotReady(); return
+            surfaceProviderNotReady(); return .refused
         }
         // The packs root: the materialized bundled packs, or the SZ_AGENT_PACKS override —
         // without a valid root the run refuses up front with one honest line.
@@ -323,7 +346,7 @@ extension SZHost {
             status = "no agent packs — materialization failed and no SZ_AGENT_PACKS override"
             narrateDirector("Run not started — no agent packs: the bundled packs did not "
                 + "materialize and no valid SZ_AGENT_PACKS override is set.")
-            return
+            return .refused
         }
         // The run loads the packs fresh from disk; the Plan panel's cache follows suit.
         agentGraphPlanCache = nil
@@ -342,8 +365,10 @@ extension SZHost {
         guard ledger.tryAcquire(claimSet, as: claim) else {
             let holders = ledger.blockers(of: claimSet).map(\.label).joined(separator: ", ")
             status = "cannot start run — \(holders) in flight"
-            narrateDirector("Run not started — \(holders) is still working. Wait for it to finish (or stop it), then build again.")
-            return
+            if narrateContention {
+                narrateDirector("Run not started — \(holders) is still working. Wait for it to finish (or stop it), then build again.")
+            }
+            return .waiting
         }
         runClaim = claim   // `.steer` ack waits derive their consumer from the `.run` holder
         runWorkSet = workSet
@@ -412,6 +437,7 @@ extension SZHost {
             // makes a cancelled op roll back instead of leak.
             drainPendingGraphOp()
         }
+        return .started
     }
 
     // MARK: - The build delivery
@@ -446,8 +472,7 @@ extension SZHost {
         let router = SZIdentityRouter(choice: SZModelChoice(
             providerID: providerID, model: generation.model,
             reasoningEffort: generation.reasoningEffort))
-        // ONE query service per run: every delivery's asks funnel through it, so the
-        // journal is the run's whole ask history.
+        // ONE query service per run: every delivery's asks funnel through it.
         let queries = SZQueryService(renderer: renderer, router: router,
                                     cacheDirectory: cacheDirectory)
 
@@ -476,7 +501,8 @@ extension SZHost {
                 do {
                     let result = try await self.runDirectorTurn(
                         prompt: order.brief, session: order.session, providerID: providerID,
-                        mcpPort: mcpPort, projectURL: projectURL, cacheDirectory: cacheDirectory)
+                        mcpPort: mcpPort, projectURL: projectURL, cacheDirectory: cacheDirectory,
+                        claim: claim)
                     return SZTurnReport(failed: result.outcome.failed, detail: result.outcome.message)
                 } catch {
                     return SZTurnReport(failed: true, detail: String(describing: error))
@@ -694,7 +720,7 @@ extension SZHost {
         }
         func finish(_ summary: SZSettledSummary?) -> SZSettledSummary? {
             // The set is over: advance the run's world — the round the reconcile brief
-            // states, and the steers its {{inbox}} folds — before the engine walks on.
+            // states, and the steers its {{inbox}} folds — before the engine moves on.
             state.round = state.supervisor.round
             state.steers = state.pendingSteers
             state.pendingSteers = []

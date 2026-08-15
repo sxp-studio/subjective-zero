@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The build-tool plugin wiring the spec into the step runtime: applied to SZRuntime it
-// emits SZStepSDKGenerated.swift — the verbatim spec region of SZCore's
-// AgentFacts/SZFacts.swift plus its conveniences, which the step SDK splices into every
+// emits SZStepKitGenerated.swift — the verbatim spec region of SZCore's
+// Agents/SZFacts.swift plus its conveniences, which the step kit splices into every
 // step build so both sides of the ABI compile the same source.
 import Foundation
 import PackagePlugin
@@ -14,7 +14,7 @@ struct SZFactGenPlugin: BuildToolPlugin {
         }
         let spec = try specURL(in: context)
         let tool = try context.tool(named: "SZFactGenTool")
-        let output = context.pluginWorkDirectoryURL.appending(path: "SZStepSDKGenerated.swift")
+        let output = context.pluginWorkDirectoryURL.appending(path: "SZStepKitGenerated.swift")
         return [
             .buildCommand(
                 displayName: "SZFactGen: facts-section from SZFacts.swift",

@@ -122,7 +122,9 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             ordinal = try c.decode(Int.self, forKey: .ordinal)
             node = try c.decode(String.self, forKey: .node)
-            phase = try c.decode(Phase.self, forKey: .phase)
+            // Tolerant like `trace` above: the whole-file decode is `?? []` at load, so one
+            // entry missing a phase must not silently erase a project's entire run history.
+            phase = try c.decodeIfPresent(Phase.self, forKey: .phase) ?? .done
             outcome = try c.decodeIfPresent(String.self, forKey: .outcome)
             detail = try c.decodeIfPresent(String.self, forKey: .detail)
             tally = try c.decodeIfPresent(Tally.self, forKey: .tally)

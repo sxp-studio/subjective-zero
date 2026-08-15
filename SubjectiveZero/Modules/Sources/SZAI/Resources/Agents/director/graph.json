@@ -1,6 +1,5 @@
 {
   "label": "Director",
-  "hint": "Every message the director receives, decided at its door: a granted build goes to work and its fleet is awaited at the dispatch, reconciled around the settled loop; prose is triaged by content and answered in conversation.",
   "nodes": [
     { "id": "door", "title": "On message", "step": "door" },
     { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose" } },

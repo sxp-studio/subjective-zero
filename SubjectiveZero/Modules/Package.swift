@@ -31,7 +31,7 @@ let package = Package(
         ),
         .target(name: "SZRuntime", dependencies: ["SZCore"], plugins: ["SZFactGen"]),
         .target(name: "SZUI", dependencies: ["SZCore"]),
-        // SZFactGen: the spec (SZCore/AgentFacts/SZFacts.swift) compiles twice — normally
+        // SZFactGen: the spec (SZCore/Agents/SZFacts.swift) compiles twice — normally
         // into SZCore, and through this build-tool plugin into two generated artifacts
         // (the fact catalog for SZCore, the verbatim facts section for SZRuntime's step
         // SDK). The parsing core is a library so the tests can prove the grammar and the

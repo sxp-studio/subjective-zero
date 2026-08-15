@@ -22,7 +22,7 @@ private let shippedPacksRoot = URL(filePath: #filePath)
 private let pinnedDeclarations: [String: String] = [
     "director/door": #"{"outcomes":["build","answer","answer-resumed","implement"]}"#,
     "director/work-left": #"{"outcomes":["yes","no"]}"#,
-    "coding/door": #"{"outcomes":["implement","continue","chat","chat-resumed"]}"#,
+    "coding/door": #"{"outcomes":["implement","continue","edit","chat","chat-resumed"]}"#,
     "debug/door": #"{"outcomes":["answer"]}"#,
 ]
 

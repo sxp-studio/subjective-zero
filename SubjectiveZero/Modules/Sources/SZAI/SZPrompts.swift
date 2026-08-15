@@ -1,36 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Agent system prompts — loaded from bundled markdown-mustache files (Resources/Prompts/<role>/…),
-// not hardcoded in Swift, so prompt content stays cleanly separated and editable. Rendered with the
-// flat-`{{token}}` SZPromptTemplate (our prompts don't need full mustache). Coding-agent prompts live
-// under Prompts/coding/, Director Agent prompts under Prompts/director/.
+// HOST-owned prompt prose (Resources/Prompts/) — what is left after the packs became the one
+// home for AGENT prose: today exactly the ask-repair wrapper, which belongs to the query
+// service, not to any agent. Rendered with the flat-`{{token}}` SZPromptTemplate.
 import Foundation
 import SZCore
 
 enum SZPrompts {
-    /// Cold-start chat prompt: a Coding Agent edits an EXISTING node from a user message. Leans on the
-    /// node's current source as the ABI reference (no ABI re-statement), so it can't drift from the ABI.
-
-    /// Seed prompt for one piece of a split node. Carries the original intent + this stage's boundary
-    /// contract so the Coding Agent implements only its slice of the pipeline.
-    static let splitStage = load("coding/split-stage.md.mustache")
-
-    /// Seed prompt for a merged node. Carries the constituents + the reconciled boundary contract.
-    static let merge = load("coding/merge.md.mustache")
-
-    /// The `agent_library_index` framing (see SZAgentLibraryText).
-    static func libraryIndex(categories: String) -> String {
-        SZPromptTemplate.render(load("library/index.md.mustache"), ["categories": categories])
-    }
-
-    /// The Director Agent's cold-start CHAT framing: same coordination job as decompose, but
-    /// conversational — and it can call `ui_run` to dispatch implementation (the run starts after
-    /// its turn ends). The chat turn IS the decompose turn for a message-triggered run.
-    static let directorChat = load("director/chat.md.mustache")
-
-    /// The `ui_*` toolbelt + restraint + contract guidance SHARED by every Director framing —
-    /// injected as the `{{toolbelt}}` token so decompose and chat can't drift apart.
-    static let directorToolbelt = load("director/toolbelt.md.mustache")
-
     /// The repair wrapper the query service appends to a step ask's retry prompt (attempt > 0):
     /// the decode error + the previous reply, as `{{error}}` / `{{previousReply}}` tokens.
     static let askRepair = load("ask-repair.md.mustache")
@@ -48,40 +23,10 @@ enum SZPrompts {
     }
 }
 
-/// Public seed-prompt builders for split/merge pieces. The host (SZApp) renders these onto each new
-/// prompt node during a split/merge re-save, keeping the prose in templates (SZCore stays prose-free).
-/// The Coding Agents author the real title/contract/source at Run from these seeds.
+/// Value builders shared by the brief renderer's split/merge recipes — the production seed
+/// path renders the coding pack's `split-stage`/`merge` templates through `SZBriefRenderer`
+/// (SZHost+SplitMerge `renderSeed`); these assemble the values its tokens substitute.
 public enum SZGraphPrompts {
-    /// One stage of a split: the original node's intent + full source (so the agent divides real code) +
-    /// this stage's reconciled boundary contract. `instruction` is the user's steer for THIS split
-    /// ("a blur stage then a sharpen stage") — every stage sees it, so they divide along the same seam.
-    public static func splitStage(original: String, intent: String, stage: Int, count: Int,
-                                  source: String?, contract: SZNodeContract,
-                                  instruction: String? = nil) -> String {
-        SZPromptTemplate.render(SZPrompts.splitStage, [
-            "original": original, "intent": intent,
-            "stage": String(stage), "count": String(count),
-            "source": sourceBlock(source),
-            "boundary": SZBoundaryPrompt.render(contract),
-            "instruction": steerBlock(instruction, verb: "split"),
-        ])
-    }
-
-    /// A merged node: its constituents (title + intent + full source, in pipeline order) so the agent
-    /// fuses real code + the reconciled boundary contract. `instruction` is the user's steer for THIS
-    /// merge ("merge favouring performance").
-    public static func merge(constituents: [(title: String, intent: String, source: String?)],
-                             contract: SZNodeContract, instruction: String? = nil) -> String {
-        let blocks = constituents.map { "- \($0.title): \($0.intent)\n\(sourceBlock($0.source))" }
-            .joined(separator: "\n\n")
-        return SZPromptTemplate.render(SZPrompts.merge, [
-            "count": String(constituents.count),
-            "constituents": blocks,
-            "boundary": SZBoundaryPrompt.render(contract),
-            "instruction": steerBlock(instruction, verb: "merge"),
-        ])
-    }
-
     /// A fenced Swift block for a node's source, or a "no source yet" note for an un-implemented node.
     /// Internal (not private): the brief renderer assembles the same value.
     static func sourceBlock(_ source: String?) -> String {
@@ -189,35 +134,6 @@ public enum SZDirectorPrompt {
         instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "(none — make the current graph as drawn ready to implement)"
             : instruction
-    }
-
-    /// The Director Agent's cold-start CHAT turn: the live graph + the user's (mention-expanded)
-    /// message, framed conversationally with the shared toolbelt. Resumed chat turns send the raw
-    /// message — their context is the session.
-    public static func renderChat(graph: SZGraph, message: String) -> String {
-        SZPromptTemplate.render(SZPrompts.directorChat, [
-            "graph": graphSummary(graph),
-            "message": message,
-            "toolbelt": SZPrompts.directorToolbelt,
-        ])
-    }
-
-    /// A RESUMED Director chat turn. Its session already holds the persona and the toolbelt, but the graph it
-    /// remembers is a snapshot from whenever it last looked — and runs mutate the graph underneath it. (A run's
-    /// last Director turn renders node kinds *before* the coding fleet's promotes land, so the session's final
-    /// memory of the graph is reliably out of date.) Re-project the live graph every turn rather than trusting
-    /// the model to re-read it: the host has the truth, so hand it over.
-    public static func renderResumedChat(graph: SZGraph, message: String) -> String {
-        """
-        Live graph state, as of this message. This and `agent_read_graph` are authoritative — trust them over \
-        any description of the graph earlier in our conversation, which may predate a run.
-
-        \(graphSummary(graph))
-
-        ---
-
-        \(message)
-        """
     }
 
     /// The reconcile brief's `{{blockers}}` value: one block per unresolved node — its typed

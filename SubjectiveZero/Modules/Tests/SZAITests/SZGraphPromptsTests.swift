@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The split/merge SEED prompts the host writes onto each new node. These are the only place a user's
-// steer ("split it into a blur stage then a sharpen stage") survives the trip from the composer through
-// the Director and `ui_split_node` into the Coding Agents — so it is asserted here, not just live.
-//
-// `SZPromptTemplate` is a flat `{{token}}` replacer with no conditional sections: an absent steer has to
-// collapse to "" in Swift. The `noUnrenderedTokens` checks below are the only thing standing between a
-// typo'd template token and an agent silently reading a literal `{{instruction}}` in its prompt.
+// The split/merge SEED prompts the host writes onto each new node — rendered through the
+// production path (`SZBriefRenderer` + the shipped coding pack's `split-stage`/`merge`
+// templates, exactly as SZHost+SplitMerge's `renderSeed` does). These are the only place a
+// user's steer ("split it into a blur stage then a sharpen stage") survives the trip from
+// the composer through the Director and `ui_split_node` into the Coding Agents — so it is
+// asserted here, not just live. The defusing checks stand between a token-spelling steer
+// and a hash-seed-dependent prompt.
 import Foundation
 import Testing
 @testable import SZAI
 @testable import SZCore
+
+private let shippedPacksRoot = URL(filePath: #filePath)
+    .deletingLastPathComponent()   // SZAITests
+    .deletingLastPathComponent()   // Tests
+    .deletingLastPathComponent()   // Modules
+    .appending(path: "Sources/SZAI/Resources/Agents")
 
 private func contract(_ title: String = "Blur") -> SZNodeContract {
     SZNodeContract(
@@ -19,17 +25,24 @@ private func contract(_ title: String = "Blur") -> SZNodeContract {
         outputs: [SZPort(name: "output", type: .texture, display: true)])
 }
 
+private func renderSeed(_ template: String, _ graphOp: SZBriefExtras.GraphOp) -> String {
+    try! SZBriefRenderer(packRoot: shippedPacksRoot).render(
+        agent: "coding", template: template, message: "",
+        world: SZWorld(), extras: SZBriefExtras(graphOp: graphOp))
+}
+
 private func splitStage(_ instruction: String?, stage: Int = 1, count: Int = 2) -> String {
-    SZGraphPrompts.splitStage(
+    renderSeed("split-stage", SZBriefExtras.GraphOp(
         original: "Blur+Sharpen", intent: "blur then sharpen the image", stage: stage, count: count,
-        source: "struct Node {}", contract: contract(), instruction: instruction)
+        source: "struct Node {}", contract: contract(), instruction: instruction))
 }
 
 private func merge(_ instruction: String?) -> String {
-    SZGraphPrompts.merge(
-        constituents: [(title: "Blur", intent: "blur it", source: "struct A {}"),
-                       (title: "Sharpen", intent: "sharpen it", source: "struct B {}")],
-        contract: contract("Blur+Sharpen"), instruction: instruction)
+    renderSeed("merge", SZBriefExtras.GraphOp(
+        count: 2,
+        constituents: [.init(title: "Blur", intent: "blur it", source: "struct A {}"),
+                       .init(title: "Sharpen", intent: "sharpen it", source: "struct B {}")],
+        contract: contract("Blur+Sharpen"), instruction: instruction))
 }
 
 /// No `{{token}}` may survive rendering — a template typo is otherwise invisible until an agent reads it.

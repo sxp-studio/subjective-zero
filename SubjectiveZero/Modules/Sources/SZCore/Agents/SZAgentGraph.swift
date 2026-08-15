@@ -10,9 +10,8 @@
 import Foundation
 
 public struct SZAgentGraph: Sendable, Equatable {
-    /// Optional display name / picker hint (drawn by the panel; never routing input).
+    /// Optional display name (drawn by the panel; never routing input).
     public var label: String?
-    public var hint: String?
     public var nodes: [Node]
     public var edges: [Edge]
 
@@ -98,10 +97,8 @@ public struct SZAgentGraph: Sendable, Equatable {
         }
     }
 
-    public init(label: String? = nil, hint: String? = nil,
-                nodes: [Node], edges: [Edge]) {
+    public init(label: String? = nil, nodes: [Node], edges: [Edge]) {
         self.label = label
-        self.hint = hint
         self.nodes = nodes
         self.edges = edges
     }
@@ -136,13 +133,12 @@ public struct SZAgentGraph: Sendable, Equatable {
 
 extension SZAgentGraph: Codable {
     enum CodingKeys: String, CodingKey {
-        case label, hint, nodes, edges
+        case label, nodes, edges
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         label = try container.decodeIfPresent(String.self, forKey: .label)
-        hint = try container.decodeIfPresent(String.self, forKey: .hint)
         nodes = try container.decode([Node].self, forKey: .nodes)
         edges = try container.decodeIfPresent([Edge].self, forKey: .edges) ?? []
     }
@@ -150,7 +146,6 @@ extension SZAgentGraph: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(label, forKey: .label)
-        try container.encodeIfPresent(hint, forKey: .hint)
         try container.encode(nodes, forKey: .nodes)
         try container.encode(edges, forKey: .edges)
     }

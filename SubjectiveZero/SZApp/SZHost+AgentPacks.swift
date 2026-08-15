@@ -76,6 +76,19 @@ extension SZHost {
                     try? fm.removeItem(at: dest.appending(path: stale))
                     print("[SZHost] agent packs: removed \(agent)/\(stale) — the bundle no longer ships it")
                 }
+                // Sweep EMPTY directories bottom-up — the dirs stale removals emptied, this
+                // pass or any past one. An empty dir holds no user work, but it reads as a
+                // step folder to every folder-scanning consumer (check_pack counts it,
+                // validate refuses it as sourceless); a dir holding ANY file stays.
+                if let walker = fm.enumerator(at: dest, includingPropertiesForKeys: [.isDirectoryKey]) {
+                    let dirs = walker.compactMap { $0 as? URL }
+                        .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+                    for dir in dirs.sorted(by: { $0.path.count > $1.path.count }) {
+                        if (try? fm.contentsOfDirectory(atPath: dir.path))?.isEmpty == true {
+                            try? fm.removeItem(at: dir)
+                        }
+                    }
+                }
                 Self.writeMaterializedManifest(shippedSet, for: agent)
             } catch {
                 print("[SZHost] agent pack \(agent): could not materialize — \(error)")

@@ -314,6 +314,10 @@ final class SZHost {
     /// (SZUntitledProjects). Drives the window title's "not saved" suffix and Save As's source cleanup.
     var isUntitledProject: Bool { loadedProjectURL.map(SZUntitledProjects.contains) ?? false }
 
+    /// Set by `debug_quit` before it terminates: the untitled-rescue prompt waits for a
+    /// human an automated drive doesn't have (the untitled project is autosaved anyway).
+    var quitSkipsUntitledRescue = false
+
     /// The window title: the project's name, suffixed while the project is still untitled. App
     /// name before anything is loaded (launch, Metal-less fallback).
     var projectWindowTitle: String {
