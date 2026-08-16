@@ -48,10 +48,15 @@ final class SZCardState: ObservableObject {           // @Published: re-renders 
                                                        // the card (card-body points) — nil without one
     func values(_ outputPort: String) -> [Double]      // telemetry: the node's latest float/floatArray
                                                        // OUTPUT values (~30 Hz, lossy, latest-wins)
+    func string(_ outputPort: String) -> String?       // telemetry: a string/enum OUTPUT's latest value
+    var learn: SZCardLearn?                            // controller nodes only: {armed, seen, key, value01}
+                                                       // — the host's binding-learn state, same cadence
     func live(_ port: String, _ value: Double)         // stream a gesture tick — the render follows,
     func live(_ port: String, _ values: [Double])      // nothing persists
     func commit(_ port: String, _ value: Double)       // ONE store write + persist, at gesture end
     func commit(_ port: String, _ values: [Double])
+    func call(_ tool: String, argsJSON: String = "{}") // a named HOST VERB for this node (below); no
+                                                       // return value — read the outcome from `learn`/state
 }
 struct SZCardPort {
     let name: String; let type: String                 // contract type: float, float2, float3, float4,
@@ -67,6 +72,12 @@ Writes are by PORT NAME and go through the same funnel the plain rows use: the h
 contract's `ui` range, snaps to `step`, pushes the runtime live, writes the store, persists. Only
 numeric ports (float, vectors, colors, bool) can be written from a card — an enum/string input stays on
 the plain rows (the user flips with right-click → "Show Rows").
+
+**Host verbs** (`call`) exist only for controller nodes — a contract with a `mappings` string input and
+a `lastKey` string output (MIDI Input, OSC Input): `learn_arm`, `learn_cancel`, `learn_commit`
+(`{"label": …}` optional — commits the learned control as a NEW output socket the user wires by hand),
+`remove_binding` (`{"port": …}`). Anything else is dropped; a card can only act on its own node.
+`state.learn` is how the card knows the arm was taken and which control moved.
 
 ## The gesture rule (get this right)
 
@@ -86,7 +97,8 @@ the plain rows (the user flips with right-click → "Show Rows").
 - The card region is clipped to its footprint (`bodySize`: the card's width × rows × 24 pt). Declare
   it in the CONTRACT: `"card": { "cols": 12, "rows": 8, "backdrop": "output", "plumbing": [...] }`
   (all optional; defaults 9 × 8; `cols` is a MINIMUM width — the generated rows, or a backdrop
-  filling its rows, may widen the card).
+  filling its rows, may widen the card). A library node whose contract declares a `card` block (even
+  `{}`) mounts its card by default when added; a Card.swift without one waits in the context menu.
   Your view's natural height is measured and the rows auto-grow to fit unless the user pinned the
   size — but design for the declared footprint, and size explicit canvases to `bodySize`.
 - `backdrop` names a TEXTURE OUTPUT the host draws as a live thumbnail INSIDE the region (square

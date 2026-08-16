@@ -21,6 +21,7 @@ final class SZFrameBindings {
     var values: [String: [Float]] = [:]
     var strings: [String: String] = [:]   // v4: enum/string input values (unconnected inputs)
     var outputValues: [String: [Float]] = [:]   // v5: scalar OUTPUT values the node emits this frame
+    var outputStrings: [String: String] = [:]   // v8: string OUTPUT values the node emits this frame
     var holds: SZFrameHolds?              // v6: the FRAME-wide hold list (one per encodeFrame, shared)
 }
 
@@ -79,6 +80,15 @@ let szResolveOutputValue: SZOutputValueResolver = { ctx, name, in_, count in
     bindings.outputValues[String(cString: name)] = Array(UnsafeBufferPointer(start: in_, count: Int(count)))
 }
 
+/// Records a node's emitted string OUTPUT value (v8): decodes `count` UTF-8 bytes from `in` into the
+/// node's bindings, where the scheduler reads it back after the frame to feed a connected downstream input.
+let szResolveOutputString: SZOutputStringResolver = { ctx, name, in_, count in
+    guard let ctx, let name, let in_ else { return }
+    let bindings = Unmanaged<SZFrameBindings>.fromOpaque(ctx).takeUnretainedValue()
+    let bytes = UnsafeRawBufferPointer(start: in_, count: Int(count))
+    bindings.outputStrings[String(cString: name)] = String(decoding: bytes, as: UTF8.self)
+}
+
 /// Pins an object until the frame's command buffer completes (v6). OWNERSHIP TRANSFER: the node side
 /// passed a +1-retained pointer (`passRetained`), balanced here by `takeRetainedValue` into the frame's
 /// hold list. Dropped (released immediately) if the frame has no hold list — nothing to pin against.
@@ -111,10 +121,10 @@ struct SZScheduler: Sendable {
     }
 
     /// Encode every node's `update` for one frame into `commandBuffer`. Returns the render-endpoint
-    /// texture (nil if the graph has no endpoint) plus every scalar output value emitted this frame,
-    /// keyed `"<nodeID>:<port>"` (`textureID`) — the same v5 channel downstream inputs read, surfaced
-    /// so the host can observe a node's emitted values (`SZRuntime.readOutputFloats`). Does not
-    /// commit — the caller owns commit/present/wait.
+    /// texture (nil if the graph has no endpoint) plus every scalar (v5) and string (v8) output value
+    /// emitted this frame, keyed `"<nodeID>:<port>"` (`textureID`) — the same channels downstream inputs
+    /// read, surfaced so the host can observe a node's emitted values (`SZRuntime.readOutputFloats` /
+    /// `readOutputString`). Does not commit — the caller owns commit/present/wait.
     func encodeFrame(
         device: any MTLDevice,
         commandBuffer: any MTLCommandBuffer,
@@ -126,11 +136,12 @@ struct SZScheduler: Sendable {
         time: Double,
         width: Int,
         height: Int
-    ) -> (endpoint: (any MTLTexture)?, outputValues: [String: [Float]]) {
-        // Scalar output values emitted by nodes earlier this frame, keyed "<nodeID>:<port>" — the v5
-        // connected value channel. Topo order runs producers first, so a downstream node's connected value
-        // input is already populated here by the time we bind it. Frame-scoped (cleared each call).
+    ) -> (endpoint: (any MTLTexture)?, outputValues: [String: [Float]], outputStrings: [String: String]) {
+        // Scalar (v5) and string (v8) output values emitted by nodes earlier this frame, keyed
+        // "<nodeID>:<port>" — the connected value channels. Topo order runs producers first, so a downstream
+        // node's connected value input is already populated here by the time we bind it. Frame-scoped.
         var valueOutputs: [String: [Float]] = [:]
+        var stringOutputs: [String: String] = [:]
         // Frame-lifetime holds (v6) — one list for the whole frame, shared by every node's bindings.
         let holds = SZFrameHolds()
 
@@ -147,15 +158,18 @@ struct SZScheduler: Sendable {
             bindings.holds = holds
 
             // Route each data edge into this node by its SOURCE port's type: a texture binds the upstream
-            // texture (as before); a non-texture source feeds the upstream node's emitted output value into
-            // this input, overriding the unconnected default seeded just above.
+            // texture; a string/enum source feeds the upstream node's emitted string; any other source feeds
+            // its emitted floats — each overriding the unconnected default seeded just above.
             for connection in graph.connections where connection.kind == .data && connection.to.node == nodeID {
                 let sourceID = Self.textureID(node: connection.from.node, port: connection.from.port)
-                if Self.sourcePortType(graph, connection.from) == .texture {
+                switch Self.sourcePortType(graph, connection.from) {
+                case .texture:
                     bindings.inputs[connection.to.port] = assets.texture(
                         id: sourceID, width: width, height: height)
-                } else if let value = valueOutputs[sourceID] {
-                    bindings.values[connection.to.port] = value
+                case .string, .enumeration:
+                    if let string = stringOutputs[sourceID] { bindings.strings[connection.to.port] = string }
+                default:
+                    if let value = valueOutputs[sourceID] { bindings.values[connection.to.port] = value }
                 }
             }
 
@@ -174,6 +188,7 @@ struct SZScheduler: Sendable {
                 ctx.inputStringFn = szResolveInputString
                 ctx.outputValueFn = szResolveOutputValue
                 ctx.frameHoldFn = szFrameHold
+                ctx.outputStringFn = szResolveOutputString
                 withUnsafeMutablePointer(to: &ctx) { pointer in
                     _ = loader.renderFrame(context: UnsafeMutableRawPointer(pointer))
                 }
@@ -183,6 +198,9 @@ struct SZScheduler: Sendable {
             for (port, value) in bindings.outputValues {
                 valueOutputs[Self.textureID(node: nodeID, port: port)] = value
             }
+            for (port, string) in bindings.outputStrings {
+                stringOutputs[Self.textureID(node: nodeID, port: port)] = string
+            }
         }
 
         // The completed-handler's capture keeps every held object alive until the GPU has executed
@@ -191,10 +209,10 @@ struct SZScheduler: Sendable {
             commandBuffer.addCompletedHandler { _ in _ = holds }
         }
 
-        guard let endpoint = renderEndpoint else { return (nil, valueOutputs) }
+        guard let endpoint = renderEndpoint else { return (nil, valueOutputs, stringOutputs) }
         return (assets.texture(
             id: Self.textureID(node: endpoint.node, port: endpoint.port), width: width, height: height),
-            valueOutputs)
+            valueOutputs, stringOutputs)
     }
 
     /// The pooled texture the CURRENT `renderEndpoint` points at, WITHOUT encoding a frame and
@@ -213,7 +231,8 @@ struct SZScheduler: Sendable {
     static func textureID(node: SZNodeID, port: String) -> String { "\(node.uuidString):\(port)" }
 
     /// The declared type of a connection's source output port (nil if the node/port/contract is missing).
-    /// Used to route a data edge: `.texture` flows a texture; any other type flows a scalar value (v5).
+    /// Used to route a data edge: `.texture` flows a texture; `.string`/`.enumeration` flow a string (v8);
+    /// any other type flows a scalar value (v5).
     static func sourcePortType(_ graph: SZGraph, _ ref: SZPortRef) -> SZPortType? {
         graph.node(id: ref.node)?.contract?.outputs.first { $0.name == ref.port }?.type
     }

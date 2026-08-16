@@ -12,6 +12,7 @@
 // contract. Texture handles cross as opaque pointers (recovered via `Unmanaged`). A third resolver fn
 // is the scalar-input channel: it resolves a port name to its float value(s) (an unconnected input's
 // default, live-overridable from the host) so a node reads e.g. `ctx.inputFloat("speed")` at runtime.
+// Output channels mirror the input ones: floats (v5) and strings (v8) a node emits flow downstream.
 // `persistentTexture` is still not in the ABI (earned, not scheduled).
 import Foundation
 
@@ -42,14 +43,22 @@ typealias SZOutputValueResolver = @convention(c) (UnsafeMutableRawPointer?, Unsa
 /// list and releases after GPU completion. Host-side, called node-side. `(resolverContext, object)`.
 typealias SZFrameHoldFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
 
+/// Emits a port's string output value (v8): the node hands the runtime `byteCount` UTF-8 bytes from `in`
+/// for a named declared `string`/`enum` output port, which the runtime routes across a `.data` edge into a
+/// downstream node's string input (read there via `inputString`). The write-side mirror of
+/// `SZStringResolver`. Host-side, called node-side. `(resolverContext, portName, in, byteCount) -> Void`.
+typealias SZOutputStringResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32) -> Void
+
 enum SZNodeABI {
     /// Bumped on a breaking ABI change. The loader rejects a mismatch. v2 = binding-table context;
     /// v3 = scalar-input value channel; v4 = string-input channel; v5 = output value channel
     /// (a node's non-texture output flowing across a data edge to a downstream input); v6 = frame-lifetime
     /// hold (pin an object until the frame's command buffer completes — pooled capture buffers etc.);
     /// v7 = setPaused (the one transport event `update()` can't deliver, because pause means no more
-    /// frames — so a node's self-driving resource can stop when the graph does).
-    static let version: Int32 = 7
+    /// frames — so a node's self-driving resource can stop when the graph does); v8 = string output
+    /// channel (a `string`/`enum` output flowing across a data edge, and host-readable — the learn key
+    /// carrier for controller nodes).
+    static let version: Int32 = 8
 
     static let apiVersionSymbol = "SZPluginAPIVersion"
     static let setupSymbol = "SZNodeSetup"
@@ -90,4 +99,5 @@ struct SZRuntimeContextRaw {
     var inputStringFn: SZStringResolver?             // v4: string/enum input values (appended → layout-compatible)
     var outputValueFn: SZOutputValueResolver?        // v5: scalar OUTPUT values (appended → layout-compatible)
     var frameHoldFn: SZFrameHoldFn?                  // v6: frame-lifetime hold (appended → layout-compatible)
+    var outputStringFn: SZOutputStringResolver?      // v8: string OUTPUT values (appended → layout-compatible)
 }

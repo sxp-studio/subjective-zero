@@ -21,7 +21,7 @@ public enum SZAgentDocs {
         SZAgentDocsTopic(id: "node-abi", title: "Node runtime ABI",
               summary: "Node.swift shape + the injected SZNode/SZFrameContext accessors (textures + live scalar/string inputs); BGRA8; don't-redeclare rules."),
         SZAgentDocsTopic(id: "card-abi", title: "Card ABI (custom card UI)",
-              summary: "Card.swift shape (SwiftUI, SZCardMain + SZCardState): reading ports, live/commit gesture rule, telemetry, backdrop + plumbing, contract `card` hints, how to ship it with the node."),
+              summary: "Card.swift shape (SwiftUI, SZCardMain + SZCardState): reading ports, live/commit gesture rule, telemetry (values, strings, learn), host verbs (`call`), backdrop + plumbing, contract `card` hints, how to ship it with the node."),
     ]
 
     /// The card doc's worked example, verbatim — ALSO the starter `Card.swift` the app scaffolds for

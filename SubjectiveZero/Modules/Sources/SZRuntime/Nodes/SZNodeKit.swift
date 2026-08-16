@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The host-owned kit compiled into every node dylib beside the author's `Node.swift` (ABI v7,
+// The host-owned kit compiled into every node dylib beside the author's `Node.swift` (ABI v8,
 // `SZNodeABI`). Defines the ergonomic `SZNode` protocol + typed setup/frame contexts over the C-flat
 // context in SZNodeABI.swift, and exports the `@_cdecl` entry points the loader dlsym's. Node authors
 // must NOT redeclare these symbols or touch the raw struct (RUNTIME.md). The mirror of
@@ -37,6 +37,7 @@ enum SZNodeKit {
     typealias SZStringResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutablePointer<CChar>?, Int32) -> Int32
     typealias SZOutputValueResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32) -> Void
     typealias SZFrameHoldFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+    typealias SZOutputStringResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32) -> Void
 
     // Must byte-match SZRuntimeContextRaw in the host (SZNode.swift).
     struct SZRuntimeContextRaw {
@@ -54,6 +55,7 @@ enum SZNodeKit {
         var inputStringFn: SZStringResolver?
         var outputValueFn: SZOutputValueResolver?
         var frameHoldFn: SZFrameHoldFn?
+        var outputStringFn: SZOutputStringResolver?
     }
 
     private func szObject<T>(_ pointer: UnsafeMutableRawPointer?) -> T? {
@@ -88,6 +90,7 @@ enum SZNodeKit {
         private let inputStringFn: SZStringResolver?
         private let outputValueFn: SZOutputValueResolver?
         private let frameHoldFn: SZFrameHoldFn?
+        private let outputStringFn: SZOutputStringResolver?
 
         init?(_ raw: UnsafeMutableRawPointer?) {
             guard let raw else { return nil }
@@ -109,6 +112,7 @@ enum SZNodeKit {
             self.inputStringFn = c.inputStringFn
             self.outputValueFn = c.outputValueFn
             self.frameHoldFn = c.frameHoldFn
+            self.outputStringFn = c.outputStringFn
         }
 
         private func resolve(_ fn: SZTextureResolver?, _ port: String) -> (any MTLTexture)? {
@@ -174,6 +178,16 @@ enum SZNodeKit {
 
         /// Emit a single scalar for a named declared output port — the common single-float case.
         public func setOutputFloat(_ port: String, _ value: Float) { setOutputFloats(port, [value]) }
+
+        /// Emit the string value of a named declared `string`/`enum` output port. The runtime routes it
+        /// across a `.data` edge into the connected downstream node's input (read there via `inputString`)
+        /// and keeps it host-readable. The write-side mirror of `inputString`. No-op if unwired.
+        public func setOutputString(_ port: String, _ string: String) {
+            guard let fn = outputStringFn else { return }
+            port.withCString { name in
+                string.withCString { fn(resolverContext, name, $0, Int32(string.utf8.count)) }
+            }
+        }
 
         /// The string value of a named `enum`/`string` input port (its unconnected default,
         /// live-overridable from the host). nil if unset. Grows + retries on truncation.

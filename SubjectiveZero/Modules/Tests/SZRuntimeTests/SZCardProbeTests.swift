@@ -191,8 +191,12 @@ private func probeWorkDir(_ name: String) throws -> URL {
                 state.commit("value", [0.5])
                 state.live("echo", tl.map(Float.init) + [Float(gain)])
                 state.commit("meta", [Float(backdrop == "100x50" ? 1 : 0), Float(connected == "gain" ? 1 : 0)])
+                state.call("learn_arm", argsJSON: #"{"port":"x"}"#)
             }
-            return Color(red: 0, green: 0, blue: 1).frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Learn telemetry (v2) colours the card: armed+seen ⇒ green, else blue.
+            let armed = state.learn?.armed == true && state.learn?.seen == true && state.learn?.key == "ch1/cc7"
+            return (armed ? Color(red: 0, green: 1, blue: 0) : Color(red: 0, green: 0, blue: 1))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
     enum SZCardMain { static func make(_ state: SZCardState) -> AnyView { AnyView(Card(state: state)) } }
@@ -208,7 +212,8 @@ private func probeWorkDir(_ name: String) throws -> URL {
     let (ref, view) = try mounted(module, verbs: SZCardVerbs(
         live: { port, values in events.list.append("live \(port) \(values)") },
         commit: { port, values in events.list.append("commit \(port) \(values)") },
-        size: { height in events.list.append("size \(height)") }))
+        size: { height in events.list.append("size \(height)") },
+        call: { tool, args in events.list.append("call \(tool) \(args)") }))
     _ = try renderCenterColor(view)   // settle the initial render
     // The root wrapper self-reports size on first layout — the card's own verbs must NOT have
     // fired yet.
@@ -231,6 +236,13 @@ private func probeWorkDir(_ name: String) throws -> URL {
     #expect(events.list.contains("commit value [0.5]"))
     #expect(events.list.contains("live echo [0.25, 0.75, 0.5]"))
     #expect(events.list.contains("commit meta [1.0, 1.0]"))
+    #expect(events.list.contains(#"call learn_arm {"port":"x"}"#))
+
+    print("[card-probe] phase=verbs-learn")
+    expectHue(try renderCenterColor(view), blue: true, "blue before learn telemetry")
+    ref.push(channel: "telemetry", json: Data(#"{"learn":{"armed":true,"seen":true,"key":"ch1/cc7","value01":0.5}}"#.utf8))
+    spinMain(0.25)
+    expectHue(try renderCenterColor(view), green: true, "green once armed+seen with the key")
 }
 
 // MARK: - The shipped library cards
@@ -271,13 +283,17 @@ private var nodeLibraryRoot: URL {
                    {"name":"br","type":"float2","default":[1,1]},{"name":"bl","type":"float2","default":[0,1]},
                    {"name":"center","type":"float2","default":[0.5,0.5],"ui":{"kind":"slider","min":0,"max":1}},
                    {"name":"radius","type":"float","default":0.6,"ui":{"kind":"slider","min":0,"max":1.5}},
-                   {"name":"softness","type":"float","default":0.4,"ui":{"kind":"slider","min":0,"max":1}}],
-         "outputs":[{"name":"output","type":"texture","display":true},{"name":"magnitudes","type":"floatArray"}],
+                   {"name":"softness","type":"float","default":0.4,"ui":{"kind":"slider","min":0,"max":1}},
+                   {"name":"mappings","type":"string","default":"[{\\"key\\":\\"ch1/cc7\\",\\"port\\":\\"knob\\",\\"min\\":0,\\"max\\":1,\\"label\\":\\"Knob\\"}]"},
+                   {"name":"port","type":"float","default":8000}],
+         "outputs":[{"name":"output","type":"texture","display":true},{"name":"magnitudes","type":"floatArray"},
+                    {"name":"lastEvent","type":"float2"},{"name":"lastKey","type":"string"},{"name":"knob","type":"float"}],
          "connectedInputs":["input"],
          "render":{"width":1280,"height":800},
          "body":{"width":240,"height":120},
          "backdrop":{"x":8,"y":8,"width":224,"height":68}}
         """.utf8))
+        ref.push(channel: "telemetry", json: Data(#"{"outputs":{"knob":[0.5]},"learn":{"armed":true,"seen":true,"key":"ch1/cc7","value01":0.5}}"#.utf8))
         spinMain(0.15)
         // Cards are mostly transparent chrome — assert the render pass completes, not a pixel.
         view.setFrameSize(NSSize(width: 240, height: 120))

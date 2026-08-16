@@ -93,6 +93,9 @@ paces it for the node editor's live thumbnails; with nothing to see it idles.
   recycle while the GPU still reads it (a camera frame's `CVMetalTexture`/`CVPixelBuffer`) goes
   through `ctx.holdUntilFrameCompletes(…)` (ABI v6) - the runtime releases it after the frame's
   command buffer executes.
+- **Non-texture outputs flow over value channels:** floats/vectors via `ctx.setOutputFloats` (ABI v5),
+  `enum`/`string` via `ctx.setOutputString` (ABI v8). The host reads the last encoded frame's values
+  (`readOutputFloats` / `readOutputString`) for card telemetry and controller learn.
 - **`setup()` / `teardown()` run on the main thread** (load/reload paths), serialized against
   frames - a frame never interleaves a half-swapped graph.
 - **`dynamicOptions(for:)` may run CONCURRENTLY with `update()`** (it's called from the UI when a

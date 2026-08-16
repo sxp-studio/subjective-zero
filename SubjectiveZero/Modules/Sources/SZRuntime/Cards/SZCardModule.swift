@@ -64,6 +64,7 @@ public final class SZCardModule {
         raw.liveFn = szCardLive
         raw.commitFn = szCardCommit
         raw.sizeFn = szCardSize
+        raw.callFn = szCardCall
         guard let pointer = withUnsafeMutablePointer(to: &raw, { create(UnsafeMutableRawPointer($0)) }) else { return nil }
         let instance = SZCardInstance(pointer: pointer, view: view, update: update, destroy: destroy, box: box)
         instances.removeAll { !$0.isLive }
@@ -134,13 +135,17 @@ public struct SZCardVerbs {
     public var commit: (String, [Float]) -> Void
     /// Measured intrinsic content height in points.
     public var size: (Double) -> Void
+    /// Named host verb (tool, argsJSON) — the host allowlists per node kind.
+    public var call: (String, String) -> Void
 
     public init(live: @escaping (String, [Float]) -> Void = { _, _ in },
                 commit: @escaping (String, [Float]) -> Void = { _, _ in },
-                size: @escaping (Double) -> Void = { _ in }) {
+                size: @escaping (Double) -> Void = { _ in },
+                call: @escaping (String, String) -> Void = { _, _ in }) {
         self.live = live
         self.commit = commit
         self.size = size
+        self.call = call
     }
 }
 
@@ -176,4 +181,11 @@ private let szCardSize: SZCardSizeFn = { ctx, height in
     guard let box = SZCardVerbBox.from(ctx) else { return }
     let h = Double(height)
     MainActor.assumeIsolated { box.verbs.size(h) }
+}
+
+private let szCardCall: SZCardCallFn = { ctx, tool, args in
+    guard let box = SZCardVerbBox.from(ctx), let tool else { return }
+    let name = String(cString: tool)
+    let json = args.map { String(cString: $0) } ?? "{}"
+    MainActor.assumeIsolated { box.verbs.call(name, json) }
 }

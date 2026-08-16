@@ -55,6 +55,7 @@ struct SZFrameContext {
     func inputFloatArray(_ port: String) -> [Float]?         // connected `floatArray` input — any length (audio samples / spectrum)
     func setOutputFloat(_ port: String, _ value: Float)      // emit a single-float NON-texture output
     func setOutputFloats(_ port: String, _ values: [Float])  // emit a float/vector NON-texture output
+    func setOutputString(_ port: String, _ string: String)   // emit an enum/string output
     func holdUntilFrameCompletes(_ object: AnyObject)        // pin an object until this frame's GPU work executes
                                                              // (framework/CF/host objects ONLY — never your own classes:
                                                              //  their deinit could run after your module was hot-reloaded)
@@ -81,8 +82,10 @@ one of those types without `setPaused` is a compile error.
   value), every frame, for any `float`/vector/color/matrix/`bool` output you declared. When that output is
   connected by a `.data` edge, the runtime delivers it to the downstream node's input — read it there with
   `inputFloats` / `inputFloat`, exactly like any other scalar input. A texture output still uses
-  `outputTexture`; use a `texture` output for anything that must be **displayed**. (A connected
-  `enum`/`string` *output* isn't carried yet — emit those as a `texture` if they must flow downstream.)
+  `outputTexture`; use a `texture` output for anything that must be **displayed**.
+- **Emit an `enum`/`string` output with `ctx.setOutputString("port", value)`** — it flows across a `.data`
+  edge into a downstream input of the same type (read there with `inputString`; the connect guard requires
+  equal types: string→string, enum→enum). The host can read it too (a controller node's learn key).
 - **A `floatArray` output/input carries a variable-length `[Float]`** (audio PCM samples, an FFT spectrum,
   any numeric series too big for `float4x4`) over that same connected value channel. Emit it with
   `ctx.setOutputFloats("port", array)`; read it downstream with `ctx.inputFloatArray("port")`, which grows
@@ -263,8 +266,9 @@ the card shows). Omit the block entirely for a node without a `Card.swift`. See 
   real type, exactly like inputs. When connected by a `.data` edge, the value **flows to the downstream
   node's input**: the producer emits it each frame with `ctx.setOutputFloats("port", values)` and the
   consumer reads it via `ctx.inputFloats` / `inputFloat` — see `node-abi` for the runtime side. (Covers the
-  float family — `float·float2–4·colorRGB/RGBA·float3x3/4x4·bool`. A connected `enum`/`string` *output*
-  isn't carried yet; emit a `texture` for anything that must be **displayed** in the viewport.)
+  float family — `float·float2–4·colorRGB/RGBA·float3x3/4x4·bool`; an `enum`/`string` output is emitted
+  with `ctx.setOutputString` and read downstream with `inputString`. Emit a `texture` for anything that
+  must be **displayed** in the viewport.)
 - **`floatArray`** carries a **variable-length** `[Float]` (audio PCM samples, an FFT spectrum, any series
   bigger than `float4x4`) over that same connected value channel. Like `texture` it is **connection-only**
   (no by-value `default`): the producer emits it with `ctx.setOutputFloats("port", array)` and the consumer
@@ -286,8 +290,8 @@ the card shows). Omit the block entirely for a node without a `Card.swift`. See 
 | `colorRGB`  | `{"type":"colorRGB","value":[1,0,0]}`               | `colorWell` | `ctx.inputFloats("name")` (3) |
 | `colorRGBA` | `{"type":"colorRGBA","value":[1,0,0,1]}`            | `colorWell` | `ctx.inputFloats("name")` (4) |
 | `bool`      | `{"type":"bool","value":true}`                      | `toggle` | `ctx.inputBool("name")` |
-| `enum`      | `{"type":"enum","value":"warm"}` + an `options` list | `dropdown` | `ctx.inputString("name")` (the chosen `value`) |
-| `string`    | `{"type":"string","value":"hi"}`                    | `field`, or `filePicker` for a path | `ctx.inputString("name")` |
+| `enum`      | `{"type":"enum","value":"warm"}` + an `options` list | `dropdown` | `ctx.inputString("name")` (the chosen `value`) — emit with `ctx.setOutputString` |
+| `string`    | `{"type":"string","value":"hi"}`                    | `field`, or `filePicker` for a path | `ctx.inputString("name")` — emit with `ctx.setOutputString` |
 | `texture`   | — (no by-value default)                              | — | `ctx.inputTexture` / `ctx.outputTexture` (by id; input may be nil before a frame) |
 | `floatArray`| — (no by-value default)                              | — | `ctx.inputFloatArray("name")` (connected; any length) — emit with `ctx.setOutputFloats("name", array)` |
 | `event`     | — (no by-value default)                              | — | declared for the UI; **not delivered to the node yet** |

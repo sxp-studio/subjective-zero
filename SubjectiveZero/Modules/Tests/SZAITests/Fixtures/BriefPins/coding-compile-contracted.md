@@ -55,6 +55,7 @@ struct SZFrameContext {
     func inputFloatArray(_ port: String) -> [Float]?         // connected `floatArray` input — any length (audio samples / spectrum)
     func setOutputFloat(_ port: String, _ value: Float)      // emit a single-float NON-texture output
     func setOutputFloats(_ port: String, _ values: [Float])  // emit a float/vector NON-texture output
+    func setOutputString(_ port: String, _ string: String)   // emit an enum/string output
     func holdUntilFrameCompletes(_ object: AnyObject)        // pin an object until this frame's GPU work executes
                                                              // (framework/CF/host objects ONLY — never your own classes:
                                                              //  their deinit could run after your module was hot-reloaded)
@@ -81,8 +82,10 @@ one of those types without `setPaused` is a compile error.
   value), every frame, for any `float`/vector/color/matrix/`bool` output you declared. When that output is
   connected by a `.data` edge, the runtime delivers it to the downstream node's input — read it there with
   `inputFloats` / `inputFloat`, exactly like any other scalar input. A texture output still uses
-  `outputTexture`; use a `texture` output for anything that must be **displayed**. (A connected
-  `enum`/`string` *output* isn't carried yet — emit those as a `texture` if they must flow downstream.)
+  `outputTexture`; use a `texture` output for anything that must be **displayed**.
+- **Emit an `enum`/`string` output with `ctx.setOutputString("port", value)`** — it flows across a `.data`
+  edge into a downstream input of the same type (read there with `inputString`; the connect guard requires
+  equal types: string→string, enum→enum). The host can read it too (a controller node's learn key).
 - **A `floatArray` output/input carries a variable-length `[Float]`** (audio PCM samples, an FFT spectrum,
   any numeric series too big for `float4x4`) over that same connected value channel. Emit it with
   `ctx.setOutputFloats("port", array)`; read it downstream with `ctx.inputFloatArray("port")`, which grows

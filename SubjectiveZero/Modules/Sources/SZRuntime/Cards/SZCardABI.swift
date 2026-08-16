@@ -18,13 +18,16 @@ import Foundation
 // instance's lifetime. Signatures are shared by both sides of the boundary.
 typealias SZCardEmitFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32) -> Void
 typealias SZCardSizeFn = @convention(c) (UnsafeMutableRawPointer?, Float) -> Void
+/// Named host verb (v2): `(hostContext, tool cstring, argsJSON cstring)`. Allowlisted host-side per
+/// node kind; no return value — the card reads the outcome back from its state/telemetry pushes.
+typealias SZCardCallFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
 
 /// The frozen contract between the host and a compiled card dylib. Version bumps on ANY change to
 /// the symbols, their signatures, or `SZCardHostRaw`'s layout (append-only, like the node ABI).
 /// All five entry points are main-thread calls by contract (the dylib asserts via
-/// `MainActor.assumeIsolated`).
+/// `MainActor.assumeIsolated`). v2 = `callFn` (named host verbs — binding learn).
 enum SZCardABI {
-    static let version: Int32 = 1
+    static let version: Int32 = 2
 
     static let apiVersionSymbol = "SZCardAPIVersion"
     static let createSymbol = "SZCardCreate"
@@ -57,4 +60,6 @@ struct SZCardHostRaw {
     var commitFn: SZCardEmitFn?
     /// Measured intrinsic content height in points (auto-size rows).
     var sizeFn: SZCardSizeFn?
+    /// Named host verb (tool, JSON args) — allowlisted host-side; v2.
+    var callFn: SZCardCallFn?
 }

@@ -21,7 +21,7 @@ public enum SZPortBindingAudit {
     // port name is always the first string-literal argument. `floatArray` I/O rides `inputFloatArray` /
     // `setOutputFloats`.
     private static let inputAccessors  = ["inputTexture", "inputFloatArray", "inputFloats", "inputFloat", "inputBool", "inputString"]
-    private static let outputAccessors = ["outputTexture", "setOutputFloats", "setOutputFloat"]
+    private static let outputAccessors = ["outputTexture", "setOutputFloats", "setOutputFloat", "setOutputString"]
 
     /// Types that run on their OWN clock — they keep going when `update()` stops being called, so a graph
     /// that looks paused would still be playing audio or holding the mic. Constructing one without

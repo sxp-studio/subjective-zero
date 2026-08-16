@@ -21,6 +21,7 @@ enum SZCardKit {
 
     typealias SZCardEmitFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32) -> Void
     typealias SZCardSizeFn = @convention(c) (UnsafeMutableRawPointer?, Float) -> Void
+    typealias SZCardCallFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
 
     // Must byte-match SZCardHostRaw in the host (SZCardABI.swift). Append-only.
     struct SZCardHostRaw {
@@ -29,6 +30,7 @@ enum SZCardKit {
         var liveFn: SZCardEmitFn?
         var commitFn: SZCardEmitFn?
         var sizeFn: SZCardSizeFn?
+        var callFn: SZCardCallFn?
     }
 
     /// The card's window into its node: host-pushed observable state plus the outbound verbs.
@@ -68,6 +70,13 @@ enum SZCardKit {
         public func commit(_ port: String, _ values: [Float]) { emit(raw.commitFn, port, values) }
         public func commit(_ port: String, _ value: Double) { commit(port, [Float(value)]) }
         public func commit(_ port: String, _ values: [Double]) { commit(port, values.map(Float.init)) }
+        /// Ask the host to run a named verb for THIS node (e.g. `"learn_arm"` on a controller card).
+        /// The host allowlists verbs per node kind and drops unknown ones; there is no return value —
+        /// read the outcome back from `learn` / the state push. `argsJSON` must be a JSON object.
+        public func call(_ tool: String, argsJSON: String = "{}") {
+            guard let fn = raw.callFn else { return }
+            tool.withCString { t in argsJSON.withCString { a in fn(raw.hostContext, t, a) } }
+        }
         /// Report measured intrinsic content height (points). The root wrapper feeds this.
         func reportSize(_ height: Double) { raw.sizeFn?(raw.hostContext, Float(height)) }
 
@@ -115,6 +124,15 @@ enum SZCardKit {
         public var defaultBool: Bool? { (def as? NSNumber)?.boolValue }
     }
 
+    /// Binding-learn state the host streams for a binding-source node (a controller card):
+    /// `armed` while a learn session is live, `seen`/`key`/`value01` once a control moved.
+    public struct SZCardLearn: Equatable {
+        public let armed: Bool
+        public let seen: Bool
+        public let key: String?
+        public let value01: Double?
+    }
+
     // Typed accessors over the raw channel payloads — the card-author surface.
     public extension SZCardState {
         var inputs: [SZCardPort] { (state["inputs"] as? [[String: Any]] ?? []).map(SZCardPort.init) }
@@ -146,6 +164,22 @@ enum SZCardKit {
         func values(_ port: String) -> [Double] {
             let outputs = telemetry["outputs"] as? [String: Any]
             return (outputs?[port] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue } ?? []
+        }
+
+        /// Latest telemetry string for one of the node's string/enum OUTPUT ports (nil until the
+        /// first frame arrives). Same cadence as `values`.
+        func string(_ port: String) -> String? {
+            (telemetry["strings"] as? [String: Any])?[port] as? String
+        }
+
+        /// The host's binding-learn state for this node — nil until the host publishes one (only
+        /// binding-source nodes get it). Drives a controller card's Learn button + candidate readout.
+        var learn: SZCardLearn? {
+            guard let raw = telemetry["learn"] as? [String: Any] else { return nil }
+            return SZCardLearn(armed: (raw["armed"] as? NSNumber)?.boolValue ?? false,
+                               seen: (raw["seen"] as? NSNumber)?.boolValue ?? false,
+                               key: raw["key"] as? String,
+                               value01: (raw["value01"] as? NSNumber)?.doubleValue)
         }
 
         private static func size(_ raw: Any?) -> CGSize? {

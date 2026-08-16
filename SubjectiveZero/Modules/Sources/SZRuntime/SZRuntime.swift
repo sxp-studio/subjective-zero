@@ -57,6 +57,8 @@ public final class SZRuntime: @unchecked Sendable {
         /// (`readOutputFloats`) — never fed back into a frame. Paused frames don't encode, so this holds
         /// the pre-pause frame's values, matching the frozen viewport.
         var lastOutputValues: [String: [Float]] = [:]
+        /// String output values from the same frame (the v8 channel) — same lifecycle as `lastOutputValues`.
+        var lastOutputStrings: [String: String] = [:]
         /// Offscreen render size; the loop overrides it each tick with the driver surface's drawable size.
         var renderSize: (width: Int, height: Int)
         /// The zero-copy node-preview stream (watched set + IOSurface target pairs). A class ref so
@@ -386,6 +388,13 @@ public final class SZRuntime: @unchecked Sendable {
         engine.withLock { $0.lastOutputValues[SZScheduler.textureID(node: node, port: port)] }
     }
 
+    /// The string `node` emitted on a `string`/`enum` output `port` during the most recently encoded
+    /// frame — the host-side read of the v8 output channel; same semantics as `readOutputFloats`.
+    /// Feeds binding learn (a controller node's `lastKey`) and card telemetry.
+    public func readOutputString(node: SZNodeID, port: String) -> String? {
+        engine.withLock { $0.lastOutputStrings[SZScheduler.textureID(node: node, port: port)] }
+    }
+
     /// Re-point the live render endpoint without a reload (the host op behind `ui_toggle_display`). The
     /// scheduler reads this each frame → the viewport switches next frame. `nil` clears it (black
     /// viewport). The host should only point it at a currently-rendered (generated) node's texture output.
@@ -445,12 +454,13 @@ public final class SZRuntime: @unchecked Sendable {
         guard let scheduler = state.scheduler else { return (nil, nil) }
         guard let commandBuffer = assets.commandQueue.makeCommandBuffer() else { return (nil, nil) }
         let timing = state.timeline.nextFrame(now: CACurrentMediaTime())
-        let (endpoint, outputValues) = scheduler.encodeFrame(
+        let (endpoint, outputValues, outputStrings) = scheduler.encodeFrame(
             device: assets.device, commandBuffer: commandBuffer, assets: assets, loaders: state.loaders,
             inputValues: state.inputValues, inputStrings: state.inputStrings, frameIndex: timing.frameIndex,
             time: timing.timeSeconds,
             width: width, height: height)
         state.lastOutputValues = outputValues
+        state.lastOutputStrings = outputStrings
         beforeCommit(commandBuffer, endpoint)
         // The live thumb pass rides THIS buffer (throttled inside) — after the schedule's writes,
         // before the commit, so hazard tracking orders the downscales behind the frame's renders.

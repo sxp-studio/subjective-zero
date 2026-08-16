@@ -34,13 +34,14 @@ private let canonicalFields: [(name: String, type: String)] = [
     ("inputValueFn", "SZValueResolver?"),
     ("inputStringFn", "SZStringResolver?"),
     ("outputValueFn", "SZOutputValueResolver?"),   // v5
-    ("frameHoldFn", "SZFrameHoldFn?"),             // v6 — last field
+    ("frameHoldFn", "SZFrameHoldFn?"),             // v6
+    ("outputStringFn", "SZOutputStringResolver?"), // v8 — last field
 ]
 
 @Test func abiHostStructMatchesCanonicalLayout() {
-    // Size/stride pinned: appending the v6 fn pointer grew the struct to 104 bytes (8-aligned).
+    // Size/stride pinned: appending the v8 fn pointer grew the struct to 112 bytes (8-aligned).
     // Any insert/reorder of the pointer block, or a field type change, moves this.
-    #expect(MemoryLayout<SZRuntimeContextRaw>.stride == 104)
+    #expect(MemoryLayout<SZRuntimeContextRaw>.stride == 112)
     #expect(MemoryLayout<SZRuntimeContextRaw>.alignment == 8)
 
     // Pin the offsets of the same-width fn-pointer fields — the exact case stride alone can't catch.
@@ -50,6 +51,7 @@ private let canonicalFields: [(name: String, type: String)] = [
     #expect(MemoryLayout<SZRuntimeContextRaw>.offset(of: \.inputStringFn) == 80)
     #expect(MemoryLayout<SZRuntimeContextRaw>.offset(of: \.outputValueFn) == 88)
     #expect(MemoryLayout<SZRuntimeContextRaw>.offset(of: \.frameHoldFn) == 96)
+    #expect(MemoryLayout<SZRuntimeContextRaw>.offset(of: \.outputStringFn) == 104)
 
     // Reflect the host struct's field NAMES + order and assert they match the canonical list.
     let hostNames = Mirror(reflecting: SZRuntimeContextRaw()).children.map { $0.label ?? "?" }
@@ -76,17 +78,19 @@ private let cardCanonicalFields: [(name: String, type: String)] = [
     ("hostContext", "UnsafeMutableRawPointer?"),
     ("liveFn", "SZCardEmitFn?"),
     ("commitFn", "SZCardEmitFn?"),
-    ("sizeFn", "SZCardSizeFn?"),   // last field
+    ("sizeFn", "SZCardSizeFn?"),
+    ("callFn", "SZCardCallFn?"),   // v2 — last field
 ]
 
 @Test func cardABIHostStructMatchesCanonicalLayout() {
-    // Int32 + padding, then four 8-byte pointers → 40 bytes, 8-aligned.
-    #expect(MemoryLayout<SZCardHostRaw>.stride == 40)
+    // Int32 + padding, then five 8-byte pointers → 48 bytes, 8-aligned.
+    #expect(MemoryLayout<SZCardHostRaw>.stride == 48)
     #expect(MemoryLayout<SZCardHostRaw>.alignment == 8)
     #expect(MemoryLayout<SZCardHostRaw>.offset(of: \.hostContext) == 8)
     #expect(MemoryLayout<SZCardHostRaw>.offset(of: \.liveFn) == 16)
     #expect(MemoryLayout<SZCardHostRaw>.offset(of: \.commitFn) == 24)
     #expect(MemoryLayout<SZCardHostRaw>.offset(of: \.sizeFn) == 32)
+    #expect(MemoryLayout<SZCardHostRaw>.offset(of: \.callFn) == 40)
 
     let hostNames = Mirror(reflecting: SZCardHostRaw()).children.map { $0.label ?? "?" }
     #expect(hostNames == cardCanonicalFields.map(\.name))
