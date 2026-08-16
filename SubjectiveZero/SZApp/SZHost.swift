@@ -1391,13 +1391,21 @@ final class SZHost {
         return envelope.id
     }
 
-    /// Open a node's `Node.swift` in the user's default `.swift` editor (the card's file button). Saving the
-    /// file then hot-reloads the node live (`reloadEditedNode`, via the source watcher).
+    /// Open a node's sources in the user's default `.swift` editor (the card's file button): `Node.swift`,
+    /// plus `Card.swift` when the node has one — both handed to the editor in one call, so they land as
+    /// tabs of the same window. Saving either hot-reloads live (node via the source watcher, card via
+    /// its mount's watcher).
     func openNodeSource(_ id: SZNodeID) {
         guard let url = loadedProjectURL else { return }
-        let source = SZProjectIO.nodeSourceURL(projectURL: url, nodeID: id)
-        guard FileManager.default.fileExists(atPath: source.path) else { return }
-        NSWorkspace.shared.open(source)
+        let files = [SZProjectIO.nodeSourceURL(projectURL: url, nodeID: id),
+                     SZProjectIO.cardSourceURL(projectURL: url, nodeID: id)]
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard let first = files.first else { return }
+        guard let editor = NSWorkspace.shared.urlForApplication(toOpen: first) else {
+            NSWorkspace.shared.open(first)
+            return
+        }
+        NSWorkspace.shared.open(files, withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration())
     }
 
     /// Hot-reload a node whose `Node.swift` changed on disk (the source watcher's change handler). Drives the

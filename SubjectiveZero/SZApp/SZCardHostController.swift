@@ -43,7 +43,7 @@ final class SZCardHostController: SZCustomCardProvider {
     }
 
     private var mounts: [SZNodeID: Mount] = [:]
-    /// Which nodes have a `Card.swift` on disk — refreshed on graph change so the pill button and
+    /// Which nodes have a `Card.swift` on disk — refreshed on graph change so the file button and
     /// context menu don't stat the disk per render.
     private var cardSources: Set<SZNodeID> = []
     private var ticker: Task<Void, Never>?

@@ -40,7 +40,7 @@ public final class SZCardMount {
 public protocol SZCustomCardProvider: AnyObject {
     /// The node's mount box, nil when nothing is mounted (yet).
     func mount(for node: SZNodeID) -> SZCardMount?
-    /// Whether `node`'s folder holds a `Card.swift` — gates the pill button and the context-menu rows.
+    /// Whether `node`'s folder holds a `Card.swift` — gates the context-menu rows and the file button's tooltip.
     func hasCardSource(for node: SZNodeID) -> Bool
     /// Show the custom card (`on`) or fall back to port rows: an explicit body commit; the
     /// `Card.swift` on disk is never touched.

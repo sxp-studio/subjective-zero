@@ -163,11 +163,13 @@ struct SZNodeView: View, Equatable {
     /// chat with the node's Coding Agent, and the "⋯" for structural actions (split/merge/…).
     private var bottomButtons: some View {
         HStack(spacing: 4) {
-            if let onOpenSource { SZCardPillButton(symbol: "doc.text", help: "Open this node's source (Node.swift)", action: onOpenSource) }
-            // The card's own source, when the node has one: saving it hot-reloads the card.
-            if let cardProvider, cardProvider.hasCardSource(for: node.id) {
-                SZCardPillButton(symbol: "rectangle.and.pencil.and.ellipsis", help: "Open this node's custom card (Card.swift)",
-                                 action: { cardProvider.openCardSource(node: node.id) })
+            // One button for the node's sources: Node.swift, and Card.swift alongside when the node has one.
+            if let onOpenSource {
+                let hasCard = cardProvider?.hasCardSource(for: node.id) ?? false
+                SZCardPillButton(symbol: "doc.text",
+                                 help: hasCard ? "Open this node's sources (Node.swift + Card.swift)"
+                                               : "Open this node's source (Node.swift)",
+                                 action: onOpenSource)
             }
             if let onOpenChat { SZCardPillButton(symbol: "bubble.left.fill", help: "Chat with this node's Coding Agent", action: onOpenChat) }
             if let onOpenMenu { SZCardPillButton(symbol: "ellipsis", help: "Node actions", action: onOpenMenu) }
