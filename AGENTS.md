@@ -17,9 +17,9 @@ especially `docs/ARCHITECTURE.md` (incl. the host seam) and `docs/BUILD_SPEC.md`
 2. **License header on new source.** Start every new first-party **app/engine** Swift file with
    `// SPDX-License-Identifier: AGPL-3.0-only` as its first line — this covers `SZApp/` and
    `Modules/Sources/` (and their tests). The app + engine are AGPL-3.0; see `LICENSE` / `NOTICE`.
-   **Do not** add this header to **node sources** — `Node.swift` under `NodeLibrary/` or `Samples/`
-   (or any node the runtime authors): those fall under the `NOTICE` §7 node exception and must stay
-   unencumbered. And never put it above `Package.swift`'s `swift-tools-version` line (must remain line 1).
+   **Do not** add this header to **node sources** — `Node.swift` and `Card.swift` under `NodeLibrary/`
+   or `Samples/` (or any node the runtime authors): those fall under the `NOTICE` §7 node exception and
+   must stay unencumbered. And never put it above `Package.swift`'s `swift-tools-version` line (must remain line 1).
 
 3. **No legacy / migration (until v1 ships).** No backward-compat shims, deprecations, versioned
    migrations, or "old format" support. The schemas (JSON state, node ABI) are **not frozen** — change

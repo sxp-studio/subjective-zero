@@ -173,7 +173,7 @@ A single pass, naming who calls what. Full narrative in [CORE_LOOP.md](CORE_LOOP
 | User journey + sequences | [CORE_LOOP.md](CORE_LOOP.md) | all |
 | State, serialization, transactions | [STATE.md](STATE.md) | SZCore |
 | Metal, scheduling, hot reload | [RUNTIME.md](RUNTIME.md) | SZRuntime |
-| Node anatomy, I/O types, connections | [GRAPH_AND_NODES.md](GRAPH_AND_NODES.md) | SZCore, SZRuntime, SZUI |
+| Node anatomy, I/O types, connections, custom cards | [GRAPH_AND_NODES.md](GRAPH_AND_NODES.md) | SZCore, SZRuntime, SZUI |
 | Director Agent + coding agents, behavior trees | [AGENT_ORCHESTRATION.md](AGENT_ORCHESTRATION.md) | SZAI |
 | Provider wrapping | [AI_PROVIDERS.md](AI_PROVIDERS.md) | SZAI |
 | MCP server + command surface | [MCP.md](MCP.md) | SZApp (host) |

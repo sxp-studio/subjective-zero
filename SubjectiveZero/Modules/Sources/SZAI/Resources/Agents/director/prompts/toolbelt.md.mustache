@@ -75,3 +75,14 @@ pass-through (e.g. Grayscale below); anything more specific deserves a specific 
   "permissions": []
 }
 ```
+
+### Custom cards — a decision you make, rarely
+A node can ship a **custom card**: a small custom UI mounted inside its node card (draggable corner
+handles over the output, an XY pad, a curve, a meter over an array it emits). Its generated rows —
+sliders, dropdowns, colors — are the default and cost nothing, so a card is the exception: call for one
+ONLY when the user asks for custom UI / on-canvas controls, or when the interaction has no row
+equivalent (placing points or regions over the picture by hand). When you do, say so in the node's
+`prompt` in plain words ("ships a custom card: drag the four corners over the output"); the Coding
+Agent ships one only when the prompt asks. Never call for a card just to restyle sliders. Projection
+mapping / corner-pin already exists as the built-in `corner-pin` library node (card included) — name it
+in the prompt so the Coding Agent reuses it instead of re-inventing it.

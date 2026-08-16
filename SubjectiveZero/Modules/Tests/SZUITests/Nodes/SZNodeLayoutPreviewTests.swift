@@ -120,12 +120,17 @@ private func withPreviewsEnabled<T>(_ enabled: Bool, _ body: () -> T) -> T {
         }
     }
 
-    @Test func customBodyRendersCompactUntilCustomCardsLand() {
+    @Test func customBodyOwnsItsRegionAndSuppressesThePreview() {
         withPreviewsEnabled(true) {
             let custom = textureNode(body: SZNodeBody(mode: .custom,
-                                                      custom: SZCustomCardRef(artifact: "knob")))
-            #expect(custom.effectiveBodyMode == .none)
+                                                      custom: SZCustomCardRef()))
+            #expect(custom.effectiveBodyMode == .custom)
+            // One body slot: the custom card fills it, so the preview inset is 0 and only the
+            // custom inset contributes (default 8 rows).
             #expect(SZNodeLayout.previewInset(of: custom) == 0)
+            #expect(SZNodeLayout.customInset(of: custom) == 8 * SZNodeLayout.gridPitch)
+            // A custom body streams no thumb unless the contract asks for a backdrop.
+            #expect(custom.effectivePreviewPort == nil)
         }
     }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // ABI v7 — the runtime tells a node when it pauses / resumes (`setPaused`), the one transport event
 // `update()` can't carry: pause means no more frames. Driven through a REAL compiled node, because the
-// callback is declared in `SZRuntimeSupport.source` — the ABI injected into every node build, which no
+// callback is declared in `SZNodeKit.source` — the ABI injected into every node build, which no
 // host-side unit test compiles.
 //
 // The node under test owns an `AVPlayer` (no item needed — `rate` is the observable, and it's exactly what

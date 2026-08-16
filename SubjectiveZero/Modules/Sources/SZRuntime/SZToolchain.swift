@@ -15,6 +15,18 @@ import Foundation
 public struct SZToolchain {
     public init() {}
 
+    /// The app-wide swiftc gate, shared by every tier that compiles off the main thread (steps,
+    /// cards): a burst of schedules must not fan out into a compile storm — a swiftc storm has
+    /// wedged a machine before. Static on purpose: every runtime instance (and every test in the
+    /// process) shares the same slots. Synchronous by design: the semaphore wait must live in a
+    /// sync frame, and the detached task that calls this is exactly the thread meant to park.
+    private static let compileSlots = DispatchSemaphore(value: 4)
+    public func gated<T>(_ body: () throws -> T) -> Result<T, Error> {
+        Self.compileSlots.wait()
+        defer { Self.compileSlots.signal() }
+        return Result { try body() }
+    }
+
     enum CompileError: Error, CustomStringConvertible {
         case sdkNotFound(log: String)
         case compileFailed(log: String)
@@ -32,7 +44,7 @@ public struct SZToolchain {
     /// Compile `nodeSource` into `Node.dylib` inside `buildDir` (created if needed) and ad-hoc sign it.
     func compile(nodeSource: URL, into buildDir: URL) throws -> URL {
         try compile(source: nodeSource, into: buildDir,
-                    supportFileName: SZRuntimeSupport.fileName, supportSource: SZRuntimeSupport.source,
+                    supportFileName: SZNodeKit.fileName, supportSource: SZNodeKit.source,
                     modulePrefix: "SZNode_", product: "Node.dylib")
     }
 
@@ -44,7 +56,15 @@ public struct SZToolchain {
                     modulePrefix: "SZStep_", product: "Step.dylib")
     }
 
-    /// The one pipeline both tiers share: write the host-owned support source beside the
+    /// Compile a node's `Card.swift` into `Card.dylib` — same pipeline, SZCardKit as the support
+    /// blob (SwiftUI/AppKit-linking, separate from the node kit on purpose), its own module prefix.
+    public func compile(cardSource: URL, into buildDir: URL) throws -> URL {
+        try compile(source: cardSource, into: buildDir,
+                    supportFileName: SZCardKit.fileName, supportSource: SZCardKit.source,
+                    modulePrefix: "SZCard_", product: "Card.dylib")
+    }
+
+    /// The one pipeline all tiers share: write the host-owned support source beside the
     /// authored file, `swiftc -emit-library`, then `codesign -s -` (ad-hoc signing is
     /// REQUIRED for `dlopen` on macOS). Returns the dylib URL. A fresh, unique Swift module
     /// name per build keeps mangled type metadata from colliding when an old + new dylib are

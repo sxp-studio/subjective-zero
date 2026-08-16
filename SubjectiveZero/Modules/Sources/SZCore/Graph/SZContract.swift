@@ -107,6 +107,24 @@ public enum SZPortValue: Codable, Equatable, Sendable {
         }
     }
 
+    /// The inverse of `floats`: rebuild a typed value from a flat numeric spelling (a card's gesture,
+    /// a runtime read) for a port of `type`. `nil` for the non-numeric kinds (they have no float
+    /// spelling) and for a scalar with no components.
+    public init?(type: SZPortType, doubles: [Double]) {
+        switch type {
+        case .float: guard let v = doubles.first else { return nil }; self = .float(v)
+        case .float2: self = .float2(doubles)
+        case .float3: self = .float3(doubles)
+        case .float4: self = .float4(doubles)
+        case .float3x3: self = .float3x3(doubles)
+        case .float4x4: self = .float4x4(doubles)
+        case .colorRGB: self = .colorRGB(doubles)
+        case .colorRGBA: self = .colorRGBA(doubles)
+        case .bool: guard let v = doubles.first else { return nil }; self = .bool(v != 0)
+        case .texture, .floatArray, .enumeration, .string, .event: return nil
+        }
+    }
+
     /// The value as a `String` for the runtime's v4 string-input channel — the chosen option of an `enum`
     /// or the text of a `string`. `nil` for the other kinds (they cross as floats or not at all).
     public var string: String? {
@@ -211,6 +229,29 @@ public enum SZEntitlement: String, Codable, Sendable {
     case microphone
 }
 
+/// How a node's custom card (its `Card.swift`, when it ships one) wants to be mounted — the contract's
+/// `"card"` block. All optional: `cols`/`rows` seed the card-body footprint in grid cells the first time
+/// the card is shown (the body ref in the graph then owns them); `backdrop` names a texture OUTPUT the
+/// host draws as a live thumbnail UNDER the card, so overlay controls (corner handles, crops) can map onto
+/// the rendered image. `plumbing` names input ports the card OWNS (its handles/knobs write them): while
+/// the card is shown their generated rows — control and socket — step aside, so a value is never
+/// presented twice; they stay settable over MCP and come back when the user flips to rows. Declared
+/// here — not in a second manifest — because the contract is the one file a card author already
+/// writes; the runtime never reads it.
+public struct SZCardHints: Codable, Equatable, Sendable {
+    public var cols: Int?
+    public var rows: Int?
+    public var backdrop: String?
+    public var plumbing: [String]?
+
+    public init(cols: Int? = nil, rows: Int? = nil, backdrop: String? = nil, plumbing: [String]? = nil) {
+        self.cols = cols
+        self.rows = rows
+        self.backdrop = backdrop
+        self.plumbing = plumbing
+    }
+}
+
 /// `NodeContract ⇄ node-contract.json` — the node's typed I/O + identity. `permissions` travels with the
 /// contract so a copied library node carries its entitlement, and the runtime can pre-grant before load.
 public struct SZNodeContract: Codable, Equatable, Sendable {
@@ -220,6 +261,7 @@ public struct SZNodeContract: Codable, Equatable, Sendable {
     public var inputs: [SZPort]
     public var outputs: [SZPort]
     public var permissions: [SZEntitlement]?   // nil/omitted == none
+    public var card: SZCardHints?              // nil/omitted == no mount hints (a Card.swift may still ship)
 
     public init(
         title: String,
@@ -227,7 +269,8 @@ public struct SZNodeContract: Codable, Equatable, Sendable {
         summary: String,
         inputs: [SZPort] = [],
         outputs: [SZPort] = [],
-        permissions: [SZEntitlement]? = nil
+        permissions: [SZEntitlement]? = nil,
+        card: SZCardHints? = nil
     ) {
         self.title = title
         self.sfSymbol = sfSymbol
@@ -235,6 +278,7 @@ public struct SZNodeContract: Codable, Equatable, Sendable {
         self.inputs = inputs
         self.outputs = outputs
         self.permissions = permissions
+        self.card = card
     }
 
     /// One port as generated code sees it: which side it's on, what it's called, what type it carries. Direction

@@ -717,6 +717,7 @@ struct SZApp: App {
                               showMiniMap: host.showMiniMap,
                               livePreviews: host.livePreviews,
                               previewFrames: host.previewFrames,
+                              cardProvider: host.cardHost,
                               onVisibleNodesChanged: { host.setVisiblePreviewNodes($0) },
                               cameraCommand: host.cameraCommand,
                               selectedNodeID: $selectedNodeID,

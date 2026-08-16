@@ -163,6 +163,29 @@ small value types passed by the scheduler.
   the previous good module; the error is surfaced as status.
 - Hot reload is **per node** - recompiling one node does not rebuild the whole graph.
 
+## Custom cards
+
+The runtime compiles three kinds of plugin with the one toolchain (`SZToolchain`: swiftc → dylib →
+ad-hoc codesign, unique module names, `SZMappedDylib` for the dlopen motion) and the same shape -
+a **C-flat ABI** across the `dlopen` boundary plus a **kit** (host-owned Swift source compiled INTO
+each plugin) that gives the author an ergonomic surface:
+
+```
+SZRuntime/Nodes/   SZNodeABI · SZNodeKit · SZLoader        Node.swift  - the render graph
+SZRuntime/Steps/   SZStepABI · SZStepKit · SZStepLoader    Step.swift  - agent-graph decision steps
+SZRuntime/Cards/   SZCardABI · SZCardKit · SZCardModule    Card.swift  - a node's custom card (UI)
+```
+
+A card module exports five symbols (`SZCardAPIVersion/Create/View/Update/Destroy`); the host owns a
+`SZCardHostRaw` (verbs `live`/`commit`, auto-size) and pushes two JSON channels in - `state` (the
+node's scoped snapshot) and `telemetry` (its float/floatArray outputs, lossy). The kit's
+`SZCardState` is an `ObservableObject` the author's SwiftUI view reads; the entry point is
+`enum SZCardMain { static func make(_ state: SZCardState) -> AnyView }`. One dylib can host N
+instances (a future card panel mounts a second one). Cards hot-reload per file like nodes;
+a red compile keeps the last good instance mounted (keep-last-good) and surfaces the log. Card
+and step dylibs are **never dlclose'd** (Darwin pins Swift metadata); each build is a fresh module,
+and swiftc invocations are throttled by one gate shared with steps.
+
 ## Failure handling
 
 - A node that throws/crashes during `update()` is isolated: the runtime marks it failed, skips it

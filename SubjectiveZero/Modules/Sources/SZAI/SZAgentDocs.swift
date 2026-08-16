@@ -20,11 +20,25 @@ public enum SZAgentDocs {
               summary: "node-contract.json: port types, the `ui` OBJECT + valid kinds, `default`/`options` shapes, permissions, and what reaches the node at runtime."),
         SZAgentDocsTopic(id: "node-abi", title: "Node runtime ABI",
               summary: "Node.swift shape + the injected SZNode/SZFrameContext accessors (textures + live scalar/string inputs); BGRA8; don't-redeclare rules."),
+        SZAgentDocsTopic(id: "card-abi", title: "Card ABI (custom card UI)",
+              summary: "Card.swift shape (SwiftUI, SZCardMain + SZCardState): reading ports, live/commit gesture rule, telemetry, backdrop + plumbing, contract `card` hints, how to ship it with the node."),
     ]
+
+    /// The card doc's worked example, verbatim — ALSO the starter `Card.swift` the app scaffolds for
+    /// "New Custom Card…", so the file a user first opens IS the example the docs teach (one source;
+    /// SZAppTests compile it). The first fenced Swift block after the "Worked example" heading.
+    public static let cardStarterSource: String = {
+        guard let doc = read("card-abi"),
+              let heading = doc.range(of: "## Worked example"),
+              let open = doc.range(of: "```swift\n", range: heading.upperBound..<doc.endIndex),
+              let close = doc.range(of: "\n```", range: open.upperBound..<doc.endIndex)
+        else { fatalError("SZAI: card-abi.md has no worked example to scaffold from") }
+        return String(doc[open.upperBound..<close.lowerBound]) + "\n"
+    }()
 
     /// The node-abi doc body — ALSO embedded verbatim into the coding compile prompt (its `{{abi}}`
     /// token), so the ABI prose lives in exactly one file (derive-don't-duplicate). The code-level
-    /// source of truth stays SZRuntime's `SZRuntimeSupport.source`; this doc mirrors it for agents.
+    /// source of truth stays SZRuntime's `SZNodeKit.source`; this doc mirrors it for agents.
     public static let abiReference: String = {
         guard let doc = read("node-abi") else { fatalError("SZAI: missing bundled doc node-abi.md") }
         return doc

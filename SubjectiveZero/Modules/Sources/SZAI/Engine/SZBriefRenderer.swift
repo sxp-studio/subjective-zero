@@ -133,6 +133,7 @@ public struct SZBriefRenderer: Sendable {
     // MARK: - The authoring namespace (the pack gate's ground truth)
 
     static let toolbeltPartial = "prompts/toolbelt.md.mustache"
+    static let cardsPartial = "prompts/cards.md.mustache"
     static let referencePreservePartial = "prompts/reference-preserve.md.mustache"
     static let referenceInlinePartial = "prompts/reference-inline.md.mustache"
     static let referenceLibraryPartial = "prompts/reference-library.md.mustache"
@@ -142,7 +143,7 @@ public struct SZBriefRenderer: Sendable {
     /// Every `{{token}}` a template may mention — the ONE namespace the pack gate checks
     /// briefs against. Tied to the assembly: `add` asserts each computed token is listed.
     public static let knownTokens: Set<String> = [
-        "graph", "message", "toolbelt", "node", "contract", "source",
+        "graph", "message", "toolbelt", "cards", "node", "contract", "source",
         "round", "cap", "blockers", "inbox", "instruction",
         "prompt", "inputs", "outputs", "boundary", "abi", "reference", "schema",
         "blocker", "director_message",
@@ -153,6 +154,7 @@ public struct SZBriefRenderer: Sendable {
     /// mention the token. A token lists every variant its section can select.
     public static let requiredPartials: [String: [String]] = [
         "toolbelt": [toolbeltPartial],
+        "cards": [cardsPartial],
         "reference": [referencePreservePartial, referenceInlinePartial, referenceLibraryPartial],
         "schema": [schemaInlinePartial, schemaFetchPartial],
     ]
@@ -186,6 +188,7 @@ public struct SZBriefRenderer: Sendable {
             SZDirectorPrompt.graphSummary(try need(world.graph, "graph", "a project"))) }
         add("message") { SZPromptTemplate.defused(message) }
         try add("toolbelt") { try template(agent, Self.toolbeltPartial) }
+        try add("cards") { try template(agent, Self.cardsPartial) }
         try add("node") { try need(world.node, "node", "a bound node").uuidString }
         try add("round") { String(try need(world.run, "round", "a live run").round) }
         try add("cap") { String(try need(world.run, "cap", "a live run").roundCap) }

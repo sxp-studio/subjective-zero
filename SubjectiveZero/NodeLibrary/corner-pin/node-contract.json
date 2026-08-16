@@ -1,0 +1,16 @@
+{
+  "title": "Corner Pin",
+  "sfSymbol": "perspective",
+  "summary": "Projection mapping: warps the input onto a quad whose four corners you drag — the surface you project on.",
+  "inputs": [
+    { "name": "input", "type": "texture" },
+    { "name": "tl", "type": "float2", "default": { "type": "float2", "value": [0.0, 0.0] } },
+    { "name": "tr", "type": "float2", "default": { "type": "float2", "value": [1.0, 0.0] } },
+    { "name": "br", "type": "float2", "default": { "type": "float2", "value": [1.0, 1.0] } },
+    { "name": "bl", "type": "float2", "default": { "type": "float2", "value": [0.0, 1.0] } }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ],
+  "card": { "cols": 10, "rows": 8, "backdrop": "output", "plumbing": ["tl", "tr", "br", "bl"] }
+}

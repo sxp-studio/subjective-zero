@@ -60,9 +60,10 @@ round-trip costs far more than the payload it fetches. Batch independent reads i
 never re-fetch what this brief already contains: the runtime ABI, your node's boundary, and the
 contract schema material are all above.
 
+{{cards}}
 ## Workflow — call these MCP tools in order
 
-1. `agent_write_node_staged { "node": "{{node}}", "contract": <the json OBJECT>, "source": "<full Node.swift>" }`
+1. `agent_write_node_staged { "node": "{{node}}", "contract": <the json OBJECT>, "source": "<full Node.swift>", "card": "<full Card.swift — optional, see Custom cards>" }`
 2. `agent_compile_node { "node": "{{node}}" }`
    - if it returns `{ "ok": false, "errors": "..." }` → fix `Node.swift` and repeat from step 1.
    - if it returns `{ "ok": true }` → continue.

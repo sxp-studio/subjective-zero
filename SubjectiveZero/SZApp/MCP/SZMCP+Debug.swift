@@ -14,6 +14,8 @@ extension SZHostBridge {
         [
             tool("debug_get_build_errors", "Return the most recent node build errors, or (none)."),
             tool("debug_snapshot_state", "Return the live project graph as JSON."),
+            tool("debug_card_mount", "A node's custom-card mount as JSON: {state: unmounted|loading|ready|failed, generation, warning, error, hasSource, backdrop}.",
+                 properties: ["node": ["type": "string", "description": "node id (UUID)"]]),
             tool("debug_chat_transcript", "Return a chat transcript as JSON — role/text/thinking plus, where present, timestamp/duration/usage/breakdown per message (the same numbers the in-app turn breakdown shows).",
                  properties: ["scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"]]),
             tool("debug_turn_timings", "Per-turn timing data for profiling, as JSON: completed agent turns per scope — {turnID, start, duration, usage, events} where events are the turn's recorded phases (queue wait, first output, tool spans, compile/promote, the CLI's own report) with id/parent (span hierarchy) and runID (run grouping). The latest run's rollup rides the Director run-complete narration (run.* stages). `tracing` reports whether collection is on (SZ_TRACE / DEBUG).",
@@ -43,6 +45,9 @@ extension SZHostBridge {
         switch name {
         case "debug_get_build_errors": return host.lastBuildErrors ?? "(none)"
         case "debug_snapshot_state":   return debugSnapshotState()
+        case "debug_card_mount":
+            guard let id = arguments.uuid("node") else { throw SZMCPError.message("debug_card_mount needs `node`") }
+            return SZJSONRPC.encode(host.cardHost.debugDescription(for: id))
         case "debug_chat_transcript":  return try debugChatTranscript(arguments)
         case "debug_turn_timings":     return try debugTurnTimings(arguments)
         case "debug_run_summary":      return try debugRunSummary(arguments)

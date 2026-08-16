@@ -50,18 +50,14 @@ extension SZHost {
     /// the preview off (explicit `.none`); clicking any other texture output points the preview at
     /// it. Graph state, persisted with the project like `position`. Returns the applied body.
     ///
-    /// A `.custom` body is refused (returned unchanged): the card renders compact so the user can't
-    /// see what the click would destroy — the authored custom-card ref. Replacing it stays an
-    /// explicit act (`ui_set_node_body`).
+    /// A `.custom` body is refused (returned unchanged): the photo glyph is hidden while a card fills
+    /// the slot, and swapping the card away stays an explicit act (context menu, `ui_set_node_body`).
+    /// Resolves through `applyNodeBody` — the one body-edit path.
     @discardableResult
     func toggleNodePreview(node id: SZNodeID, port: String) -> SZNodeBody? {
         guard let node = store.project?.graph.node(id: id) else { return nil }
         guard node.body?.mode != .custom else { return node.body }
-        let body = node.effectivePreviewPort == port
-            ? SZNodeBody(mode: .none)
-            : SZNodeBody(mode: .preview, previewPort: port)
-        guard setNodeBody(node: id, body: body) else { return nil }
-        return body
+        return try? applyNodeBody(node: id, mode: node.effectivePreviewPort == port ? .none : .preview, port: port)
     }
 
     // MARK: - Watch-set maintenance (event-driven)
@@ -91,6 +87,7 @@ extension SZHost {
     /// the thumbs' demand on the render loop (each push re-applies the render drive), and it empties
     /// when the main window — the node editor's only home — can't show pixels.
     func refreshPreviewStream() {
+        cardHostStorage?.graphDidChange()   // custom cards ride the same graph hook (SZCardHostController)
         guard let runtime else { return }
         guard livePreviews, popoutManager.mainWindowIsDisplayable, let graph = store.project?.graph else {
             if lastPushedWatchKeys != [] {

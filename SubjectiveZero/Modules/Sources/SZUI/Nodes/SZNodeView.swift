@@ -28,6 +28,9 @@ struct SZNodeView: View, Equatable {
     /// This node's live preview box (stable per node, written by the host's preview frame sink). Excluded
     /// from `==` like the closures — only SZNodePreviewThumb reads its contents.
     var previewFrame: SZNodePreviewFrame? = nil
+    /// The app's card host (stable ref — excluded from `==` like `previewFrame`; the card region
+    /// observes its per-node mount box directly, so mount changes never touch this card's `==`).
+    var cardProvider: (any SZCustomCardProvider)? = nil
     var onOpenSource: (() -> Void)? = nil   // file button → open this node's Node.swift
     var onOpenChat: (() -> Void)? = nil     // speech button → this node's Coding Agent chat
     var onOpenMenu: (() -> Void)? = nil     // "⋯" → the node's context menu (split/merge/implement/…)
@@ -68,17 +71,26 @@ struct SZNodeView: View, Equatable {
                 lodTile
             } else {
                 header
-                // The preview body sits between header and rows, exactly `previewHeight` tall —
-                // SZNodeLayout.previewInset is the ONE term the frame below and rowCenterY share.
+                // The body region sits between header and rows — the preview thumb (exactly
+                // `previewHeight` tall) or the node's custom card (`customInset` tall). One slot;
+                // SZNodeLayout.bodyInset is the ONE term the frame below and rowCenterY share.
                 if SZNodeLayout.previewInset(of: node) > 0 {
                     previewRegion
+                } else if SZNodeLayout.customInset(of: node) > 0 {
+                    SZCustomCardView(nodeID: node.id,
+                                     bodySize: CGSize(width: SZNodeLayout.width(of: node),
+                                                      height: SZNodeLayout.customInset(of: node)),
+                                     mount: cardProvider?.mount(for: node.id),
+                                     backdropFrame: previewFrame,
+                                     provider: cardProvider)
                 }
                 // The body rows must match SZNodeLayout's geometry exactly (bodyTopPadding above the first
-                // row, rowSpacing between rows) so the overlaid sockets line up with their labels.
+                // row, rowSpacing between rows) so the overlaid sockets line up with their labels. A
+                // custom card's plumbing inputs (the ports the card itself controls) get no row.
                 // The card-wide numeric-cell width, computed ONCE per body pass (each row reuses it).
                 let fieldWidth = SZNodeLayout.numericFieldWidth(of: node)
                 VStack(spacing: SZNodeLayout.rowSpacing) {
-                    ForEach(inputs, id: \.name) { inputRow($0, fieldWidth: fieldWidth) }
+                    ForEach(SZNodeLayout.rowInputs(of: node), id: \.name) { inputRow($0, fieldWidth: fieldWidth) }
                     ForEach(outputs, id: \.name) { outputRow($0) }
                 }
                 .padding(.top, SZNodeLayout.bodyTopPadding)
@@ -127,7 +139,9 @@ struct SZNodeView: View, Equatable {
     /// buttons) is gone — the status pill floating above survives.
     @ViewBuilder
     private var lodTile: some View {
-        if SZNodeLayout.previewInset(of: node) > 0 {
+        // A custom card with a backdrop streams a thumb too — the tile shows it (the card itself
+        // is too small to operate at this zoom).
+        if previewsEnabled && node.effectivePreviewPort != nil {
             SZNodePreviewThumb(frame: previewFrame, cornerRadius: SZNodeLayout.cornerRadius)
         } else {
             VStack(spacing: 8) {
@@ -150,6 +164,11 @@ struct SZNodeView: View, Equatable {
     private var bottomButtons: some View {
         HStack(spacing: 4) {
             if let onOpenSource { SZCardPillButton(symbol: "doc.text", help: "Open this node's source (Node.swift)", action: onOpenSource) }
+            // The card's own source, when the node has one: saving it hot-reloads the card.
+            if let cardProvider, cardProvider.hasCardSource(for: node.id) {
+                SZCardPillButton(symbol: "rectangle.and.pencil.and.ellipsis", help: "Open this node's custom card (Card.swift)",
+                                 action: { cardProvider.openCardSource(node: node.id) })
+            }
             if let onOpenChat { SZCardPillButton(symbol: "bubble.left.fill", help: "Chat with this node's Coding Agent", action: onOpenChat) }
             if let onOpenMenu { SZCardPillButton(symbol: "ellipsis", help: "Node actions", action: onOpenMenu) }
         }
@@ -197,10 +216,14 @@ struct SZNodeView: View, Equatable {
             Spacer(minLength: 0)
             if port.type == .texture {
                 let previewing = isPreviewPort(port)
-                toggleGlyph("photo", active: previewing, port: port.name,
-                            help: previewing ? "Hide this output's live preview"
-                                             : "Preview this output on the card",
-                            action: onTogglePreview)
+                // The photo toggle picks the preview body; while a custom card fills that slot the
+                // choice isn't the row's to make (the host refuses it too), so the glyph steps aside.
+                if node.effectiveBodyMode != .custom {
+                    toggleGlyph("photo", active: previewing, port: port.name,
+                                help: previewing ? "Hide this output's live preview"
+                                                 : "Preview this output on the card",
+                                action: onTogglePreview)
+                }
                 toggleGlyph("display", active: isRenderEndpoint(port), port: port.name,
                             help: isRenderEndpoint(port) ? "Stop displaying this output"
                                                          : "Display this output in the viewport",

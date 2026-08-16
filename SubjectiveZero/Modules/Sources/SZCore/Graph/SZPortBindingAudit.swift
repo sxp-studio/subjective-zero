@@ -17,7 +17,7 @@ public enum SZPortBindingAudit {
         public init(errors: [String], warnings: [String]) { self.errors = errors; self.warnings = warnings }
     }
 
-    // The runtime `ctx` accessors (SZRuntime/SZNode.swift), grouped by the port direction they name. The
+    // The runtime `ctx` accessors (SZRuntime/Nodes/SZNodeKit.swift), grouped by the port direction they name. The
     // port name is always the first string-literal argument. `floatArray` I/O rides `inputFloatArray` /
     // `setOutputFloats`.
     private static let inputAccessors  = ["inputTexture", "inputFloatArray", "inputFloats", "inputFloat", "inputBool", "inputString"]

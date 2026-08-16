@@ -18,6 +18,7 @@
 // Excluded props are asserted too (differ in one → still `==`), so an exclusion stays a deliberate
 // choice rather than an omission nobody noticed.
 import CoreGraphics
+import SwiftUI
 import Testing
 @testable import SZUI
 import SZCore
@@ -39,6 +40,9 @@ private func storedProperties(of subject: Any) -> Set<String> {
         // compared in ==
         "node", "status", "isSelected", "locked", "showPill", "errorDetail", "renderEndpoint",
         "connectedInputs", "previewsEnabled", "zoomedOut",
+        // the app's card host — a stable ref like previewFrame, excluded from == (the card region
+        // observes its per-node mount box directly)
+        "cardProvider",
         // closures — deliberately excluded from == (capture only stable refs). The card's
         // bottom-left buttons: file (onOpenSource), speech (onOpenChat), and "⋯" (onOpenMenu).
         "onOpenSource", "onOpenChat", "onOpenMenu",
@@ -78,6 +82,8 @@ private func storedProperties(of subject: Any) -> Set<String> {
         "graph", "strokeZoom", "space", "selectedNodeID", "multiSelection", "selectedConnectionID",
         "hiddenConnectionID", "ghostedNodeIDs", "raisedTiers", "connectedSockets", "connectedInputsByNode",
         "nodeAgentState", "graphOpStatus", "isRunning", "runWorkSet", "lockedNodes", "previewsEnabled", "zoomedOut",
+        // the app's card host — stable ref, excluded like previewFrames
+        "cardProvider",
         // closures — deliberately excluded from == (routed to the panel's live handlers).
         // Split/Merge/chat-open/source-open moved to the panel's right-click menu, so their
         // closures left too.
@@ -108,12 +114,24 @@ private func nodeView(
     node n: SZNode = node, status: SZNodeStatus = .ready, isSelected: Bool = false, locked: Bool = false,
     showPill: Bool = true, errorDetail: String? = nil, renderEndpoint: SZPortRef? = nil,
     previewsEnabled: Bool = true, zoomedOut: Bool = false,
-    connectedInputs: Set<String> = [], previewFrame: SZNodePreviewFrame? = nil
+    connectedInputs: Set<String> = [], previewFrame: SZNodePreviewFrame? = nil,
+    cardProvider: (any SZCustomCardProvider)? = nil
 ) -> SZNodeView {
     SZNodeView(node: n, status: status, isSelected: isSelected, locked: locked, showPill: showPill,
                errorDetail: errorDetail, renderEndpoint: renderEndpoint,
                previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
-               connectedInputs: connectedInputs, previewFrame: previewFrame)
+               connectedInputs: connectedInputs, previewFrame: previewFrame,
+               cardProvider: cardProvider)
+}
+
+/// A no-op card host, only for identity checks: `cardProvider` must not participate in `==`.
+@MainActor
+private final class StubCardProvider: SZCustomCardProvider {
+    func mount(for node: SZNodeID) -> SZCardMount? { nil }
+    func hasCardSource(for node: SZNodeID) -> Bool { false }
+    func setCardShown(node: SZNodeID, _ on: Bool) {}
+    func openCardSource(node: SZNodeID) {}
+    func createCard(node: SZNodeID) {}
 }
 
 @MainActor
@@ -145,6 +163,8 @@ private func nodeView(
     // The preview box is a stable per-node ref written at ~15 Hz — its identity (and contents)
     // must not invalidate the card; only the thumb leaf observes it.
     #expect(nodeView(previewFrame: SZNodePreviewFrame()) == nodeView())
+    // Same for the card host: a stable app-owned ref; the card region observes its mount box itself.
+    #expect(nodeView(cardProvider: StubCardProvider()) == nodeView())
 
     // Closures capture only stable refs; a fresh closure identity each render must not invalidate.
     let withClosures = SZNodeView(
@@ -195,7 +215,8 @@ private func canvasView(
     nodeAgentState: [SZNodeID: SZNodeAgentState] = [:], graphOpStatus: [SZNodeID: String] = [:],
     isRunning: Bool = false, runWorkSet: Set<SZNodeID> = [], lockedNodes: Set<SZNodeID> = [],
     autoEditNodeID: SZNodeID? = nil,
-    previewsEnabled: Bool = true, zoomedOut: Bool = false, previewFrames: SZNodePreviewFrames? = nil
+    previewsEnabled: Bool = true, zoomedOut: Bool = false, previewFrames: SZNodePreviewFrames? = nil,
+    cardProvider: (any SZCustomCardProvider)? = nil
 ) -> SZNodeCanvasContentView {
     var v = SZNodeCanvasContentView(
         graph: graph, strokeZoom: strokeZoom, space: space, selectedNodeID: selectedNodeID,
@@ -204,7 +225,7 @@ private func canvasView(
         connectedSockets: connectedSockets, connectedInputsByNode: connectedInputsByNode,
         nodeAgentState: nodeAgentState, graphOpStatus: graphOpStatus, isRunning: isRunning,
         runWorkSet: runWorkSet, lockedNodes: lockedNodes, previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
-        previewFrames: previewFrames)
+        previewFrames: previewFrames, cardProvider: cardProvider)
     v.autoEditNodeID = autoEditNodeID
     return v
 }
@@ -240,6 +261,7 @@ private func canvasView(
 
     // The preview registry is a stable host-owned ref — identity must not invalidate the canvas.
     #expect(canvasView(previewFrames: SZNodePreviewFrames()) == canvasView())
+    #expect(canvasView(cardProvider: StubCardProvider()) == canvasView())
 
     var withClosures = canvasView()
     withClosures.onSelectNode = { _, _ in }

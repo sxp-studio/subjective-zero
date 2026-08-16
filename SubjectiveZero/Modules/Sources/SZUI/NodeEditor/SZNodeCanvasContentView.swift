@@ -48,6 +48,8 @@ struct SZNodeCanvasContentView: View, Equatable {
     // Interaction plumbing — closures excluded from `==` (see header). `previewFrames` rides with
     // them: a stable registry ref whose per-node boxes are observed only by the thumb leaves.
     var previewFrames: SZNodePreviewFrames? = nil
+    /// The app's card host (stable ref, `previewFrames` pattern) — mount state + content per node.
+    var cardProvider: (any SZCustomCardProvider)? = nil
     var onSelectNode: (SZNodeID, _ additive: Bool) -> Void = { _, _ in }
     var onSelectConnection: (SZConnectionID) -> Void = { _ in }
     var onNodeDragChanged: (SZNodeID, _ translation: CGSize, _ location: CGPoint) -> Void = { _, _, _ in }
@@ -152,6 +154,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             previewsEnabled: previewsEnabled,
             zoomedOut: zoomedOut,
             previewFrame: previewFrames?.frame(for: node.id),
+            cardProvider: cardProvider,
             onOpenSource: { onOpenNodeSource(node.id) },
             onOpenChat: { onOpenNodeChat(node.id) },
             onOpenMenu: { onOpenNodeMenu(node.id) },
@@ -183,6 +186,7 @@ struct SZNodeCanvasContentView: View, Equatable {
         previewsEnabled: Bool = true,
         zoomedOut: Bool = false,
         previewFrame: SZNodePreviewFrame? = nil,
+        cardProvider: (any SZCustomCardProvider)? = nil,
         onOpenSource: (() -> Void)? = nil,
         onOpenChat: (() -> Void)? = nil,
         onOpenMenu: (() -> Void)? = nil,
@@ -213,6 +217,7 @@ struct SZNodeCanvasContentView: View, Equatable {
                        zoomedOut: zoomedOut,
                        connectedInputs: connectedInputs,
                        previewFrame: previewFrame,
+                       cardProvider: cardProvider,
                        onOpenSource: onOpenSource,
                        onOpenChat: onOpenChat,
                        onOpenMenu: onOpenMenu,

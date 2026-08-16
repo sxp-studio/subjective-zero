@@ -56,22 +56,6 @@ public final class SZStepRuntime {
         var queued: LoadRequest?
     }
 
-    /// App-wide swiftc gate for the step tier, sized to keep a burst of schedules from
-    /// becoming a compile storm. Static on purpose: every runtime instance (and every test
-    /// in the process) shares the same slots. The blocking wait is acceptable because it
-    /// happens on a detached utility task whose whole job is to sit in a subprocess anyway.
-    private nonisolated static let compileSlots = DispatchSemaphore(value: 4)
-
-    /// The slot-gated compile, synchronous by design: the semaphore wait must live in a sync
-    /// frame (it is unavailable to async contexts), and the detached task that calls this is
-    /// exactly the thread we mean to park.
-    private nonisolated static func gatedCompile(_ toolchain: SZToolchain,
-                                                 _ request: LoadRequest) -> Result<URL, Error> {
-        compileSlots.wait()
-        defer { compileSlots.signal() }
-        return Result { try toolchain.compile(stepSource: request.sourceURL, into: request.buildDir) }
-    }
-
     private let toolchain = SZToolchain()
     private var entries: [SZStepKey: Entry] = [:]
 
@@ -111,10 +95,10 @@ public final class SZStepRuntime {
     private func startCompile(key: SZStepKey, entry: Entry, request: LoadRequest) {
         let toolchain = self.toolchain
         entry.compileTask = Task { [weak self] in
-            // The slow part, off the actor and gated by the shared slots. Everything the
-            // detached closure touches is Sendable; the toolchain is stateless.
+            // The slow part, off the actor and gated by the toolchain's shared slots. Everything
+            // the detached closure touches is Sendable; the toolchain is stateless.
             let compiled = await Task.detached(priority: .utility) {
-                Self.gatedCompile(toolchain, request)
+                toolchain.gated { try toolchain.compile(stepSource: request.sourceURL, into: request.buildDir) }
             }.value
             self?.finishCompile(key: key, entry: entry, request: request, compiled: compiled)
         }

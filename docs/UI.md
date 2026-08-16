@@ -97,7 +97,11 @@ A classic node-graph editor rendered natively over the viewport. Two node kinds
   a wire-spawned node carries its one seeded port.
 - **Generated node (post-gen):** header (title + SF Symbol) and one port row per declared
   input/output; unconnected inputs render their compatible control (slider, toggle, dropdown,
-  field, file picker); texture outputs show a **display** toggle.
+  field, file picker); texture outputs show a **display** toggle. Between header and rows sits the
+  **body region**: the live preview of a texture output by default, or the node's **custom card**
+  when it ships a `Card.swift` and the body is set to custom ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md#custom-card-cardswift)).
+  A backdrop card (corner-pin) shows the output under its handles and sizes the region to the
+  render aspect; the inputs the card owns (`card.plumbing`) get no row while it shows.
 
 Node anatomy should be **compact and sleek** (right anatomy, minimal bulk). The whole node view
 is derived from the node's contract, so reflow on `ui_update_node` is
@@ -121,7 +125,9 @@ are REAL messages to real agents; determinism stays in the agents' `ui_*` tools)
 - **A node** → "@\<node\> fix this: \<blocker\>" (when its agent reported error/needsInput),
   "@project implement @\<node\>" (prompt node) or "@project split @\<node\> into two stages"
   (generated), plus **Open Transcript** (`text.quote` - read) and **Open Node.swift** (`doc.text`)
-  action rows. Right-click also selects the node (a multi-selection member keeps the set).
+  action rows. A generated node with a `Card.swift` adds **Show Custom Card / Show Rows** and
+  **Open Card.swift**; one without adds **New Custom Card…** (scaffolds a starter and opens it).
+  Right-click also selects the node (a multi-selection member keeps the set).
 - **A multi-selection** → "@project merge @A, @B and @C into one node".
 - **Empty canvas** → "@project implement the N pending nodes".
 - Every menu has a **free-text row** seeded with the target's mention - the recipient is always

@@ -15,7 +15,8 @@ MyProject.subz/
 ├─ nodes/
 │  ├─ n1/
 │  │  ├─ node-contract.json
-│  │  └─ Node.swift
+│  │  ├─ Node.swift
+│  │  └─ Card.swift          // optional: the node's custom card (see below)
 │  └─ n2/
 │     ├─ node-contract.json
 │     └─ Node.swift
@@ -25,8 +26,8 @@ MyProject.subz/
 ```
 
 `project.json` references nodes by id and owns the connection list. Each node folder owns its
-contract + source. This "per-node `Node.swift` + `node-contract.json`" shape keeps each node a
-self-contained, inspectable unit on disk.
+contract + source (+ an optional `Card.swift`). This "per-node `Node.swift` + `node-contract.json`"
+shape keeps each node a self-contained, inspectable unit on disk.
 
 ## Node kinds
 
@@ -64,6 +65,35 @@ enforcement. Illustrative shape:
   these ([RUNTIME.md](RUNTIME.md)).
 - `display: true` on a texture output marks it as the current render endpoint candidate.
 - **`ui`** is an object `{ "kind", "min"?, "max"?, "step"? }` - `kind` ∈ `slider · field · colorWell · toggle · dropdown · filePicker`. **`default`** is a *tagged* object `{ "type", "value" }` matching the port's type (e.g. `{"type":"float","value":1.0}`, `{"type":"colorRGB","value":[1,0,0]}`, `{"type":"enum","value":"warm"}`) - never a bare value. An `enum` also carries `options` as positional pairs `[["Label","value"], …]`. The complete per-type table (every `default`/`ui`/runtime read) is the canonical `node-contract` agent doc (`agent_docs_read`), kept in sync with `SZContract.swift`.
+
+- **`card`** (optional) declares the node's custom card: `{ "cols"?, "rows"?, "backdrop"?, "plumbing"? }`
+  - a minimum width in grid columns, the region's default height in rows, the texture output the
+  host draws live under the card, and the inputs the card owns (their generated rows step aside
+  while the card shows). Hints only - the card itself is `Card.swift`, below.
+
+## Custom card (`Card.swift`)
+
+A generated node MAY ship a **custom card**: a small SwiftUI view, compiled at runtime exactly like
+`Node.swift`, mounted as a **region** of the node card between the header and the generated port
+rows - where the live preview would sit. Everything else stays system-generated from the contract:
+header, input rows (control + socket), output rows (monitor toggle + socket). A card is for
+interactions the rows can't express - dragging corner handles over the output (the built-in
+`corner-pin` projection-mapping node), an XY pad, a curve - never for restyling a slider.
+
+- **Model:** the node's `body` is `none | preview | custom` (graph state, persisted like `position`);
+  `custom` is only accepted when `Card.swift` exists on disk. Right-click → **Show Custom Card /
+  Show Rows** flips it; `ui_set_node_body` is the same edit from MCP. The file stays either way.
+- **Data flow:** the card reads a scoped snapshot of its node (contract, current input values,
+  connected inputs, render size) and, for nodes with float/floatArray outputs, a lossy ~30 Hz
+  telemetry stream. It writes through two verbs only - `live` (per-gesture-tick, unpersisted) and
+  `commit` (on release, persisted) - which land on the same input-default path a slider drag uses.
+  Cards never see the graph, other nodes, or Metal.
+- **Who writes it:** the user (right-click → **New Custom Card…** scaffolds a starter and opens it;
+  saving hot-reloads, a red edit keeps the last good build mounted with a warning chip) or an agent
+  (`agent_write_node_staged { card }`, compile-checked with the node; the first promoted card turns
+  the body on). Agents are told cards are **off by default** - a Director-level call, made only when
+  the user asks for custom UI or the interaction has no row equivalent. The authoring contract is
+  the `card-abi` agent doc; the runtime side is in [RUNTIME.md](RUNTIME.md#custom-cards).
 
 ## I/O types and their UI
 

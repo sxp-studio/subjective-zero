@@ -82,12 +82,17 @@ public struct SZLibraryIndexEntry: Codable, Equatable, Sendable {
     public var avoidWhen: String?
     public var reuse: String?
     public var platform: String?
+    /// The node ships a `Card.swift` — a custom card mounted as its body — worth reading as the
+    /// reference for authoring one. Derived from the folder (file presence), never curated.
+    public var card: Bool?
 
     /// Assemble a record: identity + I/O + permissions from the contract (authoritative); the discovery
-    /// fields from the node's curation entry (if any). A node with no curation entry degrades to the
-    /// contract-derived subset — still a superset of the old `{id, title, summary}`.
-    public init(id: String, contract: SZNodeContract, curation: SZLibraryCurationEntry?) {
+    /// fields from the node's curation entry (if any); `hasCard` from the folder. A node with no
+    /// curation entry degrades to the contract-derived subset — still a superset of the old
+    /// `{id, title, summary}`.
+    public init(id: String, contract: SZNodeContract, curation: SZLibraryCurationEntry?, hasCard: Bool = false) {
         self.id = id
+        self.card = hasCard ? true : nil
         self.title = contract.title
         self.sfSymbol = contract.sfSymbol
         self.summary = contract.summary

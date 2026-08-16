@@ -238,9 +238,23 @@ round-trip costs far more than the payload it fetches. Batch independent reads i
 never re-fetch what this brief already contains: the runtime ABI, your node's boundary, and the
 contract schema material are all above.
 
+## Custom cards — off by default
+
+A node MAY ship a `Card.swift`: a small SwiftUI view mounted between the node's header and its
+generated port rows. **Do not ship one unless the node's prompt (or your instruction) asks for a
+custom card / custom UI, or the interaction has no row equivalent** — dragging handles or a pad over
+the output, a curve, a meter over an array the node emits. Sliders, dropdowns, colors, toggles come
+free from the contract's rows; a card that rebuilds them is noise the user has to hide. If (and only
+if) one is called for: read `agent_docs_read { "topic": "card-abi" }` first, study the built-in
+reference (`agent_library_source { "node": "corner-pin", "file": "Card.swift" }`), list the inputs the
+card takes over under the contract's `card.plumbing`, and pass the file as `card` in step 1 — a red
+card blocks the promote and comes back through `agent_compile_node`'s errors like a node build would.
+If the node already has a `Card.swift` (it is shown after the source above), keep it: re-stage it as
+`card` whenever your contract change touches a port it reads.
+
 ## Workflow — call these MCP tools in order
 
-1. `agent_write_node_staged { "node": "22222222-2222-4222-8222-222222222222", "contract": <the json OBJECT>, "source": "<full Node.swift>" }`
+1. `agent_write_node_staged { "node": "22222222-2222-4222-8222-222222222222", "contract": <the json OBJECT>, "source": "<full Node.swift>", "card": "<full Card.swift — optional, see Custom cards>" }`
 2. `agent_compile_node { "node": "22222222-2222-4222-8222-222222222222" }`
    - if it returns `{ "ok": false, "errors": "..." }` → fix `Node.swift` and repeat from step 1.
    - if it returns `{ "ok": true }` → continue.

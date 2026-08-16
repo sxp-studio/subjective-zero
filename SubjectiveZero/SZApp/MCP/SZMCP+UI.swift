@@ -24,6 +24,11 @@ extension SZHostBridge {
                               "description": "absolute paths to image/video files (≥1)"],
                     "x": ["type": "number"], "y": ["type": "number"],
                  ]),
+            tool("ui_add_library_node", "Add a built-in library node verbatim (see agent_library_index for ids, e.g. `corner-pin`, `checkerboard`) — mirrors placing one from the palette. Copies its Node.swift (and Card.swift, when the node ships a custom card — a card that draws over the node's output lands ON, others wait in the context menu) into the project, compiles, and returns the new node id.",
+                 properties: [
+                    "library": ["type": "string", "description": "the NodeLibrary id"],
+                    "x": ["type": "number"], "y": ["type": "number"],
+                 ]),
             tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged. Data edges must keep the graph acyclic: a data connection that would close a cycle is refused with {status: \"refused\", reason} naming the path — rewire or drop an edge instead. Flow (intent) edges are never cycle-checked.",
                  properties: [
                     "from": ["type": "string"], "fromPort": ["type": "string"],
@@ -97,11 +102,14 @@ extension SZHostBridge {
                  ]),
             tool("ui_toggle_display", "Toggle a node's texture output as the viewport render endpoint (mirrors clicking the node card's monitor icon) — switches the live viewport to that output. Pointing at the current endpoint clears it. `port` must be a `texture` output.",
                  properties: ["node": ["type": "string"], "port": ["type": "string"]]),
-            tool("ui_set_node_body", "Set a generated node card's body region (between header and rows). `mode`: \"none\" (compact card) or \"preview\" (a live thumbnail of a texture output — `port` picks which, defaulting to the display-marked/first texture output). An unset body auto-previews a texture node; an explicit value pins the choice. Geometry-affecting and persisted; echoes the applied body (including the resolved preview port).",
+            tool("ui_set_node_body", "Set a generated node card's body region (between header and rows). `mode`: \"none\" (compact card), \"preview\" (a live thumbnail of a texture output — `port` picks which, defaulting to the display-marked/first texture output), or \"custom\" (the node's own Card.swift, mounted as its body — the node folder must hold one; `cols`/`rows` set the footprint in grid cells, `pinned` stops auto-size). An unset body auto-previews a texture node; an explicit value pins the choice. Geometry-affecting and persisted; echoes the applied body.",
                  properties: [
                     "node": ["type": "string"],
-                    "mode": ["type": "string", "enum": ["none", "preview"]],
+                    "mode": ["type": "string", "enum": ["none", "preview", "custom"]],
                     "port": ["type": "string", "description": "preview only: which texture output to show"],
+                    "cols": ["type": "integer", "description": "custom only: card width in grid cells (6…24)"],
+                    "rows": ["type": "integer", "description": "custom only: card body height in grid cells (2…24)"],
+                    "pinned": ["type": "boolean", "description": "custom only: pin the size against auto-measure"],
                  ]),
             // The chat-tab and panel tools below are view/window navigation — no graph or render
             // effect — so they are withheld from agents (`agentCallable: false`); only the human
@@ -159,6 +167,7 @@ extension SZHostBridge {
         switch name {
         case "ui_add_prompt_node": return try uiAddPromptNode(arguments)
         case "ui_add_source_node": return try uiAddSourceNode(arguments)
+        case "ui_add_library_node": return try uiAddLibraryNode(arguments)
         case "ui_connect":         return try uiConnect(arguments)
         case "ui_disconnect":      return try uiDisconnect(arguments)
         case "ui_update_node":     return try uiUpdateNode(arguments)
@@ -635,7 +644,7 @@ extension SZHostBridge {
     /// A port value as its natural JSON type — mirrors `portValue`'s coercion in reverse. Taken off the
     /// enum rather than `SZPortValue.floats`, which narrows to `Float` (echoing 1.2 as 1.2000000476…)
     /// and flattens a bool to 1/0.
-    private static func jsonValue(_ value: SZPortValue) -> Any? {
+    static func jsonValue(_ value: SZPortValue) -> Any? {
         switch value {
         case .float(let v): v
         case .bool(let b): b
@@ -678,49 +687,46 @@ extension SZHostBridge {
 
     private func uiSetNodeBody(_ arguments: [String: Any]) throws -> String {
         guard let id = arguments.uuid("node") else { throw SZMCPError.message("ui_set_node_body needs `node` id") }
-        guard let modeRaw = arguments.string("mode"), let mode = SZNodeBodyMode(rawValue: modeRaw),
-              mode != .custom else {   // custom cards haven't landed natively yet
-            throw SZMCPError.message("ui_set_node_body needs `mode` ∈ {none, preview}")
+        guard let modeRaw = arguments.string("mode"), let mode = SZNodeBodyMode(rawValue: modeRaw) else {
+            throw SZMCPError.message("ui_set_node_body needs `mode` ∈ {none, preview, custom}")
         }
-        guard let node = host.store.project?.graph.node(id: id) else {
-            throw SZMCPError.message("no node \(id)")
-        }
-        // Body is a generated-card affordance: a prompt card is a single field with no body region.
-        guard node.kind == .generated else {
-            throw SZMCPError.message("node \(id) is a prompt card — it has no body region")
-        }
-
-        let body: SZNodeBody
-        if mode == .preview {
-            // The explicit `port` must be a texture output; omitted, the shared default rule picks
-            // one (`preferredTextureOutput` — the SAME pick the card's auto-preview shows, so the
-            // echoed body can never disagree with the canvas). No texture output → nothing to
-            // preview → reject, so the persisted body is always renderable.
-            let outputs = node.contract?.outputs ?? []
-            if let port = arguments.string("port") {
-                guard outputs.contains(where: { $0.name == port && $0.type == .texture }) else {
-                    throw SZMCPError.message("node \(id) has no texture output port '\(port)'")
-                }
-                body = SZNodeBody(mode: .preview, previewPort: port)
-            } else if let port = outputs.preferredTextureOutput?.name {
-                body = SZNodeBody(mode: .preview, previewPort: port)
-            } else {
-                throw SZMCPError.message("node \(id) has no texture output to preview")
-            }
-        } else {
-            body = SZNodeBody(mode: .none)
-        }
-
-        // The same host op as the card's photo toggle — one apply choreography (store write, stale
-        // thumb drop, persist, watch-set refresh) for human and agent edits.
+        // The same host op as the card's photo toggle and the context-menu card toggle — ONE
+        // resolve+apply choreography (validation, store write, stale thumb drop, persist,
+        // watch-set refresh) for human and agent edits. Its errors are the agent's guidance.
         try requireUnfenced([id])
-        guard host.setNodeBody(node: id, body: body, origin: .agent) else {
-            throw SZMCPError.message("no node \(id)")
+        let body: SZNodeBody
+        do {
+            body = try host.applyNodeBody(
+                node: id, mode: mode, port: arguments.string("port"),
+                cols: (arguments["cols"] as? NSNumber)?.intValue, rows: (arguments["rows"] as? NSNumber)?.intValue,
+                pinned: arguments["pinned"] as? Bool, origin: .agent)
+        } catch {
+            throw SZMCPError.message(String(describing: error))
         }
 
         var applied: [String: Any] = ["mode": body.mode.rawValue]
         if let previewPort = body.previewPort { applied["previewPort"] = previewPort }
+        if let custom = body.custom {
+            var card: [String: Any] = [:]
+            if let cols = custom.cols { card["cols"] = cols }
+            if let rows = custom.rows { card["rows"] = rows }
+            if let pinned = custom.pinned { card["pinned"] = pinned }
+            applied["custom"] = card
+        }
         return SZJSONRPC.encode(["body": applied])
+    }
+
+    /// Materialize a built-in library node into the graph — the human's drag/drop and palette path,
+    /// exposed so a test drive (and an agent that wants a shipped node verbatim, e.g. `corner-pin`)
+    /// can place one without authoring it.
+    private func uiAddLibraryNode(_ arguments: [String: Any]) throws -> String {
+        guard let library = arguments.string("library") else { throw SZMCPError.message("ui_add_library_node needs `library` (a NodeLibrary id, e.g. corner-pin)") }
+        let x = (arguments["x"] as? NSNumber)?.doubleValue ?? 0
+        let y = (arguments["y"] as? NSNumber)?.doubleValue ?? 0
+        let id = try host.instantiateLibraryNode(libraryID: library, position: SZPoint(x: x, y: y))
+        var response: [String: Any] = ["node": id.uuidString, "library": library]
+        if let body = host.store.project?.graph.node(id: id)?.body { response["body"] = body.mode.rawValue }
+        return SZJSONRPC.encode(response)
     }
 
     /// Coerce a JSON `value` to the port's declared type.

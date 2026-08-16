@@ -121,4 +121,9 @@ public enum SZProjectIO {
     public static func nodeSourceURL(projectURL: URL, nodeID: SZNodeID) -> URL {
         projectURL.appending(path: nodesDirName).appending(path: nodeID.description).appending(path: "Node.swift")
     }
+
+    /// The on-disk path of a node's optional `Card.swift` (its custom card), beside `Node.swift`.
+    public static func cardSourceURL(projectURL: URL, nodeID: SZNodeID) -> URL {
+        projectURL.appending(path: nodesDirName).appending(path: nodeID.description).appending(path: "Card.swift")
+    }
 }

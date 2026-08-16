@@ -51,9 +51,14 @@ public enum SZGraphCanvasModel {
     }
 
     /// Every interactive socket of ONE node: flow in/out, plus data sockets per declared port on a
-    /// generated node (prompt cards show only flow sockets, matching the node views).
+    /// generated node (prompt cards show only flow sockets, matching the node views). A shown custom
+    /// card's plumbing inputs have no row and no dot — the card is their control; they stay
+    /// CONNECTABLE (MCP, or flip to rows to wire by hand).
     public static func sockets(of node: SZNode) -> [SZSocket] {
-        connectableSockets(of: node).filter { $0.kind == .flow || node.kind == .generated }
+        connectableSockets(of: node).filter {
+            ($0.kind == .flow || node.kind == .generated)
+                && !($0.side == .input && $0.kind == .data && SZNodeLayout.isPlumbing(node, port: $0.port))
+        }
     }
 
     /// Every interactive socket in the graph — `sockets(of:)` over every node.

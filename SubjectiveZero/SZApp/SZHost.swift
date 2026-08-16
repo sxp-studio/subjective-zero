@@ -271,6 +271,9 @@ final class SZHost {
     // Per-node live-preview thumbs (stable observable boxes the cards hold uncompared refs to) and
     // the watch-set plumbing feeding them — all event-driven, see SZHost+NodePreviews.swift.
     let previewFrames = SZNodePreviewFrames()
+    /// Custom-card mounts — see `cardHost` (SZHost+NodeBody.swift), created on first access. The
+    /// controller is @Observable itself; the host only holds it.
+    @ObservationIgnored var cardHostStorage: SZCardHostController?
     /// Debounce for store-observation-triggered watch-set recomputes.
     var previewWatchDebounce: Task<Void, Never>?
     /// The editor's latest visible-node report; nil = no editor report yet ⇒ no culling (headless
@@ -719,6 +722,7 @@ final class SZHost {
 
     private func clearPerProjectState() {
         resetPreviewStreamForProjectSwitch()   // SZHost+NodePreviews — the one unwatch/teardown home
+        cardHostStorage?.unmountAll()          // card mounts + their Card.swift watchers die with the project
         nodeAgentState = [:]
         runWorkSet = []
         // IN-MEMORY reset only — never a disk write: this runs while `loadedProjectURL` still points
@@ -855,6 +859,20 @@ final class SZHost {
         if fm.fileExists(atPath: liveSource.path) { try fm.removeItem(at: liveSource) }
         try fm.copyItem(at: stagedSource, to: liveSource)
 
+        // The node's custom card, if the agent staged one: copy it beside Node.swift. The card
+        // host's per-mount watcher sees the mtime move and recompiles/remounts on its own; the
+        // FIRST card a node ever gets also turns the card on (below, once the body can validate
+        // against the file) — an agent that just authored a control surface expects to see it.
+        let stagedCard = staging.appending(path: "Card.swift")
+        let liveCard = SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: id)
+        let hadCard = fm.fileExists(atPath: liveCard.path)
+        var cardArrived = false
+        if fm.fileExists(atPath: stagedCard.path) {
+            if hadCard { try fm.removeItem(at: liveCard) }
+            try fm.copyItem(at: stagedCard, to: liveCard)
+            cardArrived = !hadCard
+        }
+
         // Fold the staged contract (if any) into the store and flip the node to generated.
         let stagedContract = (try? Data(contentsOf: staging.appending(path: "node-contract.json")))
             .flatMap { try? JSONDecoder().decode(SZNodeContract.self, from: $0) }
@@ -887,6 +905,12 @@ final class SZHost {
                 project.graph.nodes[i].title = contract.title
                 project.graph.nodes[i].sfSymbol = contract.sfSymbol
             }
+            // First card for this node → show it (an explicit `.none` the user chose earlier stands;
+            // nil / auto-preview flips to custom). Part of the promote's own store write — it is the
+            // run's work, so it does not go through the user/agent fence like `applyNodeBody` would.
+            if cardArrived, project.graph.nodes[i].body?.mode != SZNodeBodyMode.none {   // (`.none` alone would mean nil)
+                project.graph.nodes[i].body = SZNodeBody(mode: .custom, custom: SZCustomCardRef())
+            }
         }
 
         // Persist project.json + per-node contracts, then hot-reload.
@@ -904,6 +928,7 @@ final class SZHost {
             try runtime?.loadProject(at: projectURL)
         }
         watchNodeSources(in: projectURL)          // a newly-generated node becomes hot-reloadable
+        if cardArrived { refreshPreviewStream() } // the card host mounts the body flipped above
         nodeAgentState[id]?.errorDetail = nil     // a successful promote clears any prior failure detail
         status = "promoted \(id.uuidString.prefix(8))"
     }
@@ -935,18 +960,42 @@ final class SZHost {
         for (port, value) in inputDefaults {
             if let pi = contract.inputs.firstIndex(where: { $0.name == port }) { contract.inputs[pi].def = value }
         }
-        let node = SZNode(kind: .generated, title: contract.title, sfSymbol: contract.sfSymbol,
+        var node = SZNode(kind: .generated, title: contract.title, sfSymbol: contract.sfSymbol,
                           contract: contract, position: position)
         let live = projectURL.appending(path: "nodes/\(node.id.uuidString)")
         try fm.createDirectory(at: live, withIntermediateDirectories: true)
         try fm.copyItem(at: sourceURL, to: live.appending(path: "Node.swift"))
+        // A library node that ships a custom card copies it along; a card that draws OVER the node's
+        // output (a `backdrop` hint — corner-pin's handles) lands ON, since it IS the node's face; a
+        // control card on an existing effect (vignette, audio-fft) keeps the node's familiar auto-
+        // preview and waits in the context menu ("Show Custom Card").
+        let cardURL = src.appending(path: "Card.swift")
+        if fm.fileExists(atPath: cardURL.path) {
+            try fm.copyItem(at: cardURL, to: SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: node.id))
+            if contract.card?.backdrop != nil { node.body = SZNodeBody(mode: .custom, custom: SZCustomCardRef()) }
+        }
 
         store.mutate { $0.graph.nodes.append(node) }
         if let project = store.project { try SZProjectIO.save(project, to: projectURL) }
+        // A node declaring a permission the app doesn't hold yet (microphone, camera) prompts BEFORE its
+        // `setup()` runs — like project open and the run path do — otherwise the node boots unauthorized
+        // and stays on its fallback (the mic's synthetic tone) until the next reload.
+        if let runtime, contract.requiredPermissions.contains(where: { !runtime.permissions.isAuthorized($0) }) {
+            Task { @MainActor [weak self] in
+                await runtime.requestDeclaredPermissions(for: SZProject(name: "", graph: SZGraph(nodes: [node])))
+                guard let self else { return }
+                do { try self.finishInstantiate(libraryID, in: projectURL) } catch { self.status = "add failed: \(error)" }
+            }
+        } else {
+            try finishInstantiate(libraryID, in: projectURL)
+        }
+        return node.id
+    }
+
+    private func finishInstantiate(_ libraryID: String, in projectURL: URL) throws {
         try runtime?.loadProject(at: projectURL)   // diffs node ids → compiles + loads the new module
         watchNodeSources(in: projectURL)           // the new node becomes hot-reloadable
         status = "added \(libraryID)"
-        return node.id
     }
 
     /// Create library media nodes for a set of media files — the canvas drop (drag & drop) and the

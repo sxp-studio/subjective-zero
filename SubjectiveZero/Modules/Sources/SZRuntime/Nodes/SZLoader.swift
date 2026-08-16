@@ -20,19 +20,7 @@ import SZCore
 /// the runtime's engine lock (or single-threaded tests); `enumerateOptions` is the one documented
 /// concurrent READ (UI dropdown vs render thread) and touches only the immutable resolved symbols.
 final class SZLoader: @unchecked Sendable {
-    enum LoadError: Error, CustomStringConvertible {
-        case dlopenFailed(String)
-        case missingSymbol(String)
-        case apiMismatch(found: Int32, expected: Int32)
-
-        var description: String {
-            switch self {
-            case .dlopenFailed(let msg): "dlopen failed: \(msg)"
-            case .missingSymbol(let name): "node dylib is missing required symbol \(name)"
-            case .apiMismatch(let found, let expected): "node ABI version \(found) != host \(expected)"
-            }
-        }
-    }
+    typealias LoadError = SZDylibLoadError
 
     private var handle: UnsafeMutableRawPointer?
     private var update: SZNodeABI.UpdateFn?
@@ -66,48 +54,19 @@ final class SZLoader: @unchecked Sendable {
     /// un-activated pending first.
     func open(dylib: URL, runtimeLoadsDir: URL) throws {
         discardPending()
-        let fm = FileManager.default
-        try fm.createDirectory(at: runtimeLoadsDir, withIntermediateDirectories: true)
-        let copy = runtimeLoadsDir.appending(path: "node-\(UUID().uuidString).dylib")
-        try? fm.removeItem(at: copy)
-        try fm.copyItem(at: dylib, to: copy)
-
-        guard let newHandle = dlopen(copy.path, RTLD_NOW | RTLD_LOCAL) else {
-            try? fm.removeItem(at: copy)
-            throw LoadError.dlopenFailed(String(cString: dlerror()))
-        }
-
-        func symbol(_ name: String) throws -> UnsafeMutableRawPointer {
-            guard let sym = dlsym(newHandle, name) else {
-                dlclose(newHandle)
-                try? fm.removeItem(at: copy)
-                throw LoadError.missingSymbol(name)
-            }
-            return sym
-        }
-
-        let apiVersion = unsafeBitCast(try symbol(SZNodeABI.apiVersionSymbol), to: SZNodeABI.APIVersionFn.self)
-        let found = apiVersion()
-        guard found == SZNodeABI.version else {
-            dlclose(newHandle)
-            try? fm.removeItem(at: copy)
-            throw LoadError.apiMismatch(found: found, expected: SZNodeABI.version)
-        }
-
-        // Optional — resolved without throwing; a node with no dynamic options simply won't export it.
-        let enumerate = dlsym(newHandle, SZNodeABI.enumerateOptionsSymbol)
-            .map { unsafeBitCast($0, to: SZNodeABI.EnumerateOptionsFn.self) }
-        let setPaused = dlsym(newHandle, SZNodeABI.setPausedSymbol)
-            .map { unsafeBitCast($0, to: SZNodeABI.SetPausedFn.self) }
-
+        let image = try SZMappedDylib.map(dylib, into: runtimeLoadsDir, prefix: "node-",
+                                          versionSymbol: SZNodeABI.apiVersionSymbol,
+                                          expected: SZNodeABI.version, tier: "node")
+        // Optional symbols resolve without throwing; a node with no dynamic options simply won't
+        // export them.
         pending = Pending(
-            handle: newHandle,
-            setup: unsafeBitCast(try symbol(SZNodeABI.setupSymbol), to: SZNodeABI.SetupFn.self),
-            update: unsafeBitCast(try symbol(SZNodeABI.updateSymbol), to: SZNodeABI.UpdateFn.self),
-            teardown: unsafeBitCast(try symbol(SZNodeABI.teardownSymbol), to: SZNodeABI.TeardownFn.self),
-            enumerateOptions: enumerate,
-            setPaused: setPaused,
-            copy: copy)
+            handle: image.handle,
+            setup: try image.symbol(SZNodeABI.setupSymbol),
+            update: try image.symbol(SZNodeABI.updateSymbol),
+            teardown: try image.symbol(SZNodeABI.teardownSymbol),
+            enumerateOptions: image.optionalSymbol(SZNodeABI.enumerateOptionsSymbol),
+            setPaused: image.optionalSymbol(SZNodeABI.setPausedSymbol),
+            copy: image.copy)
     }
 
     /// Phase 2: run the pending module's `setup(setupContext)` and install it as the live module. The

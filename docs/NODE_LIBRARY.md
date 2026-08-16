@@ -184,6 +184,11 @@ A node folder has three files:
   the right side of this; the same rule is enforced automatically for *generated* nodes - see
   [the port-name check](#the-port-name-check).)
 - **`CARD.md`** - prose reuse guidance + gotchas (Tier 2), short by design.
+- **`Card.swift`** *(optional, rare)* - a custom card ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md#custom-card-cardswift)),
+  copied along when the node is instantiated (`ui_add_library_node` / the palette); a card that draws
+  over the node's output (`card.backdrop` in the contract) lands ON, any other waits in the context
+  menu. The index derives `card: true` from the file (served as "ships a card"). Only `corner-pin`
+  ships one today: library nodes get a card only when the interaction has no row equivalent.
 
 Then add **one curation entry** to `NodeLibrary/index.json`, keyed by folder `id`, carrying only the
 fields that aren't in the contract: `tags`, `purpose`, `useWhen`, `avoidWhen`, `reuse`, `platform`.

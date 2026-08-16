@@ -53,6 +53,10 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
                                             // on the canvas (same classifier, stagger, and "last node
                                             // takes the render endpoint"). Rejects the whole call on a
                                             // missing or non-media path
+- `ui_add_library_node`                     // a built-in library node verbatim (Node.swift + its Card.swift
+                                            // when it ships one); a card that draws over the output lands ON
+- `ui_set_node_body`                        // none | preview | custom — a node's body region (the custom
+                                            // card = the node's Card.swift; cols/rows/pinned = its footprint)
 - `ui_connect`, `ui_disconnect`            // flow or data edges
 - `ui_update_node`                          // title, sfSymbol, prompt, summary, permissions → triggers reflow
 - `ui_edit_ports`                           // the ONLY way to add/retype/remove ports; omission preserves,
@@ -83,14 +87,16 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
   but downscaled to fit the token budget (default 768px long edge; `maxSize` overrides). Captures the
   CURRENT display endpoint (what's on screen) - call `ui_toggle_display` first to retarget the viewport.
 - `agent_apply_plan`, `agent_spawn_coding_agents`, `agent_await_all`
-- `agent_write_node_staged`, `agent_compile_node`
+- `agent_write_node_staged`, `agent_compile_node`   // `card` = an optional Card.swift; a red card blocks the promote
 - `agent_library_index`, `agent_library_card`, `agent_library_source`  // 3-tier, see NODE_LIBRARY.md
+                                            // (`source` takes `file: "Card.swift"` for a node that ships a card)
   (`index` built M3; `card` + `source` built M4 - `card`/`source` return raw text, `index` returns JSON)
 - `agent_report_status`, `agent_report_complete`
 
 **`debug_` (diagnostics + tests)**
 - `debug_dump_logs` (build / agent / runtime)
 - `debug_get_build_errors`
+- `debug_card_mount`                        // a node's custom-card mount: state / warning / backdrop rect
 - `debug_snapshot_state`, `debug_load_state`
 - `debug_chat_transcript` - a scope's transcript as JSON, including each message's
   `timestamp`/`duration`/`usage`/`breakdown` where present (the per-turn debug breakdown).

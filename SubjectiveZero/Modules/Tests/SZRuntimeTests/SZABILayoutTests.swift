@@ -5,7 +5,7 @@ import Foundation
 
 /// Golden-layout guard for the node ABI (`SZRuntimeContextRaw`). The host fills this struct and passes a
 /// **raw pointer**; each node reinterprets the bytes through its **byte-identical mirror copy** inside
-/// `SZRuntimeSupport.source`. Field meaning is encoded purely by declaration order — there is no
+/// `SZNodeKit.source`. Field meaning is encoded purely by declaration order — there is no
 /// serialization — so the two copies MUST stay in lockstep, and fields must only ever be **appended**.
 ///
 /// The loader's version-symbol check catches a stale dylib but NOT a layout change: reordering two
@@ -59,7 +59,7 @@ private let canonicalFields: [(name: String, type: String)] = [
 @Test func abiMirrorCopyMatchesHostStruct() {
     // Extract the mirror `struct SZRuntimeContextRaw { … }` from the host-injected support source and assert
     // its (name, type) field list is byte-for-byte the canonical one — i.e. it can't drift from the host.
-    let fields = extractMirrorStructFields(from: SZRuntimeSupport.source)
+    let fields = extractMirrorStructFields(from: SZNodeKit.source, structName: "SZRuntimeContextRaw")
     #expect(fields.count == canonicalFields.count)
     for (got, want) in zip(fields, canonicalFields) {
         #expect(got.name == want.name, "mirror field name drift: \(got) vs \(want)")
@@ -67,12 +67,46 @@ private let canonicalFields: [(name: String, type: String)] = [
     }
 }
 
-/// Parse the `var name: Type` lines of the mirror `SZRuntimeContextRaw` declaration out of the support
-/// source string. Returns them in declaration order. Deliberately simple (the mirror copy carries no inline
-/// comments or defaults) — a parse miss surfaces as a count mismatch in the test above.
-private func extractMirrorStructFields(from source: String) -> [(name: String, type: String)] {
+// MARK: - Card ABI (`SZCardHostRaw`)
+
+/// The card tier's twin discipline: the host fills `SZCardHostRaw`, the card dylib reinterprets it
+/// through the byte-identical mirror in `SZCardKit.source`. Same append-only rule, same tripwire.
+private let cardCanonicalFields: [(name: String, type: String)] = [
+    ("apiVersion", "Int32"),
+    ("hostContext", "UnsafeMutableRawPointer?"),
+    ("liveFn", "SZCardEmitFn?"),
+    ("commitFn", "SZCardEmitFn?"),
+    ("sizeFn", "SZCardSizeFn?"),   // last field
+]
+
+@Test func cardABIHostStructMatchesCanonicalLayout() {
+    // Int32 + padding, then four 8-byte pointers → 40 bytes, 8-aligned.
+    #expect(MemoryLayout<SZCardHostRaw>.stride == 40)
+    #expect(MemoryLayout<SZCardHostRaw>.alignment == 8)
+    #expect(MemoryLayout<SZCardHostRaw>.offset(of: \.hostContext) == 8)
+    #expect(MemoryLayout<SZCardHostRaw>.offset(of: \.liveFn) == 16)
+    #expect(MemoryLayout<SZCardHostRaw>.offset(of: \.commitFn) == 24)
+    #expect(MemoryLayout<SZCardHostRaw>.offset(of: \.sizeFn) == 32)
+
+    let hostNames = Mirror(reflecting: SZCardHostRaw()).children.map { $0.label ?? "?" }
+    #expect(hostNames == cardCanonicalFields.map(\.name))
+}
+
+@Test func cardABIMirrorCopyMatchesHostStruct() {
+    let fields = extractMirrorStructFields(from: SZCardKit.source, structName: "SZCardHostRaw")
+    #expect(fields.count == cardCanonicalFields.count)
+    for (got, want) in zip(fields, cardCanonicalFields) {
+        #expect(got.name == want.name, "card mirror field name drift: \(got) vs \(want)")
+        #expect(got.type == want.type, "card mirror field type drift on \(got.name): \(got.type) vs \(want.type)")
+    }
+}
+
+/// Parse the `var name: Type` lines of the mirror `struct <structName> { … }` declaration out of a
+/// support source string. Returns them in declaration order. Deliberately simple (the mirror copies
+/// carry no inline comments or defaults) — a parse miss surfaces as a count mismatch in the tests above.
+private func extractMirrorStructFields(from source: String, structName: String) -> [(name: String, type: String)] {
     let lines = source.components(separatedBy: "\n")
-    guard let start = lines.firstIndex(where: { $0.contains("struct SZRuntimeContextRaw {") }) else { return [] }
+    guard let start = lines.firstIndex(where: { $0.contains("struct \(structName) {") }) else { return [] }
     var fields: [(String, String)] = []
     for line in lines[(start + 1)...] {
         let trimmed = line.trimmingCharacters(in: .whitespaces)

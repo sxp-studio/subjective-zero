@@ -50,12 +50,14 @@ struct SZContextMenuSession: Identifiable {
     }
 }
 
-/// A plain (non-message) action row: open transcript / open Node.swift / add a node here. Distinct
-/// glyphs on purpose — bubble = say something, transcript glyph = read, doc = the source file,
-/// plus = a direct structural edit (the deterministic node add, not a message).
+/// A plain (non-message) action row: open transcript / open Node.swift / add a node here / show or
+/// hide a node's custom card. Distinct glyphs on purpose — bubble = say something, transcript glyph
+/// = read, doc = the source file, plus = a direct structural edit (the deterministic node add, not
+/// a message), the card glyphs = a body-mode flip.
 public struct SZContextAction: Identifiable, Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case openTranscript(SZNodeID), openSource(SZNodeID), addNode
+        case toggleCard(SZNodeID, on: Bool), openCard(SZNodeID), newCard(SZNodeID)
     }
     public let kind: Kind
     public let label: String

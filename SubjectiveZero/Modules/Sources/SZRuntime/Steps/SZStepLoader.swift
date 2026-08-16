@@ -117,19 +117,7 @@ final class SZStepModule: @unchecked Sendable {
 /// `@unchecked Sendable`: load/retire mutate under the lock; evaluation touches only a
 /// module's immutable symbols plus its own per-call state.
 public final class SZStepLoader: @unchecked Sendable {
-    enum LoadError: Error, CustomStringConvertible {
-        case dlopenFailed(String)
-        case missingSymbol(String)
-        case apiMismatch(found: Int32, expected: Int32)
-
-        var description: String {
-            switch self {
-            case .dlopenFailed(let msg): "dlopen failed: \(msg)"
-            case .missingSymbol(let name): "step dylib is missing required symbol \(name)"
-            case .apiMismatch(let found, let expected): "step ABI version \(found) != host \(expected)"
-            }
-        }
-    }
+    typealias LoadError = SZDylibLoadError
 
     private let lock = NSLock()
     private var current: SZStepModule?
@@ -157,48 +145,17 @@ public final class SZStepLoader: @unchecked Sendable {
     /// in-flight evaluations finish on the old code, and it closes when the last one settles.
     /// A throw leaves the live module untouched.
     public func load(dylib: URL, runtimeLoadsDir: URL) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: runtimeLoadsDir, withIntermediateDirectories: true)
-        let copy = runtimeLoadsDir.appending(path: "step-\(UUID().uuidString).dylib")
-        try? fm.removeItem(at: copy)
-        try fm.copyItem(at: dylib, to: copy)
-
-        guard let handle = dlopen(copy.path, RTLD_NOW | RTLD_LOCAL) else {
-            try? fm.removeItem(at: copy)
-            // dlerror() is nullable — another subsystem's dl-call can clear it between our
-            // failure and this read.
-            throw LoadError.dlopenFailed(dlerror().map { String(cString: $0) } ?? "unknown dlopen error")
-        }
-        func discard(_ error: LoadError) -> LoadError {
-            dlclose(handle)
-            try? fm.removeItem(at: copy)
-            return error
-        }
-
-        guard let versionSym = dlsym(handle, SZStepABI.apiVersionSymbol) else {
-            throw discard(.missingSymbol(SZStepABI.apiVersionSymbol))
-        }
-        let found = unsafeBitCast(versionSym, to: SZStepABI.APIVersionFn.self)()
-        guard found == SZStepABI.version else {
-            throw discard(.apiMismatch(found: found, expected: SZStepABI.version))
-        }
-        guard let evaluateSym = dlsym(handle, SZStepABI.evaluateSymbol) else {
-            throw discard(.missingSymbol(SZStepABI.evaluateSymbol))
-        }
-        guard let cancelSym = dlsym(handle, SZStepABI.cancelSymbol) else {
-            throw discard(.missingSymbol(SZStepABI.cancelSymbol))
-        }
+        let image = try SZMappedDylib.map(dylib, into: runtimeLoadsDir, prefix: "step-",
+                                          versionSymbol: SZStepABI.apiVersionSymbol,
+                                          expected: SZStepABI.version, tier: "step")
+        let evaluateFn: SZStepABI.EvaluateFn = try image.symbol(SZStepABI.evaluateSymbol)
+        let cancelFn: SZStepABI.CancelFn = try image.symbol(SZStepABI.cancelSymbol)
         var declared: String?
-        if let declareSym = dlsym(handle, SZStepABI.declareSymbol) {
-            let declareFn = unsafeBitCast(declareSym, to: SZStepABI.DeclareFn.self)
+        if let declareFn: SZStepABI.DeclareFn = image.optionalSymbol(SZStepABI.declareSymbol) {
             declared = Self.readString { out, cap in declareFn(out, cap) }
         }
 
-        let module = SZStepModule(
-            handle: handle,
-            evaluateFn: unsafeBitCast(evaluateSym, to: SZStepABI.EvaluateFn.self),
-            cancelFn: unsafeBitCast(cancelSym, to: SZStepABI.CancelFn.self),
-            copy: copy)
+        let module = SZStepModule(handle: image.handle, evaluateFn: evaluateFn, cancelFn: cancelFn, copy: image.copy)
 
         lock.lock()
         let old = current

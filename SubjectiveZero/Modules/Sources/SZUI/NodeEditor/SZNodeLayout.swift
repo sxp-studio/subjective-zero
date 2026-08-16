@@ -60,6 +60,19 @@ public enum SZNodeLayout {
     public static func inputs(of node: SZNode) -> [SZPort] { node.contract?.inputs ?? [] }
     public static func outputs(of node: SZNode) -> [SZPort] { node.contract?.outputs ?? [] }
 
+    /// Whether an INPUT port is card-owned while `node` shows its custom card: the contract's
+    /// `card.plumbing` names it, so its row (control + socket) is not generated — the card IS its
+    /// control. Nothing is plumbing on a non-custom card (flip to rows and every port is back).
+    public static func isPlumbing(_ node: SZNode, port: String) -> Bool {
+        node.effectiveBodyMode == .custom && node.contract?.card?.plumbing?.contains(port) == true
+    }
+
+    /// The input rows a card renders: every input minus the plumbing ones. Outputs are never
+    /// plumbing (a card can't emit).
+    public static func rowInputs(of node: SZNode) -> [SZPort] {
+        node.effectiveBodyMode == .custom ? inputs(of: node).filter { !isPlumbing(node, port: $0.name) } : inputs(of: node)
+    }
+
     /// Extra card height the preview body contributes — `previewHeight` when the node effectively
     /// previews (`SZNode.effectiveBodyMode`, the SZCore policy) AND the global gate is on, else 0.
     /// The ONE term `height(of:)` and `rowCenterY` share, so the card frame and the socket rows can
@@ -68,15 +81,77 @@ public enum SZNodeLayout {
         previewsEnabled && node.effectiveBodyMode == .preview ? previewHeight : 0
     }
 
+    /// The custom card's declared minimum width in grid cells (committed cols, else the contract's
+    /// `card.cols` hint, else 9; clamped 6…24).
+    static func declaredCardCells(of node: SZNode) -> CGFloat {
+        CGFloat(max(6, min(node.body?.custom?.cols ?? node.contract?.card?.cols ?? 9, 24)))
+    }
+
+    /// Grid rows a mounted custom card's REGION (between header and rows) occupies: the committed
+    /// `custom.rows` (auto-size — which, for a backdrop card, follows the render aspect — or the
+    /// user), else the contract's `card.rows` hint, else 8. Always clamped 2…24 (the auto-size
+    /// loop's bounds, so geometry can't disagree with a commit). Nil when the node isn't
+    /// effectively custom.
+    public static func customRows(of node: SZNode) -> Int? {
+        guard node.effectiveBodyMode == .custom else { return nil }
+        return max(2, min(node.body?.custom?.rows ?? node.contract?.card?.rows ?? 8, 24))
+    }
+
+    /// The rows a backdrop card's region needs to hold the aspect-fit image at the card's width
+    /// plus its chrome, to the nearest row (the image gives a few px rather than leave a band; the
+    /// slack sits between image and footer as breathing room). The host commits this through the
+    /// auto-size path whenever the render aspect changes.
+    public static func backdropRows(of node: SZNode, renderAspect: CGFloat) -> Int {
+        let imageHeight = ((width(of: node) - 2 * backdropMargin) / max(renderAspect, 0.05)).rounded(.up)
+        return max(2, min(Int(((imageHeight + backdropChrome) / gridPitch).rounded()), 24))
+    }
+
+    /// Extra card height a custom-card body contributes. Mutually exclusive with `previewInset`
+    /// (one body slot, `effectiveBodyMode` picks); `bodyInset` is their one shared spelling.
+    public static func customInset(of node: SZNode) -> CGFloat {
+        customRows(of: node).map { CGFloat($0) * gridPitch } ?? 0
+    }
+
+    /// The body region's height, whichever mode fills it — the ONE term `height(of:)`, `rowCenterY`,
+    /// and the custom socket placement share.
+    public static func bodyInset(of node: SZNode) -> CGFloat {
+        previewInset(of: node) + customInset(of: node)
+    }
+
+    /// The chrome around a custom card's backdrop thumb: `backdropMargin` on top and both sides
+    /// (room for a handle to sit ON the image edge without touching the card frame), and below the
+    /// image everything that isn't picture — an 8pt gap, a 20pt footer band where an overlay card
+    /// puts its own controls (a readout, a reset) instead of floating them over the pixels, and
+    /// 6pt of breathing before the rows. `backdropChrome` = top margin + gap + footer + bottom.
+    public static let backdropMargin: CGFloat = 8
+    public static let backdropChrome: CGFloat = 8 + 8 + 20 + 6
+
+    /// Where the live-output thumbnail sits UNDER a custom card: aspect-fit `render` inside the
+    /// region minus its chrome, centered horizontally and sitting on the top margin — the footer
+    /// band sits at the region's bottom, so any slack reads as space above it. Nil when either size
+    /// is empty. The ONE function the card view (to draw the thumb) and the card snapshot (so the
+    /// card maps handles onto it) share, so overlay controls and pixels can never disagree.
+    public static func customBackdropRect(body: CGSize, render: CGSize) -> CGRect? {
+        let (margin, chrome) = (backdropMargin, backdropChrome)
+        let avail = CGSize(width: body.width - 2 * margin, height: body.height - chrome)
+        guard avail.width > 0, avail.height > 0, render.width > 0, render.height > 0 else { return nil }
+        let scale = min(avail.width / render.width, avail.height / render.height)
+        let size = CGSize(width: (render.width * scale).rounded(.down), height: (render.height * scale).rounded(.down))
+        return CGRect(x: ((body.width - size.width) / 2).rounded(), y: margin,
+                      width: size.width, height: size.height)
+    }
+
     /// Total card height (excludes the status pill, which floats above the card). Always a multiple
-    /// of gridPitch — the metrics above are chosen so this needs no rounding slack.
+    /// of gridPitch — the metrics above are chosen so this needs no rounding slack. A custom card is
+    /// a region between header and rows (like the preview): the generated rows stay, minus the
+    /// plumbing inputs the card owns.
     public static func height(of node: SZNode) -> CGFloat {
         switch node.kind {
         case .prompt:
             return promptHeight
         case .generated:
-            let rows = inputs(of: node).count + outputs(of: node).count
-            let inset = previewInset(of: node)
+            let rows = rowInputs(of: node).count + outputs(of: node).count
+            let inset = bodyInset(of: node)
             guard rows > 0 else { return headerHeight + bodyTopPadding + inset + bodyBottomPadding }
             return headerHeight + inset + bodyTopPadding
                 + CGFloat(rows) * rowHeight + CGFloat(rows - 1) * rowSpacing
@@ -133,14 +208,17 @@ public enum SZNodeLayout {
     /// when connecting.
     public static func width(of node: SZNode) -> CGFloat {
         guard node.kind == .generated else { return width }
+        // A custom card asks for a MINIMUM width in grid cells (the declared cols); the generated
+        // rows may still widen it.
+        let cardCells: CGFloat = node.effectiveBodyMode == .custom ? declaredCardCells(of: node) : 0
         // Loops, not maps — this runs per socket per canvas evaluation (socketOffset), so it must not
         // allocate intermediate arrays on the drag hot path.
         let fieldWidth = numericFieldWidth(of: node)
         var content = headerWidth(of: node)
-        for port in inputs(of: node) { content = max(content, inputRowWidth(port, fieldWidth: fieldWidth)) }
+        for port in rowInputs(of: node) { content = max(content, inputRowWidth(port, fieldWidth: fieldWidth)) }
         for port in outputs(of: node) { content = max(content, outputRowWidth(port)) }
-        let cells = (content / gridPitch).rounded(.up)
-        return min(max(width, cells * gridPitch), gridPitch * 18)
+        let cells = max((content / gridPitch).rounded(.up), cardCells)
+        return min(max(width, cells * gridPitch), gridPitch * max(18, cardCells))
     }
 
     /// Header: leading SF Symbol + title, centered with 12pt side padding.
@@ -302,11 +380,17 @@ public enum SZNodeLayout {
         case .flow:
             return CGPoint(x: x, y: flowY(of: node))
         case .data:
-            let ports = side == .input ? inputs(of: node) : outputs(of: node)
+            // A card-owned (plumbing) input has no row while the card shows; an edge that still
+            // targets it lands at the region's left edge, mid-height.
+            if side == .input, isPlumbing(node, port: port) {
+                let regionTop = -height(of: node) / 2 + headerHeight
+                return CGPoint(x: x, y: regionTop + customInset(of: node) / 2)
+            }
+            let ports = side == .input ? rowInputs(of: node) : outputs(of: node)
             guard let index = ports.firstIndex(where: { $0.name == port }) else {
                 return CGPoint(x: x, y: flowY(of: node))
             }
-            let row = side == .input ? index : inputs(of: node).count + index
+            let row = side == .input ? index : rowInputs(of: node).count + index
             return CGPoint(x: x, y: rowCenterY(of: node, row: row))
         }
     }
@@ -319,10 +403,10 @@ public enum SZNodeLayout {
         }
     }
 
-    /// Y center of the stacked port row `row` (0-based across inputs then outputs). The preview body
-    /// sits between header and rows, so the rows shift down by exactly `previewInset`.
+    /// Y center of the stacked port row `row` (0-based across inputs then outputs). The body region
+    /// sits between header and rows, so the rows shift down by exactly `bodyInset`.
     public static func rowCenterY(of node: SZNode, row: Int) -> CGFloat {
-        let bodyTop = -height(of: node) / 2 + headerHeight + previewInset(of: node) + bodyTopPadding
+        let bodyTop = -height(of: node) / 2 + headerHeight + bodyInset(of: node) + bodyTopPadding
         return bodyTop + rowHeight / 2 + CGFloat(row) * (rowHeight + rowSpacing)
     }
 

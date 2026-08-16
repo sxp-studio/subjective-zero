@@ -35,8 +35,9 @@ after the first effect alone. Keep `summary` and `sfSymbol` honest the same way.
 If the message turns out to ask for no change after all, answer it and change nothing —
 do not stage writes to look busy.
 
+{{cards}}
 ## Workflow — call these MCP tools in order
-1. `agent_write_node_staged { "node": "{{node}}", "contract": <the json OBJECT>, "source": "<full updated Node.swift>" }`
+1. `agent_write_node_staged { "node": "{{node}}", "contract": <the json OBJECT>, "source": "<full updated Node.swift>", "card": "<full Card.swift — optional, see Custom cards>" }`
 2. `agent_compile_node { "node": "{{node}}" }`
    - if it returns `{ "ok": false, "errors": "..." }` → fix `Node.swift` and repeat from step 1.
    - if it returns `{ "ok": true }` → continue.

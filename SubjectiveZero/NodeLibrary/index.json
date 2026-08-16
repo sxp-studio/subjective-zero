@@ -109,6 +109,23 @@
       "reuse": "copy-as-is"
     },
     {
+      "id": "corner-pin",
+      "tags": [
+        "render",
+        "projection-mapping",
+        "warp",
+        "perspective",
+        "keystone",
+        "corner-pin",
+        "card"
+      ],
+      "purpose": "Projection mapping: warps the input onto a draggable four-corner quad (inverse homography); black outside. Ships a custom card with corner handles over the live output.",
+      "platform": "any",
+      "useWhen": "You need to fit the render onto a physical surface (projector keystone / corner pin), a perspective warp, or a reference for authoring a Card.swift with draggable handles over the output.",
+      "avoidWhen": "You need a mesh warp with more than four control points, or a plain 2D transform (write a scale/translate node).",
+      "reuse": "copy-as-is"
+    },
+    {
       "id": "contrast",
       "tags": [
         "color",

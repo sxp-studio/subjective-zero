@@ -17,22 +17,24 @@ extension SZHostBridge {
             tool("agent_library_index", "The built-in node library, grouped by category: one line per node saying what it does. Cheap — read it whole and decide for yourself whether any node does YOUR node's job. Nothing is ranked or filtered; a similar name is not a match. Fetch at most once per turn (it does not change), and not at all if your brief already includes it."),
             tool("agent_library_card", "Read one library node's card (CARD.md) — reuse guidance, gotchas, and setup notes — to confirm or reject it as a reference without fetching full source. When the node is already the likely reference, request its card and source together in one round.",
                  properties: ["node": ["type": "string", "description": "library node id (e.g. camera.macos)"]]),
-            tool("agent_library_source", "Fetch one library node's full Node.swift source, to copy-as-is, adapt, or study before writing your own. Batchable with agent_library_card in the same round.",
-                 properties: ["node": ["type": "string", "description": "library node id (e.g. camera.macos)"]]),
-            tool("agent_write_node_staged", "Write a node's Node.swift (+ optional node-contract.json) to the project's .staging area. Does NOT touch live state.",
+            tool("agent_library_source", "Fetch one library node's full Node.swift source, to copy-as-is, adapt, or study before writing your own. Batchable with agent_library_card in the same round. `file: \"Card.swift\"` fetches the node's custom card instead (nodes marked \"ships a card\" in the index) — the worked example for authoring one.",
+                 properties: ["node": ["type": "string", "description": "library node id (e.g. camera.macos)"],
+                              "file": ["type": "string", "enum": ["Node.swift", "Card.swift"], "description": "which file (default Node.swift)"]]),
+            tool("agent_write_node_staged", "Write a node's Node.swift (+ optional node-contract.json, + optional Card.swift — the node's custom card, see agent_docs_read {topic:\"card-abi\"}) to the project's .staging area. Does NOT touch live state. Omitting `card` also drops any previously staged card.",
                  properties: [
                     "node": ["type": "string", "description": "node id (UUID)"],
                     "source": ["type": "string", "description": "the full Node.swift source"],
                     "contract": ["type": "object", "description": "the node-contract.json object (optional)"],
+                    "card": ["type": "string", "description": "the full Card.swift source (optional)"],
                  ]),
-            tool("agent_compile_node", "Compile-check the staged Node.swift. On success, promote it (copy to live + hot-reload) and return {ok:true}. On failure, return {ok:false, errors} and leave live state untouched.",
+            tool("agent_compile_node", "Compile-check the staged Node.swift (and the staged Card.swift, if any). On success, promote (copy to live + hot-reload; a first card turns itself on) and return {ok:true}. On failure, return {ok:false, errors} and leave live state untouched — a red card blocks the promote too.",
                  properties: ["node": ["type": "string", "description": "node id (UUID)"]]),
             tool("agent_report_status", "Report a node's observable status (queued/coding/ok/needsInput/error + message).",
                  properties: [
                     "node": ["type": "string"], "status": ["type": "string"], "message": ["type": "string"],
                  ]),
             tool("agent_docs_index", "List the reference docs you can fetch (id, title, summary) — the canonical contract schema, the runtime ABI, etc. Cheap; read a topic's body only when you need it (e.g. before authoring a node-contract.json)."),
-            tool("agent_docs_read", "Fetch one reference doc's full markdown by topic id (from agent_docs_index) — e.g. \"node-contract\" for the contract/ui/default schema, \"node-abi\" for the runtime ABI. Use this instead of guessing the schema — but skip any doc your brief already embeds, and batch it with your other reads (e.g. the library index) rather than spending a round on it alone.",
+            tool("agent_docs_read", "Fetch one reference doc's full markdown by topic id (from agent_docs_index) — e.g. \"node-contract\" for the contract/ui/default schema, \"node-abi\" for the runtime ABI, \"card-abi\" for authoring a node's Card.swift. Use this instead of guessing the schema — but skip any doc your brief already embeds, and batch it with your other reads (e.g. the library index) rather than spending a round on it alone.",
                  properties: ["topic": ["type": "string", "description": "a topic id from agent_docs_index, e.g. node-contract"]]),
             tool("agent_view_frame", "Capture what the live viewport is rendering and return it as an inline image so you can SEE your VFX result — composition, color, motion, artifacts. Pixel-perfect (real framebuffer readback), downscaled to fit the token budget (default 768px long edge; pass maxSize to change). Captures the CURRENT display endpoint (what's on screen) — use ui_toggle_display to change which node's output the viewport shows. Pair with debug_set_paused to freeze time and A/B an input.",
                  properties: ["maxSize": ["type": "integer", "description": "max long-edge px of the returned image (default 768, clamped 64–1280). Full render is 1280×800."]]),
@@ -99,7 +101,12 @@ extension SZHostBridge {
     private func agentReadNode(_ arguments: [String: Any]) throws -> String {
         guard let id = arguments.uuid("node") else { throw SZMCPError.message("agent_read_node needs `node` (UUID)") }
         guard let node = host.store.project?.graph.node(id: id) else { throw SZMCPError.message("no node \(id)") }
-        return encodeJSON(node)
+        // Whether the node folder holds a Card.swift rides along — a Director/agent can't see files.
+        guard var json = try? JSONSerialization.jsonObject(with: Data(encodeJSON(node).utf8)) as? [String: Any] else {
+            return encodeJSON(node)
+        }
+        json["hasCard"] = host.nodeHasCardSource(id)
+        return SZJSONRPC.encode(json)
     }
 
     /// Scan the repo's `NodeLibrary/` for node folders (a `node-contract.json` inside) and assemble the
@@ -120,7 +127,8 @@ extension SZHostBridge {
             guard let data = try? Data(contentsOf: contractURL),
                   let contract = try? JSONDecoder().decode(SZNodeContract.self, from: data) else { continue }
             let id = folder.lastPathComponent
-            entries.append(SZLibraryIndexEntry(id: id, contract: contract, curation: curation[id]))
+            let hasCard = fm.fileExists(atPath: folder.appending(path: "Card.swift").path)
+            entries.append(SZLibraryIndexEntry(id: id, contract: contract, curation: curation[id], hasCard: hasCard))
         }
         entries.sort { $0.id < $1.id }
         return entries
@@ -174,6 +182,7 @@ extension SZHostBridge {
                 return "  \(entry.id) — \(entry.purpose ?? entry.summary)"
                     + " [in \(ports(entry.io.inputs)) | out \(ports(entry.io.outputs))"
                     + (permissions.isEmpty ? "" : " | needs \(permissions)")
+                    + (entry.card == true ? " | ships a card" : "")
                     + (entry.reuse.map { " | \($0)" } ?? "")
                     + (tags.isEmpty ? "" : " | \(tags)") + "]"
             }
@@ -197,9 +206,15 @@ extension SZHostBridge {
     /// (not JSON-wrapped) so copy-as-is stays byte-faithful and cheap to read.
     private func agentLibrarySource(_ arguments: [String: Any]) throws -> String {
         let id = try libraryNodeID(arguments, tool: "agent_library_source")
-        let url = SZHost.libraryURL.appending(path: "\(id)/Node.swift")
+        // `file: "Card.swift"` reads the node's custom card instead of its Node.swift — the worked
+        // example an agent studies before authoring one (only nodes flagged "ships a card" have one).
+        let file = arguments.string("file") ?? "Node.swift"
+        guard file == "Node.swift" || file == "Card.swift" else {
+            throw SZMCPError.message("agent_library_source `file` must be Node.swift or Card.swift")
+        }
+        let url = SZHost.libraryURL.appending(path: "\(id)/\(file)")
         guard let source = try? String(contentsOf: url, encoding: .utf8) else {
-            throw SZMCPError.message("no library source for \(id)")
+            throw SZMCPError.message("no library \(file) for \(id)")
         }
         return source
     }
@@ -234,6 +249,14 @@ extension SZHostBridge {
         if let contract = arguments.object("contract") {
             let data = try JSONSerialization.data(withJSONObject: contract, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: dir.appending(path: "node-contract.json"))
+        }
+        // Staging mirrors the LAST write: a card staged earlier and omitted now is removed, so a
+        // stale card can never re-promote over a live one the user has since hand-edited.
+        let stagedCard = dir.appending(path: "Card.swift")
+        if let card = arguments.string("card") {
+            try card.write(to: stagedCard, atomically: true, encoding: .utf8)
+        } else if FileManager.default.fileExists(atPath: stagedCard.path) {
+            try FileManager.default.removeItem(at: stagedCard)
         }
         return SZJSONRPC.encode(["ok": true, "staged": dir.path])
     }
@@ -290,6 +313,17 @@ extension SZHostBridge {
                     warnings += audit.warnings
                 }
             }
+            // The card half: a staged Card.swift must compile too, or nothing promotes — a green
+            // node with a red card would mount the failed chip in the agent's name. Same
+            // `{ok:false, errors}` channel, prefixed so the agent knows which file to fix.
+            let stagedCard = projectURL.appending(path: ".staging/nodes/\(id.uuidString)/Card.swift")
+            if FileManager.default.fileExists(atPath: stagedCard.path) {
+                if case .failed(let log) = host.cardHost.compileCheck(source: stagedCard) {
+                    let msg = Self.cardCompileError(log)
+                    host.recordBuildErrors(msg)
+                    return SZJSONRPC.encode(["ok": false, "errors": msg])
+                }
+            }
             host.recordBuildErrors(nil)
             try host.promoteStagedNode(id: id)
             return warnings.isEmpty
@@ -314,6 +348,18 @@ extension SZHostBridge {
         - `min` / `max` live INSIDE `ui`. `default` is an OBJECT `{ "type", "value" }`.
         Fix node-contract.json (re-stage with agent_write_node_staged) and call agent_compile_node again.
         Call agent_docs_read { "topic": "node-contract" } for the full schema.
+        """
+    }
+
+    /// A red Card.swift compile, surfaced through the same channel as a node build failure so the
+    /// coding agent's fix loop self-corrects — and knows it's the CARD, not the node, that failed.
+    private static func cardCompileError(_ log: String) -> String {
+        """
+        Card.swift failed to compile (nothing was promoted — Node.swift included):
+        \(log)
+
+        Fix Card.swift, re-stage with agent_write_node_staged (source + card), and call agent_compile_node again.
+        Call agent_docs_read { "topic": "card-abi" } for the card contract (SZCardState, SZCardMain, live/commit).
         """
     }
 

@@ -45,6 +45,7 @@ public struct SZNodeEditorPanel: View {
     private let showMiniMap: Bool                 // host-owned pref (Graph menu); the corner overview map
     private let livePreviews: Bool                // host-owned pref (Graph menu); mirrors SZNodeLayout.previewsEnabled
     private let previewFrames: SZNodePreviewFrames?   // host-owned per-node thumb boxes (stable refs)
+    private let cardProvider: (any SZCustomCardProvider)?   // host-owned custom-card mounts (stable ref)
     private let onTogglePreview: (SZNodeID, String) -> Void
     /// Debounced visible-node reports for the host's preview watch-set culling (the camera is
     /// panel-local @State — this closure is how visibility leaves the panel).
@@ -130,6 +131,7 @@ public struct SZNodeEditorPanel: View {
                 showMiniMap: Bool = true,
                 livePreviews: Bool = true,
                 previewFrames: SZNodePreviewFrames? = nil,
+                cardProvider: (any SZCustomCardProvider)? = nil,
                 onVisibleNodesChanged: ((Set<SZNodeID>) -> Void)? = nil,
                 cameraCommand: SZCameraCommand? = nil,
                 selectedNodeID: Binding<SZNodeID?>,
@@ -175,6 +177,7 @@ public struct SZNodeEditorPanel: View {
         self.showMiniMap = showMiniMap
         self.livePreviews = livePreviews
         self.previewFrames = previewFrames
+        self.cardProvider = cardProvider
         self.onVisibleNodesChanged = onVisibleNodesChanged
         self.cameraCommand = cameraCommand
         self._selectedNodeID = selectedNodeID
@@ -678,6 +681,21 @@ public struct SZNodeEditorPanel: View {
             if node.kind == .generated {
                 actions.append(SZContextAction(kind: .openSource(id), label: "Open Node.swift",
                                                sfSymbol: "doc.text"))
+                // A node that ships a Card.swift can flip between its custom card and plain rows —
+                // an explicit body commit either way; the file on disk is never touched — and open
+                // the card's source (saving hot-reloads it). A node without one can start a card
+                // from the starter template.
+                if let cardProvider, cardProvider.hasCardSource(for: id) {
+                    let showing = node.effectiveBodyMode == .custom
+                    actions.append(SZContextAction(kind: .toggleCard(id, on: !showing),
+                                                   label: showing ? "Show Rows" : "Show Custom Card",
+                                                   sfSymbol: showing ? "list.bullet.rectangle" : "rectangle.inset.filled"))
+                    actions.append(SZContextAction(kind: .openCard(id), label: "Open Card.swift",
+                                                   sfSymbol: "rectangle.and.pencil.and.ellipsis"))
+                } else if cardProvider != nil {
+                    actions.append(SZContextAction(kind: .newCard(id), label: "New Custom Card…",
+                                                   sfSymbol: "rectangle.badge.plus"))
+                }
             }
             return actions
         case .canvas:
@@ -696,6 +714,9 @@ public struct SZNodeEditorPanel: View {
         case .openTranscript(let id): onOpenNodeChat(id)
         case .openSource(let id): onOpenNodeSource(id)
         case .addNode: if let anchor { addPromptNode(atScreen: anchor) }
+        case .toggleCard(let id, let on): cardProvider?.setCardShown(node: id, on)
+        case .openCard(let id): cardProvider?.openCardSource(node: id)
+        case .newCard(let id): cardProvider?.createCard(node: id)
         }
     }
 
@@ -781,6 +802,7 @@ public struct SZNodeEditorPanel: View {
             // zoom crosses the LOD threshold, re-rendering the cards once per crossing.
             zoomedOut: zoomedOut,
             previewFrames: previewFrames,
+            cardProvider: cardProvider,
             onSelectNode: { selectNode($0, additive: $1) },
             onSelectConnection: { id in
                 selectedConnectionID = id
@@ -870,8 +892,10 @@ public struct SZNodeEditorPanel: View {
             connectedInputs: connectedInputs,
             previewsEnabled: livePreviews,
             zoomedOut: zoomedOut,
-            // The SAME stable box as the resting card — a dragged card keeps its live thumb.
+            // The SAME stable box as the resting card — a dragged card keeps its live thumb (and
+            // its mounted custom card).
             previewFrame: previewFrames?.frame(for: node.id),
+            cardProvider: cardProvider,
             optionsFor: { port in optionsFor(node.id, port) })
     }
 

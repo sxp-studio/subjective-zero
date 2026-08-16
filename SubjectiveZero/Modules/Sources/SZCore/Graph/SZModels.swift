@@ -131,38 +131,29 @@ public enum SZNodeBodyMode: String, Codable, Sendable {
     case none
     /// A live thumbnail of one of the node's texture outputs (TouchDesigner's Viewer).
     case preview
-    /// An authored mini-UI — a sandboxed custom card — mounted into the body region.
+    /// An authored mini-UI — the node's runtime-compiled `Card.swift` — mounted into the body region.
     case custom
 }
 
-/// Which authored custom card a `.custom` body mounts, and its footprint. `artifact` is the card's
-/// identity: a built-in id (`"observer"`, `"midi"`), a library card name, or `"node"` for the node's own
-/// agent-authored card. `source` names where it's served from (`"library"` / `"node"`; nil = the app's
-/// built-in card set). A custom card OWNS the node body — the native port rows are suppressed — so it
-/// sizes itself: `cols`/`rows` request a footprint in GRID CELLS (clamped by the page) that stays stable
-/// across regenerations. `binds` maps the card's roles to the node's ports (nil = identity by port name).
+/// A `.custom` body's COMMITTED footprint — the region's `cols`/`rows` in GRID CELLS once auto-size or
+/// the user set them (nil = the contract's `card` hints, then the defaults). The card itself is the
+/// node's own `Card.swift`; there is nothing else to name. `pinned`: the user fixed the size — the
+/// auto-measure loop must not override it.
 public struct SZCustomCardRef: Codable, Equatable, Sendable {
-    public var artifact: String
-    public var source: String?
     public var cols: Int?
     public var rows: Int?
-    public var binds: [String: String]?
-    /// User pinned the size explicitly — the auto-measure loop must not override it.
     public var pinned: Bool?
-    public init(artifact: String, source: String? = nil, cols: Int? = nil, rows: Int? = nil,
-                binds: [String: String]? = nil, pinned: Bool? = nil) {
-        self.artifact = artifact
-        self.source = source
+    public init(cols: Int? = nil, rows: Int? = nil, pinned: Bool? = nil) {
         self.cols = cols
         self.rows = rows
-        self.binds = binds
         self.pinned = pinned
     }
 }
 
 /// A node card's body: which mode, plus the datum that mode needs. `previewPort` names the texture output a
-/// `.preview` shows (nil = the display-marked/first texture output); `custom` names the artifact a `.custom`
-/// mounts. `preview` and `custom` share the one body slot and are mutually exclusive.
+/// `.preview` shows (nil = the display-marked/first texture output); `custom` carries a `.custom` body's
+/// committed footprint (nil = defaults). `preview` and `custom` share the one body slot and are mutually
+/// exclusive.
 public struct SZNodeBody: Codable, Equatable, Sendable {
     public var mode: SZNodeBodyMode
     public var previewPort: String?
@@ -188,25 +179,38 @@ public extension SZNode {
     /// The body region this card EFFECTIVELY renders: an explicit `body` pins the choice; `nil` falls
     /// back to the legacy rule (a texture output → auto-preview). Validated against the CURRENT
     /// contract — a `.preview` pin on a node whose texture outputs vanished (rebuild, port edit)
-    /// degrades to `.none` instead of reserving a body region nothing can ever fill. `.custom` reads
-    /// as `.none` until a native custom-card renderer lands; the ref itself stays in the model.
+    /// degrades to `.none` instead of reserving a body region nothing can ever fill. A `.custom` pin
+    /// needs no texture output (a knob card drives a float); whether the `Card.swift` behind it
+    /// compiles is the mount's business (the region reserves either way, so geometry never depends
+    /// on a build).
     var effectiveBodyMode: SZNodeBodyMode {
-        guard kind == .generated,
-              contract?.outputs.contains(where: { $0.type == .texture }) == true else { return .none }
+        guard kind == .generated else { return .none }
+        if body?.mode == .custom { return .custom }
+        guard contract?.outputs.contains(where: { $0.type == .texture }) == true else { return .none }
         guard let body else { return .preview }
         return body.mode == .preview ? .preview : .none
     }
 
-    /// The texture output an effective `.preview` shows: the explicit `previewPort` when it still
-    /// names a texture output on the current contract, else the preferred texture output. Nil when
-    /// the node isn't effectively previewing — so `nil`/non-nil IS the "does this node preview"
-    /// predicate; callers never need to consult `effectiveBodyMode` separately.
+    /// The texture output this card's body shows live: for `.preview`, the explicit `previewPort`
+    /// when it still names a texture output on the current contract, else the preferred texture
+    /// output; for `.custom`, the contract's `card.backdrop` port when it names a texture output
+    /// (the thumbnail drawn UNDER the custom card). Nil otherwise — so `nil`/non-nil IS the "does this
+    /// node stream a thumb" predicate the preview watch-set keys on; callers never need to consult
+    /// `effectiveBodyMode` separately.
     var effectivePreviewPort: String? {
-        guard effectiveBodyMode == .preview else { return nil }
         let outputs = contract?.outputs ?? []
-        if let pinned = body?.previewPort,
-           outputs.contains(where: { $0.name == pinned && $0.type == .texture }) { return pinned }
-        return outputs.preferredTextureOutput?.name
+        switch effectiveBodyMode {
+        case .preview:
+            if let pinned = body?.previewPort,
+               outputs.contains(where: { $0.name == pinned && $0.type == .texture }) { return pinned }
+            return outputs.preferredTextureOutput?.name
+        case .custom:
+            guard let backdrop = contract?.card?.backdrop,
+                  outputs.contains(where: { $0.name == backdrop && $0.type == .texture }) else { return nil }
+            return backdrop
+        case .none:
+            return nil
+        }
     }
 }
 
@@ -232,9 +236,9 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// (`afterPromote`). `SZProjectIO.load` re-establishes it for files nothing vouches for.
     public var rebuildReason: SZRebuildReason?
 
-    /// What the card renders between header and rows (preview thumbnail / authored custom card / nothing).
+    /// What the card renders between header and rows (preview thumbnail / the node's custom card / nothing).
     /// `nil` = unset; the editor applies its legacy auto-preview fallback. Presentation-only: never affects
-    /// the render graph or a rebuild. Native renders `.custom` as a compact card until custom cards land.
+    /// the render graph or a rebuild.
     public var body: SZNodeBody?
 
     /// This node has a build that no longer fits its contract.

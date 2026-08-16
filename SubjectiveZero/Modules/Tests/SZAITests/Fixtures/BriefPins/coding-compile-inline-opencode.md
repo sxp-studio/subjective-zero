@@ -225,9 +225,15 @@ rejects it (`{ok:false, errors}`) — it is never silently dropped.
   "summary": "One line describing what the node does.",
   "inputs":  [ <port>, ... ],
   "outputs": [ <port>, ... ],
-  "permissions": [ "camera" ]        // optional; omit if none. Valid values: "camera", "microphone".
+  "permissions": [ "camera" ],       // optional; omit if none. Valid values: "camera", "microphone".
+  "card": { "cols": 12, "rows": 8, "backdrop": "output" }   // optional; ONLY if the node ships a Card.swift
 }
 ```
+
+`card` (all fields optional) hints how the node's custom card mounts: `cols`/`rows` = its footprint in
+grid cells (defaults 9 × 8), `backdrop` = a texture OUTPUT drawn live inside the card region (the region
+then follows the render aspect), `plumbing` = inputs the card owns (their generated rows step aside while
+the card shows). Omit the block entirely for a node without a `Card.swift`. See `subz_agent_docs_read { "topic": "card-abi" }`.
 
 ## A port
 
@@ -321,9 +327,23 @@ round-trip costs far more than the payload it fetches. Batch independent reads i
 never re-fetch what this brief already contains: the runtime ABI, your node's boundary, and the
 contract schema material are all above.
 
+## Custom cards — off by default
+
+A node MAY ship a `Card.swift`: a small SwiftUI view mounted between the node's header and its
+generated port rows. **Do not ship one unless the node's prompt (or your instruction) asks for a
+custom card / custom UI, or the interaction has no row equivalent** — dragging handles or a pad over
+the output, a curve, a meter over an array the node emits. Sliders, dropdowns, colors, toggles come
+free from the contract's rows; a card that rebuilds them is noise the user has to hide. If (and only
+if) one is called for: read `subz_agent_docs_read { "topic": "card-abi" }` first, study the built-in
+reference (`subz_agent_library_source { "node": "corner-pin", "file": "Card.swift" }`), list the inputs the
+card takes over under the contract's `card.plumbing`, and pass the file as `card` in step 1 — a red
+card blocks the promote and comes back through `subz_agent_compile_node`'s errors like a node build would.
+If the node already has a `Card.swift` (it is shown after the source above), keep it: re-stage it as
+`card` whenever your contract change touches a port it reads.
+
 ## Workflow — call these MCP tools in order
 
-1. `subz_agent_write_node_staged { "node": "22222222-2222-4222-8222-222222222222", "contract": <the json OBJECT>, "source": "<full Node.swift>" }`
+1. `subz_agent_write_node_staged { "node": "22222222-2222-4222-8222-222222222222", "contract": <the json OBJECT>, "source": "<full Node.swift>", "card": "<full Card.swift — optional, see Custom cards>" }`
 2. `subz_agent_compile_node { "node": "22222222-2222-4222-8222-222222222222" }`
    - if it returns `{ "ok": false, "errors": "..." }` → fix `Node.swift` and repeat from step 1.
    - if it returns `{ "ok": true }` → continue.

@@ -177,6 +177,12 @@ extension SZHost {
                 extras.nodeSource =
                     (try? String(contentsOf: nodeDir.appending(path: "Node.swift"), encoding: .utf8))
                     ?? "(this node has no Node.swift yet)"
+                // The node's custom card rides along: an edit that renames a port must re-stage the
+                // card that reads it (the brief's card section says so).
+                if let card = try? String(contentsOf: SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: nodeID),
+                                          encoding: .utf8) {
+                    extras.nodeSource! += "\n\n// ===== Card.swift (this node's custom card) =====\n" + card
+                }
             }
             let (result, ack) = try await runProseDelivery(
                 scope: scope, message: expanded, existing: existing, providerID: providerID,

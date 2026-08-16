@@ -13,9 +13,15 @@ rejects it (`{ok:false, errors}`) — it is never silently dropped.
   "summary": "One line describing what the node does.",
   "inputs":  [ <port>, ... ],
   "outputs": [ <port>, ... ],
-  "permissions": [ "camera" ]        // optional; omit if none. Valid values: "camera", "microphone".
+  "permissions": [ "camera" ],       // optional; omit if none. Valid values: "camera", "microphone".
+  "card": { "cols": 12, "rows": 8, "backdrop": "output" }   // optional; ONLY if the node ships a Card.swift
 }
 ```
+
+`card` (all fields optional) hints how the node's custom card mounts: `cols`/`rows` = its footprint in
+grid cells (defaults 9 × 8), `backdrop` = a texture OUTPUT drawn live inside the card region (the region
+then follows the render aspect), `plumbing` = inputs the card owns (their generated rows step aside while
+the card shows). Omit the block entirely for a node without a `Card.swift`. See `agent_docs_read { "topic": "card-abi" }`.
 
 ## A port
 

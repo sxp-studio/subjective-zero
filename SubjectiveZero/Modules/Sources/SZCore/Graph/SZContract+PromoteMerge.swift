@@ -65,6 +65,9 @@ extension SZNodeContract {
         let union = boundary.requiredPermissions
             + authored.requiredPermissions.filter { !boundary.requiredPermissions.contains($0) }
         merged.permissions = union.isEmpty ? nil : union
+        // Card mount hints: the authored block wins when present; a silent re-stage keeps the live one
+        // (an agent editing Node.swift must not strip the card's footprint by omission).
+        merged.card = authored.card ?? boundary.card
         return SZBoundaryMergeResult(contract: merged, conflicts: conflicts)
     }
 

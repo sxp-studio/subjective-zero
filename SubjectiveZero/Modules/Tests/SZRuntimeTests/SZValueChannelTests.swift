@@ -73,8 +73,16 @@ import Metal
     """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sink), atomically: true, encoding: .utf8)
 
     try runtime.loadProject(at: dir)
+    // Nothing has encoded yet — the host-side read reports nothing rather than inventing a value.
+    #expect(runtime.readOutputFloats(node: source, port: "level") == nil)
 
     // 0.75 emitted upstream → received as `gain` downstream → gray ≈ 191.
     let pixel = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))
     #expect(abs(Int(pixel.r) - 191) <= 2)
+
+    // The same channel, read from the HOST (`readOutputFloats` — card telemetry, output-inspection
+    // tooling): the value the encode emitted; texture outputs and unknown ports read nil, not empty.
+    #expect(runtime.readOutputFloats(node: source, port: "level") == [0.75])
+    #expect(runtime.readOutputFloats(node: sink, port: "color") == nil)
+    #expect(runtime.readOutputFloats(node: source, port: "missing") == nil)
 }

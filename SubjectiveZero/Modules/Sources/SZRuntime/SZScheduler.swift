@@ -111,7 +111,10 @@ struct SZScheduler: Sendable {
     }
 
     /// Encode every node's `update` for one frame into `commandBuffer`. Returns the render-endpoint
-    /// texture (nil if the graph has no endpoint). Does not commit — the caller owns commit/present/wait.
+    /// texture (nil if the graph has no endpoint) plus every scalar output value emitted this frame,
+    /// keyed `"<nodeID>:<port>"` (`textureID`) — the same v5 channel downstream inputs read, surfaced
+    /// so the host can observe a node's emitted values (`SZRuntime.readOutputFloats`). Does not
+    /// commit — the caller owns commit/present/wait.
     func encodeFrame(
         device: any MTLDevice,
         commandBuffer: any MTLCommandBuffer,
@@ -123,7 +126,7 @@ struct SZScheduler: Sendable {
         time: Double,
         width: Int,
         height: Int
-    ) -> (any MTLTexture)? {
+    ) -> (endpoint: (any MTLTexture)?, outputValues: [String: [Float]]) {
         // Scalar output values emitted by nodes earlier this frame, keyed "<nodeID>:<port>" — the v5
         // connected value channel. Topo order runs producers first, so a downstream node's connected value
         // input is already populated here by the time we bind it. Frame-scoped (cleared each call).
@@ -188,9 +191,10 @@ struct SZScheduler: Sendable {
             commandBuffer.addCompletedHandler { _ in _ = holds }
         }
 
-        guard let endpoint = renderEndpoint else { return nil }
-        return assets.texture(
-            id: Self.textureID(node: endpoint.node, port: endpoint.port), width: width, height: height)
+        guard let endpoint = renderEndpoint else { return (nil, valueOutputs) }
+        return (assets.texture(
+            id: Self.textureID(node: endpoint.node, port: endpoint.port), width: width, height: height),
+            valueOutputs)
     }
 
     /// The pooled texture the CURRENT `renderEndpoint` points at, WITHOUT encoding a frame and
