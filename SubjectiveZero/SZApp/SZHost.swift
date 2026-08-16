@@ -827,6 +827,7 @@ final class SZHost {
         try SZTrace.span(SZTurnStage.promote) {
             try promoteStagedNodeInner(id: id)
         }
+        trackNodeBuiltTelemetry()   // reached only on success — a throw above skips it
     }
 
     private func promoteStagedNodeInner(id: SZNodeID) throws {

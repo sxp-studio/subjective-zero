@@ -217,6 +217,9 @@ extension SZHost {
         @discardableResult
         func reject(_ note: String) -> SZChatSendRouting {
             store.appendChatMessage(SZChatMessage(role: .assistant, text: note, transient: true), to: scope)
+            if origin == .user {   // a refused first ask is a funnel fact, not silence
+                trackPromptSentTelemetry(scope: Self.telemetryScopeLabel(scope), providerID: activeProviderID, rejected: true)
+            }
             return .rejected
         }
 
@@ -266,6 +269,9 @@ extension SZHost {
         mailbox.enqueue(envelope)
         flushTranscript(scope)   // the user's words are durable even if delivery waits or dies
         pumpMailboxes()
+        if origin == .user {
+            trackPromptSentTelemetry(scope: Self.telemetryScopeLabel(scope), providerID: providerID, rejected: false)
+        }
         return .queued(envelope.id)
     }
 

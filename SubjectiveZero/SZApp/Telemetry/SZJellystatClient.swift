@@ -36,7 +36,7 @@ private struct SZJellystatConfigFile: Decodable {
     }
 }
 
-enum SZJellystatReportValue: Encodable, Sendable {
+enum SZJellystatReportValue: Encodable, Sendable, Equatable {
     case string(String)
     case int(Int)
     case double(Double)

@@ -128,6 +128,8 @@ extension SZHost {
         // A successful turn takes the scope's disk-restored session off probation (self-heal — see
         // SZHost+Transcripts.swift header); a failed resume is handled by `sendChat`.
         if !result.outcome.failed { restoredSessions[scope.key] = nil }
+        trackTurnEndedTelemetry(scope: scope, providerID: provider.id, failed: result.outcome.failed,
+                                timedOut: result.process.timedOut, cancelled: Task.isCancelled)
         return (result, assistantID)
     }
 
@@ -338,6 +340,7 @@ extension SZHost {
         // of a silent generic run failure. Unknown health stays permissive.
         // Terminal for the admission path above all others: this "narration" is a SHEET.
         guard isProviderReadyForNewWork(activeProviderID) else {
+            trackPromptSentTelemetry(scope: "build", providerID: activeProviderID, rejected: true)
             surfaceProviderNotReady(); return .refused
         }
         // The packs root: the materialized bundled packs, or the SZ_AGENT_PACKS override —
@@ -437,6 +440,9 @@ extension SZHost {
             // makes a cancelled op roll back instead of leak.
             drainPendingGraphOp()
         }
+        // A Build is an ask without a chat bubble. (Residual: a run minted by a delivery restored
+        // from disk after a crash also passes here — rare enough not to thread an origin through.)
+        trackPromptSentTelemetry(scope: "build", providerID: providerID, rejected: false)
         return .started
     }
 

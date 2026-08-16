@@ -5,7 +5,8 @@ import Foundation
 
 // App-level anonymous usage telemetry: app_launch, agent_provider_default, the
 // first-run setup funnel (setup_shown / setup_skipped / setup_completed /
-// setup_stuck_relaunch), and a 15-minute active-only heartbeat, all fire-and-forget
+// setup_stuck_relaunch), the first-session milestones (prompt_sent / turn_ended /
+// node_built), and a 15-minute active-only heartbeat, all fire-and-forget
 // over the Jellystat wire layer (SZJellystatClient.swift). A missing/empty
 // JellystatConfig.json disables telemetry entirely; DEBUG builds print payloads
 // instead of sending; the user's "Share anonymous usage data" pref (welcome screen)
@@ -26,6 +27,10 @@ final class SZTelemetry {
 
     private static let installUIDDefaultsKey = "studio.sxp.subjectivezero.jellystat.installUID"
     private static let hasLaunchedBeforeDefaultsKey = "studio.sxp.subjectivezero.jellystat.hasLaunchedBefore"
+    private static let milestoneDefaultsKeyPrefix = "studio.sxp.subjectivezero.jellystat.milestone."
+    // Opt-in per-machine tag (`defaults write studio.sxp.subjectivezero <key> -bool YES`) so a
+    // developer's own installs can be filtered server-side instead of by hand. Absent otherwise.
+    private static let devMachineDefaultsKey = "studio.sxp.subjectivezero.jellystat.devMachine"
     private static let heartbeatInterval: TimeInterval = 15 * 60
     private static let heartbeatCheckInterval: TimeInterval = 60
 
@@ -41,6 +46,7 @@ final class SZTelemetry {
     private var lastProviderSignature: String?
     private var sentSetupShown = false
     private var sentSetupSkipped = false
+    private var sentMilestones: Set<String> = []
 
     init(bundle: Bundle = .main, userDefaults: UserDefaults = .standard) {
         self.config = SZJellystatConfig.load(bundle: bundle)
@@ -125,6 +131,33 @@ final class SZTelemetry {
         send(baseReport(event: "setup_stuck_relaunch"))
     }
 
+    // MARK: - First-session milestones
+
+    /// The three things a session can do between `app_launch` and the first 15-minute heartbeat
+    /// that the funnel was blind to: the user sent a prompt, an agent turn ended (and whether it
+    /// failed), an agent-built node went live. Each fires ONCE PER PROCESS — the session-level
+    /// funnel — and carries `first_in_install` (persisted marker) so the install-level funnel and
+    /// `minutes_since_launch` (how deep into the session it happened) read off the same event.
+    /// The marker records the milestone, not the send — set even while telemetry is disabled, so
+    /// a later opt-in doesn't misreport an old hand as a first-timer.
+    func trackMilestone(_ event: String, detail: [String: SZJellystatReportValue] = [:]) {
+        guard !hasSentMilestone(event) else { return }
+        sentMilestones.insert(event)
+        let key = Self.milestoneDefaultsKeyPrefix + event
+        let firstInInstall = !userDefaults.bool(forKey: key)
+        userDefaults.set(true, forKey: key)
+
+        var report = baseReport(event: event)
+        report["first_in_install"] = .int(firstInInstall ? 1 : 0)
+        report["minutes_since_launch"] = .int(max(0, Int(Date().timeIntervalSince(startedAt ?? Date()) / 60)))
+        for (k, v) in detail { report[k] = v }
+        send(report)
+    }
+
+    /// Whether this process already fired `event` — lets a later milestone require an earlier
+    /// one (a turn that ends without a prompt this session was a restored queue, not a user).
+    func hasSentMilestone(_ event: String) -> Bool { sentMilestones.contains(event) }
+
     private func startHeartbeatTimer() {
         heartbeatTimer?.invalidate()
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: Self.heartbeatCheckInterval, repeats: true) { [weak self] _ in
@@ -168,14 +201,20 @@ final class SZTelemetry {
     }
 
     private func baseReport(event: String) -> [String: SZJellystatReportValue] {
-        [
+        var report: [String: SZJellystatReportValue] = [
             "event": .string(event),
             "schema_version": .int(1),
             "debug": .int(Self.debugFlag)
         ]
+        if userDefaults.bool(forKey: Self.devMachineDefaultsKey) { report["dev"] = .int(1) }
+        return report
     }
 
+    /// Test seam: every report handed to `send`, before the pref/config gate — what WOULD go out.
+    var reportObserverForTests: (([String: SZJellystatReportValue]) -> Void)?
+
     private func send(_ report: [String: SZJellystatReportValue]) {
+        reportObserverForTests?(report)
         // The user pref gates every event, heartbeat included. Dedup flags and signatures are
         // still consumed while disabled — opt-out drops events, it doesn't defer them.
         guard isEnabled(), let config else { return }

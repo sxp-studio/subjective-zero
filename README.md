@@ -118,7 +118,8 @@ ABI, and MCP surface. The rest of `docs/` goes a level deeper on one area each:
 ## Privacy
 
 Release builds report a small set of anonymous events (a random install ID, OS and hardware, app
-launch, and the first-run setup funnel) so we can see where new users get stuck. Project content,
+launch, the first-run setup funnel, and first-session milestones — a prompt was sent, an agent
+turn ended, a node compiled) so we can see where new users get stuck. Project content,
 prompts, chat, file paths, and code are never sent. To opt out, uncheck "Share anonymous usage
 data" on the welcome screen (Help ▸ Welcome). Full detail in [`docs/PRIVACY.md`](docs/PRIVACY.md).
 

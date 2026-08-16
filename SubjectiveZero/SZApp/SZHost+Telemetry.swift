@@ -71,6 +71,52 @@ extension SZHost {
         SZTelemetry.shared.trackDefaultProvider(context: telemetryContext())
     }
 
+    // MARK: - First-session milestones (call sites: sendChat, startRun, deliver, promoteStagedNode)
+
+    /// The user's first ask of the session: a chat send (`scope` director/node/debug) or a Build
+    /// (`scope` "build"). `rejected` = refused at the door (host/provider not ready) — the fate of
+    /// the FIRST attempt; a later success shows up as `turn_ended`. Agent-origin sends — the
+    /// Director steering a node — are fleet traffic, not a user milestone.
+    func trackPromptSentTelemetry(scope: String, providerID: String, rejected: Bool) {
+        SZTelemetry.shared.trackMilestone("prompt_sent", detail: [
+            "provider_id": .string(providerID),
+            "scope": .string(scope),
+            "rejected": .int(rejected ? 1 : 0),
+        ])
+    }
+
+    /// The first agent turn of the session came back — the first moment the user learns whether
+    /// the AI works at all. Requires a `prompt_sent` this process: a turn with no ask behind it is
+    /// a queue restored from disk, not the user. `failed` is the provider's own verdict minus a
+    /// user Stop (a killed CLI exits non-zero — `cancelled` keeps that out of the failure bucket);
+    /// `timed_out` separates a budget overrun from a CLI/auth error.
+    func trackTurnEndedTelemetry(scope: SZChatScope, providerID: String, failed: Bool,
+                                 timedOut: Bool, cancelled: Bool) {
+        guard SZTelemetry.shared.hasSentMilestone("prompt_sent") else { return }
+        SZTelemetry.shared.trackMilestone("turn_ended", detail: [
+            "provider_id": .string(providerID),
+            "scope": .string(Self.telemetryScopeLabel(scope)),
+            "failed": .int(failed && !cancelled ? 1 : 0),
+            "timed_out": .int(timedOut ? 1 : 0),
+            "cancelled": .int(cancelled ? 1 : 0),
+        ])
+    }
+
+    /// The first agent-built node of the session compiled and went live — "it worked".
+    func trackNodeBuiltTelemetry() {
+        SZTelemetry.shared.trackMilestone("node_built", detail: [
+            "node_count": .int(store.project?.graph.nodes.count ?? 0),
+        ])
+    }
+
+    static func telemetryScopeLabel(_ scope: SZChatScope) -> String {
+        switch scope {
+        case .director: "director"
+        case .node: "node"
+        case .debug: "debug"
+        }
+    }
+
     private func telemetryContext() -> SZTelemetry.Context {
         let generation = resolvedGenerationSettings(for: activeProviderID)
         return SZTelemetry.Context(
