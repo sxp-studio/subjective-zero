@@ -350,14 +350,14 @@ public enum SZNodeLayout {
     }
 
     /// Character count of a component as the fields RENDER it — the very same FormatStyle
-    /// (`.number.precision(.fractionLength(0...3))`, grouping included: 1234.5 → "1,234.5") so the
-    /// estimate can never lag the render. A hand-rolled %.3f mirror omitted grouping separators and
-    /// undercounted every |v| ≥ 1000. Memoized behind a Mutex: this is the inner loop of width(of:),
+    /// (`.number.precision(.fractionLength(0...3)).grouping(.never)`: 1234.5 → "1234.5", no thousands
+    /// separator — data cells are monospaced numbers) so the estimate can never lag the render.
+    /// Memoized behind a Mutex: this is the inner loop of width(of:),
     /// which runs per socket per canvas evaluation on the drag hot path, and FormatStyle is one of
     /// the most expensive ways to measure a number; values repeat massively frame-to-frame.
     static func formattedNumericLength(_ v: Double) -> Int {
         if let hit = formattedLengthCache.withLock({ $0[v] }) { return hit }
-        let length = v.formatted(.number.precision(.fractionLength(0...3))).count
+        let length = v.formatted(.number.precision(.fractionLength(0...3)).grouping(.never)).count
         formattedLengthCache.withLock {
             if $0.count >= 4096 { $0.removeAll(keepingCapacity: true) }   // crude cap; refills instantly
             $0[v] = length

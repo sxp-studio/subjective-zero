@@ -515,28 +515,25 @@ private func zooNode() -> SZNode {
 
 // MARK: - Width-model fidelity (review findings: grouping, spacing, padding)
 
-@Test func numericLengthCountsGroupingSeparatorsTheCellsRender() {
-    // The estimate must count characters with the SAME FormatStyle the cells render with — grouping
-    // separators included (a %.3f mirror undercounted every |v| >= 1000).
+@Test func numericLengthMatchesTheUngroupedCellsRender() {
+    // The estimate must count characters with the SAME FormatStyle the cells render with. Cells
+    // render WITHOUT thousands grouping (`.grouping(.never)` — data cells are monospaced numbers, and
+    // a locale's "8,000" / "8 000" read as noise on a port field), so the estimate must not count
+    // separators either — a grouped mirror would overcount every |v| >= 1000 and widen the card.
     //
-    // These are LITERALS on purpose. Asserting against `v.formatted(.number.precision(...)).count` is
-    // the exact expression the implementation evaluates (SZNodeLayout.formattedNumericLength), so it
-    // only proved Foundation is deterministic — a mirror that dropped grouping would have satisfied it
-    // on both sides. Assumes a grouping locale (the separator, not its glyph, is what's counted).
+    // These are LITERALS on purpose. Asserting against `v.formatted(...)`.count is the exact expression
+    // the implementation evaluates (SZNodeLayout.formattedNumericLength), so it would only prove
+    // Foundation is deterministic. Locale-independent: no separator is ever emitted.
     #expect(SZNodeLayout.formattedNumericLength(0) == 1)              // "0"
     #expect(SZNodeLayout.formattedNumericLength(-0.1) == 4)           // "-0.1"
     #expect(SZNodeLayout.formattedNumericLength(0.35) == 4)           // "0.35"
-    #expect(SZNodeLayout.formattedNumericLength(123.456) == 7)        // "123.456" — below the group
-    #expect(SZNodeLayout.formattedNumericLength(1234.5) == 7)         // "1,234.5" — one separator
-    #expect(SZNodeLayout.formattedNumericLength(1234567.891) == 13)   // "1,234,567.891" — two separators
-
-    // Grouped values must measure WIDER than their unseparated spelling — the property the %.3f mirror
-    // violated, stated without reference to any format style at all.
-    #expect(SZNodeLayout.formattedNumericLength(1234.5) > "1234.5".count)
-    #expect(SZNodeLayout.formattedNumericLength(1234567.891) > "1234567.891".count)
+    #expect(SZNodeLayout.formattedNumericLength(123.456) == 7)        // "123.456"
+    #expect(SZNodeLayout.formattedNumericLength(1234.5) == 6)         // "1234.5" — no separator
+    #expect(SZNodeLayout.formattedNumericLength(1234567.891) == 11)   // "1234567.891" — none
+    #expect(SZNodeLayout.formattedNumericLength(8000) == 4)           // "8000" — a UDP port, not "8,000"
 
     // Memoized behind a Mutex (SZNodeLayout.swift): a repeat read must agree with the first.
-    #expect(SZNodeLayout.formattedNumericLength(1234.5) == 7)
+    #expect(SZNodeLayout.formattedNumericLength(1234.5) == 6)
 }
 
 @Test func inputRowWidthCountsBothSpacerSideGaps() {

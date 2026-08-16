@@ -109,7 +109,7 @@ struct SZPortControl: View {
             ForEach(0..<count, id: \.self) { i in
                 numericCell(TextField("", value: Binding(get: { component(i) },
                                                          set: { setComponent(i, to: $0, count: count) }),
-                                      format: .number.precision(.fractionLength(0...3)))
+                                      format: .number.precision(.fractionLength(0...3)).grouping(.never))
                     .textFieldStyle(.plain))
                     .background(fieldWell)
             }
@@ -124,7 +124,7 @@ struct SZPortControl: View {
     private func readOnlyWells(_ values: [Double]) -> some View {
         HStack(spacing: SZNodeLayout.cellSpacing) {
             ForEach(values.indices, id: \.self) { i in
-                numericCell(Text(values[i].formatted(.number.precision(.fractionLength(0...3))))
+                numericCell(Text(values[i].formatted(.number.precision(.fractionLength(0...3)).grouping(.never)))
                     .foregroundStyle(SZNodeCardStyle.readOnlyValueColor))
                     .background(Capsule().fill(SZNodeCardStyle.chipFill))
             }
