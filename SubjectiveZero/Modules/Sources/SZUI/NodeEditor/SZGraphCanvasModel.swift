@@ -102,19 +102,26 @@ public enum SZGraphCanvasModel {
     }
 
     /// The IDs of every socket wired by at least one connection, in one O(connections) pass — the
-    /// socket layer looks its dots up here instead of scanning all connections per socket. Flow ends
-    /// normalize to port "" (a flow ref's port may be "flow", but flow sockets are keyed portless —
-    /// same rule the per-socket scan applied). `excluding` drops a picked-up wire so its sockets dim.
+    /// socket layer looks its dots up here instead of scanning all connections per socket. A plain
+    /// flow end keys the portless flow socket; a PINNED flow end lights the data socket it targets.
+    /// `excluding` drops a picked-up wire so its sockets dim.
     public static func connectedSocketIDs(in graph: SZGraph, excluding excluded: SZConnectionID? = nil) -> Set<String> {
         var result = Set<String>()
         result.reserveCapacity(graph.connections.count * 2)
         for c in graph.connections where c.id != excluded {
-            result.insert(SZSocket.key(nodeID: c.from.node, side: .output, kind: c.kind,
-                                       port: c.kind == .flow ? "" : c.from.port))
-            result.insert(SZSocket.key(nodeID: c.to.node, side: .input, kind: c.kind,
-                                       port: c.kind == .flow ? "" : c.to.port))
+            let from = endSocket(of: c, end: .from), to = endSocket(of: c, end: .to)
+            result.insert(SZSocket.key(nodeID: c.from.node, side: .output, kind: from.kind, port: from.port))
+            result.insert(SZSocket.key(nodeID: c.to.node, side: .input, kind: to.kind, port: to.port))
         }
         return result
+    }
+
+    /// The socket kind + port a connection end lands on, in canvas convention: data ends and pinned
+    /// flow ends name their data socket; a plain flow end is the portless flow socket.
+    static func endSocket(of c: SZConnection, end: SZConnectionEnd) -> (kind: SZConnectionKind, port: String) {
+        if c.kind == .data { return (.data, end == .from ? c.from.port : c.to.port) }
+        if let pinned = c.pinnedPort(end) { return (.data, pinned) }
+        return (.flow, "")
     }
 
     /// The declared type of a node's port (nil if no contract / not found).
@@ -123,12 +130,13 @@ public enum SZGraphCanvasModel {
         return ports.first { $0.name == port }?.type
     }
 
-    /// Whether `a`→`b` is a legal connection (order-independent): different nodes, opposite sides, same
-    /// kind; data additionally requires equal port types (texture→texture, float→float, …) and must not
-    /// close a cycle. Flow is always allowed between an output and an input.
+    /// Whether `a`→`b` is a legal connection (order-independent): different nodes, opposite sides.
+    /// data↔data additionally requires equal port types (texture→texture, float→float, …) and must not
+    /// close a cycle. Anything touching a flow socket lays a flow edge — always allowed between an
+    /// output and an input; a flow↔data mix pins the flow edge to that data slot (`SZConnection.pinnedPort`).
     public static func canConnect(_ a: SZSocket, _ b: SZSocket, in graph: SZGraph) -> Bool {
-        guard a.nodeID != b.nodeID, a.side != b.side, a.kind == b.kind else { return false }
-        guard a.kind == .data else { return true }
+        guard a.nodeID != b.nodeID, a.side != b.side else { return false }
+        guard a.kind == .data, b.kind == .data else { return true }
         let out = a.side == .output ? a : b
         let inp = a.side == .input ? a : b
         guard let outNode = graph.node(id: out.nodeID), let inNode = graph.node(id: inp.nodeID),
@@ -158,7 +166,12 @@ public enum SZGraphCanvasModel {
               canConnect(source, socket, in: graph),
               !isOccluded(socket, in: graph, tiers: tiers)
         else { return false }
-        if let occupied = incomingDataConnection(to: socket, in: graph),
+        // A picked-up edge keeps its kind on re-route: a DATA edge can't land on a flow socket
+        // (a flow edge dropped on a data socket just becomes pinned).
+        if let pickedConnectionID, socket.kind == .flow,
+           graph.connections.contains(where: { $0.id == pickedConnectionID && $0.kind == .data }) { return false }
+        // Only a data→data drop swaps the occupant out; a flow pinned onto an occupied input displaces nothing.
+        if source.kind == .data, let occupied = incomingDataConnection(to: socket, in: graph),
            occupied.id != pickedConnectionID, isLocked(occupied.from.node) { return false }
         return true
     }
@@ -200,18 +213,20 @@ public enum SZGraphCanvasModel {
     }
 
     /// The socket at the end of `connection` OPPOSITE the detached one — where a pickup drag's preview
-    /// anchors while the detached end is re-routed. Works for data AND flow edges; the socket's port is
-    /// normalized to the canvas convention ("" for flow sockets, whatever the connection ref names for
-    /// data). Nil if the edge's endpoints don't resolve.
+    /// anchors while the detached end is re-routed. Works for data AND flow edges; the socket follows
+    /// the canvas convention (`endSocket`: portless flow, or the data socket a data/pinned end names).
+    /// Nil if the edge's endpoints don't resolve.
     public static func pickupAnchor(detaching end: SZConnectionEnd, of connection: SZConnection,
                                     in graph: SZGraph) -> SZSocket? {
         guard let pts = endpoints(of: connection, in: graph) else { return nil }
-        let ref = end == .to ? connection.from : connection.to
+        let kept: SZConnectionEnd = end == .to ? .from : .to
+        let ref = kept == .from ? connection.from : connection.to
+        let socket = endSocket(of: connection, end: kept)
         return SZSocket(nodeID: ref.node,
-                        side: end == .to ? .output : .input,
-                        kind: connection.kind,
-                        port: connection.kind == .flow ? "" : ref.port,
-                        point: end == .to ? pts.from : pts.to)
+                        side: kept == .from ? .output : .input,
+                        kind: socket.kind,
+                        port: socket.port,
+                        point: kept == .from ? pts.from : pts.to)
     }
 
     /// Which end of `connection` a grab at world-space `point` should detach for re-routing: the
@@ -228,7 +243,9 @@ public enum SZGraphCanvasModel {
     /// socket of `to`). Nil if an endpoint node is missing, OR — for a DATA connection — if either
     /// typed port doesn't exist yet (an endpoint is still a prompt node). A data edge is drawn only once
     /// both real ports exist; before that the relationship is carried by a flow (intent) edge, which the
-    /// draft step realizes into this data edge (and resolves) once the contract lands.
+    /// draft step realizes into this data edge (and resolves) once the contract lands. A flow end
+    /// PINNED to a declared data port lands on that data socket; an unresolvable pin falls back to
+    /// the flow socket.
     public static func endpoints(of connection: SZConnection, in graph: SZGraph) -> (from: CGPoint, to: CGPoint)? {
         guard let fromNode = graph.node(id: connection.from.node),
               let toNode = graph.node(id: connection.to.node) else { return nil }
@@ -236,9 +253,12 @@ public enum SZGraphCanvasModel {
             guard portType(of: fromNode, side: .output, port: connection.from.port) != nil,
                   portType(of: toNode, side: .input, port: connection.to.port) != nil else { return nil }
         }
-        return (
-            socketPoint(of: fromNode, side: .output, kind: connection.kind, port: connection.from.port),
-            socketPoint(of: toNode, side: .input, kind: connection.kind, port: connection.to.port)
-        )
+        func point(_ node: SZNode, _ side: SZSocketSide, _ end: SZConnectionEnd) -> CGPoint {
+            let s = endSocket(of: connection, end: end)
+            let resolvable = connection.kind == .data || portType(of: node, side: side, port: s.port) != nil
+            return resolvable ? socketPoint(of: node, side: side, kind: s.kind, port: s.port)
+                              : socketPoint(of: node, side: side, kind: .flow, port: "")
+        }
+        return (point(fromNode, .output, .from), point(toNode, .input, .to))
     }
 }

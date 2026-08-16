@@ -131,6 +131,39 @@ private func seededPrompt(_ id: SZNodeID, _ title: String,
     #expect(flows.count == 1 && flows.first?.from.node == c)   // only the unbindable arrow survives
 }
 
+@Test func aPinnedArrowRealizesIntoItsSlotAndABadPinStaysAsIntent() {
+    // The user dropped the flow wire on a specific blue slot: realization honors that slot over
+    // first-unwired (mask before frame), and a pinned SOURCE port over the first texture output.
+    // A pin naming a non-texture / missing port is never redirected — the arrow stays as intent.
+    let a = SZNodeID(), b = SZNodeID(), c = SZNodeID(), seeded = SZNodeID()
+    func source(_ id: SZNodeID, _ title: String, ports: [String]) -> SZNode {
+        SZNode(id: id, kind: .generated, title: title,
+               contract: SZNodeContract(title: title, sfSymbol: "circle", summary: "",
+                                        outputs: ports.map { SZPort(name: $0, type: .texture) }),
+               position: SZPoint(x: 0, y: 0))
+    }
+    let spawn = seededPrompt(seeded, "Spawn", inputs: [SZPort(name: "frame", type: .texture),
+                                                       SZPort(name: "mask", type: .texture),
+                                                       SZPort(name: "amount", type: .float)])
+    let toMask = SZConnection(from: SZPortRef.flow(node: a), to: SZPortRef(node: seeded, port: "mask"), kind: .flow)
+    let fromSecond = SZConnection(from: SZPortRef(node: b, port: "second"), to: SZPortRef.flow(node: seeded), kind: .flow)
+    let toAmount = SZConnection(from: SZPortRef.flow(node: c), to: SZPortRef(node: seeded, port: "amount"), kind: .flow)
+    let graph = SZGraph(nodes: [source(a, "A", ports: ["outA"]), source(b, "B", ports: ["first", "second"]),
+                                source(c, "C", ports: ["outC"]), spawn],
+                        connections: [toMask, fromSecond, toAmount])
+
+    let (g, drafted, skipped) = graph.draftContractsFromFlow()
+    #expect(drafted.isEmpty)
+    #expect(g.connections.contains {
+        $0.kind == .data && $0.from == SZPortRef(node: a, port: "outA") && $0.to == SZPortRef(node: seeded, port: "mask")
+    })
+    #expect(g.connections.contains {
+        $0.kind == .data && $0.from == SZPortRef(node: b, port: "second") && $0.to == SZPortRef(node: seeded, port: "frame")
+    })
+    #expect(skipped.count == 1 && skipped.first?.from == c && skipped.first?.reason == .noCompatiblePort)
+    #expect(g.connections.filter { $0.kind == .flow }.map(\.id) == [toAmount.id])
+}
+
 @Test func anArrowFromASourceWithNoTextureOutputStaysAsIntent() {
     // A seeded float3 SOURCE declares no texture output, so its arrow has no texture wiring to
     // realize — it must stay as reported intent, never an edge to a nonexistent or mistyped port

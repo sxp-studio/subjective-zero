@@ -139,9 +139,9 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     #expect(session.outcome() == .none)
 }
 
-@Test func aFlowRestoreComparesNodesOnly() {
+@Test func aFlowRestoreComparesNodeAndPin() {
     // A flow ref's port may be "flow" (ensureFlow) while the socket is keyed portless — dropping a
-    // picked flow edge back on its node must read as unchanged, not as a re-route.
+    // picked flow edge back on its node's flow dot must read as unchanged, not as a re-route.
     let a = texNode("A", at: SZPoint(x: 0, y: 0), outputs: ["out"])
     let b = texNode("B", at: SZPoint(x: 600, y: 0), inputs: ["input"])
     let flow = SZConnection(from: SZPortRef(node: a.id, port: "flow"),
@@ -154,6 +154,46 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     session.update(toWorld: pts.to, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
     #expect(session.target?.nodeID == b.id)
     #expect(session.outcome() == .none)
+    // …but dropping it on the same node's BLUE input is a real re-route: the edge becomes pinned.
+    let blueIn = socket(b, .input, .data, "input")
+    session.update(toWorld: blueIn.point, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    #expect(session.target?.id == blueIn.id)
+    #expect(session.outcome() == .reconnect(flow.id, .to, SZPortRef(node: b.id, port: "input")))
+}
+
+@Test func aFlowWireDroppedOnADataSocketConnectsAsFlowPinnedToThatSlot() {
+    let a = texNode("A", at: SZPoint(x: 0, y: 0), outputs: ["out"])
+    let b = texNode("B", at: SZPoint(x: 600, y: 0), inputs: ["input", "mask"])
+    let graph = SZGraph(nodes: [a, b], connections: [])
+
+    // flow-out → blue input: a flow edge, its `to` pinned to the exact slot; `from` is the plain marker
+    let flowOut = socket(a, .output, .flow, "")
+    let mask = socket(b, .input, .data, "mask")
+    var s1 = SZWireDragSession.begin(from: flowOut, atWorld: flowOut.point, screen: flowOut.point,
+                                     in: graph, isLocked: unlocked)!
+    s1.update(toWorld: mask.point, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    #expect(s1.target?.id == mask.id)
+    #expect(s1.outcome() == .connect(from: SZPortRef.flow(node: a.id),
+                                     to: SZPortRef(node: b.id, port: "mask"), kind: .flow))
+
+    // blue output → flow-in: the mirror image pins the SOURCE port
+    let out = socket(a, .output, .data, "out")
+    let flowIn = socket(b, .input, .flow, "")
+    var s2 = SZWireDragSession.begin(from: out, atWorld: out.point, screen: out.point,
+                                     in: graph, isLocked: unlocked)!
+    s2.update(toWorld: flowIn.point, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    #expect(s2.outcome() == .connect(from: SZPortRef(node: a.id, port: "out"),
+                                     to: SZPortRef.flow(node: b.id), kind: .flow))
+
+    // a picked-up DATA edge never lands on a flow socket (its kind is fixed on re-route)
+    let data = SZConnection(from: SZPortRef(node: a.id, port: "out"),
+                            to: SZPortRef(node: b.id, port: "input"), kind: .data)
+    let wired = SZGraph(nodes: [a, b], connections: [data])
+    let grab = socket(b, .input, .data, "input")
+    var s3 = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+                                     in: wired, isLocked: unlocked)!
+    s3.update(toWorld: flowIn.point, zoom: 1, in: wired, tiers: [:], isLocked: unlocked)
+    #expect(s3.target == nil)
 }
 
 @Test func aFreshWireOrientsOutputToInputWhicheverEndWasDragged() {

@@ -155,7 +155,7 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     #expect(pr.allSatisfy { $0.kind == .flow })
 }
 
-@Test func canConnectEnforcesOppositeSidesSameKindAndDataTypes() {
+@Test func canConnectEnforcesOppositeSidesAndDataTypesAndLetsFlowPinADataSlot() {
     let camera = cameraNode(at: SZPoint(x: 0, y: 0))
     let gray = SZNode(
         kind: .generated, title: "Grayscale", sfSymbol: "circle.lefthalf.filled",
@@ -177,8 +177,53 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     #expect(!SZGraphCanvasModel.canConnect(camTex, sock(gray.id, .output, .data, "output"), in: graph)) // out→out ✗
     // flow is always allowed between opposite sides
     #expect(SZGraphCanvasModel.canConnect(sock(camera.id, .output, .flow, ""), sock(gray.id, .input, .flow, ""), in: graph))
+    // a flow wire may land on a DATA socket of the opposite side (it pins that slot) — any type, no cycle check
+    #expect(SZGraphCanvasModel.canConnect(sock(camera.id, .output, .flow, ""), grayIn, in: graph))
+    #expect(SZGraphCanvasModel.canConnect(sock(camera.id, .output, .flow, ""), grayAmt, in: graph))
+    #expect(SZGraphCanvasModel.canConnect(camTex, sock(gray.id, .input, .flow, ""), in: graph))
+    #expect(!SZGraphCanvasModel.canConnect(sock(camera.id, .output, .flow, ""), sock(gray.id, .output, .data, "output"), in: graph))
     // no self-connection
     #expect(!SZGraphCanvasModel.canConnect(camTex, sock(camera.id, .input, .data, "mirror"), in: graph))
+}
+
+@Test func aPinnedFlowEdgeLandsOnItsDataSocketAndLightsIt() {
+    let camera = cameraNode(at: SZPoint(x: 0, y: 0))
+    let gray = SZNode(
+        kind: .generated, title: "Grayscale", sfSymbol: "circle.lefthalf.filled",
+        contract: SZNodeContract(title: "Grayscale", sfSymbol: "circle.lefthalf.filled", summary: "luma",
+                                 inputs: [SZPort(name: "input", type: .texture),
+                                          SZPort(name: "amount", type: .float)],
+                                 outputs: [SZPort(name: "output", type: .texture)]),
+        position: SZPoint(x: 400, y: 0))
+    // camera (flow out) → gray.amount: pinned at the input end only
+    let pinned = SZConnection(from: SZPortRef.flow(node: camera.id),
+                              to: SZPortRef(node: gray.id, port: "amount"), kind: .flow)
+    // a pin naming no declared port falls back to the flow socket (never a phantom point)
+    let stale = SZConnection(from: SZPortRef.flow(node: camera.id),
+                             to: SZPortRef(node: gray.id, port: "gone"), kind: .flow)
+    let graph = SZGraph(nodes: [camera, gray], connections: [pinned, stale])
+    #expect(pinned.pinnedPort(.to) == "amount" && pinned.pinnedPort(.from) == nil)
+
+    let pts = SZGraphCanvasModel.endpoints(of: pinned, in: graph)!
+    #expect(pts.from == SZGraphCanvasModel.socketPoint(of: camera, side: .output, kind: .flow, port: ""))
+    #expect(pts.to == SZGraphCanvasModel.socketPoint(of: gray, side: .input, kind: .data, port: "amount"))
+    #expect(SZGraphCanvasModel.endpoints(of: stale, in: graph)!.to
+            == SZGraphCanvasModel.socketPoint(of: gray, side: .input, kind: .flow, port: ""))
+
+    let connected = SZGraphCanvasModel.connectedSocketIDs(in: graph)
+    #expect(connected.contains(SZSocket.key(nodeID: gray.id, side: .input, kind: .data, port: "amount")))
+    #expect(connected.contains(SZSocket.key(nodeID: camera.id, side: .output, kind: .flow, port: "")))
+    #expect(!connected.contains(SZSocket.key(nodeID: gray.id, side: .input, kind: .flow, port: "")))
+
+    // detaching the source end keeps the pinned data socket as the anchor
+    let anchor = SZGraphCanvasModel.pickupAnchor(detaching: .from, of: pinned, in: graph)!
+    #expect(anchor.kind == .data && anchor.port == "amount" && anchor.side == .input && anchor.point == pts.to)
+
+    // while a flow wire is dragged from camera's flow-out, gray's blue inputs are live targets
+    let flowOut = SZGraphCanvasModel.sockets(in: graph).first { $0.nodeID == camera.id && $0.side == .output && $0.kind == .flow }!
+    let targets = SZGraphCanvasModel.validTargets(for: flowOut, in: graph, tiers: [:], pickedConnectionID: nil, isLocked: { _ in false })
+    #expect(Set(targets.map(\.port)) == ["", "input", "amount"])
+    #expect(targets.allSatisfy { $0.nodeID == gray.id && $0.side == .input })
 }
 
 @Test func canConnectRefusesACycleClosingDataEdgeButAllowsDropBack() {

@@ -181,8 +181,13 @@ public enum SZDirectorPrompt {
             return "- `\(n.id.uuidString)` \"\(n.title)\" — \(n.kind.rawValue)\(rebuild), \(io)\(prompt)"
         }.joined(separator: "\n")
 
+        // A pinned end prints as `node.port` — the user dropped the arrow on that exact slot.
         let flow = graph.connections.filter { $0.kind == .flow }
-            .map { "\(short($0.from.node)) → \(short($0.to.node))" }
+            .map { c in
+                let from = short(c.from.node) + (c.pinnedPort(.from).map { ".\($0)" } ?? "")
+                let to = short(c.to.node) + (c.pinnedPort(.to).map { ".\($0)" } ?? "")
+                return "\(from) → \(to)"
+            }
         let data = graph.connections.filter { $0.kind == .data }
             .map { "\(short($0.from.node)).\($0.from.port) → \(short($0.to.node)).\($0.to.port)" }
         let endpoint = graph.renderEndpoint.map { "\(short($0.node)).\($0.port)" } ?? "none"
@@ -191,7 +196,7 @@ public enum SZDirectorPrompt {
         Nodes:
         \(nodes.isEmpty ? "- (none)" : nodes)
 
-        Flow edges (drawing intent — realize each into typed data wiring; laying the data edge resolves the arrow): \(flow.isEmpty ? "none" : flow.joined(separator: ", "))
+        Flow edges (drawing intent — realize each into typed data wiring; laying the data edge resolves the arrow; an end written `node.port` was dropped on that exact slot — wire that port, not another): \(flow.isEmpty ? "none" : flow.joined(separator: ", "))
         Data edges: \(data.isEmpty ? "none" : data.joined(separator: ", "))
         Render endpoint (blitted to the viewport): \(endpoint)
         """

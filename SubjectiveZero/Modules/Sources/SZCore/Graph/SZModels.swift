@@ -283,10 +283,18 @@ public struct SZPortRef: Codable, Equatable, Hashable, Sendable {
     public var port: String
     public init(node: SZNodeID, port: String) { self.node = node; self.port = port }
 
-    /// A flow (intent) endpoint. Flow is node-to-node, so every flow ref carries this fixed port
-    /// marker — the one home for the literal. (Flow SOCKETS key port as ""; comparisons match flow
-    /// by node, never by port string.)
-    public static func flow(node: SZNodeID) -> SZPortRef { SZPortRef(node: node, port: "flow") }
+    /// The port marker of a node-to-node flow ref — the one home for the literal. (Flow SOCKETS key
+    /// port as "".) A flow end naming any OTHER port is PINNED to that slot (`SZConnection.pinnedPort`).
+    public static let flowMarker = "flow"
+
+    /// A plain (unpinned) flow endpoint: `port` is the marker.
+    public static func flow(node: SZNodeID) -> SZPortRef { SZPortRef(node: node, port: flowMarker) }
+
+    /// Whether this ref's port is a flow marker ("" or "flow") rather than a pinned slot.
+    public var isFlowMarker: Bool { port.isEmpty || port == Self.flowMarker }
+
+    /// The port normalized for flow comparison: markers collapse to "flow", a pinned slot stays itself.
+    public var flowPort: String { isFlowMarker ? Self.flowMarker : port }
 }
 
 public struct SZConnection: Codable, Identifiable, Equatable, Sendable {
@@ -300,6 +308,27 @@ public struct SZConnection: Codable, Identifiable, Equatable, Sendable {
         self.from = from
         self.to = to
         self.kind = kind
+    }
+
+    /// The contract port a flow edge's `end` is pinned to — the user dropped the flow wire on that
+    /// specific data socket ("feed THIS slot") — or nil for a plain node-to-node flow end / data edge.
+    public func pinnedPort(_ end: SZConnectionEnd) -> String? {
+        guard kind == .flow else { return nil }
+        let ref = end == .from ? from : to
+        return ref.isFlowMarker ? nil : ref.port
+    }
+
+    /// Whether this is a flow arrow that the data edge `from`→`to` realizes: same node pair, and each
+    /// pinned end (if any) is the very port the data edge uses.
+    public func isFlowIntent(realizedBy from: SZPortRef, _ to: SZPortRef) -> Bool {
+        kind == .flow && self.from.node == from.node && self.to.node == to.node
+            && (pinnedPort(.from) ?? from.port) == from.port
+            && (pinnedPort(.to) ?? to.port) == to.port
+    }
+
+    /// Whether two flow ends mean the same thing: same node, and same pin (markers "" / "flow" agree).
+    public static func sameFlowEnd(_ a: SZPortRef, _ b: SZPortRef) -> Bool {
+        a.node == b.node && a.flowPort == b.flowPort
     }
 }
 

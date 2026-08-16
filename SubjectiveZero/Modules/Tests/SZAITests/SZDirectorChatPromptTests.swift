@@ -74,3 +74,17 @@ private func node(_ title: String, kind: SZNodeKind, rebuildReason: SZRebuildRea
     #expect(outDesc.contains("make the input texture glow"))
     #expect(!outDesc.contains("has not described"))
 }
+
+/// A flow arrow the user dropped on a specific blue slot prints that slot (`node.port`), so the
+/// Director wires THAT port; a plain node-to-node arrow prints nodes only.
+@Test func theSummaryPrintsAFlowArrowsPinnedSlot() {
+    let cam = node("Camera", kind: .generated)
+    let blend = node("Blend", kind: .generated)
+    let short = { (id: SZNodeID) in String(id.uuidString.prefix(8)) }
+    let plain = SZConnection(from: SZPortRef.flow(node: cam.id), to: SZPortRef.flow(node: blend.id), kind: .flow)
+    let pinned = SZConnection(from: SZPortRef(node: cam.id, port: "output"),
+                              to: SZPortRef(node: blend.id, port: "mask"), kind: .flow)
+    let summary = SZDirectorPrompt.graphSummary(SZGraph(nodes: [cam, blend], connections: [plain, pinned]))
+    #expect(summary.contains("\(short(cam.id)) → \(short(blend.id)),"))
+    #expect(summary.contains("\(short(cam.id)).output → \(short(blend.id)).mask"))
+}

@@ -57,8 +57,8 @@ extension SZStore {
     /// Connect an output port to an input port. Type-compatibility is the caller's call (the editor
     /// checks before connecting), but cardinality is enforced here: a data input holds at most ONE
     /// incoming connection, so wiring an occupied input swaps the old edge out. Repeating an existing
-    /// connection — same data from→to, or any flow edge between the same node pair — is idempotent and
-    /// returns the existing id. And the graph must stay a DAG: a DATA edge that would close a cycle is
+    /// connection — same data from→to, or a flow edge between the same node pair with the same pins
+    /// (`SZConnection.pinnedPort`) — is idempotent and returns the existing id. And the graph must stay a DAG: a DATA edge that would close a cycle is
     /// refused, judged against the graph as if the occupied input's edge were already swapped out, so
     /// a replace that breaks the old cycle path is never a false positive. Flow is never checked.
     ///
@@ -71,10 +71,10 @@ extension SZStore {
     public func tryConnect(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind) -> SZConnectResult {
         guard let graph = project?.graph else { return .noProject }
         assertFenceCleared([from.node, to.node])
-        // Flow compares node pairs (port names vary: "" / "flow") because flow is node-to-node intent.
+        // Flow compares node + pin per end (markers "" / "flow" agree); a different pin is a new intent.
         if let existing = graph.connections.first(where: {
             $0.kind == kind && (kind == .flow
-                ? ($0.from.node == from.node && $0.to.node == to.node)
+                ? (SZConnection.sameFlowEnd($0.from, from) && SZConnection.sameFlowEnd($0.to, to))
                 : ($0.from == from && $0.to == to))
         }) { return .connected(existing.id) }
         if kind == .data {
@@ -90,11 +90,10 @@ extension SZStore {
                 project.graph.connections.removeAll { $0.kind == .data && $0.to == to }
             }
             project.graph.connections.append(connection)
-            // Realizing intent: a data edge resolves the matching flow arrow between the same nodes.
+            // Realizing intent: a data edge resolves the matching flow arrows between the same nodes —
+            // an arrow pinned to another slot is a different intent and stays.
             if kind == .data {
-                project.graph.connections.removeAll {
-                    $0.kind == .flow && $0.from.node == from.node && $0.to.node == to.node
-                }
+                project.graph.connections.removeAll { $0.isFlowIntent(realizedBy: from, to) }
             }
         }
         return applied ? .connected(connection.id) : .noProject

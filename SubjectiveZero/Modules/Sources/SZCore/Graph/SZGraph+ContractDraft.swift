@@ -64,7 +64,7 @@ extension SZGraph {
         for i in g.nodes.indices {
             let n = g.nodes[i]
             guard n.kind == .prompt, n.contract == nil else { continue }
-            let inputs = incomingFlowSources(of: n.id, order: order).indices.map {
+            let inputs = incomingFlowArrows(of: n.id, order: order).indices.map {
                 Self.texturePort(SZDraftPortName.input($0))
             }
             g.nodes[i].contract = SZNodeContract(
@@ -100,24 +100,38 @@ extension SZGraph {
         // the flow→data promotion that makes the textures actually bind. As with `SZStore.connect`,
         // realizing an arrow RESOLVES it: the flow intent edges are removed afterward (snapshot the
         // realized pairs first — flow is read here, removed only after the loop).
-        var realized: [(from: SZNodeID, to: SZNodeID)] = []
+        var realized: [SZConnection] = []
         var skipped: [(from: SZNodeID, to: SZNodeID, reason: SZFlowSkipReason)] = []
         for nid in drafted + contracted {
-            for (k, source) in incomingFlowSources(of: nid, order: order).enumerated() {
+            for (k, arrow) in incomingFlowArrows(of: nid, order: order).enumerated() {
+                let source = arrow.from.node
                 let alreadyWired = g.connections.contains {
                     $0.kind == .data && $0.from.node == source && $0.to.node == nid
+                        && (arrow.pinnedPort(.from) ?? $0.from.port) == $0.from.port
+                        && (arrow.pinnedPort(.to) ?? $0.to.port) == $0.to.port
                 }
-                if alreadyWired { realized.append((source, nid)); continue }
+                if alreadyWired { realized.append(arrow); continue }
                 // Both ports resolved against the DRAFTED graph (a pass-1 source's contract lives
                 // only in `g`). A source with no texture output, or a target with no free texture
                 // input, can't carry this wiring — the arrow stays as intent instead of an edge
                 // pointing at a phantom or mistyped port. Drafted targets keep the k-indexed names
                 // deliberately (arrow k owns input k, so a cycle-skipped arrow leaves ITS slot
-                // unwired); first-unwired would compact later arrows into earlier slots.
-                let inputPort = draftedSet.contains(nid)
-                    ? SZDraftPortName.input(k)
-                    : g.firstUnwiredTextureInput(of: nid)
-                guard let sourcePort = g.textureOutputPort(of: source), let inputPort else {
+                // unwired); first-unwired would compact later arrows into earlier slots. A PINNED end
+                // is honored literally when it names a texture port (an unwired input on the target)
+                // — and never redirected: a bad pin stays as intent.
+                let sourcePort: String?
+                if let pin = arrow.pinnedPort(.from) {
+                    sourcePort = g.isTexturePort(of: source, output: true, pin) ? pin : nil
+                } else {
+                    sourcePort = g.textureOutputPort(of: source)
+                }
+                let inputPort: String?
+                if let pin = arrow.pinnedPort(.to) {
+                    inputPort = g.isUnwiredTextureInput(of: nid, pin) ? pin : nil
+                } else {
+                    inputPort = draftedSet.contains(nid) ? SZDraftPortName.input(k) : g.firstUnwiredTextureInput(of: nid)
+                }
+                guard let sourcePort, let inputPort else {
                     skipped.append((source, nid, .noCompatiblePort))
                     continue
                 }
@@ -127,28 +141,46 @@ extension SZGraph {
                     skipped.append((source, nid, .wouldCloseCycle))
                     continue
                 }
-                realized.append((source, nid))
+                realized.append(arrow)
                 g.connections.append(SZConnection(
                     from: SZPortRef(node: source, port: sourcePort),
                     to: SZPortRef(node: nid, port: inputPort),
                     kind: .data))
             }
         }
+        // Every arrow that reads the same as a realized one (node pair + pins) is resolved.
         g.connections.removeAll { c in
-            c.kind == .flow && realized.contains { $0.from == c.from.node && $0.to == c.to.node }
+            c.kind == .flow && realized.contains {
+                SZConnection.sameFlowEnd($0.from, c.from) && SZConnection.sameFlowEnd($0.to, c.to)
+            }
         }
         return (g, drafted, skipped)
     }
 
     // MARK: - Helpers
 
-    /// Distinct source nodes of flow edges INTO `id`, ordered by declaration index for determinism.
-    private func incomingFlowSources(of id: SZNodeID, order: [SZNodeID: Int]) -> [SZNodeID] {
-        var seen = Set<SZNodeID>(), sources: [SZNodeID] = []
+    /// Distinct flow arrows INTO `id` (one per source node + pin pair), ordered by the source's
+    /// declaration index for determinism.
+    private func incomingFlowArrows(of id: SZNodeID, order: [SZNodeID: Int]) -> [SZConnection] {
+        var arrows: [SZConnection] = []
         for c in connections where c.kind == .flow && c.to.node == id && c.from.node != id {
-            if seen.insert(c.from.node).inserted { sources.append(c.from.node) }
+            if !arrows.contains(where: { SZConnection.sameFlowEnd($0.from, c.from) && SZConnection.sameFlowEnd($0.to, c.to) }) {
+                arrows.append(c)
+            }
         }
-        return sources.sorted { order[$0, default: 0] < order[$1, default: 0] }
+        return arrows.sorted { order[$0.from.node, default: 0] < order[$1.from.node, default: 0] }
+    }
+
+    /// Whether `port` is a declared texture output (or input) of `id`.
+    private func isTexturePort(of id: SZNodeID, output: Bool, _ port: String) -> Bool {
+        let ports = output ? node(id: id)?.contract?.outputs : node(id: id)?.contract?.inputs
+        return ports?.contains { $0.name == port && $0.type == .texture } ?? false
+    }
+
+    /// Whether `port` is a declared texture input of `id` with no incoming data edge.
+    private func isUnwiredTextureInput(of id: SZNodeID, _ port: String) -> Bool {
+        isTexturePort(of: id, output: false, port)
+            && !connections.contains { $0.kind == .data && $0.to == SZPortRef(node: id, port: port) }
     }
 
     /// The name of `id`'s first texture output, resolved against THIS graph's contracts — nil when the

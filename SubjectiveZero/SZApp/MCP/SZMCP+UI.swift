@@ -29,7 +29,7 @@ extension SZHostBridge {
                     "library": ["type": "string", "description": "the NodeLibrary id"],
                     "x": ["type": "number"], "y": ["type": "number"],
                  ]),
-            tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged. Data edges must keep the graph acyclic: a data connection that would close a cycle is refused with {status: \"refused\", reason} naming the path — rewire or drop an edge instead. Flow (intent) edges are never cycle-checked.",
+            tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged. Data edges must keep the graph acyclic: a data connection that would close a cycle is refused with {status: \"refused\", reason} naming the path — rewire or drop an edge instead. Flow (intent) edges are never cycle-checked; a flow edge given an explicit fromPort/toPort naming a declared data port is PINNED to that slot (the user-drop-on-a-blue-dot semantics) — omit the ports for plain node-to-node intent.",
                  properties: [
                     "from": ["type": "string"], "fromPort": ["type": "string"],
                     "to": ["type": "string"], "toPort": ["type": "string"],
@@ -335,10 +335,18 @@ extension SZHostBridge {
             throw SZMCPError.message("incompatible \(kindRaw) connection \(fromNode.title):\(fromPort) → \(toNode.title):\(toPort) (port types differ)")
         }
         try requireUnfenced([from, to])
+        // A flow ref is the plain node-to-node marker unless the caller explicitly named a declared
+        // data port — then the flow edge is PINNED to that slot (`SZConnection.pinnedPort`), like a
+        // canvas drop on a blue dot. The "output"/"input" defaults never pin.
+        func ref(_ node: SZNode, side: SZSocketSide, port: String, explicit: Bool) -> SZPortRef {
+            guard kind == .flow else { return SZPortRef(node: node.id, port: port) }
+            let pins = explicit && SZGraphCanvasModel.portType(of: node, side: side, port: port) != nil
+            return pins ? SZPortRef(node: node.id, port: port) : .flow(node: node.id)
+        }
         // Through the host (not bare store.connect) so the new edge persists + reloads the runtime.
         let connection = host.addConnection(
-            from: SZPortRef(node: from, port: fromPort),
-            to: SZPortRef(node: to, port: toPort),
+            from: ref(fromNode, side: .output, port: fromPort, explicit: arguments.string("fromPort") != nil),
+            to: ref(toNode, side: .input, port: toPort, explicit: arguments.string("toPort") != nil),
             kind: kind,
             origin: .agent
         )

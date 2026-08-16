@@ -81,18 +81,21 @@ struct SZWireDragSession {
         if let picked {
             guard moved else { return .none }               // plain click / sub-threshold wobble: no-op
             guard let target else { return .disconnect(picked.id) }   // dropped on empty canvas
-            let ref = SZPortRef(node: target.nodeID, port: target.port)
-            // Dropping back on the original port restores the wire untouched. Flow compares nodes
-            // only: the socket port is "" but a flow ref's port may be "flow" (ensureFlow).
-            let unchanged = source.kind == .flow
-                ? ref.node == picked.original.node : ref == picked.original
+            let flow = source.kind == .flow || target.kind == .flow
+            let ref = Self.ref(target, flow: flow)
+            // Dropping back on the original socket restores the wire untouched. Flow compares node +
+            // pin (socket port "" vs ref marker "flow" agree; a pinned slot must match literally).
+            let unchanged = flow
+                ? SZConnection.sameFlowEnd(ref, picked.original) : ref == picked.original
             return unchanged ? .none : .reconnect(picked.id, picked.end, ref)
         }
         if let target {
             let out = source.side == .output ? source : target
             let inp = source.side == .input ? source : target
-            return .connect(from: SZPortRef(node: out.nodeID, port: out.port),
-                            to: SZPortRef(node: inp.nodeID, port: inp.port), kind: out.kind)
+            // Any flow socket makes it a flow edge; a data socket on the other end PINS that slot.
+            let flow = out.kind == .flow || inp.kind == .flow
+            return .connect(from: Self.ref(out, flow: flow), to: Self.ref(inp, flow: flow),
+                            kind: flow ? .flow : .data)
         }
         if moved {
             // Anchor the new node by the EDGE the wire lands on, not its centroid: drop from an
@@ -112,5 +115,11 @@ struct SZWireDragSession {
                                     downstream: source.side == .output)
         }
         return .none
+    }
+
+    /// A socket as a connection end: on a flow edge, a flow socket is the plain marker ref and a data
+    /// socket keeps its port (a pin); on a data edge the port is the port.
+    private static func ref(_ socket: SZSocket, flow: Bool) -> SZPortRef {
+        flow && socket.kind == .flow ? .flow(node: socket.nodeID) : SZPortRef(node: socket.nodeID, port: socket.port)
     }
 }

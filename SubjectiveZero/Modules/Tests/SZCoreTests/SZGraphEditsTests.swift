@@ -222,6 +222,25 @@ private func loadedStore() -> SZStore {
 }
 
 @MainActor
+@Test func aPinnedFlowArrowIsItsOwnIntentAndResolvesOnlyWithItsSlot() {
+    let store = loadedStore()
+    let a = store.addPromptNode(prompt: nil, position: SZPoint(x: 0, y: 0))!
+    let b = store.addPromptNode(prompt: nil, position: SZPoint(x: 100, y: 0))!
+    let plain = store.connect(from: SZPortRef.flow(node: a), to: SZPortRef.flow(node: b), kind: .flow)!
+    // pinned to b.mask: a different intent from the plain arrow, and from a pin to another slot
+    let mask = store.connect(from: SZPortRef.flow(node: a), to: SZPortRef(node: b, port: "mask"), kind: .flow)!
+    #expect(mask != plain)
+    #expect(store.connect(from: SZPortRef(node: a, port: ""), to: SZPortRef(node: b, port: "mask"), kind: .flow) == mask)
+    let input = store.connect(from: SZPortRef.flow(node: a), to: SZPortRef(node: b, port: "input"), kind: .flow)!
+    #expect(store.project!.graph.connections.filter { $0.kind == .flow }.count == 3)
+    // laying a.output → b.input realizes the plain arrow and the `input` pin; the `mask` pin stays
+    _ = store.connect(from: SZPortRef(node: a, port: "output"), to: SZPortRef(node: b, port: "input"), kind: .data)
+    let flows = store.project!.graph.connections.filter { $0.kind == .flow }
+    #expect(flows.map(\.id) == [mask])
+    _ = input
+}
+
+@MainActor
 @Test func distinctDataInputsOnTheSameNodeEachKeepTheirEdge() {
     let store = loadedStore()
     let a = store.addPromptNode(prompt: nil, position: SZPoint(x: 0, y: 0))!
