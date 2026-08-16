@@ -453,6 +453,8 @@ struct SZApp: App {
                                                      set: { host.setSnapToGrid($0) }))
                 Toggle("Grid Cursor Trail", isOn: Binding(get: { host.gridCursorTrail },
                                                           set: { host.setGridCursorTrail($0) }))
+                Toggle("Mini Map", isOn: Binding(get: { host.showMiniMap },
+                                                 set: { host.setShowMiniMap($0) }))
                 Toggle("Live Previews", isOn: Binding(get: { host.livePreviews },
                                                       set: { host.setLivePreviews($0) }))
             }
@@ -586,6 +588,8 @@ struct SZApp: App {
                                                  set: { host.setSnapToGrid($0) }))
             Toggle("Grid Cursor Trail", isOn: Binding(get: { host.gridCursorTrail },
                                                       set: { host.setGridCursorTrail($0) }))
+            Toggle("Mini Map", isOn: Binding(get: { host.showMiniMap },
+                                             set: { host.setShowMiniMap($0) }))
             Toggle("Live Previews", isOn: Binding(get: { host.livePreviews },
                                                   set: { host.setLivePreviews($0) }))
         }
@@ -710,6 +714,7 @@ struct SZApp: App {
                               pendingNodeCount: host.pendingNodeCount,
                               snapToGrid: host.snapToGrid,
                               gridCursorTrail: host.gridCursorTrail,
+                              showMiniMap: host.showMiniMap,
                               livePreviews: host.livePreviews,
                               previewFrames: host.previewFrames,
                               onVisibleNodesChanged: { host.setVisiblePreviewNodes($0) },

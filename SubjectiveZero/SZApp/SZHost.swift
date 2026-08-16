@@ -252,6 +252,10 @@ final class SZHost {
     // SZGridCursorTrailView).
     internal(set) var gridCursorTrail: Bool = SZAppStateIO.load()?.gridCursorTrail ?? true
 
+    // Node-editor mini map (the corner overview thumbnail) — same app-state.json + restore story,
+    // mutated via setShowMiniMap. Toggled from the Graph menu (SZApp). Defaults ON.
+    internal(set) var showMiniMap: Bool = SZAppStateIO.load()?.showMiniMap ?? true
+
     // Node-editor live previews (per-card thumbnails of texture outputs) — same app-state.json +
     // restore story, mutated via setLivePreviews (SZHost+NodePreviews.swift). Toggled from the Graph
     // menu (SZApp), beside Snap to Grid. Defaults ON: texture nodes auto-preview. The geometry gate

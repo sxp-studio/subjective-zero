@@ -401,6 +401,9 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// Node-editor cursor trail — grid dots morph into glyphs near the pointer (Graph ▸ Grid Cursor
     /// Trail). Optional for the same decode-compatibility reason; nil means ON.
     public var gridCursorTrail: Bool?
+    /// Node-editor mini map — the corner overview thumbnail (Graph ▸ Mini Map). Optional for the same
+    /// decode-compatibility reason; nil means ON.
+    public var showMiniMap: Bool?
     /// Rounded corners on the viewport tile (View ▸ Rounded Viewport Corners). Off squares just the
     /// viewport; other tiles stay rounded. Optional for the same decode-compatibility reason; nil means ON.
     public var viewportRoundedCorners: Bool?
@@ -450,6 +453,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         livePreviews: Bool? = nil,
         autoHidePanelHeaders: Bool? = nil,
         gridCursorTrail: Bool? = nil,
+        showMiniMap: Bool? = nil,
         viewportRoundedCorners: Bool? = nil,
         defaultProviderID: String? = nil,
         disabledProviderIDs: [String]? = nil,
@@ -469,6 +473,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.livePreviews = livePreviews
         self.autoHidePanelHeaders = autoHidePanelHeaders
         self.gridCursorTrail = gridCursorTrail
+        self.showMiniMap = showMiniMap
         self.viewportRoundedCorners = viewportRoundedCorners
         self.defaultProviderID = defaultProviderID
         self.disabledProviderIDs = disabledProviderIDs

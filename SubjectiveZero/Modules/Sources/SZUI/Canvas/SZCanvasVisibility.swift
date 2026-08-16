@@ -13,12 +13,9 @@ enum SZCanvasVisibility {
     /// Nodes whose card rect intersects the current screen viewport (inflated by `overscan`).
     static func visibleNodes(in graph: SZGraph, camera: SZCanvasCamera, viewSize: CGSize) -> Set<SZNodeID> {
         guard viewSize.width > 0, viewSize.height > 0 else { return [] }
-        let inset = CGSize(width: viewSize.width * overscan, height: viewSize.height * overscan)
-        let topLeft = camera.worldPoint(screen: CGPoint(x: -inset.width, y: -inset.height))
-        let bottomRight = camera.worldPoint(screen: CGPoint(x: viewSize.width + inset.width,
-                                                            y: viewSize.height + inset.height))
-        let viewport = CGRect(x: topLeft.x, y: topLeft.y,
-                              width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y)
+        let screen = CGRect(origin: .zero, size: viewSize)
+            .insetBy(dx: -viewSize.width * overscan, dy: -viewSize.height * overscan)
+        let viewport = SZMiniMapLayout.viewportWorldRect(camera: camera, screen: screen)
         return Set(graph.nodes.filter { SZNodeLayout.cardRect(of: $0).intersects(viewport) }.map(\.id))
     }
 }

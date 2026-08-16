@@ -42,6 +42,7 @@ public struct SZNodeEditorPanel: View {
     private let pendingNodeCount: Int             // pending prompt nodes → the Build button's count badge
     private let snapToGrid: Bool                  // host-owned pref (Graph menu); grid dots draw regardless
     private let gridCursorTrail: Bool             // host-owned pref (Graph menu); dots morph to glyphs near the cursor
+    private let showMiniMap: Bool                 // host-owned pref (Graph menu); the corner overview map
     private let livePreviews: Bool                // host-owned pref (Graph menu); mirrors SZNodeLayout.previewsEnabled
     private let previewFrames: SZNodePreviewFrames?   // host-owned per-node thumb boxes (stable refs)
     private let onTogglePreview: (SZNodeID, String) -> Void
@@ -126,6 +127,7 @@ public struct SZNodeEditorPanel: View {
                 pendingNodeCount: Int = 0,
                 snapToGrid: Bool = true,
                 gridCursorTrail: Bool = true,
+                showMiniMap: Bool = true,
                 livePreviews: Bool = true,
                 previewFrames: SZNodePreviewFrames? = nil,
                 onVisibleNodesChanged: ((Set<SZNodeID>) -> Void)? = nil,
@@ -170,6 +172,7 @@ public struct SZNodeEditorPanel: View {
         self.pendingNodeCount = pendingNodeCount
         self.snapToGrid = snapToGrid
         self.gridCursorTrail = gridCursorTrail
+        self.showMiniMap = showMiniMap
         self.livePreviews = livePreviews
         self.previewFrames = previewFrames
         self.onVisibleNodesChanged = onVisibleNodesChanged
@@ -239,6 +242,7 @@ public struct SZNodeEditorPanel: View {
     public var body: some View {
         canvasArea
             .overlay(alignment: .bottom) { hudBar.padding(.bottom, 16) }
+            .overlay(alignment: .bottomTrailing) { miniMapOverlay }
             // Declared AFTER the HUD → the menu always draws above it (and everything else).
             .overlay(alignment: .topLeading) { contextMenuOverlay }
             // A deleted target (agent promote/merge mid-run) closes the menu rather than leaving
@@ -352,6 +356,43 @@ public struct SZNodeEditorPanel: View {
                 publishVisibleNodes(override: [])   // closed editor ⇒ nothing visible ⇒ zero thumb GPU
             }
         }
+    }
+
+    /// The corner overview map (Graph ▸ Mini Map). Reads the same hidden-piece-free graph the canvas
+    /// draws and proposes cameras back — the camera stays panel-owned, so a click reframes with the
+    /// same snappy curve as Center View and a drag follows live.
+    @ViewBuilder
+    private var miniMapOverlay: some View {
+        if showMiniMap, let graph = project?.graph, !graph.nodes.isEmpty {
+            SZMiniMapView(graph: contentGraph(graph), camera: camera, viewSize: viewSize, isRunning: isRunning,
+                          isSelected: { isSelected($0) },
+                          statusOf: { node in
+                              SZNodeCanvasContentView.pillStatus(for: node, agentState: nodeAgentState,
+                                                                 ops: graphOpStatus, isRunning: isRunning,
+                                                                 workSet: runWorkSet)
+                          },
+                          onNavigate: { proposed, animated in
+                              if animated {
+                                  withAnimation(.snappy(duration: 0.22)) { camera = proposed }
+                              } else {
+                                  camera = proposed
+                              }
+                          },
+                          onFit: { applyCameraCommand(SZCameraCommand(action: .fit)) })
+            .padding(Self.miniMapInset)
+        }
+    }
+
+    static let miniMapInset: CGFloat = 12
+
+    /// The mini map's frame in canvas space (bottom-trailing, fixed card size) — a right-click there is
+    /// the navigator's, not the canvas menu's. Null while hidden / unmeasured.
+    private var miniMapFrame: CGRect {
+        guard showMiniMap, !(project?.graph.nodes.isEmpty ?? true), viewSize != .zero else { return .null }
+        let size = SZMiniMapView.cardSize
+        return CGRect(x: viewSize.width - Self.miniMapInset - size.width,
+                      y: viewSize.height - Self.miniMapInset - size.height,
+                      width: size.width, height: size.height)
     }
 
     // A floating glass control bar. The conversation group leads — the Build button (whole-graph run,
@@ -525,6 +566,7 @@ public struct SZNodeEditorPanel: View {
             dismissContextMenu()
             guard isSecondary else { return false }
         }
+        if miniMapFrame.contains(point) { return false }   // the map is a navigator, not canvas
         guard isSecondary, inCanvas, project?.graph != nil else { return false }
         guard drag == nil, wire == nil, marquee == nil else { return false }   // not during a live drag
         openContextMenu(at: point)

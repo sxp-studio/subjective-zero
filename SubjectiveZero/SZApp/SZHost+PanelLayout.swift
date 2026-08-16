@@ -98,6 +98,12 @@ extension SZHost {
         persistAppState()
     }
 
+    /// Graph ▸ Mini Map — a live pref, persisted like every layout change.
+    func setShowMiniMap(_ on: Bool) {
+        showMiniMap = on
+        persistAppState()
+    }
+
     /// View ▸ Show Token Counts — a live pref, persisted like every layout change.
     func setShowTokenCounts(_ on: Bool) {
         showTokenCounts = on
@@ -123,6 +129,7 @@ extension SZHost {
                                              livePreviews: livePreviews,
                                              autoHidePanelHeaders: autoHidePanelHeaders,
                                              gridCursorTrail: gridCursorTrail,
+                                             showMiniMap: showMiniMap,
                                              viewportRoundedCorners: viewportRoundedCorners,
                                              defaultProviderID: defaultProviderID,
                                              disabledProviderIDs: disabledProviderIDs.isEmpty
