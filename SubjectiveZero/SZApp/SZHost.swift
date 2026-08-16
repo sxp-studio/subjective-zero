@@ -28,10 +28,14 @@ enum SZPendingGraphOp {
 @Observable
 final class SZHost {
     private(set) var runtime: SZRuntime?
-    /// Which viewport instance drives the frame schedule (the rest mirror) — consulted at call
-    /// time by the closures `renderFrame(for:)` vends (SZHost+Popout.swift); re-synced by
-    /// `syncViewportDriver()` on every visibility change.
+    /// Which viewport drives (the rest mirror); pushed to the runtime by `applyRenderDrive()`
+    /// (SZHost+Viewports.swift).
     let viewportDriver = SZViewportDriverRegistry()
+    /// Viewport surfaces currently in a window, keyed by layer identity (briefly two per id during
+    /// a pop-out/dock transition).
+    @ObservationIgnored var viewportSurfaces: [SZViewportSurface] = []
+    /// What `applyRenderDrive()` last pushed — its idempotence key.
+    @ObservationIgnored var appliedRenderDrive: SZRenderDrive?
     internal(set) var status = "starting…"
     private var started = false
     /// One source watcher per watched node, id-keyed — so `watchNodeSources` can re-run idempotently
@@ -498,7 +502,7 @@ final class SZHost {
         }
         self.runtime = runtime
         popoutManager.host = self   // the windows' back-channel (dock intents, frame persistence)
-        syncViewportDriver()        // seed the driver from the restored layout
+        syncViewportDriver()        // the driver follows surface attach events from here on
         installPreviewFrameSink(runtime)
         armPreviewGraphObservation()
 

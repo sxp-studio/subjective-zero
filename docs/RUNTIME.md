@@ -69,15 +69,21 @@ protocol SZNode {
   silently in the leaking direction. The runtime asserts it after `activate()` too, so a node set up or
   hot-reloaded while paused can't come up running. Called under the engine lock, serialized against
   frames - don't block.
-  Not yet covered: frames also stop with no signal when every viewport is occluded/miniaturized or a panel
-  is maximized; those states have no shared "can anything present?" predicate today.
+  Frames also stop, with no signal, when nothing needs them (no viewport can show and no node-editor
+  thumbnail is watched): the host's render drive (below) idles the loop - a node must not treat "no
+  `update()` for a while" as anything but that.
 - The **exported ABI is host-owned and stable** - node source is generated/regenerated freely,
   but the shape it must conform to does not drift.
 
 ### Threading contract *(behavioral change, 2026-07-03 - pre-dating nodes were authored under a main-thread `update()`)*
 
-The live viewport renders on a **dedicated render thread** (a display-link pump), not the main
-thread, so the editor UI can never starve frames:
+The runtime owns **one render loop** on a **dedicated render thread** (`SZRenderLoop`: a run loop
+hosting one pacing `CADisplayLink`), not the main thread, so the editor UI can never starve frames.
+Viewports don't drive it - they are *surfaces* the loop fans each frame out to (the host-designated
+driver surface defines the render size and is presented on the loop thread; every other viewport
+mirrors on its own queue). *When* the loop runs is one host decision (`SZHost+Viewports`): a visible
+viewport's display link paces it; with no viewport showing, the main window's link (capped ~30 Hz)
+paces it for the node editor's live thumbnails; with nothing to see it idles.
 
 - **`update()` runs on the render thread**, every frame. Do NOT do blocking work in it (device I/O,
   session reconfiguration, file access) - a blocked `update()` drops viewport frames. Kick slow

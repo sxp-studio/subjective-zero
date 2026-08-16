@@ -5,7 +5,7 @@
 // `Mutex` — no new locking, no threading hazard (see SZRuntime's class header).
 //
 // SEPARATION OF CONCERNS: freezing the *visible output* on pause is the RUNTIME's job — while paused
-// it stops advancing the schedule and re-presents the current endpoint (SZRuntime.drawLive). This clock
+// it stops advancing the schedule and re-presents the current endpoint (SZRuntime.tick). This clock
 // only owns *time*: it's a pausable, resettable elapsed clock. Ticking it while paused returns the
 // frozen frame (a paused clock doesn't advance), and on resume the paused span is excluded so time is
 // continuous — that's what makes Play pick up exactly where Pause left off.

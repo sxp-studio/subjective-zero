@@ -687,8 +687,8 @@ struct SZApp: App {
 
     /// One case per panel; the initializers are the pre-refactor ones, moved verbatim out of the old
     /// SplitView tree (min sizes now live in SZPanelLayoutGeometry, not `.frame` constraints).
-    /// Addressed by SZPanelID: the viewport case vends a PER-INSTANCE render closure (driver or
-    /// mirror — SZHost+Popout.swift); the single-instance panels only care about the kind. Note a
+    /// Addressed by SZPanelID: the viewport case wires the instance's surface events (attach /
+    /// resize / detach — SZHost+Viewports.swift); the single-instance panels only care about the kind. Note a
     /// pop-out/dock intentionally recreates the panel's view in its new window (one expected
     /// "[SZViewportPanel] makeNSView" print per transition — render state lives in the runtime);
     /// WITHIN a window, layout edits still never recreate it (the container's stable ForEach ids).
@@ -696,7 +696,7 @@ struct SZApp: App {
     private func panelContent(_ id: SZPanelID) -> some View {
         switch id.kind {
         case .viewport:
-            SZViewportPanel(device: host.runtime?.device, renderFrame: host.renderFrame(for: id))
+            SZViewportPanel(device: host.runtime?.device, events: host.viewportEvents(for: id))
         case .nodeEditor:
             SZNodeEditorPanel(store: host.store, project: host.store.project,
                               status: host.status, isRunning: host.isRunning,

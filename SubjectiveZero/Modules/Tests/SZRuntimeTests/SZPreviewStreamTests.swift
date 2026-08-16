@@ -200,3 +200,27 @@ private func solidRuntime(renderSize: (width: Int, height: Int)) throws -> (SZRu
     try? await Task.sleep(for: .milliseconds(150))
     #expect(collector.all.isEmpty)   // absence, not a fabricated blank
 }
+
+@MainActor
+@Test(.enabled(if: SZGPU.isAvailable)) func thumbsOnlyTicksPublishAndPausedTicksHold() async throws {
+    // No viewport surface at all — the host paces the loop for the node editor's thumbs alone.
+    // Each tick is a frame; the thumb pass rides it and publishes; paused ticks encode nothing.
+    let (runtime, nodeID, dir) = try solidRuntime(renderSize: (width: 32, height: 32))
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let collector = FrameCollector()
+    runtime.setPreviewFrameCallback { collector.append($0) }
+    runtime.setPreviewThrottleForTests(0)
+    runtime.setWatchedPreviews([(node: nodeID, port: "color")], maxDimension: 16)
+    runtime.tick()
+    #expect(await collector.waitForBatches(1))
+    let frame = try #require(collector.all.first?.first)
+    #expect(isNear(pixel(of: frame.surface, x: 8, y: 8).r, 255))
+    #expect(runtime.renderSize.width == 32)   // no driver: the last size stands
+
+    runtime.setPaused(true)
+    let count = collector.all.count
+    runtime.tick()
+    runtime.tick()
+    try? await Task.sleep(for: .milliseconds(150))
+    #expect(collector.all.count == count)     // hold: nothing encoded, nothing published
+}

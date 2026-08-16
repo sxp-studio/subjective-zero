@@ -5,7 +5,8 @@
 // capped. Event-driven end to end — graph edits arrive via Observation on the store, camera moves
 // via the panel's visible-set callback, frames via the runtime's completion callback. No polling
 // loop, no CPU pixels: the runtime publishes IOSurfaces that go straight into the cards' frame
-// boxes (and from there to CALayer.contents).
+// boxes (and from there to CALayer.contents). With no viewport showing, the watch set is what keeps
+// the render loop paced (SZHost+Viewports.applyRenderDrive).
 import Foundation
 import SZCore
 import SZRuntime
@@ -82,17 +83,20 @@ extension SZHost {
         visiblePreviewNodes = nil
         lastPushedWatchKeys = []
         runtime?.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
+        applyRenderDrive()
     }
 
     /// Recompute the watched set NOW and push it to the runtime iff it changed. Cheap (one graph
-    /// scan + ordered-key compare), so every mutation chokepoint just calls it: gate flips, body
-    /// edits, project load, visible-set reports, and the store observation below.
+    /// scan + ordered-key compare), so every mutation chokepoint just calls it. The watch set is also
+    /// the thumbs' demand on the render loop (each push re-applies the render drive), and it empties
+    /// when the main window — the node editor's only home — can't show pixels.
     func refreshPreviewStream() {
         guard let runtime else { return }
-        guard livePreviews, let graph = store.project?.graph else {
+        guard livePreviews, popoutManager.mainWindowIsDisplayable, let graph = store.project?.graph else {
             if lastPushedWatchKeys != [] {
                 lastPushedWatchKeys = []
                 runtime.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
+                applyRenderDrive()
             }
             return
         }
@@ -108,6 +112,7 @@ extension SZHost {
         guard keys != lastPushedWatchKeys else { return }
         lastPushedWatchKeys = keys
         runtime.setWatchedPreviews(wanted, maxDimension: Self.previewMaxDimension)
+        applyRenderDrive()
     }
 
     /// Observe the store for graph edits (every `mutate` reassigns `project`, so this fires on any

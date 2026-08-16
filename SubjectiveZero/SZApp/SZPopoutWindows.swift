@@ -32,7 +32,7 @@ final class SZPopoutWindowManager {
     var makePanelContent: ((SZPanelID) -> AnyView)?
 
     private var controllers: [SZPanelID: SZPopoutWindowController] = [:]
-    private var mainWindowObserver: NSObjectProtocol?
+    private var mainWindowObservers: [NSObjectProtocol] = []
     /// The welcome↔workspace edge (set from the chrome configurator, same signal that resizes the
     /// main window): pop-outs hide behind the welcome surface and return with the workspace.
     private var workspaceActive = false
@@ -44,21 +44,36 @@ final class SZPopoutWindowManager {
         case docked, panelClosed, mainWindowClosed
     }
 
-    /// The main window, learned from the chrome configurator (the established window-fishing seam).
-    /// Registers the close-children observer once.
+    /// The main window, learned from the chrome configurator. Registers the close-children observer
+    /// and the visibility observers behind `mainWindowIsDisplayable`.
     weak var mainWindow: NSWindow? {
         didSet {
             guard mainWindow !== oldValue, let window = mainWindow else { return }
-            if let observer = mainWindowObserver { NotificationCenter.default.removeObserver(observer) }
-            mainWindowObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.willCloseNotification, object: window, queue: .main
-            ) { [weak self] _ in
-                // willClose = the close IS proceeding (a cancelled save prompt never gets here).
-                // Synchronous: the children die before the main window finishes closing, so the
-                // app's last-window quit fires exactly as in the single-window days.
-                MainActor.assumeIsolated { self?.closeAll(reason: .mainWindowClosed) }
+            for observer in mainWindowObservers { NotificationCenter.default.removeObserver(observer) }
+            let center = NotificationCenter.default
+            mainWindowObservers = [
+                center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                    // willClose = the close IS proceeding (a cancelled save prompt never gets here).
+                    // Synchronous: the children die before the main window finishes closing, so the
+                    // app's last-window quit fires exactly as in the single-window days.
+                    MainActor.assumeIsolated { self?.closeAll(reason: .mainWindowClosed) }
+                },
+            ]
+            for name in [NSWindow.didChangeOcclusionStateNotification,
+                         NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
+                mainWindowObservers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.host?.mainWindowVisibilityChanged() }
+                })
             }
+            host?.mainWindowVisibilityChanged()
         }
+    }
+
+    /// Whether the main window can show pixels (tiles + node editor live here). `true` before it is
+    /// learned (headless/MCP sessions, first frames of launch).
+    var mainWindowIsDisplayable: Bool {
+        guard let window = mainWindow else { return true }
+        return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
     }
 
     var poppedOutIDs: Set<SZPanelID> { Set(controllers.keys) }

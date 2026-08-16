@@ -20,30 +20,25 @@ public enum SZBuildResult: Sendable, Equatable {
     case failed(String)
 }
 
-/// Threading contract (the reason this class is NOT `@MainActor`): the live viewport renders on a
-/// dedicated display-link thread — SZUI's viewport render loop drives the host-wired closure → `drawLive(into:)` —
-/// so the editor's SwiftUI work can never starve viewport frames (profiled on main, camera/drag
-/// interactions delayed draws by 20–700ms). Everything a frame encode touches lives in `EngineState`
-/// behind a `Mutex` — the compiler enforces that no engine state is reachable outside `withLock`.
+/// Threading model (why this is not `@MainActor`):
+/// - The runtime owns THE render loop: `SZRenderLoop`'s pacing display link fires `tick()` on its own
+///   thread. Viewports are `SZRenderSurface`s the tick fans frames out to — the driver surface
+///   (sets `renderSize`) presents synchronously on the loop thread, mirrors on their own queues.
+/// - The host alone decides when the loop runs (`setPacing`); the runtime never guesses liveness.
+/// - All engine state lives in `EngineState` behind `engine` (a Mutex).
 ///
-/// THE LOCK-SCOPE RULE (what makes a mutex acceptable in a renderer): critical sections contain
-/// ONLY CPU-side encode/state work, never anything that can block — `nextDrawable()` (parks up to
-/// ~1s on an occluded window), `waitUntilCompleted`, CPU readbacks, and node device enumeration all
-/// run OUTSIDE the lock. Worst-case cross-thread wait is therefore one encode (sub-ms), not a
-/// drawable stall; the one deliberate exception is a graph swap/hot reload, which holds the lock
-/// through node teardown+setup so a frame can never interleave a half-swapped graph.
+/// Rules:
+/// - LOCK SCOPE: only CPU encode/state work under the lock — never `nextDrawable`, GPU waits, or
+///   readbacks. Backpressure is `framesInFlight`, waited BEFORE the lock. Exception: graph swaps hold
+///   the lock through teardown+setup so a frame never sees a half-swapped graph.
+/// - COMMIT UNDER LOCK: a schedule buffer is committed in the critical section that encoded it, so
+///   commit order == encode order and pool-texture hazard tracking keeps passes consistent.
+///   Presentation is a separate blit buffer after `nextDrawable()` (a capture landing in between can
+///   show a one-frame-newer endpoint — whole frames, monotonic).
+/// - The engine lock never calls into the loop or a surface queue.
 ///
-/// THE COMMIT-UNDER-LOCK RULE: every schedule command buffer is COMMITTED inside the same critical
-/// section that encoded it (commit is a non-blocking enqueue), so no encoded-but-uncommitted buffer
-/// ever escapes — commit order equals encode order by construction, and Metal's hazard tracking on
-/// the (whole-resource-synchronized) pool textures keeps every pass consistent. Presentation is a
-/// separate tiny blit buffer AFTER `nextDrawable()`. The one accepted effect: a capture or offline
-/// render committed between a live frame's commit and its present blit can make the viewport show a
-/// one-frame-NEWER endpoint — whole frames only, monotonic, invisible in practice.
-///
-/// `@unchecked Sendable` is retained but NARROW: `assets`' mutable pool is only ever touched inside
-/// `engine.withLock`, and `toolchain`/compile paths are main-thread-only by convention. Everything
-/// else is either in the Mutex or immutable.
+/// `@unchecked Sendable`: `assets`' pool is touched only under the lock; `toolchain`/compile paths
+/// are main-thread by convention; the rest is Mutex-guarded or immutable.
 public final class SZRuntime: @unchecked Sendable {
     /// Everything a frame encode reads or a load/reload swaps — guarded by `engine`.
     private struct EngineState {
@@ -57,12 +52,17 @@ public final class SZRuntime: @unchecked Sendable {
         /// The virtual playback clock — owns `frameIndex` + `timeSeconds`, pausable/resettable from the
         /// HUD. Read and advanced only here under the engine lock (see SZTimeline).
         var timeline = SZTimeline()
-        /// Offscreen render size; the live viewport overrides it each frame with its drawable size.
+        /// Offscreen render size; the loop overrides it each tick with the driver surface's drawable size.
         var renderSize: (width: Int, height: Int)
         /// The zero-copy node-preview stream (watched set + IOSurface target pairs). A class ref so
         /// completion handlers can hold it; its vars follow this struct's lock, its atomics don't
         /// need it — see SZPreviewStream's header.
         let previews = SZPreviewStream()
+        /// Attached viewport surfaces by layer identity; every tick presents to all of them.
+        var surfaces: [ObjectIdentifier: SZRenderSurface] = [:]
+        /// The surface that defines `renderSize` and presents synchronously (`setDriver`). Resolved
+        /// per tick; a stale key just keeps the last size.
+        var driverKey: ObjectIdentifier?
     }
 
     private let engine: Mutex<EngineState>
@@ -81,12 +81,18 @@ public final class SZRuntime: @unchecked Sendable {
     }
     private let presentScaler = Mutex<SZPresentScalerBox?>(nil)
 
+    /// The render clock; set at the end of init (its tick needs `self`).
+    private var loop: SZRenderLoop!
+    /// Loop frames allowed on the GPU at once. Waited before the engine lock, signalled on frame
+    /// completion. `renderFrame()`/`captureFrame()` don't take part (they wait synchronously).
+    private let framesInFlight = DispatchSemaphore(value: 2)
+
     /// The permission broker. The runtime owns permissions; capture lives in the node. The host
     /// pre-grants declared permissions (`requestDeclaredPermissions`) before loading.
     public let permissions = SZPermissions()
 
-    /// Offscreen render size (the live viewport overrides it each frame with its drawable size).
-    /// Read-only publicly: the render thread writes it per frame under the engine lock.
+    /// Offscreen render size (the loop overrides it each tick with the driver surface's drawable size).
+    /// Read-only publicly: the loop thread writes it per tick under the engine lock.
     public var renderSize: (width: Int, height: Int) {
         engine.withLock { $0.renderSize }
     }
@@ -100,6 +106,11 @@ public final class SZRuntime: @unchecked Sendable {
         self.engine = Mutex(EngineState(renderSize: renderSize))
         self.workspace = workspace
             ?? FileManager.default.temporaryDirectory.appending(path: "SZRuntime-\(UUID().uuidString)")
+        loop = SZRenderLoop { [weak self] in self?.tick() }
+    }
+
+    deinit {
+        loop.stop()
     }
 
     /// Load a whole project from its `.subz` directory: read the model, compile each node's `Node.swift`,
@@ -369,7 +380,7 @@ public final class SZRuntime: @unchecked Sendable {
     }
 
     /// Pause/resume the playback clock (the HUD Pause/Play toggle). While paused the render loop stops
-    /// advancing the schedule and just re-presents the current endpoint (see `drawLive` / `captureFrame`),
+    /// advancing the schedule and just re-presents the current endpoint (see `tick` / `captureFrame`),
     /// so the whole graph holds still; on resume the clock continues from where it stopped (the paused
     /// span is excluded, so no time jump).
     public func setPaused(_ paused: Bool) {
@@ -410,12 +421,12 @@ public final class SZRuntime: @unchecked Sendable {
         buffer?.waitUntilCompleted()
     }
 
-    /// Encode one schedule pass into a fresh command buffer and COMMIT it — the commit-under-lock rule
-    /// (see the class header). Caller must be inside `engine.withLock`; extra work destined for the
-    /// same buffer (a capture blit) is encoded via `beforeCommit` so it still precedes the commit.
+    /// Encode one schedule pass and COMMIT it (commit-under-lock). Caller holds the engine lock.
+    /// `beforeCommit` adds work to the same buffer pre-commit (capture blit, completion handlers);
+    /// its `endpoint` is nil when nothing is routed to the display.
     private func encodeAndCommitFrame(
         _ state: inout EngineState, width: Int, height: Int,
-        beforeCommit: (any MTLCommandBuffer, any MTLTexture) -> Void = { _, _ in }
+        beforeCommit: (any MTLCommandBuffer, (any MTLTexture)?) -> Void = { _, _ in }
     ) -> (buffer: (any MTLCommandBuffer)?, endpoint: (any MTLTexture)?) {
         guard let scheduler = state.scheduler else { return (nil, nil) }
         guard let commandBuffer = assets.commandQueue.makeCommandBuffer() else { return (nil, nil) }
@@ -425,7 +436,7 @@ public final class SZRuntime: @unchecked Sendable {
             inputValues: state.inputValues, inputStrings: state.inputStrings, frameIndex: timing.frameIndex,
             time: timing.timeSeconds,
             width: width, height: height)
-        if let endpoint { beforeCommit(commandBuffer, endpoint) }
+        beforeCommit(commandBuffer, endpoint)
         // The live thumb pass rides THIS buffer (throttled inside) — after the schedule's writes,
         // before the commit, so hazard tracking orders the downscales behind the frame's renders.
         encodePreviewPass(state.previews, on: commandBuffer, now: CACurrentMediaTime())
@@ -540,65 +551,77 @@ public final class SZRuntime: @unchecked Sendable {
         engine.withLock { $0.previews.minInterval = interval }
     }
 
-    /// Live viewport frame, called on the DISPLAY-LINK thread (the viewport's render loop → the host-wired
-    /// closure), never the main thread — see the class header. Takes the viewport's `CAMetalLayer`:
-    /// its drawable APIs are thread-safe, and `drawableSize` is READ-only here (the view owns it and
-    /// keeps it synced on the main thread), so no cross-thread geometry writes.
-    ///
-    /// Pipeline (lock-scope + commit-under-lock rules): the schedule encodes AND commits inside the
-    /// lock; then — no lock held — `nextDrawable()` (can park ~1s on an occluded window) and a second
-    /// tiny buffer blits the endpoint onto the drawable and presents. The endpoint local is retained,
-    /// so a concurrent graph swap resetting the pool can't deallocate it under the blit.
-    public func drawLive(into layer: CAMetalLayer) {
-        let size = layer.drawableSize   // synced by the view on the main thread
-        let width = Int(size.width), height = Int(size.height)
-        guard width > 0, height > 0 else { return }
+    /// Test hook: the surface object held for `layer` (nil once detached).
+    func attachedSurfaceForTests(_ layer: CAMetalLayer) -> SZRenderSurface? {
+        engine.withLock { $0.surfaces[ObjectIdentifier(layer)] }
+    }
 
-        let endpoint = engine.withLock { state -> (any MTLTexture)? in
-            state.renderSize = (width, height)
-            // Paused → hold the frame: DON'T advance the schedule, just re-present the CURRENT render
-            // endpoint's pooled texture (each node's last output is still in the pool). This freezes the
-            // ENTIRE graph (camera, live-capture, generative) at the runtime level, so pause works for
-            // every project regardless of whether its node sources know about the timeline — and reading
-            // the *current* endpoint means switching the display target while paused shows that node's
-            // held frame, not a stale one. Re-presented each vsync so the freeze survives occlusion /
-            // display changes / resize. The NON-allocating read matters: asking the pool at the layer's
-            // size would reallocate — i.e. destroy — the held frame on a paused resize.
-            if state.timeline.paused {
-                return state.scheduler?.heldEndpointTexture(assets: assets)
+    // MARK: - The render loop: surfaces, driver, pacing, tick
+
+    /// Attach a viewport surface: every tick presents into `layer` from now on. Attaching does not
+    /// start the loop — the host paces it (`setPacing`).
+    public func attach(_ layer: CAMetalLayer) {
+        engine.withLock { $0.surfaces[ObjectIdentifier(layer)] = SZRenderSurface(layer: layer) }
+    }
+
+    /// Detach a surface. Never waits: an in-flight mirror present keeps the layer alive until done.
+    public func detach(_ layer: CAMetalLayer) {
+        engine.withLock { $0.surfaces[ObjectIdentifier(layer)] = nil }
+    }
+
+    /// The DRIVER surface: its `drawableSize` becomes `renderSize` and it presents synchronously.
+    /// The host's drivership ladder decides this on visibility/size edges. nil keeps the last size.
+    public func setDriver(_ layer: CAMetalLayer?) {
+        engine.withLock { $0.driverKey = layer.map(ObjectIdentifier.init) }
+    }
+
+    /// Pace the loop with the link `make` builds (an NSView/NSWindow/NSScreen display-link factory —
+    /// main-thread AppKit the runtime doesn't import), or idle on nil. The loop installs it on its
+    /// thread and drops the previous one. This is the host's ONE "run the renderer" decision.
+    @MainActor
+    public func setPacing(_ make: (AnyObject, Selector) -> CADisplayLink?) {
+        loop.setPacing(make(loop, #selector(SZRenderLoop.fire(_:))))
+    }
+
+    /// One beat: encode+commit under the lock, then fan out with no lock held (driver synchronously,
+    /// mirrors on their queues). Paused → no encode; sinks re-present the CURRENT endpoint's held
+    /// pool texture every beat (non-allocating read: asking the pool at the driver's size would
+    /// destroy the held frame on a paused resize), so the whole graph freezes at the runtime level
+    /// and the freeze survives resize/occlusion. Called directly by tests.
+    func tick() {
+        // Backpressure outside the lock: a GPU-bound graph paces the loop at GPU rate here.
+        guard framesInFlight.wait(timeout: .now() + 1) == .success else { return }
+        let (encoded, endpoint, driver, mirrors) = engine.withLock {
+            state -> (Bool, (any MTLTexture)?, SZRenderSurface?, [SZRenderSurface]) in
+            let driver = state.driverKey.flatMap { state.surfaces[$0] }
+            if let driver {
+                let size = driver.layer.drawableSize   // plain CA read; the view is its single writer (main)
+                if size.width > 0, size.height > 0 { state.renderSize = (Int(size.width), Int(size.height)) }
             }
-            return encodeAndCommitFrame(&state, width: width, height: height).endpoint
+            let mirrors = state.surfaces.values.filter { $0 !== driver }
+            if state.timeline.paused {
+                return (false, state.scheduler?.heldEndpointTexture(assets: assets), driver, mirrors)
+            }
+            let semaphore = framesInFlight
+            let frame = encodeAndCommitFrame(&state, width: state.renderSize.width,
+                                             height: state.renderSize.height) { commandBuffer, _ in
+                commandBuffer.addCompletedHandler { _ in semaphore.signal() }   // pre-commit
+            }
+            return (frame.buffer != nil, frame.endpoint, driver, mirrors)
         }
-
-        // Blocking presentation below — no lock held.
-        presentEndpoint(endpoint, into: layer)
+        if !encoded { framesInFlight.signal() }   // nothing on the GPU this beat
+        // `endpoint` is retained by this frame, so a concurrent pool reset can't free it under a blit.
+        driver?.presentNow(endpoint, via: self)
+        for mirror in mirrors { mirror.presentLater(endpoint, via: self) }
     }
 
-    /// Mirror-viewport frame, called on that viewport's display-link thread: present the CURRENT
-    /// endpoint texture into `layer` WITHOUT advancing the timeline, WITHOUT writing
-    /// `state.renderSize`, and WITHOUT allocating in the texture pool — one viewport drives the
-    /// schedule (`drawLive`), every other visible viewport re-presents its output through here,
-    /// aspect-fitted to its own drawable size. Coherence rides the same whole-resource hazard
-    /// tracking as the paused hold (whole frames only, monotonic — see the class header).
-    ///
-    /// [Future per-viewport routing seam: an `endpoint: SZPortRef?` parameter resolving through the
-    /// same held-texture lookup slots in here (nil = the scheduler's renderEndpoint) — the host's
-    /// per-instance closure vend is the other half.]
-    public func presentCurrentFrame(into layer: CAMetalLayer) {
-        let size = layer.drawableSize   // synced by the view on the main thread
-        guard size.width > 0, size.height > 0 else { return }
-        let endpoint = engine.withLock { $0.scheduler?.heldEndpointTexture(assets: assets) }
-        presentEndpoint(endpoint, into: layer)
-    }
-
-    /// The shared presentation tail (blocking — call with NO lock held): acquire a drawable and
-    /// put `endpoint` on it. Equal sizes → the plain blit (the driver's hot path); mismatched
-    /// sizes (a mirror at its own size, a resize race, a paused resize) → clear to black and
-    /// aspect-fit-scale into the letterboxed region; no endpoint (node deleted, nothing rendered
-    /// yet) → clear to black rather than present an uninitialized buffer.
-    private func presentEndpoint(_ endpoint: (any MTLTexture)?, into layer: CAMetalLayer) {
+    /// The presentation tail (blocking — no lock held): acquire a drawable and put `endpoint` on it.
+    /// Equal sizes → blit; mismatched → clear + aspect-fit; nil endpoint → clear. Returns whether a
+    /// buffer was committed; `onCompleted` fires from its completion handler.
+    func presentEndpoint(_ endpoint: (any MTLTexture)?, into layer: CAMetalLayer,
+                         onCompleted: (@Sendable () -> Void)?) -> Bool {
         guard let drawable = layer.nextDrawable(),
-              let presentBuffer = assets.commandQueue.makeCommandBuffer() else { return }
+              let presentBuffer = assets.commandQueue.makeCommandBuffer() else { return false }
         let target = drawable.texture
         if let endpoint, endpoint.width == target.width, endpoint.height == target.height {
             Self.encodeCopy(endpoint, into: target, width: endpoint.width, height: endpoint.height,
@@ -609,8 +632,10 @@ public final class SZRuntime: @unchecked Sendable {
         } else {
             Self.encodeClear(target, on: presentBuffer)
         }
+        if let onCompleted { presentBuffer.addCompletedHandler { _ in onCompleted() } }
         presentBuffer.present(drawable)
         presentBuffer.commit()
+        return true
     }
 
     /// Clear a texture to opaque black (letterbox bars, endpoint-less viewports).
@@ -707,7 +732,7 @@ public final class SZRuntime: @unchecked Sendable {
             var capture: (any MTLTexture)?
             let (buffer, _) = encodeAndCommitFrame(&state, width: state.renderSize.width,
                                                    height: state.renderSize.height) { commandBuffer, endpoint in
-                capture = captureEndpoint(commandBuffer, endpoint)
+                if let endpoint { capture = captureEndpoint(commandBuffer, endpoint) }
             }
             return (buffer, capture)
         }

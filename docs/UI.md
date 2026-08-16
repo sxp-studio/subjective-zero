@@ -25,7 +25,8 @@ floats over the viewport" sketch - panels are tiled sections, not overlays): a b
   50/50 with a new instance of its kind - the lowest free number, so closed numbers are reused.
   Only the viewport is cloneable today; every viewport shows the same render, with per-clone
   render routing as the planned follow-on.
-- **Render resolution: the drivership ladder** (`SZViewportDriverRegistry`) - fullscreen
+- **Render resolution: the drivership ladder** (`SZViewportDriverRegistry`, recomputed on
+  visibility and size edges from the viewport views actually in a window) - fullscreen
   pop-outs > windowed pop-outs > the primary tile. Fullscreen a pop-out on a projector and the
   graph renders at projector resolution while the editor tiles show a crisp downscale; fullscreen
   outranks floating windows regardless of area (an accidentally-enlarged preview window must
@@ -33,6 +34,9 @@ floats over the viewport" sketch - panels are tiled sections, not overlays): a b
   wins with ~15% hysteresis. With everything docked, the primary tile drives unconditionally -
   tiles never compete by area, so no divider drag can reshape the frame and docking a window
   back restores normal tile rendering. Mirrors are aspect-fit, letterboxed when shapes differ.
+  With no viewport showing at all (closed, maximized-away), the runtime's loop keeps running for
+  the node editor's live thumbnails as long as any are watched - closing the viewport never
+  freezes the cards.
 - **Pop out** (header button / View ▸ Pop Out Viewport / `ui_popout_panel` — or **drag the tile's
   header out of the window**: releasing outside the container tears it out into a window under
   the cursor): moves a viewport into its own floating window; via the button it opens exactly
@@ -77,12 +81,12 @@ floats over the viewport" sketch - panels are tiled sections, not overlays): a b
 
 ## ViewportPanel
 
-- An `MTKView` (or `CAMetalLayer`-backed `NSView`) wrapped for SwiftUI via
-  `NSViewRepresentable`. This is the only place Metal touches the UI.
+- A `CAMetalLayer`-backed `NSView` wrapped for SwiftUI via `NSViewRepresentable` - a *surface* of
+  the runtime's render loop: it reports attach / resize / detach to the host, which attaches its
+  layer to the runtime. This is the only place Metal touches the UI.
 - Displays whatever texture output is currently marked for display
   ([RUNTIME.md](RUNTIME.md) blits it to the drawable). The user changes the displayed output with
   the per-output **display** toggle in the node editor (`ui_toggle_display`).
-- Owns viewport interactions tied to `Project` state: zoom, translation, fps readout.
 
 ## Node Editor
 

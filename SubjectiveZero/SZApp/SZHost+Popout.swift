@@ -4,7 +4,7 @@
 // its restore position = the dock-back target) and tracked in `poppedOutPanels`, persisted through
 // the one app-state writer so pop-outs restore on relaunch like the rest of the workspace
 // arrangement. Every visibility change re-syncs the viewport driver registry (one driver, the rest
-// mirror — SZViewportDriverRegistry).
+// mirror — SZViewportDriverRegistry), which SZHost+Viewports pushes to the runtime.
 import AppKit
 import Foundation
 import SZCore
@@ -178,45 +178,37 @@ extension SZHost {
         }
     }
 
-    /// Recompute the visible viewport instances → the driver registry, split tiles vs pop-out
-    /// windows (windows outrank tiles; tiles never compete by area). Called from every path that
-    /// changes either set: start(), layout mutations (SZHost+PanelLayout), pop-out open/close and
-    /// (de)miniaturize, the welcome↔workspace edge. Miniaturized pop-outs don't count — a hidden
-    /// window must not hold drivership (its render loop can stall on an occluded drawable).
+    /// Visible viewport instances → the driver registry, from the surfaces actually in a window (so a
+    /// maximized-away or closed viewport can't be a ghost driver). Tiles count while the main window
+    /// can show pixels, pop-outs while their window can (a hidden window's link suspends — it must
+    /// not hold drivership). Called on every edge of either set, then pushed by `applyRenderDrive()`.
     func syncViewportDriver() {
-        let tiles = Set(panelLayout.root.leafIDs.filter { $0.kind == .viewport }.map(\.instance))
-        var windows: Set<Int> = []
-        var fullscreen: Set<Int> = []
-        for id in popoutManager.poppedOutIDs
-        where id.kind == .viewport && popoutManager.windowIsDisplayable(id) {
-            windows.insert(id.instance)
-            if popoutManager.windowIsFullscreen(id) { fullscreen.insert(id.instance) }
+        var tiles: Set<Int> = [], windows: Set<Int> = [], fullscreen: Set<Int> = []
+        let mainWindow = popoutManager.mainWindow
+        let mainShows = popoutManager.mainWindowIsDisplayable
+        for surface in viewportSurfaces where surface.id.kind == .viewport {
+            let id = surface.id
+            // Pop-out surface: the id has a window and the view isn't in the main window (both
+            // exist for one turn during a pop-out/dock transition).
+            if popoutManager.poppedOutIDs.contains(id), surface.view?.window !== mainWindow {
+                guard popoutManager.windowIsDisplayable(id) else { continue }
+                windows.insert(id.instance)
+                if popoutManager.windowIsFullscreen(id) { fullscreen.insert(id.instance) }
+            } else if mainShows {
+                tiles.insert(id.instance)
+            }
         }
         viewportDriver.setVisible(tiles: tiles, windows: windows, fullscreen: fullscreen)
+        applyRenderDrive()
         // Positional titles depend on the same live set — retitle pop-out windows on its edges.
         popoutManager.refreshTitles { panelTitle($0) }
     }
 
-    /// Per-instance viewport render closure, vended to SZUI's panel — called on that panel's
-    /// display-link render thread. The instance the registry designates drives the schedule
-    /// (`drawLive`); every other visible viewport mirrors the current endpoint
-    /// (`presentCurrentFrame`). Checked AT CALL TIME — reporting the caller's drawable area, so
-    /// drivership follows the LARGEST visible viewport through resizes/fullscreen without
-    /// re-wiring a live view. [Future per-viewport routing seam: this vend is where an instance's
-    /// endpoint override would resolve — presentCurrentFrame's `endpoint:` parameter is the other
-    /// half.]
-    func renderFrame(for id: SZPanelID) -> ((CAMetalLayer) -> Void)? {
-        guard let runtime else { return nil }
-        let registry = viewportDriver
-        let instance = id.instance
-        return { layer in
-            let size = layer.drawableSize
-            if registry.isDriver(instance, reportingArea: Int(size.width) * Int(size.height)) {
-                runtime.drawLive(into: layer)
-            } else {
-                runtime.presentCurrentFrame(into: layer)
-            }
-        }
+    /// The main window's visibility changed (occluded/miniaturized/restored): tiles and the node
+    /// editor's thumbs — its only home — follow.
+    func mainWindowVisibilityChanged() {
+        syncViewportDriver()
+        refreshPreviewStream()
     }
 
     // MARK: - Pop-out placement
