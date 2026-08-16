@@ -284,6 +284,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "SubjectiveZero uses the camera as a live texture source for camera nodes.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SubjectiveZero uses the microphone as a live audio source for audio-reactive nodes.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SubjectiveZero listens on the local network for wifi controllers (OSC apps on your phone or tablet).";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MARKETING_VERSION = 0.2.8;
@@ -307,6 +308,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "SubjectiveZero uses the camera as a live texture source for camera nodes.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SubjectiveZero uses the microphone as a live audio source for audio-reactive nodes.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SubjectiveZero listens on the local network for wifi controllers (OSC apps on your phone or tablet).";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MARKETING_VERSION = 0.2.8;

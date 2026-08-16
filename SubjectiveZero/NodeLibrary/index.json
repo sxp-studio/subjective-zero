@@ -283,6 +283,24 @@
       "reuse": "reference-only"
     },
     {
+      "id": "osc-input",
+      "tags": [
+        "source",
+        "osc",
+        "wifi",
+        "controller",
+        "control",
+        "phone",
+        "network",
+        "macos"
+      ],
+      "purpose": "Wifi controller: OSC over UDP (TouchOSC/Lemur/any OSC app) as live float outputs; bindings live in a mappings JSON keyed by OSC address and each surfaces as its own pre-scaled output, with lastEvent [seq,value01] + lastKey as the learn signal.",
+      "platform": "macos",
+      "useWhen": "The user wants a phone/tablet or another program on the network to drive parameters. Add this node (default UDP port 8000, Bonjour `_osc._udp`), then use the binding_* learn tools — same flow as midi.macos.",
+      "avoidWhen": "You need a USB MIDI controller (use midi.macos), audio, or OSC OUTPUT — this node only receives.",
+      "reuse": "copy-as-is"
+    },
+    {
       "id": "pixelate",
       "tags": [
         "pixelate",

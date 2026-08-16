@@ -1,0 +1,16 @@
+{
+  "title": "OSC Input",
+  "sfSymbol": "wifi",
+  "summary": "Wifi controller: receives OSC over UDP (TouchOSC, Lemur, any OSC app) as live float outputs. Bindings live in the mappings JSON (port data) keyed by OSC address; each surfaces as its own pre-scaled output. lastEvent [seq, value01] + lastKey (\"/1/fader1\") are the learn signal.",
+  "inputs": [
+    { "name": "port", "type": "float", "ui": { "kind": "field", "min": 1, "max": 65535, "step": 1 },
+      "default": { "type": "float", "value": 8000 } },
+    { "name": "mappings", "type": "string", "ui": { "kind": "field" },
+      "default": { "type": "string", "value": "[]" } }
+  ],
+  "outputs": [
+    { "name": "lastEvent", "type": "float2" },
+    { "name": "lastKey", "type": "string" }
+  ],
+  "card": { "cols": 10, "rows": 5, "plumbing": ["mappings"] }
+}

@@ -13,6 +13,12 @@
 	     file — it conforms to com.apple.package, so it also AirDrops / emails as a single unit.
 	     Editor role + Owner rank = this app owns the format. Pairs with SZAppDelegate's
 	     application(_:open:) handler and the save/open panels' allowedContentTypes. -->
+	<!-- Local-network service types the app advertises/browses: the OSC Input library node's UDP
+	     listener (wifi controllers — TouchOSC and friends discover the Mac by name). -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_osc._udp</string>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
