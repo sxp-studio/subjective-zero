@@ -71,6 +71,22 @@ enforcement. Illustrative shape:
   host draws live under the card, and the inputs the card owns (their generated rows step aside
   while the card shows). Hints only - the card itself is `Card.swift`, below.
 
+## Controller nodes and derived bindings
+
+A **binding source** is any node whose contract declares a string `mappings` input and a string
+`lastKey` output (`SZNodeContract.isBindingSource`) — the shipped ones are `midi.macos` (USB MIDI CC)
+and `osc-input` (OSC over wifi). Its `mappings` default is a JSON array of rows
+`{"key", "port", "min", "max", "label"}`: `key` is the controller's own wire identity (MIDI
+`"ch1/cc7"`, OSC `"/1/fader1"`), opaque to the host; each row is a float output named `port` on the
+node INSTANCE's contract, emitting the control pre-scaled `min…max`. Node code is table-generic, so a
+binding is pure graph state — `SZStore.commitDerivedBinding` / `removeDerivedBinding` update the
+table default + the instance output + (optionally) a data edge in ONE transaction and deliberately do
+not raise a rebuild. **Learn** reads the node's `lastEvent` (`[seq, value01]`) + `lastKey` outputs
+(ABI v8 string channel) at ~30 Hz (`SZBindingLearnController`), elects the control the user moved
+(`SZBindingLearnModel`: the control already moving at arm time is excluded until it settles), and
+commits through `SZHost.commitBinding` — reached by the `binding_*` MCP tools and by the controller
+card's `learn_arm` / `learn_commit` / `remove_binding` verbs.
+
 ## Custom card (`Card.swift`)
 
 A generated node MAY ship a **custom card**: a small SwiftUI view, compiled at runtime exactly like

@@ -274,6 +274,9 @@ final class SZHost {
     /// Custom-card mounts — see `cardHost` (SZHost+NodeBody.swift), created on first access. The
     /// controller is @Observable itself; the host only holds it.
     @ObservationIgnored var cardHostStorage: SZCardHostController?
+    /// The armed binding-learn session (at most one — learn is a focused human gesture), see
+    /// SZBindingLearnController. Ephemeral: reassignment sites cancel the old one explicitly.
+    internal(set) var bindingLearn: SZBindingLearnController?
     /// Debounce for store-observation-triggered watch-set recomputes.
     var previewWatchDebounce: Task<Void, Never>?
     /// The editor's latest visible-node report; nil = no editor report yet ⇒ no culling (headless
@@ -723,6 +726,8 @@ final class SZHost {
     private func clearPerProjectState() {
         resetPreviewStreamForProjectSwitch()   // SZHost+NodePreviews — the one unwatch/teardown home
         cardHostStorage?.unmountAll()          // card mounts + their Card.swift watchers die with the project
+        bindingLearn?.cancel()                 // an armed learn must not outlive its source's project
+        bindingLearn = nil
         nodeAgentState = [:]
         runWorkSet = []
         // IN-MEMORY reset only — never a disk write: this runs while `loadedProjectURL` still points
@@ -965,14 +970,15 @@ final class SZHost {
         let live = projectURL.appending(path: "nodes/\(node.id.uuidString)")
         try fm.createDirectory(at: live, withIntermediateDirectories: true)
         try fm.copyItem(at: sourceURL, to: live.appending(path: "Node.swift"))
-        // A library node that ships a custom card copies it along; a card that draws OVER the node's
-        // output (a `backdrop` hint — corner-pin's handles) lands ON, since it IS the node's face; a
-        // control card on an existing effect (vignette, audio-fft) keeps the node's familiar auto-
-        // preview and waits in the context menu ("Show Custom Card").
+        // A library node that ships a custom card copies it along. A contract that DECLARES a `card`
+        // block lands with the card ON — it is the node's face (corner-pin's handles over the output,
+        // a controller's learn strips); a Card.swift with no `card` block is an optional control
+        // surface on an existing effect: the node keeps its familiar auto-preview and the card waits
+        // in the context menu ("Show Custom Card").
         let cardURL = src.appending(path: "Card.swift")
         if fm.fileExists(atPath: cardURL.path) {
             try fm.copyItem(at: cardURL, to: SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: node.id))
-            if contract.card?.backdrop != nil { node.body = SZNodeBody(mode: .custom, custom: SZCustomCardRef()) }
+            if contract.card != nil { node.body = SZNodeBody(mode: .custom, custom: SZCustomCardRef()) }
         }
 
         store.mutate { $0.graph.nodes.append(node) }

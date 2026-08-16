@@ -1,0 +1,16 @@
+{
+  "title": "MIDI Input",
+  "sfSymbol": "pianokeys",
+  "summary": "Hardware MIDI CC input as live float outputs. Bindings live in the mappings JSON (port data); each binding surfaces as its own pre-scaled output. lastEvent [seq, value01] + lastKey (\"ch1/cc7\") are the learn signal.",
+  "inputs": [
+    { "name": "source", "type": "enum", "ui": { "kind": "dropdown" },
+      "default": { "type": "enum", "value": "all" } },
+    { "name": "mappings", "type": "string", "ui": { "kind": "field" },
+      "default": { "type": "string", "value": "[]" } }
+  ],
+  "outputs": [
+    { "name": "lastEvent", "type": "float2" },
+    { "name": "lastKey", "type": "string" }
+  ],
+  "card": { "cols": 10, "rows": 5, "plumbing": ["mappings"] }
+}

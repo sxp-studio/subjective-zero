@@ -104,6 +104,7 @@ final class SZCardHostController: SZCustomCardProvider {
         if let rect = mounts[node]?.box.backdrop {
             out["backdrop"] = ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
         }
+        out["bindingSource"] = host.store.project?.graph.node(id: node)?.contract?.isBindingSource == true
         return out
     }
 
@@ -261,7 +262,37 @@ final class SZCardHostController: SZCustomCardProvider {
         SZCardVerbs(
             live: { [weak self] port, values in self?.cardWrite(node: node, port: port, values: values, persist: false) },
             commit: { [weak self] port, values in self?.cardWrite(node: node, port: port, values: values, persist: true) },
-            size: { [weak self] height in self?.noteMeasuredHeight(node: node, height: height) })
+            size: { [weak self] height in self?.noteMeasuredHeight(node: node, height: height) },
+            call: { [weak self] tool, args in self?.cardCall(node: node, tool: tool, argsJSON: args) })
+    }
+
+    /// The verbs a card may name through `state.call` — the binding-learn vocabulary, nothing else.
+    private static let bindingVerbs: Set<String> = ["learn_arm", "learn_cancel", "learn_commit", "remove_binding"]
+
+    /// A card invokes a verb ON ITS OWN NODE only (the closure captured the node — the card never
+    /// names one), only from the allowlist, and only when the node IS a binding source. Commits and
+    /// removals go through the host's fenced binding funnel like the MCP tools; failures land in the
+    /// status line rather than propagating — the card reads outcomes back from telemetry/state.
+    private func cardCall(node id: SZNodeID, tool: String, argsJSON: String) {
+        guard Self.bindingVerbs.contains(tool),
+              host.store.project?.graph.node(id: id)?.contract?.isBindingSource == true,
+              let args = (try? JSONSerialization.jsonObject(with: Data(argsJSON.utf8))) as? [String: Any] else { return }
+        do {
+            switch tool {
+            case "learn_arm": try host.armBindingLearn(source: id)
+            case "learn_cancel": host.cancelBindingLearn(source: id)
+            case "learn_commit":
+                guard let learn = host.bindingLearn, learn.node == id, let candidate = learn.candidate else { return }
+                _ = try host.commitBinding(source: id, target: nil, key: candidate.key,
+                                           label: args["label"] as? String, origin: .user)
+            case "remove_binding":
+                guard let port = args["port"] as? String else { return }
+                try host.removeBinding(source: id, port: port, origin: .user)
+            default: break
+            }
+        } catch {
+            host.status = "\(error)"
+        }
     }
 
     /// The card writes ITS node's inputs, by port name, through the host's one funnel — the same
@@ -360,21 +391,45 @@ final class SZCardHostController: SZCustomCardProvider {
         instance.push(channel: "state", json: json)
     }
 
-    /// Display telemetry, card-scoped: the node's own float/floatArray output values (nodes with
-    /// none get no pushes at all).
+    /// Display telemetry, card-scoped: the node's own float-family/floatArray output values under
+    /// `outputs`, string/enum outputs under `strings`, and — for a binding source — the host's learn
+    /// state under `learn` (pushed even when idle, so a card sees the disarm). Nodes with none of
+    /// these get no pushes at all.
     private func pushTelemetry() {
         for mount in mounts.values {
             guard let instance = mount.instance,
                   let node = host.store.project?.graph.node(id: mount.node),
                   let runtime = host.runtime else { continue }
+            var payload: [String: Any] = [:]
             var outputs: [String: Any] = [:]
-            for port in node.contract?.outputs ?? [] where port.type == .float || port.type == .floatArray {
-                guard let values = runtime.readOutputFloats(node: mount.node, port: port.name) else { continue }
-                // Node math can produce NaN/Inf; JSONSerialization raises for non-finite numbers.
-                outputs[port.name] = values.map { $0.isFinite ? Double($0) : 0 }
+            var strings: [String: String] = [:]
+            for port in node.contract?.outputs ?? [] {
+                switch port.type {
+                case .texture, .event: continue
+                case .string, .enumeration:
+                    if let string = runtime.readOutputString(node: mount.node, port: port.name) { strings[port.name] = string }
+                default:
+                    guard let values = runtime.readOutputFloats(node: mount.node, port: port.name) else { continue }
+                    // Node math can produce NaN/Inf; JSONSerialization raises for non-finite numbers.
+                    outputs[port.name] = values.map { $0.isFinite ? Double($0) : 0 }
+                }
             }
-            guard !outputs.isEmpty,
-                  let json = try? JSONSerialization.data(withJSONObject: ["outputs": outputs]) else { continue }
+            if !outputs.isEmpty { payload["outputs"] = outputs }
+            if !strings.isEmpty { payload["strings"] = strings }
+            if node.contract?.isBindingSource == true {
+                var learn: [String: Any] = ["armed": false, "seen": false]
+                if let session = host.bindingLearn, session.node == mount.node {
+                    learn["armed"] = true
+                    if let candidate = session.candidate {
+                        learn["seen"] = true
+                        learn["key"] = candidate.key
+                        learn["value01"] = candidate.value01
+                    }
+                }
+                payload["learn"] = learn
+            }
+            guard !payload.isEmpty,
+                  let json = try? JSONSerialization.data(withJSONObject: payload) else { continue }
             instance.push(channel: "telemetry", json: json)
         }
     }

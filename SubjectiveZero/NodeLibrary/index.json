@@ -248,6 +248,22 @@
       "reuse": "copy-as-is"
     },
     {
+      "id": "midi.macos",
+      "tags": [
+        "source",
+        "midi",
+        "controller",
+        "control",
+        "knob",
+        "macos"
+      ],
+      "purpose": "Hardware MIDI CC input as live float outputs; bindings live in a mappings JSON (port data) and each surfaces as its own pre-scaled output, with lastEvent [seq,value01] + lastKey as the learn signal.",
+      "platform": "macos",
+      "useWhen": "The user wants a physical knob/fader to drive a parameter. Add this node, then use the binding_* learn tools to bind a controller to a target input — bindings become outputs + data edges, so the control path stays native and queryable.",
+      "avoidWhen": "You need audio (use microphone.macos), note/pitch-bend events (this node is MIDI 1.0 channel-voice CC only), or a wifi/phone controller (use osc-input).",
+      "reuse": "copy-as-is"
+    },
+    {
       "id": "noise",
       "tags": [
         "generator",

@@ -54,7 +54,11 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
                                             // takes the render endpoint"). Rejects the whole call on a
                                             // missing or non-media path
 - `ui_add_library_node`                     // a built-in library node verbatim (Node.swift + its Card.swift
-                                            // when it ships one); a card that draws over the output lands ON
+                                            // when it ships one); a contract declaring `card` lands with it ON
+- `binding_learn_start/stop/state`,        // controller nodes (midi.macos, osc-input): arm learn, poll the
+  `binding_commit`, `binding_remove`        // moved control ({armed, seen, key, value01}), commit it as a
+                                            // mappings row + derived float output (+ data edge with `target`),
+                                            // remove by output port — one store transaction each
 - `ui_set_node_body`                        // none | preview | custom — a node's body region (the custom
                                             // card = the node's Card.swift; cols/rows/pinned = its footprint)
 - `ui_connect`, `ui_disconnect`            // flow or data edges
@@ -96,7 +100,8 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 **`debug_` (diagnostics + tests)**
 - `debug_dump_logs` (build / agent / runtime)
 - `debug_get_build_errors`
-- `debug_card_mount`                        // a node's custom-card mount: state / warning / backdrop rect
+- `debug_card_mount`                        // a node's custom-card mount: state / warning / backdrop rect /
+                                            // bindingSource (contract has mappings:string + lastKey:string)
 - `debug_snapshot_state`, `debug_load_state`
 - `debug_chat_transcript` - a scope's transcript as JSON, including each message's
   `timestamp`/`duration`/`usage`/`breakdown` where present (the per-turn debug breakdown).

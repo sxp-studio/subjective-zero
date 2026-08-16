@@ -60,7 +60,7 @@ final class SZHostBridge {
     /// `agentCallable: false` at its definition. Derived, like `debugToolNames`, so the definition is
     /// the single source of truth: mark one and it drops off every agent bus and out of the mirror below.
     nonisolated static let agentWithheldToolNames = Set(
-        (agentToolDefinitions + uiToolDefinitions)
+        (agentToolDefinitions + uiToolDefinitions + bindingToolDefinitions)
             .filter { ($0["agentCallable"] as? Bool) == false }
             .compactMap { $0["name"] as? String })
 
@@ -69,7 +69,7 @@ final class SZHostBridge {
     /// the Claude provider's `--allowedTools` mirrors (plumbed via `SZAgentRunRequest.allowedMCPTools`),
     /// so a NEW tool is reachable by construction and the allowlist can never go stale.
     nonisolated static let agentCallableToolNames: [String] =
-        (agentToolDefinitions + uiToolDefinitions)
+        (agentToolDefinitions + uiToolDefinitions + bindingToolDefinitions)
             .filter { ($0["agentCallable"] as? Bool) != false }
             .compactMap { $0["name"] as? String }
 
@@ -79,7 +79,7 @@ final class SZHostBridge {
     /// policy, not wire schema, so it is stripped from every returned definition.
     nonisolated static func toolDefinitions(for surface: Surface = .full) -> [[String: Any]] {
         let debug = surface.exposesDebugTools ? debugToolDefinitions : []
-        let agentAndUI = (agentToolDefinitions + uiToolDefinitions).filter {
+        let agentAndUI = (agentToolDefinitions + uiToolDefinitions + bindingToolDefinitions).filter {
             surface == .full || ($0["agentCallable"] as? Bool) != false
         }
         return (debug + agentAndUI).map { def in
@@ -155,6 +155,7 @@ final class SZHostBridge {
                 if let result = try handleDebugTool(name: name, arguments: arguments) { return .text(result) }
                 if let result = try handleAgentTool(name: name, arguments: arguments) { return .text(result) }
                 if let result = try handleUITool(name: name, arguments: arguments) { return .text(result) }
+                if let result = try handleBindingTool(name: name, arguments: arguments) { return .text(result) }
                 throw SZMCPError.message("unknown tool: \(name)")
             }
         }

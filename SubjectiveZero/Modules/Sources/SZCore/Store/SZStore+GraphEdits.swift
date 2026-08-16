@@ -290,6 +290,71 @@ extension SZStore {
         return result
     }
 
+    /// Commit one entry of a node's derived-binding table, as ONE transaction: update the table input's
+    /// default, upsert the output the entry declares, and (optionally) wire that output to a target
+    /// input — one revision, one persistable state.
+    ///
+    /// For nodes whose output set is DERIVED from an input's data (a binding/mapping table): the node's
+    /// code reads the table and emits on whatever ports it names, so the surface change carries no new
+    /// code obligation and deliberately does NOT raise `needsRebuild`. `editPorts` remains the editorial
+    /// path — a human/agent reshaping a node's declared I/O — where a build IS invalidated. Wiring
+    /// follows `connect`'s cardinality rule (a data input holds one incoming edge; occupying swaps).
+    ///
+    /// Returns false (no mutation applied) if the node, its contract, or a string-typed `tableInput`
+    /// is missing.
+    @discardableResult
+    public func commitDerivedBinding(
+        node id: SZNodeID, tableInput: String, tableJSON: String,
+        output: SZPort, target: SZPortRef?
+    ) -> Bool {
+        assertFenceCleared([id])
+        var applied = false
+        mutate { project in
+            guard let ni = project.graph.nodes.firstIndex(where: { $0.id == id }),
+                  var contract = project.graph.nodes[ni].contract,
+                  let ti = contract.inputs.firstIndex(where: { $0.name == tableInput }),
+                  contract.inputs[ti].type == .string else { return }
+            contract.inputs[ti].def = .string(tableJSON)
+            if let existing = contract.outputs.firstIndex(where: { $0.name == output.name }) {
+                contract.outputs[existing] = output
+            } else {
+                contract.outputs.append(output)
+            }
+            project.graph.nodes[ni].contract = contract
+            if let target {
+                project.graph.connections.removeAll { $0.kind == .data && $0.to == target }
+                project.graph.connections.append(SZConnection(
+                    from: SZPortRef(node: id, port: output.name), to: target, kind: .data))
+            }
+            applied = true
+        }
+        return applied
+    }
+
+    /// Remove one derived-binding entry — the inverse of `commitDerivedBinding`, same single
+    /// transaction: update the table input's default, drop the named output, and prune the data edges
+    /// that output fed. Same rebuild exemption, same grounds. Returns false if nothing matched.
+    @discardableResult
+    public func removeDerivedBinding(
+        node id: SZNodeID, tableInput: String, tableJSON: String, output name: String
+    ) -> Bool {
+        assertFenceCleared([id])
+        var applied = false
+        mutate { project in
+            guard let ni = project.graph.nodes.firstIndex(where: { $0.id == id }),
+                  var contract = project.graph.nodes[ni].contract,
+                  let ti = contract.inputs.firstIndex(where: { $0.name == tableInput }),
+                  contract.inputs[ti].type == .string else { return }
+            contract.inputs[ti].def = .string(tableJSON)
+            contract.outputs.removeAll { $0.name == name }
+            project.graph.nodes[ni].contract = contract
+            let source = SZPortRef(node: id, port: name)
+            project.graph.connections.removeAll { $0.kind == .data && $0.from == source }
+            applied = true
+        }
+        return applied
+    }
+
     /// Set (or clear) why a node must be rebuilt. The host owns this classification because deciding between
     /// `.contractChanged` and `.sourceMismatch` means reading the node's `Node.swift` off disk.
     /// `promoteStagedNode` clears it — the one place a rebuild is discharged, and conditionally: it keeps
