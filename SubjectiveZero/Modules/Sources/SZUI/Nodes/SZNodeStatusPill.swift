@@ -133,24 +133,34 @@ struct SZNodeBadges: View {
     var onFix: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 4) {
+        // The pill stays centered over the card; the lock hangs off its leading edge as an overlay so it
+        // never shifts the pill (an HStack would re-center pill+lock together).
+        pill.overlay(alignment: .leading) {
             if locked {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: SZNodeLayout.statusPillHeight, height: SZNodeLayout.statusPillHeight)
                     .background(Circle().fill(Color(white: 0.32)))
+                    .offset(x: -(SZNodeLayout.statusPillHeight + 4))
             }
-            if showPill {
-                if let errorDetail {
-                    SZNodeErrorPill(detail: errorDetail, title: errorTitle, onFix: onFix)
-                } else if status == .outdated, let onFix {
-                    SZNodeFixPill(status: status, help: "Its contract has ports its code doesn't implement — click to ask its agent to rebuild it",
-                                  action: onFix)
-                } else {
-                    SZNodeStatusPill(status: status)
-                }
+        }
+    }
+
+    @ViewBuilder
+    private var pill: some View {
+        if showPill {
+            if let errorDetail {
+                SZNodeErrorPill(detail: errorDetail, title: errorTitle, onFix: onFix)
+            } else if status == .outdated, let onFix {
+                SZNodeFixPill(status: status, help: "Its contract has ports its code doesn't implement — click to ask its agent to rebuild it",
+                              action: onFix)
+            } else {
+                SZNodeStatusPill(status: status)
             }
+        } else {
+            // No pill: keep a zero-width anchor so the lock still sits just left of the card's center.
+            Color.clear.frame(width: 0, height: SZNodeLayout.statusPillHeight)
         }
     }
 }
