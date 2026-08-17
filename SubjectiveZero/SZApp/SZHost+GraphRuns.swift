@@ -43,14 +43,17 @@ extension SZHost {
     }
 
     /// A failed work child knows WHY it failed; without this the post-run sweep paints the
-    /// node with its generic never-compiled line and the reason is lost. An agent's OWN
-    /// report always wins; cancelled work says nothing (a stopped run is not a failed node).
+    /// node with its generic never-compiled line and the reason is lost. Written as the
+    /// HOST's line, never the agent's: the traversal died (a spent budget, a dead CLI),
+    /// which says nothing about a build the agent may already have promoted — run
+    /// accounting must still count that node implemented. Whoever already explained the
+    /// node keeps their words; cancelled work says nothing (a stopped run is not a failed node).
     private func surfaceWorkFailure(_ record: SZAgentGraphRun, _ ending: SZTraversalEnding) {
         guard let id = record.work, let node = UUID(uuidString: id),
               let message = Self.workFailureMessage(ending) else { return }
         let reported = nodeAgentState[node]?.phase
         guard reported != .error, reported != .needsInput else { return }
-        recordNodeStatus(node: node, phase: .error, message: message)
+        recordHostFailure(node: node, message: message)
     }
 
     /// The node-facing sentence for a work ending, or nil when the node should stay quiet.

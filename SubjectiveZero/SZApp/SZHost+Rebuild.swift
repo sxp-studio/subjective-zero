@@ -121,8 +121,9 @@ extension SZHost {
         injectComposerDraft(SZComposerDraft(segments: [mention, .text(ask)]), scope: .node(id))
     }
 
-    /// One line, bounded, with no trailing terminator (the template supplies the sentence's own).
-    private static func oneLineDetail(_ s: String) -> String {
+    /// One line, bounded, with no trailing terminator (the caller's template supplies the sentence's own) —
+    /// shared with the run-end accounting, which quotes the same audit text.
+    static func oneLineDetail(_ s: String) -> String {
         var flat = s.split(whereSeparator: \.isNewline).joined(separator: "; ")
         if flat.count > 120 { flat = String(flat.prefix(117)) + "…" }
         while let last = flat.last, last == "." || last == ";" || last == " " { flat.removeLast() }

@@ -208,29 +208,31 @@ extension SZHost {
                 return
             }
             let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
-            if result.outcome.failed, result.process.timedOut {
+            status = result.outcome.failed ? "chat turn failed" : "chat reply ready"
+            // The shared ladder, with this lane's own pre-emption folded in at its own place: the
+            // stale-session probation must claim a failure before the provider probe opens a setup
+            // sheet at a session that simply expired.
+            switch await turnFailure(result, provider: provider,
+                                     preempt: { self.dropSessionIfStale(scope) }) {
+            case .timedOut(let detail):
                 // A timeout is its own outcome — the same sentence the run path lands, and NO
                 // stale-session probation: a killed-at-the-clock turn is no evidence the restored
                 // session is dead (the cold retry would only run down the same clock again).
-                let detail = Self.turnFailureDetail(result)
                 reply((empty ? "" : "\n") + "⚠️ \(detail)")
                 status = "chat turn timed out"
                 mailbox.markFailed(envelopeID, reason: detail)
                 return
-            }
-            if result.outcome.failed, dropSessionIfStale(scope) {
+            case .preempted:
                 // The probation self-heal just fired: ONE cold-start redelivery — bounded
                 // structurally: with the session gone, a second failure lands in markFailed.
                 reply("(session expired — retrying with a fresh session)")
                 status = "chat turn failed — retrying with a fresh session"
                 mailbox.requeue(envelopeID)
                 return   // the defer's release re-fires the pump → redelivery
-            }
-            status = result.outcome.failed ? "chat turn failed" : "chat reply ready"
-            if let detail = await providerFailureDetail(result: result, provider: provider) {
+            case .provider(let detail):
                 reply((empty ? "" : "\n") + "⚠️ Provider error: \(detail)")
-            } else if empty {
-                reply(result.outcome.failed ? "(agent run failed)" : "(no text response)")
+            case .agent, nil:
+                if empty { reply(result.outcome.failed ? "(agent run failed)" : "(no text response)") }
             }
             if result.outcome.failed {
                 mailbox.markFailed(envelopeID, reason: result.outcome.message ?? "the turn failed")

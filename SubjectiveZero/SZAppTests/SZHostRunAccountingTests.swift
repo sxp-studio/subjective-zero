@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Run-end accounting from promote evidence: `surfaceUnresolvedNodes` counts a node implemented on the
 // promote it saw (+ the node's derived state), keeps an agent's own report, and only writes the generic
-// failure through `recordRunFailure` — which never clobbers a specific diagnostic. A promote itself resets
-// the transient agent state (`clearTransientAgentStateAfterPromote`) so no red pill outlives a green build,
-// and `cancelRun` counts + narrates the Stop once, retiring the pills its own run left mid-flight.
+// failure through `recordRunFailure` — which never clobbers a specific diagnostic. Bad news the HOST wrote
+// (a work traversal that died) is a reason, never a verdict: it can't fail a node that built. A promote
+// itself resets the transient agent state (`clearTransientAgentStateAfterPromote`) so no red pill outlives
+// a green build, and `cancelRun` counts + narrates the Stop once, retiring the pills its run left mid-flight.
 import Foundation
 import Testing
+import SZAI
 import SZCore
 @testable import SubjectiveZero
 
@@ -73,7 +75,59 @@ struct SZHostRunAccountingTests {
         #expect(done == 0 && failed == 1)
         #expect(host.nodeAgentState[b.id]?.phase == .needsInput)
         #expect(host.nodeAgentState[b.id]?.message == "which palette?")
+        #expect(host.nodeAgentState[b.id]?.reportedByAgent == true)   // signed: this one IS the verdict
         #expect(directorLines(host).isEmpty)
+    }
+
+    /// The incident: the agent promotes green at minute 3, keeps polishing, and its turn's budget runs
+    /// out. The work traversal ends `.failed`, the host paints the node — and the run must STILL read it
+    /// as built, with the red pill retired. The agent's transcript keeps the timeout line either way.
+    @Test func aPromotedNodeWhoseTurnDiedLaterIsStillImplemented() {
+        let a = Self.built()
+        let host = host([a], promoted: [a.id])
+        let record = UUID()
+        host.beginAgentGraphRun(SZTraversalSighting(id: record, agent: "coding", work: a.id.uuidString),
+                                thread: record)
+        host.concludeAgentGraphRun(record, .failed(reason: "the agent timed out after 15m without finishing"))
+        #expect(host.nodeAgentState[a.id]?.phase == .error)          // the pill while the run is still up
+        #expect(host.nodeAgentState[a.id]?.reportedByAgent == false)  // …written by the host, not the agent
+        let (done, failed) = host.surfaceUnresolvedNodes()
+        #expect(done == 1 && failed == 0)
+        #expect(host.nodeAgentState[a.id]?.phase == .ok)
+        #expect(host.nodeAgentState[a.id]?.errorDetail == nil)
+        #expect(directorLines(host).isEmpty)
+        #expect(host.nodeStatusLines[a.id] == "ok")   // nothing left to feed the next run as a blocker
+    }
+
+    /// The same host line on a node that built NOTHING is a failure — and a better reason than the
+    /// generic "never compiled", both on the pill and in the run's narration.
+    @Test func aHostRecordedReasonStandsInForTheGenericLine() {
+        let b = Self.draft()
+        let host = host([b])
+        host.recordHostFailure(node: b.id, message: "the agent went silent for 5m and was stopped")
+        let (done, failed) = host.surfaceUnresolvedNodes()
+        #expect(done == 0 && failed == 1)
+        #expect(host.nodeAgentState[b.id]?.message == "the agent went silent for 5m and was stopped")
+        #expect(directorLines(host) == ["Draft didn't finish — the agent went silent for 5m and was stopped."])
+    }
+
+    /// A node whose source and contract disagree is narrated in the AUDIT's words — the audit raises
+    /// more than one fault, so a fixed "reads ports the contract doesn't declare" sentence would send
+    /// the Director hunting port names for a `setPaused` fault. (No project on disk here, so the fresh
+    /// audit can't run and the cached pill detail stands in — the same text either way.)
+    @Test func aSourceMismatchIsNarratedInTheAuditsOwnWords() throws {
+        var a = Self.built()
+        a.sourceMismatch = true
+        let host = host([a], promoted: [a.id])
+        host.nodeAgentState[a.id] = SZNodeAgentState(
+            phase: .ok, errorDetail: "Node.swift creates an AVAudioEngine, which keeps running when the "
+                + "graph's clock stops. Stop it in `func setPaused(_ paused: Bool)` — see node-abi.")
+        let (done, failed) = host.surfaceUnresolvedNodes()
+        #expect(done == 0 && failed == 1)
+        let line = try #require(directorLines(host).first)
+        #expect(line.contains("setPaused"))
+        #expect(!line.contains("reads ports"))
+        #expect(host.nodeAgentState[a.id]?.message.contains("setPaused") == true)
     }
 
     @Test func aNodeGoneFromTheGraphIsUncounted() {
@@ -164,8 +218,10 @@ struct SZHostRunAccountingTests {
     @Test func aPromoteDemotesAStaleErrorAndKeepsTheChatFlag() {
         let a = Self.built()
         let host = host([a])
-        host.nodeAgentState[a.id] = SZNodeAgentState(phase: .error, message: "boom", errorDetail: "boom log", isChatting: true)
+        host.nodeAgentState[a.id] = SZNodeAgentState(phase: .error, message: "boom", errorDetail: "boom log",
+                                                     isChatting: true, reportedByAgent: true)
         host.clearTransientAgentStateAfterPromote(a.id)
+        // The report goes with it: a green build is newer evidence, so nothing of it may outrank the next one.
         #expect(host.nodeAgentState[a.id] == SZNodeAgentState(phase: .ok, message: "", errorDetail: nil, isChatting: true))
         // A needsInput pill goes the same way; a coding phase is left alone.
         host.nodeAgentState[a.id] = SZNodeAgentState(phase: .needsInput, message: "q?")

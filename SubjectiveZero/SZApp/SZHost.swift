@@ -1372,24 +1372,52 @@ final class SZHost {
     /// until the next project switch. Hold the invariant where the writes happen.
     private func isInGraph(_ id: SZNodeID) -> Bool { store.project?.graph.node(id: id) != nil }
 
+    /// The node's OWN agent speaking (`agent_report_status`, and the debug affordance that stands in for
+    /// one). Signed as such: run accounting lets an agent's `.error`/`.needsInput` outrank even a clean
+    /// build, which is a judgement only the agent that did the work may make.
     func recordNodeStatus(node: SZNodeID, phase: SZNodeAgentPhase, message: String) {
+        writeNodeStatus(node: node, phase: phase, message: message, byAgent: true)
+    }
+
+    /// The HOST's bad news about a node — a provider that died mid-turn, a work traversal that ended
+    /// failed. Same red pill and copyable detail, but unsigned: it says the turn stopped, not that the
+    /// build is bad, so a node that already promoted green still counts implemented at run end.
+    func recordHostFailure(node: SZNodeID, message: String) {
+        writeNodeStatus(node: node, phase: .error, message: message, byAgent: false)
+    }
+
+    /// A node the run counts implemented must not keep the red pill the host painted while its turn died
+    /// (a spent budget, a dead CLI) — the build outlived the turn, and the transcript already carries the
+    /// turn's own line. An agent's own report is left exactly as it stands: that one IS the verdict.
+    func retireHostFailure(_ id: SZNodeID) {
+        guard var state = nodeAgentState[id], !state.reportedByAgent,
+              state.phase == .error || state.phase == .needsInput else { return }
+        state.phase = .ok
+        state.message = ""
+        state.errorDetail = nil
+        nodeAgentState[id] = state
+    }
+
+    private func writeNodeStatus(node: SZNodeID, phase: SZNodeAgentPhase, message: String, byAgent: Bool) {
         guard isInGraph(node) else { return }
         var state = nodeAgentState[node] ?? SZNodeAgentState()
         state.phase = phase
         state.message = message
-        // Maintain the clickable error pill's detail too: an error keeps the agent's message; else clear it.
+        // Maintain the clickable error pill's detail too: an error keeps the message; else clear it.
         state.errorDetail = phase == .error ? (message.isEmpty ? phase.rawValue : message) : nil
+        state.reportedByAgent = byAgent
         nodeAgentState[node] = state
         print("[SZHost] node \(node.uuidString) → \(phase.rawValue) \(message)")
     }
 
-    /// A promote is strictly newer evidence than any prior report: drop the failure detail and message,
-    /// and demote a stale `.error` / `.needsInput` pill to `.ok` (an in-flight chat flag is untouched).
-    /// Without this a red pill outlives the green build that answered it.
+    /// A promote is strictly newer evidence than any prior report: drop the failure detail, the message and
+    /// its authorship, and demote a stale `.error` / `.needsInput` pill to `.ok` (an in-flight chat flag is
+    /// untouched). Without this a red pill outlives the green build that answered it.
     func clearTransientAgentStateAfterPromote(_ id: SZNodeID) {
         guard var state = nodeAgentState[id] else { return }
         state.errorDetail = nil
         state.message = ""
+        state.reportedByAgent = false
         if state.phase == .error || state.phase == .needsInput { state.phase = .ok }
         nodeAgentState[id] = state
     }
@@ -1408,6 +1436,7 @@ final class SZHost {
         state.phase = .error
         if !reported || state.message.isEmpty { state.message = fallback }
         state.errorDetail = state.errorDetail ?? fallback
+        state.reportedByAgent = false   // the run wrote this pill, whoever wrote the phase before it
         nodeAgentState[node] = state
         print("[SZHost] node \(node.uuidString) → error (run end) \(state.message)")
     }

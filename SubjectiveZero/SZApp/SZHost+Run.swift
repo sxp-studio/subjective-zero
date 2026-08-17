@@ -164,8 +164,10 @@ extension SZHost {
         dispatchPrompts[node] = store.project?.graph.node(id: node)?.prompt
         // The promote evidence is per-DISPATCH, not per-run: a reconcile round redispatching this node
         // says the last build did not settle it, so an earlier promote no longer vouches for THIS turn.
-        // Without this a second agent that dies silently still counts as implemented.
-        promotedThisRun.remove(node)
+        // Without this a second agent that dies silently still counts as implemented. Claim-guarded like
+        // every other run-state write here: a cancelled run's zombie dispatch must not erase the promote
+        // evidence the NEW run just recorded for this node.
+        if let dispatchClaim = claim ?? runClaim, dispatchClaim == runClaim { promotedThisRun.remove(node) }
         openChatTab(scope)
         // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
         // A cancelled run's zombie dispatch presents its released token; deliver detects that and
@@ -174,20 +176,20 @@ extension SZHost {
                                        claim: claim ?? runClaim).result
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
         // (timeout, CLI error) is invisible and the node reads as a silent Draft.
-        // A user Stop kills the CLI mid-turn: that is a choice, not a provider failure — no error
-        // line for it (mirrors `providerFailureDetail`'s own guard).
-        if result.outcome.failed, !Task.isCancelled {
-            if result.process.timedOut {
-                // Our budget ran out, not the provider's fault — a plain warning line.
-                appendWarningLine(Self.turnFailureDetail(result), to: scope)
-            } else if let providerDetail = await providerFailureDetail(result: result, provider: provider) {
-                // A mid-turn provider death: the red pill carries the same actionable detail —
-                // set BEFORE the run's end so `surfaceUnresolvedNodes` doesn't overwrite it.
-                recordNodeStatus(node: node, phase: .error, message: providerDetail)
-                appendProviderErrorLine(providerDetail, to: scope)
-            } else {
-                appendProviderErrorLine(Self.turnFailureDetail(result), to: scope)
-            }
+        switch await turnFailure(result, provider: provider) {
+        case .timedOut(let detail):
+            // Our budget ran out, not the provider's fault — a plain warning line.
+            appendWarningLine(detail, to: scope)
+        case .provider(let detail):
+            // A mid-turn provider death: the red pill carries the same actionable detail —
+            // set BEFORE the run's end so `surfaceUnresolvedNodes` doesn't overwrite it. The HOST's
+            // line, not the agent's: it never overrules a build this node already promoted.
+            recordHostFailure(node: node, message: detail)
+            appendProviderErrorLine(detail, to: scope)
+        case .agent(let detail):
+            appendProviderErrorLine(detail, to: scope)
+        case .preempted, nil:
+            break
         }
         return result
     }
@@ -209,6 +211,22 @@ extension SZHost {
     /// A failed turn's reason, in the words it already carries (`deliver` stamps timeouts).
     nonisolated static func turnFailureDetail(_ result: SZAgentRunResult) -> String {
         result.outcome.message ?? "the provider reported a failure with no message"
+    }
+
+    /// WHY a turn failed — the one ladder every lane asks (a coding dispatch, a Director turn, a chat
+    /// delivery), so their guards and their words cannot drift apart. A user Stop is a choice, not a
+    /// failure: nothing to report. `preempt` runs between the timeout ruling and the provider probe —
+    /// the chat lane's stale-session retry must claim the failure before the probe (and its setup
+    /// sheet) does; no other lane has one. Each lane still decides what to DO with the answer.
+    func turnFailure(_ result: SZAgentRunResult, provider: any SZProvider,
+                     preempt: () -> Bool = { false }) async -> SZTurnFailure? {
+        guard result.outcome.failed, !Task.isCancelled else { return nil }
+        if result.process.timedOut { return .timedOut(Self.turnFailureDetail(result)) }
+        if preempt() { return .preempted }
+        if let detail = await providerFailureDetail(result: result, provider: provider) {
+            return .provider(detail)
+        }
+        return .agent(Self.turnFailureDetail(result))
     }
 
     /// A budget as "15m" / "45s" — nil budget, no figure.
@@ -263,12 +281,12 @@ extension SZHost {
                                        claim: claim ?? runClaim).result
         // The run re-reads the graph rather than the reply, so a mid-turn provider death
         // would otherwise vanish — land it in the Director tab like a coding turn's error line.
-        if result.outcome.failed {
-            if result.process.timedOut {
-                appendWarningLine(Self.turnFailureDetail(result), to: scope)
-            } else if let detail = await providerFailureDetail(result: result, provider: provider) {
-                appendProviderErrorLine(detail, to: scope)
-            }
+        switch await turnFailure(result, provider: provider) {
+        case .timedOut(let detail): appendWarningLine(detail, to: scope)
+        case .provider(let detail): appendProviderErrorLine(detail, to: scope)
+        // An ordinary failure needs no line here: the graph's turn report carries it into the
+        // run's own narration, and the Director's next brief states it.
+        case .agent, .preempted, nil: break
         }
         ensureRenderEndpointFromDisplay()   // safety net: a Director that declared a displayed output but
         return result                       // forgot ui_toggle_display still renders (mirrors the draft path)
@@ -464,17 +482,20 @@ extension SZHost {
                     instruction: instruction, thread: thread, claim: claim,
                     packsRoot: packsRoot, providerID: providerID, mcpPort: mcpPort,
                     projectURL: projectURL, cacheDirectory: cacheDirectory)
-                status = "agent run complete"
-                if !ownsGraphOp {
-                    adoptRunRenderEndpoint()   // show what this run just built
-                    let (done, failed) = surfaceUnresolvedNodes()
-                    let narrationID = narrateDirector(
-                        failed == 0
-                            ? (done == 0 ? "Run complete." : "Run complete — \(done) node\(done == 1 ? "" : "s") implemented.")
-                            : "Run finished — \(done) implemented, \(failed) failed. See the flagged node\(failed == 1 ? "" : "s").")
-                    // Claim-guarded like the per-run state: a zombie narrating after cancel-and-
-                    // restart must not fold the NEW run's live log onto its own narration.
-                    if runClaim == claim { attachRunRollup(to: narrationID) }
+                // Claim-guarded as a whole, like the per-run state: after a cancel-and-restart this
+                // task is a ZOMBIE, and every line below reads or paints the run's nodes — accounting
+                // for, repainting and narrating over the NEW run's work.
+                if runClaim == claim {
+                    status = "agent run complete"
+                    if !ownsGraphOp {
+                        adoptRunRenderEndpoint()   // show what this run just built
+                        let (done, failed) = surfaceUnresolvedNodes()
+                        let narrationID = narrateDirector(
+                            failed == 0
+                                ? (done == 0 ? "Run complete." : "Run complete — \(done) node\(done == 1 ? "" : "s") implemented.")
+                                : "Run finished — \(done) implemented, \(failed) failed. See the flagged node\(failed == 1 ? "" : "s").")
+                        attachRunRollup(to: narrationID)
+                    }
                 }
             } catch is CancellationError {
                 // A user Stop is not a failure: no red pills, no per-node "didn't finish" lines. This branch
@@ -485,11 +506,15 @@ extension SZHost {
                 if runClaim == claim { status = "run cancelled" }
                 print("[SZHost] agent run cancelled")
             } catch {
-                status = "agent run failed: \(error)"
-                if !ownsGraphOp {
-                    let (done, failed) = surfaceUnresolvedNodes()
-                    let narrationID = narrateDirector("Run failed: \(error). \(done) implemented, \(failed) unfinished.")
-                    if runClaim == claim { attachRunRollup(to: narrationID) }
+                // Claim-guarded like the success branch: a zombie unwinding on a non-cancellation
+                // error must not paint failure pills onto the nodes the NEW run is building.
+                if runClaim == claim {
+                    status = "agent run failed: \(error)"
+                    if !ownsGraphOp {
+                        let (done, failed) = surfaceUnresolvedNodes()
+                        let narrationID = narrateDirector("Run failed: \(error). \(done) implemented, \(failed) unfinished.")
+                        attachRunRollup(to: narrationID)
+                    }
                 }
                 print("[SZHost] agent run failed: \(error)")
             }
@@ -945,17 +970,23 @@ extension SZHost {
 
     /// After a run, account for every work-set node from EVIDENCE — a promote that landed during the
     /// run plus the node's derived state now (`SZRunNodeVerdict`). Implemented nodes are silent unless
-    /// they moved after their build; a node its agent already explained keeps the agent's words; only a
-    /// silent, unpromoted node gets the generic line. Returns (implemented, failed) for the run summary.
+    /// they moved after their build, and shed any pill the host painted over them; a node its own AGENT
+    /// explained keeps the agent's words; a failure the host recorded (a spent budget, a dead CLI) is the
+    /// reason a node that built NOTHING gets, never a verdict on a build that landed. Only a node with no
+    /// promote and no reason at all gets the generic line. Returns (implemented, failed) for the summary.
     @discardableResult
     func surfaceUnresolvedNodes() -> (implemented: Int, failed: Int) {
         var implemented = 0, failed = 0
         for id in runWorkSet {                                                     // this run's captured work (grown)
             guard let node = store.project?.graph.node(id: id) else { continue }   // removed mid-run (merge)
-            let verdict = SZRunNodeVerdict.classify(
-                promoted: promotedThisRun.contains(id), stillDirty: node.needsImplementation,
-                derivedReason: node.rebuildReason, phase: nodeAgentState[id]?.phase ?? .idle)
-            if verdict.isImplemented { implemented += 1 } else { failed += 1 }
+            let verdict = SZRunNodeVerdict.classify(node: node, promoted: promotedThisRun.contains(id),
+                                                    state: nodeAgentState[id])
+            if verdict.isImplemented {
+                implemented += 1
+                retireHostFailure(id)   // no red pill on a node this run just counted built
+            } else {
+                failed += 1
+            }
             switch verdict {
             case .implemented, .failedAsReported:
                 break
@@ -966,13 +997,21 @@ extension SZHost {
                 narrateDirector("\(node.title) was built, but its ports changed after the build — "
                     + "it needs a rebuild against the current contract.")
             case .failedSourceMismatch:
-                // The live audit is the detail (a cached one stands in if the source is unreadable).
+                // The live audit is the detail (a cached one stands in if the source is unreadable) —
+                // and its OWN words are the reason. The audit raises more than one fault (an undeclared
+                // port name, an AV resource with no `setPaused`); a fixed sentence names the wrong one.
                 if let audit = liveAuditErrors(id) { nodeAgentState[id, default: SZNodeAgentState()].errorDetail = audit }
-                let reason = "its source reads ports the contract doesn't declare"
+                let reason = rebuildDetail(node: id).map { "the port audit flags it — \(Self.oneLineDetail($0))" }
+                    ?? "it failed the port audit"
                 recordRunFailure(node: id, fallback: reason)
-                narrateDirector("\(node.title) was built, but \(reason) — see the flagged node.")
+                narrateDirector("\(node.title) was built, but \(reason). See the flagged node.")
             case .failedSilently:
-                let reason = "the agent never compiled this node or reported a blocker"
+                // A line the host already wrote (a dead provider, a spent budget) is a truer reason
+                // than the generic one — and it is what the next run reads as this node's blocker.
+                let recorded = nodeAgentState[id].flatMap {
+                    $0.phase == .error && !$0.message.isEmpty ? $0.message : nil
+                }
+                let reason = recorded ?? "the agent never compiled this node or reported a blocker"
                 recordRunFailure(node: id, fallback: reason)
                 narrateDirector("\(node.title) didn't finish — \(reason).")
             }
@@ -1049,6 +1088,18 @@ extension SZHost {
             mailbox.markFailed(envelope.id, reason: "run ended before the steer was consumed")
         }
     }
+}
+
+/// Why a turn failed, classified once for every lane (`SZHost.turnFailure`).
+enum SZTurnFailure {
+    /// OUR budget ran out — a plain warning in the turn's own words, never "provider error".
+    case timedOut(String)
+    /// The CLI died or is no longer ready — the actionable line (the setup sheet may have opened).
+    case provider(String)
+    /// An ordinary agent failure, in the words the turn already carries.
+    case agent(String)
+    /// The caller's `preempt` claimed it (the chat lane's stale-session retry) — it acts, no words here.
+    case preempted
 }
 
 /// A run that could not do its job — the library refused, the seats did not resolve, or

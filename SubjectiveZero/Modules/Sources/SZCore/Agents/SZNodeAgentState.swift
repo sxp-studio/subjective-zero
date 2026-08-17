@@ -47,14 +47,23 @@ public struct SZNodeAgentState: Sendable, Equatable {
     /// The node's Coding Agent is mid-chat-turn (`ui_send_chat` to the node) — editor shows Coding +
     /// locks the card, exactly like a run does.
     public var isChatting: Bool
+    /// The node's OWN agent wrote this phase (`agent_report_status`), rather than the host writing it
+    /// on the agent's behalf (a provider that died, a spent turn budget, a failed hot reload).
+    public var reportedByAgent: Bool
 
     public init(phase: SZNodeAgentPhase = .idle, message: String = "",
-                errorDetail: String? = nil, isChatting: Bool = false) {
+                errorDetail: String? = nil, isChatting: Bool = false,
+                reportedByAgent: Bool = false) {
         self.phase = phase
         self.message = message
         self.errorDetail = errorDetail
         self.isChatting = isChatting
+        self.reportedByAgent = reportedByAgent
     }
+
+    /// The agent itself reported a real problem — the one report that outranks a green build at run
+    /// end. Host-written bad news is not a verdict on what was built, so it never qualifies.
+    public var reportedProblem: Bool { reportedByAgent && (phase == .error || phase == .needsInput) }
 
     /// The status line the wire/prompts carry — the historical `"<status>: <message>"` shape
     /// (`debug_agent_state` `statuses`, the Director's reconcile-prompt blocker lines).
