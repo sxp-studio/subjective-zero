@@ -143,13 +143,14 @@ private func graphWithBlank() -> (SZGraph, SZNode) {
 }
 
 /// The audit-semantics section is agent-facing truth: `agent_docs_read {topic:"node-contract"}` (and the
-/// cold-start brief that embeds it) must state what the port audit compares — names, nothing else — and the
-/// three derived rebuild reasons, so no agent theorizes about byte-level file equality again.
+/// cold-start brief that embeds it) must state BOTH faults the port audit raises (undeclared port names, a
+/// live AV resource with no `setPaused`) and the three derived rebuild reasons, so no agent theorizes about
+/// byte-level file equality again — and so a video node is never sent hunting port names.
 @Test func theContractDocStatesWhatTheAuditComparesAndTheThreeReasons() {
     let doc = SZAgentDocs.read("node-contract") ?? ""
     for needle in ["sourceMismatch", "contractChanged", "intentChanged", "rebuildDetail",
-                   "The audit compares the port names", "can never cause or clear a mismatch",
-                   "merges per port, by name"] {
+                   "the audit compares the names", "can never cause or clear a mismatch",
+                   "func setPaused(", "merges per port, by name"] {
         #expect(doc.contains(needle), "node-contract.md lost: \(needle)")
     }
 }

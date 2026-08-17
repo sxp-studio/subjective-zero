@@ -43,10 +43,12 @@ For EACH unresolved node above, make the **smallest** change that will unblock i
 - It just needs another attempt (e.g. a transient build error the agent can fix itself) → leave it as
   is; it will be retried automatically.
 - The blocker is a port-audit line (`Node.swift reads input port "x" but node-contract.json declares no
-  such input`) → the finding is exactly those port NAMES, nothing more; the audit never looks at `ui`,
-  defaults, order or file bytes. Either declare the port (`ui_edit_ports`) or tell the agent to drop the
-  read — do not send byte-level "make the files match verbatim" theories, and do not re-brief a node whose
-  `rebuildDetail` (via `agent_read_node`) is empty: a clean audit has nothing left for an agent to fix.
+  such input`) → the finding is exactly that: those port NAMES, or a live AV resource with no `setPaused`.
+  The audit never looks at `ui`, defaults, order or file bytes. Either declare the port (`ui_edit_ports`)
+  or tell the agent to drop the read (add the `setPaused`, for the other line) — do not send byte-level
+  "make the files match verbatim" theories, and do not re-brief a node that `agent_read_node` reports with
+  no `rebuildReason` at all: there is nothing flagged for an agent to fix. (A node flagged
+  `intentChanged` carries no `rebuildDetail` — the prompt IS the evidence; it still needs a rebuild.)
 
 Change ONLY what will unblock these nodes — do not restructure the rest of the graph. Nodes marked
 `(empty — …)` are the user's undecided placeholders: mention them in your one-line summary and leave them

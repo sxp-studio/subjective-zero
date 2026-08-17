@@ -325,18 +325,21 @@ you cannot overwrite the user's.
 
 ## What makes a built node "outdated" — the port audit and the build stamp
 
-A built node reads **outdated / needs rebuild** for exactly one of three reasons. Nothing is stored: each is
-derived every read from evidence, and nothing else can raise or clear it.
+A built node reads **outdated / needs rebuild** for exactly one of three reasons — none of them authored state
+you can edit. The two stamp comparisons are derived every read; the audit fault is a flag the host recomputes
+from the live source at load, after every promote, after a hot reload and after a port edit.
 
-- **`sourceMismatch`** — the port audit found a fault: `Node.swift` reads or writes a port **name** the
-  contract does not declare (`ctx.inputFloat("scale")` with no input `scale`; `ctx.setOutputFloat("level", …)`
-  with no output `level`). The audit compares the port names your code passes to the `ctx` accessors against the
-  names the contract declares, per direction — **nothing else**. `ui` ranges, `default` values, port order,
-  `title`/`summary`, JSON formatting and byte-identical files can never cause or clear a mismatch. The same
-  audit gates `agent_compile_node`: while it errors nothing is promoted and the reply quotes the offending port
-  names (`{ok:false, errors}`); a declared port the code never touches is only a warning. The host re-audits the
-  live source at load, after every promote and after every hot reload, so a clean promote clears the state —
-  there is nothing to reset and no point re-emitting an unchanged file.
+- **`sourceMismatch`** — the port audit found a fault in `Node.swift`. Exactly two things raise it, and the
+  `rebuildDetail` line says which: (a) the code reads or writes a port **name** the contract does not declare
+  (`ctx.inputFloat("scale")` with no input `scale`; `ctx.setOutputFloat("level", …)` with no output `level`) —
+  the audit compares the names your code passes to the `ctx` accessors against the names the contract declares,
+  per direction, and looks at nothing else about them; (b) the node constructs a live AV resource (`AVPlayer`,
+  `AVCaptureSession`, `AVAudioEngine`) without a `func setPaused(` to stop it, so a paused graph would keep
+  playing. Nothing else is involved either way: `ui` ranges, `default` values, port order, `title`/`summary`,
+  JSON formatting and byte-identical files can never cause or clear a mismatch. The same audit gates
+  `agent_compile_node`: while it errors nothing is promoted and the reply quotes the offending lines
+  (`{ok:false, errors}`); a declared port the code never touches is only a warning. A clean promote clears the
+  state — there is nothing to reset and no point re-emitting an unchanged file.
 - **`contractChanged`** — the contract's port surface (direction · name · type of every port) differs from the
   one the last promote compiled against (the build stamp). Benign: the node keeps rendering and the new ports
   are inert until you implement them. Cleared by a promote (the stamp is rewritten from what the compile saw)
@@ -345,9 +348,10 @@ derived every read from evidence, and nothing else can raise or clear it.
   a promote against the current prompt.
 
 The audit fault outranks the two stamp comparisons. `agent_read_node` / `agent_read_graph` report the reason as
-`rebuildReason` and, when there is one, the audit's port lines (or the surface diff) as `rebuildDetail` — read
-those instead of theorizing about the files. The fix for a mismatch is a **name reconciliation**: declare the
-port the code needs, or drop that read/write — whichever keeps the node's behavior — then re-stage and compile.
+`rebuildReason` and, when there is one, the audit's lines (or the surface diff) as `rebuildDetail` — read those
+instead of theorizing about the files. A mismatch is fixed by whatever that detail names: reconcile the port
+name (declare the port the code needs, or drop that read/write — whichever keeps the node's behavior), or add
+the missing `setPaused`. Then re-stage and compile.
 
 
 

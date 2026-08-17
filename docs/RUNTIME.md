@@ -147,8 +147,9 @@ small value types passed by the scheduler.
 - The graph is a **strict DAG**. The scheduler topologically sorts nodes and executes them in
   dependency order each frame.
 - **Flow vs data** connections are distinguished (see [GRAPH_AND_NODES.md](GRAPH_AND_NODES.md)):
-  flow expresses intent/scheduling order; data carries typed runtime values. They are not always
-  the same edge - preserve that distinction.
+  flow is the user's drawing intent and orders nothing here - the sort runs on **data** edges
+  only, which are what carries typed runtime values. They are not always the same edge - preserve
+  that distinction.
 - **Feedback** (trails, persistence, anything needing last frame's output) is handled by a single
   explicit **feedback node**, not by cycles in the graph. The feedback node holds a
   runtime-owned texture that survives the frame boundary and hot reload. This keeps the scheduler

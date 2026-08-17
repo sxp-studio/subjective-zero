@@ -1,22 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A built node whose contract has moved since that build: classifying WHY, and the one-click way out.
 //
-// `SZNode.rebuildReason` is DERIVED from evidence, never stored — the build stamp (what the last promote
-// compiled against) gives `.contractChanged` / `.intentChanged`; the host's audit of the live source gives
-// the one fault state:
-//
-//   .contractChanged — the contract declares ports the code hasn't implemented yet. Benign; the node draws,
-//                      the new ports are inert. The ordinary gap between declaring an interface and building it.
-//   .intentChanged   — the prompt moved off the brief the build was written to. Benign, but the fleet must
-//                      regenerate against the new intent.
-//   .sourceMismatch  — the code names ports the contract no longer declares, so every one of those reads
-//                      resolves to nil and the node silently runs on its hardcoded defaults. A real fault:
-//                      `agent_compile_node` refuses to promote source in this state.
+// `SZNode.rebuildReason` is DERIVED — the build stamp (what the last promote compiled against) gives the two
+// benign states; `SZPortBindingAudit` over the live source gives the one fault state:
+// - `.contractChanged` — the contract declares ports the code hasn't implemented yet; the node draws, they are inert.
+// - `.intentChanged` — the prompt moved off the brief the build was written to; the fleet must regenerate.
+// - `.sourceMismatch` — the code names an undeclared port (those reads resolve to nil, so the node silently runs
+//   on hardcoded defaults) or owns a live AV resource with no `setPaused`. `agent_compile_node` refuses to promote.
 //
 // Classified by CONDITION, not by cause: a port the Director removed and one a human deleted by hand leave the
-// node equally broken. Either way the node heals the same two ways: any run picks it up (`runWorkSet` is built
-// from `needsImplementation`; a promote re-stamps it), or `stageRebuildFix` composes a message to the node's
-// own Coding Agent (never auto-sent — host-drafted messages COMPOSE).
+// node equally broken. Either way it heals the same two ways: a run picks it up (`runWorkSet` is built from
+// `needsImplementation`; a promote re-stamps it), or `stageRebuildFix` composes a message to the node's own
+// Coding Agent (never auto-sent — host-drafted messages COMPOSE).
 import Foundation
 import SZCore
 import SZUI
@@ -24,8 +19,8 @@ import SZUI
 @MainActor
 extension SZHost {
     /// Re-audit a node's live source against its contract and set the ephemeral `sourceMismatch` from the
-    /// verdict — set when the code names undeclared ports (with the human-readable detail on the pill),
-    /// cleared when the audit is clean. Called after a port edit, a promote, a hot reload, and for every
+    /// verdict — set when the audit errors (with the human-readable detail on the pill),
+    /// cleared when it is clean. Called after a port edit, a promote, a hot reload, and for every
     /// flagged node when a project opens. Never persisted: `SZProjectIO.load` re-derives it.
     func classifyRebuild(node id: SZNodeID) {
         guard let node = store.project?.graph.node(id: id), let errors = auditErrors(node) else { return }

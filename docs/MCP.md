@@ -86,8 +86,9 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 
 **`agent_` (orchestration + host ops)**
 - `agent_read_graph`, `agent_read_node`         // a built node that needs a rebuild carries `rebuildReason`
-                                            // (contractChanged | intentChanged | sourceMismatch) + `rebuildDetail`
-                                            // (the port audit's offending names / the ports off the build stamp)
+                                            // (contractChanged | intentChanged | sourceMismatch), plus `rebuildDetail`
+                                            // when there is evidence to name (the audit's offending lines / the ports
+                                            // off the build stamp; an intentChanged node has none - its prompt is it)
 - `agent_view_frame` - **real framebuffer readback** of a node's texture output, returned as an inline
   image (base64 PNG) the agent's model actually sees, so it can reason on its VFX result. Pixel-perfect
   but downscaled to fit the token budget (default 768px long edge; `maxSize` overrides). `node` (+

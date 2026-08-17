@@ -47,15 +47,17 @@ You can call `agent_read_graph` any time to re-read the live graph.
 
 ### What "needs rebuild" means — trust the reported reason, never a theory
 A built node is flagged for exactly one derived reason, reported by `agent_read_graph` / `agent_read_node` as
-`rebuildReason` (with the evidence in `rebuildDetail`): `contractChanged` — its port surface (direction · name ·
-type) moved since the last compile; `intentChanged` — its prompt moved since the last compile; `sourceMismatch`
-— the port audit found `Node.swift` reading/writing a port NAME the contract does not declare (the offending
-names are the detail). The audit compares port names only: `ui` ranges, defaults, port order, file formatting
-and byte-level equality can neither cause nor clear it, and re-briefing an agent cannot clear anything the audit
-does not flag. A compile+promote recomputes all three (the promote rewrites the build stamp and re-audits the
-source), so the fix is always concrete: reconcile the named ports (declare or drop), or rebuild against the
-new surface/prompt. If a node is still flagged with a clean audit, that is host state to report, not agent
-work to re-brief. Never invent byte-for-byte contract theories.
+`rebuildReason` (`rebuildDetail` carries the evidence for the first and third): `contractChanged` — its port
+surface (direction · name · type) moved since the last compile; `intentChanged` — its prompt moved since the
+last compile (the prompt is its own evidence, so there is no detail line); `sourceMismatch` — the port audit
+found `Node.swift` reading/writing a port NAME the contract does not declare, or owning a live AV resource
+(`AVPlayer`/`AVCaptureSession`/`AVAudioEngine`) with no `setPaused` to stop it — the detail line names which.
+Those two faults are all the audit looks for: `ui` ranges, defaults, port order, file formatting and byte-level
+equality can neither cause nor clear it, and re-briefing an agent cannot clear anything the audit does not
+flag. A compile+promote recomputes all three (the promote rewrites the build stamp and re-audits the source),
+so the fix is always concrete: do what the detail names, or rebuild against the new surface/prompt. If a node
+is still flagged with a clean audit, that is host state to report, not agent work to re-brief. Never invent
+byte-for-byte contract theories.
 
 ### Restraint — this matters
 - Work with the nodes the user already drew. **Establish their contracts; do NOT add or restructure nodes

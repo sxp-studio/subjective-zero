@@ -173,8 +173,8 @@ visible intent and narrated, never silently dropped.
    records a **build stamp** (the port surface + prompt the compile consumed); a built node reads
    *needs rebuild* only by derivation from it - `contractChanged` (surface off the stamp),
    `intentChanged` (prompt off the stamp) - or from the port audit (`sourceMismatch`: `Node.swift`
-   names a port the contract doesn't declare; names only, never `ui`/defaults/formatting). Nothing
-   is latched: the next promote re-stamps and re-audits.
+   names a port the contract doesn't declare, or owns a live AV resource with no `setPaused`; never
+   `ui`/defaults/formatting). Nothing is latched: the next promote re-stamps and re-audits.
 4. User iterates: edit defaults, draw data connections, chat with the node's agent, or split/merge.
 
 ## Split / merge as graph transactions

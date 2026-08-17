@@ -26,9 +26,13 @@ struct SZHostRebuildDetailTests {
         host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: nodes)))
         return host
     }
-    private func readNode(_ host: SZHost, _ id: SZNodeID) throws -> [String: Any] {
+    private func readNodeText(_ host: SZHost, _ id: SZNodeID) throws -> String {
         guard case .text(let text) = try SZHostBridge(host: host)
-            .callTool(name: "agent_read_node", arguments: ["node": id.uuidString]) else { return [:] }
+            .callTool(name: "agent_read_node", arguments: ["node": id.uuidString]) else { return "" }
+        return text
+    }
+    private func readNode(_ host: SZHost, _ id: SZNodeID) throws -> [String: Any] {
+        let text = try readNodeText(host, id)
         return (try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]) ?? [:]
     }
 
@@ -37,6 +41,20 @@ struct SZHostRebuildDetailTests {
         let json = try readNode(host([node]), node.id)
         #expect(json["rebuildReason"] == nil && json["rebuildDetail"] == nil)
         #expect(json["hasCard"] as? Bool == false)
+    }
+
+    /// The build stamp is host bookkeeping a promote rewrites — an agent that saw it would try to reconcile it,
+    /// and pay for it on every read. The payload stays the pretty, key-sorted shape every other tool answers in.
+    @Test func theBuildStampNeverReachesTheAgentAndTheShapeStaysPretty() throws {
+        let node = Self.built(contract: Self.contract(extraInput: SZPort(name: "amount", type: .float)))
+        let host = host([node])
+        let text = try readNodeText(host, node.id)
+        #expect(!text.contains("buildStamp"))
+        #expect(text.contains("\n  \""))       // pretty-printed, not compact
+        guard case .text(let graph) = try SZHostBridge(host: host).callTool(name: "agent_read_graph", arguments: [:])
+        else { Issue.record("no graph"); return }
+        #expect(!graph.contains("buildStamp"))
+        #expect(graph.contains("\n  \""))
     }
 
     @Test func aSurfaceOffTheStampReportsContractChangedWithThePortsAdded() throws {

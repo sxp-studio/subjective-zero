@@ -11,8 +11,8 @@ import SZRuntime
 extension SZHostBridge {
     nonisolated static var agentToolDefinitions: [[String: Any]] {
         [
-            tool("agent_read_graph", "Return the full project graph (nodes with contracts, connections, render endpoint) as JSON. A built node that needs a rebuild carries `rebuildReason` (contractChanged | intentChanged | sourceMismatch) and `rebuildDetail` (the port audit's offending port names, or the ports off the build stamp)."),
-            tool("agent_read_node", "Return one node (title, kind, prompt, contract, hasCard) as JSON, plus `rebuildReason` / `rebuildDetail` when it needs a rebuild — the audit's port names, so you reconcile those instead of guessing.",
+            tool("agent_read_graph", "Return the full project graph (nodes with contracts, connections, render endpoint) as JSON. A built node that needs a rebuild carries `rebuildReason` (contractChanged | intentChanged | sourceMismatch) and, for the first and third, `rebuildDetail` (the audit's offending lines, or the ports off the build stamp)."),
+            tool("agent_read_node", "Return one node (title, kind, prompt, contract, hasCard) as JSON, plus `rebuildReason` when it needs a rebuild and `rebuildDetail` when there is evidence to name (an intentChanged node has none — its prompt is the evidence).",
                  properties: ["node": ["type": "string", "description": "node id (UUID)"]]),
             tool("agent_library_index", "The built-in node library, grouped by category: one line per node saying what it does. Cheap — read it whole and decide for yourself whether any node does YOUR node's job. Nothing is ranked or filtered; a similar name is not a match. Fetch at most once per turn (it does not change), and not at all if your brief already includes it."),
             tool("agent_library_card", "Read one library node's card (CARD.md) — reuse guidance, gotchas, and setup notes — to confirm or reject it as a reference without fetching full source. When the node is already the likely reference, request its card and source together in one round.",
@@ -125,29 +125,43 @@ extension SZHostBridge {
             guard let id = (node["id"] as? String).flatMap(SZNodeID.init(uuidString:)) else { return node }
             return annotatingRebuild(node, id: id)
         }
-        return SZJSONRPC.encode(json)
+        return reencodeJSON(json, fallback: encoded)
     }
 
     private func agentReadNode(_ arguments: [String: Any]) throws -> String {
         guard let id = arguments.uuid("node") else { throw SZMCPError.message("agent_read_node needs `node` (UUID)") }
         guard let node = host.store.project?.graph.node(id: id) else { throw SZMCPError.message("no node \(id)") }
         // Whether the node folder holds a Card.swift rides along — a Director/agent can't see files.
-        guard var json = try? JSONSerialization.jsonObject(with: Data(encodeJSON(node).utf8)) as? [String: Any] else {
-            return encodeJSON(node)
+        let encoded = encodeJSON(node)
+        guard var json = try? JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any] else {
+            return encoded
         }
         json["hasCard"] = host.nodeHasCardSource(id)
-        return SZJSONRPC.encode(annotatingRebuild(json, id: id))
+        return reencodeJSON(annotatingRebuild(json, id: id), fallback: encoded)
     }
 
     /// `rebuildReason` is derived, not encoded with the node, and its evidence is host state — both ride on the
-    /// agent surface as `rebuildReason` / `rebuildDetail` (the audit's port lines, or the ports off the build
-    /// stamp), so an agent sees WHY a node is flagged instead of guessing at the files. Absent when clean.
+    /// agent surface as `rebuildReason` / `rebuildDetail` (the audit's lines, or the ports off the build stamp),
+    /// so an agent sees WHY a node is flagged instead of guessing at the files. Absent when clean.
+    ///
+    /// `buildStamp` goes the other way: it is host bookkeeping a promote rewrites, and an agent that sees it
+    /// reads it as something to reconcile. The derived reason says everything about it an agent may act on.
     private func annotatingRebuild(_ json: [String: Any], id: SZNodeID) -> [String: Any] {
-        guard let reason = host.store.project?.graph.node(id: id)?.rebuildReason else { return json }
         var json = json
+        json.removeValue(forKey: "buildStamp")
+        guard let reason = host.store.project?.graph.node(id: id)?.rebuildReason else { return json }
         json["rebuildReason"] = reason.rawValue
         if let detail = host.rebuildDetail(node: id) { json["rebuildDetail"] = detail }
         return json
+    }
+
+    /// Re-encode an annotated payload in the same shape `encodeJSON` produces (pretty, key-sorted) — an agent
+    /// reads these, and one tool silently answering in a different shape than its neighbours is a trap.
+    private func reencodeJSON(_ json: [String: Any], fallback: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: json,
+                                                     options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        else { return fallback }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Scan the repo's `NodeLibrary/` for node folders (a `node-contract.json` inside) and assemble the
