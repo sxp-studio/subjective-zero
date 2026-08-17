@@ -17,8 +17,8 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     /// For a dispatched work child: the node id it serves.
     public var work: String?
     public var startedAt: Date
-    /// nil while the traversal is under way — the record is LIVE. Live records are never
-    /// persisted (a crash mid-traversal loses the record; the transcript survives).
+    /// nil while the traversal is under way — the record is LIVE. Live records persist too;
+    /// one restored still live was interrupted (`sealInterrupted`).
     public var endedAt: Date?
     /// The executed trace, in traversal order — loops unrolled, one entry per node visit.
     public var trace: [Entry]
@@ -219,6 +219,18 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             self.conclusion = conclusion
         }
         endedAt = now
+    }
+
+    /// The restore policy for a record that was LIVE on disk: the app closed while it ran.
+    /// Sealed `.cancelled` at the trace's latest stamp (or the start), the flipped entry
+    /// carrying the interrupted detail — it reads as an interrupted run, in place.
+    public static let interruptedDetail = "the app closed while this run was in flight"
+    public mutating func sealInterrupted() {
+        guard isLive else { return }
+        let latest = trace.compactMap { $0.endedAt ?? $0.startedAt }.max() ?? startedAt
+        let flips = trace.last?.phase == .running
+        seal(conclusion: .cancelled, at: max(latest, startedAt))
+        if flips, let last = trace.indices.last { trace[last].detail = Self.interruptedDetail }
     }
 
     // MARK: - Reading the trace

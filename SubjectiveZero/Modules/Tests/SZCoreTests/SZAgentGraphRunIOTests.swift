@@ -77,6 +77,31 @@ private func sampleRecords() -> [SZAgentGraphRun] {
     #expect(stopped.trace[0].phase == .cancelled)
 }
 
+@Test func runsRoundTripKeepsALiveRecordLive() throws {
+    // A live record is written as-is (`endedAt == nil`, no conclusion, a running entry) —
+    // the restore policy, not the sidecar, decides what a live-on-disk record becomes.
+    let projectURL = temporaryProjectURL()
+    defer { try? FileManager.default.removeItem(at: projectURL) }
+    let leader = UUID()
+    var live = SZAgentGraphRun(id: leader, agent: "director", thread: leader,
+                               startedAt: Date(timeIntervalSinceReferenceDate: 500))
+    live.note(.init(ordinal: 1, node: "door", phase: .done, outcome: "build"),
+              at: Date(timeIntervalSinceReferenceDate: 501))
+    live.note(.init(ordinal: 2, node: "send", phase: .running,
+                    tally: .init(settled: 1, total: 4, failed: 0)),
+              at: Date(timeIntervalSinceReferenceDate: 502))
+    let records = SZAgentGraphRun.ordered(sampleRecords() + [live])
+
+    try SZAgentGraphRunIO.save(records, projectURL: projectURL)
+    let loaded = try #require(SZAgentGraphRunIO.load(projectURL: projectURL))
+    #expect(loaded == records)
+    let restored = try #require(loaded.first { $0.id == leader })
+    #expect(restored.isLive)
+    #expect(restored.conclusion == nil)
+    #expect(restored.trace.last?.phase == .running)
+    #expect(restored.trace.last?.endedAt == nil)
+}
+
 @Test func runsMissingFileLoadsAsNil() {
     #expect(SZAgentGraphRunIO.load(projectURL: temporaryProjectURL()) == nil)
 }

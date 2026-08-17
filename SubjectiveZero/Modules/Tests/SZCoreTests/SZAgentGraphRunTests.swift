@@ -175,6 +175,34 @@ private func entry(_ ordinal: Int, node: String = "step",
     #expect(record.conclusion == .ended)
 }
 
+// MARK: - The restore policy for a record found live on disk
+
+@Test func sealInterruptedStopsAtTheLatestTraceStampWithTheDetailOnTheFlippedEntry() {
+    var record = run(0, live: true)
+    record.note(entry(1, phase: .done), at: Date(timeIntervalSinceReferenceDate: 100))
+    record.note(entry(2, node: "turn", phase: .running), at: Date(timeIntervalSinceReferenceDate: 110))
+    record.sealInterrupted()
+    #expect(record.conclusion == .cancelled)
+    #expect(record.endedAt == Date(timeIntervalSinceReferenceDate: 110))
+    #expect(record.trace[1].phase == .cancelled)
+    #expect(record.trace[1].endedAt == Date(timeIntervalSinceReferenceDate: 110))
+    #expect(record.trace[1].detail == SZAgentGraphRun.interruptedDetail)
+    #expect(record.trace[0].detail == nil)
+}
+
+@Test func sealInterruptedWithoutATraceStopsAtTheStartAndLeavesEndedRecordsAlone() {
+    var bare = run(50, live: true)
+    bare.sealInterrupted()
+    #expect(bare.conclusion == .cancelled)
+    #expect(bare.endedAt == bare.startedAt)
+
+    var ended = run(0)
+    ended.seal(conclusion: .ended)
+    let before = ended
+    ended.sealInterrupted()
+    #expect(ended == before)
+}
+
 // MARK: - The tally on the visit
 
 @Test func aDispatchVisitsTallyRidesItsEntryAndSurvivesReEmits() {

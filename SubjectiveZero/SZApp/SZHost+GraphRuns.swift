@@ -2,8 +2,9 @@
 // The agent-graph RUNS records — where the delivery's observation hooks become
 // `SZAgentGraphRun` values the Agent Graph panel draws and `runs.json` archives. The
 // engine's note type (SZAI) maps onto the record's own trace entry (SZCore) here, and
-// nowhere else. Live records exist ONLY in memory; the sidecar is written at seal; the
-// history caps per budget and is replaced wholesale on project switch.
+// nowhere else. Live records persist too — written at begin, coalesced per note, and
+// immediately at seal — so a crash mid-run leaves the run on disk to be restored as
+// interrupted; the history caps per budget and is replaced wholesale on project switch.
 import Foundation
 import SZAI
 import SZCore
@@ -19,6 +20,7 @@ extension SZHost {
         let record = SZAgentGraphRun(id: sighting.id, agent: sighting.agent,
                                      thread: thread, work: sighting.work)
         agentGraphRuns = SZAgentGraphRun.ordered(agentGraphRuns + [record])
+        persistAgentGraphRuns()
     }
 
     /// One traversal note → the record's own trace entry (the SZAI→SZCore mapping). The
@@ -26,6 +28,7 @@ extension SZHost {
     func noteAgentGraphRun(_ id: UUID, _ note: SZTraversalNote) {
         guard let i = agentGraphRuns.firstIndex(where: { $0.id == id }) else { return }
         agentGraphRuns[i].note(SZAgentGraphRun.Entry(note))
+        persistAgentGraphRunsSoon()
     }
 
     /// The traversal concluded — seal, re-order (it just stopped being live), cap, persist,
@@ -79,10 +82,22 @@ extension SZHost {
 
     // MARK: - The sidecar
 
-    /// Sealed records only — a live record is never on disk.
+    /// Write the whole list, live records included; cancels a pending coalesced write.
     func persistAgentGraphRuns() {
+        agentGraphRunsPersistDebounce?.cancel()
+        agentGraphRunsPersistDebounce = nil
         guard let projectURL = loadedProjectURL else { return }
-        try? SZAgentGraphRunIO.save(agentGraphRuns.filter { !$0.isLive }, projectURL: projectURL)
+        try? SZAgentGraphRunIO.save(agentGraphRuns, projectURL: projectURL)
+    }
+
+    /// The coalesced write — `note` fires per node visit; one pending write, ≤1 s behind.
+    private func persistAgentGraphRunsSoon() {
+        guard agentGraphRunsPersistDebounce == nil else { return }
+        agentGraphRunsPersistDebounce = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.persistAgentGraphRuns()
+        }
     }
 
     /// Project open: replace the list wholesale with the new project's history.
@@ -91,13 +106,11 @@ extension SZHost {
             agentGraphRuns = []
             return
         }
-        // A record restored without an ending was truncated (nothing ever WRITES one that
-        // way): resurrect it sealed, not live — a phantom live record would pulse forever.
+        // A record restored live was in flight when the app closed: resurrect it sealed as
+        // interrupted, not live — a phantom live record would pulse forever.
         let restored = (SZAgentGraphRunIO.load(projectURL: projectURL) ?? []).map { record in
-            guard record.isLive else { return record }
             var sealed = record
-            sealed.seal(conclusion: .defect(detail: "the record was truncated"),
-                        at: record.startedAt)
+            sealed.sealInterrupted()
             return sealed
         }
         agentGraphRuns = SZAgentGraphRun.ordered(restored)

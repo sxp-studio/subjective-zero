@@ -98,6 +98,7 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
         host?.flushAllTranscripts()
         host?.flushMessageQueue()   // a queued-not-delivered message redelivers next launch
         host?.persistAgentSessions()
+        host?.persistAgentGraphRuns()   // a live record lands on disk; it restores as interrupted
         // Pop-out frame moves persist behind a debounce — a quit inside that window must not
         // restore a stale frame next launch (the in-memory record is already authoritative).
         host?.popoutFramePersistDebounce?.cancel()

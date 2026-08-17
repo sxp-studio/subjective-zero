@@ -163,9 +163,11 @@ final class SZHost {
     /// Session-scoped on purpose (an old transcript's runs aren't news).
     var unreadRunIDs: Set<UUID> = []
     /// The agent-graph RUNS records — live first, then newest (`SZAgentGraphRun.ordered`),
-    /// which is exactly the order the Agent Graph panel draws. Live records exist only here;
-    /// the sealed ones are mirrored to `<project>.subz/runs.json` (SZHost+GraphRuns.swift).
+    /// which is exactly the order the Agent Graph panel draws. Mirrored — live records too —
+    /// to `<project>.subz/runs.json` (SZHost+GraphRuns.swift).
     var agentGraphRuns: [SZAgentGraphRun] = []
+    /// The coalesced runs.json write behind per-visit notes (SZHost+GraphRuns).
+    @ObservationIgnored var agentGraphRunsPersistDebounce: Task<Void, Never>?
     /// The Plan view's pack library, cached (view bodies read it hot). The packs root is the
     /// user-editable materialized dir now, so the cache is invalidated wherever the tree can
     /// move — pack materialization and each run start — rather than held for the session.
@@ -738,8 +740,11 @@ final class SZHost {
         assert(!ledger.anyWaiting && !mailbox.anyAwaiting,
                "project teardown with a parked wait — a continuation would leak")
         forcedFailNodes = [:]
-        // IN-MEMORY reset only, like the mailbox: the OLD project's runs.json was written at
-        // each seal; the new project's history is restored right after the swap.
+        // IN-MEMORY reset only, like the mailbox: the OLD project's runs.json is written at
+        // each begin/note/seal (a pending coalesced write is dropped, never redirected at the
+        // new project); the new project's history is restored right after the swap.
+        agentGraphRunsPersistDebounce?.cancel()
+        agentGraphRunsPersistDebounce = nil
         agentGraphRuns = []
         graphOpStatus = [:]
         hiddenPieces = []

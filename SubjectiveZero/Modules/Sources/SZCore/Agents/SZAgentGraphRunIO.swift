@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Load/save the agent-graph run history sidecar: `<project>.subz/runs.json` — the RUNS list's
-// archive, `SZChatTranscriptIO`'s shape applied to run records. Ended records only: the host
-// persists at seal (and on the sanctioned post-seal tally amend), so a live record is never
-// on disk — a crash mid-traversal loses that record; the transcript survives.
+// archive, `SZChatTranscriptIO`'s shape applied to run records. Live records included: the
+// host persists at begin, coalesced per note, and at seal — a crash mid-traversal leaves the
+// record on disk (`endedAt == nil`), and the host restores it sealed as interrupted.
 //
 // Forgiving the same way: a missing or corrupt file quietly becomes "no history", never a
 // project-open error. And deliberately INDEPENDENT of the transcripts: clearing a chat does
