@@ -7,7 +7,7 @@
 Package.resolved
 
 # Xcode
-DerivedData/
+DerivedData
 
 # Release pipeline output
 build/
