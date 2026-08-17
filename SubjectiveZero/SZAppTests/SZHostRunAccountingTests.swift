@@ -2,7 +2,8 @@
 // Run-end accounting from promote evidence: `surfaceUnresolvedNodes` counts a node implemented on the
 // promote it saw (+ the node's derived state), keeps an agent's own report, and only writes the generic
 // failure through `recordRunFailure` — which never clobbers a specific diagnostic. A promote itself resets
-// the transient agent state (`clearTransientAgentStateAfterPromote`) so no red pill outlives a green build.
+// the transient agent state (`clearTransientAgentStateAfterPromote`) so no red pill outlives a green build,
+// and `cancelRun` counts + narrates the Stop once, retiring the pills its own run left mid-flight.
 import Foundation
 import Testing
 import SZCore
@@ -83,6 +84,38 @@ struct SZHostRunAccountingTests {
         #expect(done == 1 && failed == 0)
     }
 
+    // MARK: cancelRun
+
+    /// The count + narration happen synchronously in the cancel, while the work set is still this run's —
+    /// the cancelled task's own catch is a zombie and stays silent (so a Stop-then-Build can't stamp a
+    /// stray "cancelled" line under the new run's start line).
+    @Test func cancelNarratesTheUnfinishedCountOnceAndRetiresWorkingPills() {
+        let a = Self.built(), b = Self.draft()
+        let host = host([a, b])
+        host.nodeAgentState[a.id] = SZNodeAgentState(phase: .coding, message: "wiring the mask polygon")
+        host.nodeAgentState[b.id] = SZNodeAgentState(phase: .queued)
+        host.cancelRun()
+        #expect(directorLines(host) == ["Run cancelled — 1 node unfinished."])   // the built one is done
+        #expect(host.nodeAgentState[a.id]?.phase == .idle)
+        #expect(host.nodeAgentState[b.id]?.phase == .idle)
+        #expect(host.nodeStatusLines.isEmpty)   // nothing left to feed the next run as a blocker
+    }
+
+    @Test func cancelKeepsAnAgentsOwnReport() {
+        let b = Self.draft()
+        let host = host([b])
+        host.recordNodeStatus(node: b.id, phase: .needsInput, message: "which palette?")
+        host.cancelRun()
+        #expect(host.nodeAgentState[b.id]?.phase == .needsInput)
+        #expect(host.nodeAgentState[b.id]?.message == "which palette?")
+    }
+
+    @Test func cancelWithNothingLeftUnfinishedSaysSo() {
+        let host = host([Self.built()])
+        host.cancelRun()
+        #expect(directorLines(host) == ["Run cancelled."])
+    }
+
     // MARK: recordRunFailure
 
     @Test func recordRunFailurePreservesASpecificDiagnostic() {
@@ -97,16 +130,26 @@ struct SZHostRunAccountingTests {
         #expect(host.nodeStatusLines[b.id] == "error: generic")
     }
 
-    @Test func recordRunFailureFillsOnlyWhatIsEmpty() {
+    /// A progress note left by an agent that then died is not the blocker — the run's reason replaces it.
+    @Test func recordRunFailurePrefersTheRunReasonOverAStaleProgressNote() {
         let b = Self.draft()
         let host = host([b])
-        host.nodeAgentState[b.id] = SZNodeAgentState(phase: .ok, message: "halfway there", isChatting: true)
+        host.nodeAgentState[b.id] = SZNodeAgentState(phase: .coding, message: "wiring the mask polygon", isChatting: true)
         host.recordRunFailure(node: b.id, fallback: "generic")
         let state = host.nodeAgentState[b.id]
         #expect(state?.phase == .error)
-        #expect(state?.message == "halfway there")
+        #expect(state?.message == "generic")
         #expect(state?.errorDetail == "generic")
         #expect(state?.isChatting == true)
+    }
+
+    /// The verdict table routes a reported phase elsewhere, but if one ever lands here its words stand.
+    @Test func recordRunFailureKeepsAReportedMessage() {
+        let b = Self.draft()
+        let host = host([b])
+        host.recordNodeStatus(node: b.id, phase: .needsInput, message: "which palette?")
+        host.recordRunFailure(node: b.id, fallback: "generic")
+        #expect(host.nodeAgentState[b.id]?.message == "which palette?")
     }
 
     @Test func recordRunFailureIgnoresANodeOutsideTheGraph() {

@@ -123,10 +123,11 @@ final class SZHost {
     /// a different thing and preserves the pre-existing clear-on-promote behaviour for off-run paths (a
     /// node-scoped chat turn that compiles, a library instantiate).
     internal(set) var dispatchPrompts: [SZNodeID: String?] = [:]
-    /// The nodes `promoteStagedNode` landed during the CURRENT run — the run's success evidence
-    /// (`surfaceUnresolvedNodes`). Reset at run start and in the run task's claim-guarded settle (a
-    /// cancelled run's zombie must not clear a newer run's set); a promote outside a run is dropped at the
-    /// next start, so it can never vouch for work it did not do.
+    /// The nodes `promoteStagedNode` landed for their LATEST dispatch of the current run — the run's success
+    /// evidence (`surfaceUnresolvedNodes`). Cleared at run start and in the run task's claim-guarded settle
+    /// (a cancelled run's zombie must not clear a newer run's set), and per node at each coding dispatch: a
+    /// redispatch means the previous build didn't settle it, so its promote stops vouching. A promote outside
+    /// a run is dropped at the next start, so it can never vouch for work it did not do.
     internal(set) var promotedThisRun: Set<SZNodeID> = []
     /// The id of the assistant message currently STREAMING per scope (set/cleared by `deliver`).
     /// Transcript flushes exclude it, so a sidecar only ever contains completed turns — a crash
@@ -1394,14 +1395,18 @@ final class SZHost {
     }
 
     /// The run-end writer for a node that failed WITHOUT explaining itself: red pill, but a specific
-    /// diagnostic already on the node (a port audit, a provider death) survives — `fallback` fills only
-    /// what is empty. Never `recordNodeStatus`, which would overwrite that detail with the generic line
-    /// and feed it onward as the node's blocker.
+    /// diagnostic already on the node (a port audit, a provider death) survives in `errorDetail` —
+    /// `fallback` fills only what is empty there. The one-line `message`, by contrast, becomes the run's
+    /// reason: what sits there is a stale progress note from an agent that then died mid-work ("wiring the
+    /// mask polygon"), which reads as the blocker but isn't one. A phase the agent reported itself never
+    /// reaches this writer, and keeps its words if it somehow does. Never `recordNodeStatus`, which would
+    /// overwrite the detail with the generic line and feed it onward as the node's blocker.
     func recordRunFailure(node: SZNodeID, fallback: String) {
         guard isInGraph(node) else { return }
         var state = nodeAgentState[node] ?? SZNodeAgentState()
+        let reported = state.phase == .error || state.phase == .needsInput
         state.phase = .error
-        if state.message.isEmpty { state.message = fallback }
+        if !reported || state.message.isEmpty { state.message = fallback }
         state.errorDetail = state.errorDetail ?? fallback
         nodeAgentState[node] = state
         print("[SZHost] node \(node.uuidString) → error (run end) \(state.message)")

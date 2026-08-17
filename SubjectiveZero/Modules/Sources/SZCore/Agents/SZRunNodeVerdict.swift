@@ -5,7 +5,8 @@
 //   A stale flag or a phase an agent forgot to update can no longer turn a green build into "0 implemented".
 // - "Built, then moved": a promote followed by a prompt/contract edit is an implemented node that needs another
 //   pass — narrated as such, never a failure.
-// - An agent that reported a real problem (`.error` / `.needsInput`) always wins: its own words stand.
+// - An agent that reported a real problem (`.error` / `.needsInput`) always wins — even over a clean build:
+//   a promote clears a stale report, so one still standing came AFTER the compile. Its own words stand.
 // - Only a node with NO promote and NO explanation gets the generic "never compiled" line.
 import Foundation
 
@@ -37,12 +38,15 @@ public enum SZRunNodeVerdict: Equatable, Sendable {
     public static func classify(promoted: Bool, stillDirty: Bool, derivedReason: SZRebuildReason?,
                                 phase: SZNodeAgentPhase) -> SZRunNodeVerdict {
         let reported = phase == .error || phase == .needsInput
+        // The promoted source names ports the contract doesn't declare: a real defect in what landed.
+        if promoted, stillDirty, derivedReason == .sourceMismatch { return .failedSourceMismatch }
+        // A promote demotes a stale `.error`/`.needsInput`, so a report STILL standing is newer than the
+        // build it followed ("it compiles, but it renders black"): the agent's own word beats a clean stamp.
+        if reported { return .failedAsReported }
         // Clean now = nothing left to do, whether this run's promote or an edit that healed it got it there.
         if !stillDirty { return .implemented }
-        if promoted, !reported, derivedReason == .intentChanged { return .implementedButRebriefed }
-        if promoted, !reported, derivedReason == .contractChanged { return .implementedButContractMoved }
-        if promoted, derivedReason == .sourceMismatch { return .failedSourceMismatch }
-        if reported { return .failedAsReported }
+        if promoted, derivedReason == .intentChanged { return .implementedButRebriefed }
+        if promoted, derivedReason == .contractChanged { return .implementedButContractMoved }
         return .failedSilently
     }
 }

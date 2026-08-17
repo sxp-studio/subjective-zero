@@ -162,6 +162,10 @@ extension SZHost {
         // Recorded here because the brief is composed from the live graph after the Director decomposes.
         // Each turn re-records, so the reconcile rounds are held to their own latest brief.
         dispatchPrompts[node] = store.project?.graph.node(id: node)?.prompt
+        // The promote evidence is per-DISPATCH, not per-run: a reconcile round redispatching this node
+        // says the last build did not settle it, so an earlier promote no longer vouches for THIS turn.
+        // Without this a second agent that dies silently still counts as implemented.
+        promotedThisRun.remove(node)
         openChatTab(scope)
         // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
         // A cancelled run's zombie dispatch presents its released token; deliver detects that and
@@ -473,13 +477,12 @@ extension SZHost {
                     if runClaim == claim { attachRunRollup(to: narrationID) }
                 }
             } catch is CancellationError {
-                // A user Stop is not a failure: no red pills, no per-node "didn't finish" lines — the
-                // unfinished nodes simply keep their Draft / Outdated pills. Count what is left.
-                status = "run cancelled"
-                if !ownsGraphOp {
-                    let unfinished = unfinishedRunNodeCount()
-                    narrateDirector("Run cancelled — \(unfinished) node\(unfinished == 1 ? "" : "s") unfinished.")
-                }
+                // A user Stop is not a failure: no red pills, no per-node "didn't finish" lines. This branch
+                // runs SECONDS after `cancelRun` (the CLIs have to die first) and is therefore a zombie —
+                // `runWorkSet` and `status` may already belong to a NEWER run. `cancelRun` narrates and
+                // counts synchronously, while the set is still ours; here we stay silent unless the claim
+                // is somehow still held (a cancellation that did not come through `cancelRun`).
+                if runClaim == claim { status = "run cancelled" }
                 print("[SZHost] agent run cancelled")
             } catch {
                 status = "agent run failed: \(error)"
@@ -925,7 +928,14 @@ extension SZHost {
             runClaim = nil
         }
         status = "run cancelled"
-        narrateDirector("Run cancelled.")
+        // Count and narrate HERE, once: the cancelled task's own catch fires seconds later (the CLIs
+        // must die first), by which time `runWorkSet` can already be a newer run's — its narration
+        // would land under that run's start line. Everything this needs is live right now.
+        let unfinished = unfinishedRunNodeCount()
+        narrateDirector(unfinished == 0
+            ? "Run cancelled."
+            : "Run cancelled — \(unfinished) node\(unfinished == 1 ? "" : "s") unfinished.")
+        clearInFlightPhasesAfterCancel()
         // Settle a staged split/merge NOW rather than waiting on the cancelled task —
         // leaving the op staged strands the pieces. The drain is idempotent.
         drainPendingGraphOp()
@@ -968,6 +978,19 @@ extension SZHost {
             }
         }
         return (implemented, failed)
+    }
+
+    /// A cancelled run's in-flight pills. `.queued`/`.planning`/`.coding` map to Planning/Building, and
+    /// nothing else clears them once the run is gone — the node would wear a working pill forever. Return
+    /// those work-set nodes to idle (back to Draft / Outdated); an agent that reported an error or a
+    /// question keeps its say, exactly as at run end.
+    func clearInFlightPhasesAfterCancel() {
+        for id in runWorkSet {
+            guard let phase = nodeAgentState[id]?.phase,
+                  phase == .queued || phase == .planning || phase == .coding else { continue }
+            nodeAgentState[id]?.phase = .idle
+            nodeAgentState[id]?.message = ""
+        }
     }
 
     /// The work-set nodes a cancelled run left dirty — for the cancel narration only; touches nothing.

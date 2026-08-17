@@ -13,16 +13,25 @@ import Testing
 
     // MARK: Rows
 
-    @Test func promotedAndCleanIsImplementedInEveryPhase() {
-        for phase in Self.allPhases {
+    @Test func promotedAndCleanIsImplementedUnlessTheAgentReported() {
+        for phase in Self.quietPhases {
             #expect(V.classify(promoted: true, stillDirty: false, derivedReason: nil, phase: phase) == .implemented)
+        }
+        // A promote wipes a stale report, so one left standing on a clean node is the agent's verdict on
+        // its OWN build ("compiled, but it renders black") — it outranks the clean stamp.
+        for phase in Self.reportedPhases {
+            #expect(V.classify(promoted: true, stillDirty: false, derivedReason: nil, phase: phase) == .failedAsReported)
         }
     }
 
-    /// Clean now = nothing left to do, even without a promote (an edit that was reverted heals by construction).
-    @Test func cleanWithoutPromoteIsStillImplemented() {
-        for phase in Self.allPhases {
+    /// Clean now = nothing left to do, even without a promote (an edit that was reverted heals by construction) —
+    /// unless the agent said otherwise.
+    @Test func cleanWithoutPromoteIsImplementedUnlessTheAgentReported() {
+        for phase in Self.quietPhases {
             #expect(V.classify(promoted: false, stillDirty: false, derivedReason: nil, phase: phase) == .implemented)
+        }
+        for phase in Self.reportedPhases {
+            #expect(V.classify(promoted: false, stillDirty: false, derivedReason: nil, phase: phase) == .failedAsReported)
         }
     }
 
