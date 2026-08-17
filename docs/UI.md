@@ -43,7 +43,9 @@ floats over the viewport" sketch - panels are tiled sections, not overlays): a b
   over its tile (the tile detaches in place; the layout closes the gap behind it). The window is fullscreen-capable (green button - the projector case).
   Pop-outs are children of the main window's lifetime: closing the main window closes them first
   (quit-on-close is unchanged), and they hide behind the welcome surface. The window's ✕/⌘W
-  **docks the panel back**; View-menu off / `ui_close_panel` closes it for real.
+  **docks the panel back**; View-menu off / `ui_close_panel` closes it for real. View ▸ Auto-Hide
+  Panel Headers applies to pop-outs too: the strip slides away and hovering the window's top band
+  summons it (the traffic lights stay).
 - **Dock back**: the pop-out header's dock button returns the panel to its remembered spot
   (animating the window home first), or **drag the pop-out window - titlebar or anywhere on its
   body - over the main window** to dock it at any edge zone, with the same tinted drop preview as

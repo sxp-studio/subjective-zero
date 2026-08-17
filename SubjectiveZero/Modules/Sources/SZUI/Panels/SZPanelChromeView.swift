@@ -44,29 +44,17 @@ struct SZPanelChromeView<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     static var headerHeight: CGFloat { 26 }
-    /// Grace before sliding away once the cursor leaves the band — absorbs brief overshoots
-    /// (reaching for the ✕ and drifting past) without flicker.
-    private static var hideGrace: Duration { .milliseconds(350) }
+    /// The auto-hide summon band (from the tile's top). Generous by default — taller than the
+    /// header so the trigger is forgiving. Chat's is a thin sliver instead: its tab strip sits at
+    /// the very top when auto-hide is on, and a tall band would pop the header over the tabs on
+    /// every tab hover — so there, summoning means pushing to the top edge.
+    private var triggerBand: CGFloat { id.kind == .chat ? 8 : SZHeaderRevealModel.defaultTriggerBand }
 
-    /// The hover band (from the tile's top) that summons a hidden header. Generous by default —
-    /// taller than the header so the trigger is forgiving. Chat's is a thin sliver instead: its
-    /// tab strip sits at the very top when auto-hide is on, and a tall band would pop the header
-    /// over the tabs on every tab hover — so there, summoning means pushing to the top edge.
-    private var triggerBand: CGFloat { id.kind == .chat ? 8 : 36 }
-    /// Hysteresis: once revealed, the header's own footprint keeps it alive — the cursor sitting
-    /// ON the revealed header must never count as "out of the band", whatever the trigger size.
-    private var revealThreshold: CGFloat { headerVisible ? max(triggerBand, Self.headerHeight) : triggerBand }
+    /// Reveal/hide state + timing (shared with the pop-out shell). A header rearrange-drag pins
+    /// it visible even when the drag leaves the band — the drag handle must not vanish mid-drag.
+    @StateObject private var reveal = SZHeaderRevealModel()
 
-    @State private var headerVisible = false
-    /// Live truth of "cursor is in the reveal band" — the delayed hide re-checks it at fire time
-    /// (the SZHoverTip pattern: re-check state after the sleep instead of juggling cancellation).
-    @State private var inRevealBand = false
-    @State private var hidePending = false
-    /// A header rearrange-drag pins the header visible even when the drag leaves the band —
-    /// the drag handle must not vanish mid-drag.
-    @State private var headerDragActive = false
-
-    private var headerShown: Bool { !autoHideEnabled || headerVisible || headerDragActive }
+    private var headerShown: Bool { reveal.shown(autoHide: autoHideEnabled) }
 
     /// The tile's clip/border radius. Only the viewport squares off (radius 0) when the pref is off;
     /// every other tile keeps the standard rounding.
@@ -95,14 +83,7 @@ struct SZPanelChromeView<Content: View>: View {
         }
         .onContinuousHover(coordinateSpace: .local) { phase in
             guard autoHideEnabled else { return }
-            switch phase {
-            case .active(let p):
-                inRevealBand = p.y <= revealThreshold
-                if inRevealBand { revealHeader() } else { scheduleHide() }
-            case .ended:
-                inRevealBand = false
-                scheduleHide()
-            }
+            reveal.hover(phase, triggerBand: triggerBand, headerHeight: Self.headerHeight)
         }
         .background(Color(white: 0.09))
         // A rounded tile floating on the window background (never painting outside itself, whatever
@@ -158,36 +139,14 @@ struct SZPanelChromeView<Content: View>: View {
         .gesture(
             DragGesture(minimumDistance: 5, coordinateSpace: .named(szPanelGridSpaceName))
                 .onChanged {
-                    if !headerDragActive { headerDragActive = true }
+                    if !reveal.pinned { reveal.pinned = true }
                     onHeaderDragChanged($0.location)
                 }
                 .onEnded {
                     onHeaderDragEnded($0.location)
-                    // Hover events don't arrive while the mouse button is down, so band state is
-                    // stale here — assume "away" and let the very next mouse move correct it
-                    // (worst case the header re-reveals on the first twitch after a drop).
-                    inRevealBand = false
-                    withAnimation(.easeInOut(duration: 0.18)) { headerDragActive = false }
-                    scheduleHide()
+                    reveal.unpin()
                 }
         )
-    }
-
-    private func revealHeader() {
-        guard !headerVisible else { return }
-        withAnimation(.easeOut(duration: 0.12)) { headerVisible = true }
-    }
-
-    private func scheduleHide() {
-        guard headerVisible, !hidePending else { return }
-        hidePending = true
-        Task { @MainActor in
-            try? await Task.sleep(for: Self.hideGrace)
-            hidePending = false
-            if !inRevealBand && !headerDragActive {
-                withAnimation(.easeInOut(duration: 0.18)) { headerVisible = false }
-            }
-        }
     }
 }
 

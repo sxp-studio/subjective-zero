@@ -140,6 +140,11 @@ final class SZPopoutWindowManager {
         for (id, controller) in controllers { controller.updateTitle(title(id)) }
     }
 
+    /// View ▸ Auto-Hide Panel Headers flipped — every pop-out strip follows the docked tiles.
+    func setAutoHideHeaders(_ on: Bool) {
+        for controller in controllers.values { controller.setAutoHideHeader(on) }
+    }
+
     /// The welcome↔workspace edge: hide pop-outs behind the launcher, bring them back with the
     /// workspace. The first activation is also the relaunch-restore hook (the host re-opens
     /// persisted pop-outs when the workspace first appears).
@@ -339,8 +344,8 @@ final class SZPopoutWindowController: NSObject, NSWindowDelegate {
 
     private weak var host: SZHost?
     private weak var manager: SZPopoutWindowManager?
-    /// The live title (window bar + shell strip) — positional, re-pushed via `updateTitle`.
-    private let titleBox: SZPopoutWindowTitle
+    /// The strip's live state: title (positional, re-pushed via `updateTitle`) + auto-hide pref.
+    private let shellState: SZPopoutWindowShellState
     /// Occlusion has no delegate method — observed via NotificationCenter (removed in deinit).
     private nonisolated(unsafe) var occlusionObserver: NSObjectProtocol?
 
@@ -349,7 +354,7 @@ final class SZPopoutWindowController: NSObject, NSWindowDelegate {
         self.host = host
         self.manager = manager
         let title = host.panelTitle(id)
-        self.titleBox = SZPopoutWindowTitle(title)
+        self.shellState = SZPopoutWindowShellState(title: title, autoHideHeader: host.autoHidePanelHeaders)
 
         // The main window's chrome language: transparent titlebar over full-bleed content, the
         // shell's glass strip SHARING the titlebar row (name + dock-back beside the traffic
@@ -374,7 +379,7 @@ final class SZPopoutWindowController: NSObject, NSWindowDelegate {
         window.contentMinSize = NSSize(width: minSize.width,
                                        height: minSize.height + SZPopoutPanelShellMetrics.headerHeight)
         let shell = SZPopoutPanelShell(
-            title: titleBox,
+            state: shellState,
             headerLeadingInset: 78,   // clears the traffic lights sharing the strip
             onDock: { [weak manager] in manager?.dockToRememberedSpot(id: id) }
         ) { content }
@@ -399,8 +404,11 @@ final class SZPopoutWindowController: NSObject, NSWindowDelegate {
     /// The live panel set changed — this window's positional name may have too.
     func updateTitle(_ title: String) {
         window.title = title
-        titleBox.text = title
+        shellState.title = title
     }
+
+    /// View ▸ Auto-Hide Panel Headers flipped — the strip follows the docked tiles.
+    func setAutoHideHeader(_ on: Bool) { shellState.autoHideHeader = on }
 
     // MARK: NSWindowDelegate
 

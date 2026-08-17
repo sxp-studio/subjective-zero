@@ -83,6 +83,7 @@ extension SZHost {
     /// View ▸ Auto-Hide Panel Headers — a live pref, persisted like every layout change.
     func setAutoHidePanelHeaders(_ on: Bool) {
         autoHidePanelHeaders = on
+        popoutManager.setAutoHideHeaders(on)
         persistAppState()
     }
 
