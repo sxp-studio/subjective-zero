@@ -148,6 +148,23 @@ private func entry(_ ordinal: Int, node: String = "step",
 
 // MARK: - seal
 
+@Test func sealFlipsEveryStillRunningEntryToCancelled() {
+    // A fan-out leaves SEVERAL visits open at once; a sealed record that kept any of them
+    // running would pulse forever in the panel.
+    var record = run(0, live: true)
+    let t = Date(timeIntervalSinceReferenceDate: 200)
+    record.note(entry(1, node: "door", phase: .done), at: Date(timeIntervalSinceReferenceDate: 100))
+    record.note(entry(2, node: "send-a", phase: .running), at: Date(timeIntervalSinceReferenceDate: 110))
+    record.note(entry(3, node: "send-b", phase: .running), at: Date(timeIntervalSinceReferenceDate: 120))
+    record.note(entry(4, node: "send-c", phase: .running), at: Date(timeIntervalSinceReferenceDate: 130))
+    record.seal(conclusion: .cancelled, at: t)
+    #expect(record.trace.allSatisfy { $0.phase != .running })
+    #expect(record.trace.dropFirst().allSatisfy { $0.phase == .cancelled && $0.endedAt == t })
+    // The one that had already settled keeps its own stamp.
+    #expect(record.trace[0].phase == .done)
+    #expect(record.trace[0].endedAt == Date(timeIntervalSinceReferenceDate: 100))
+}
+
 @Test func sealFlipsAStillRunningLastEntryToCancelled() {
     var record = run(0, live: true)
     let t = Date(timeIntervalSinceReferenceDate: 130)
@@ -182,7 +199,9 @@ private func entry(_ ordinal: Int, node: String = "step",
     record.note(entry(1, phase: .done), at: Date(timeIntervalSinceReferenceDate: 100))
     record.note(entry(2, node: "turn", phase: .running), at: Date(timeIntervalSinceReferenceDate: 110))
     record.sealInterrupted()
-    #expect(record.conclusion == .cancelled)
+    // Its OWN conclusion — a truncated run is not the user's Stop.
+    #expect(record.conclusion == .interrupted)
+    #expect(record.conclusion != .cancelled)
     #expect(record.endedAt == Date(timeIntervalSinceReferenceDate: 110))
     #expect(record.trace[1].phase == .cancelled)
     #expect(record.trace[1].endedAt == Date(timeIntervalSinceReferenceDate: 110))
@@ -190,10 +209,26 @@ private func entry(_ ordinal: Int, node: String = "step",
     #expect(record.trace[0].detail == nil)
 }
 
+@Test func sealInterruptedMarksEveryEntryThatWasStillRunning() {
+    // The Director's fan-out: three concurrent visits, all truncated by the same close.
+    var record = run(0, live: true)
+    record.note(entry(1, node: "door", phase: .done), at: Date(timeIntervalSinceReferenceDate: 100))
+    record.note(entry(2, node: "send-a", phase: .running), at: Date(timeIntervalSinceReferenceDate: 110))
+    record.note(entry(3, node: "send-b", phase: .running), at: Date(timeIntervalSinceReferenceDate: 120))
+    record.sealInterrupted()
+    #expect(record.conclusion == .interrupted)
+    #expect(record.endedAt == Date(timeIntervalSinceReferenceDate: 120))
+    #expect(record.trace.dropFirst().allSatisfy {
+        $0.phase == .cancelled && $0.detail == SZAgentGraphRun.interruptedDetail
+    })
+    // The settled entry keeps its own (absent) detail — only the truncated ones are marked.
+    #expect(record.trace[0].detail == nil)
+}
+
 @Test func sealInterruptedWithoutATraceStopsAtTheStartAndLeavesEndedRecordsAlone() {
     var bare = run(50, live: true)
     bare.sealInterrupted()
-    #expect(bare.conclusion == .cancelled)
+    #expect(bare.conclusion == .interrupted)
     #expect(bare.endedAt == bare.startedAt)
 
     var ended = run(0)

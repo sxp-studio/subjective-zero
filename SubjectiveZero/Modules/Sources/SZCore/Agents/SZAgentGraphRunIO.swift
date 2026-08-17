@@ -42,7 +42,8 @@ public enum SZAgentGraphRunIO {
 
     /// Write the history — `SZJSON.encoder()`, so the bytes are deterministic and diffable
     /// like every sidecar's. Saving an empty list REMOVES the file instead (a fully-evicted
-    /// history leaves no husk).
+    /// history leaves no husk). The cap is applied HERE, so no write path can put the file
+    /// over its budget (a run begins live, and only its conclusion caps the host's list).
     public static func save(_ records: [SZAgentGraphRun], projectURL: URL) throws {
         let url = fileURL(projectURL: projectURL)
         guard !records.isEmpty else {
@@ -50,7 +51,8 @@ public enum SZAgentGraphRunIO {
             return
         }
         try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
-        let document = Document(runs: History(formatVersion: formatVersion, records: records))
+        let document = Document(runs: History(formatVersion: formatVersion,
+                                              records: SZAgentGraphRun.capped(records)))
         try SZJSON.encoder().encode(document).write(to: url, options: .atomic)
     }
 

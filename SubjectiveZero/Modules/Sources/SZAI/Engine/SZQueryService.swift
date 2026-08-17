@@ -159,8 +159,7 @@ public final class SZQueryService {
         { request, provider in
             let result = try await provider.run(request, runner: runner)
             if result.outcome.failed {
-                throw SZQueryError.completionFailed(
-                    result.outcome.message ?? "the provider reported a failure with no message")
+                throw SZQueryError.completionFailed(failureDetail(result, request: request))
             }
             let consumer = provider.makeStreamConsumer()
             var reply: [String] = []
@@ -176,5 +175,27 @@ public final class SZQueryService {
             let joined = reply.joined()
             return joined.isEmpty ? result.process.output : joined
         }
+    }
+
+    /// Why a query failed. This lane runs the provider directly — nothing upstream stamps a
+    /// spent budget onto the outcome — so a timeout would otherwise report "no message". The
+    /// two deadlines read differently, so each says which one fired, in this lane's own short
+    /// words (the turn lanes' fuller sentence lives in the host, above this layer).
+    nonisolated static func failureDetail(_ result: SZAgentRunResult,
+                                          request: SZAgentRunRequest) -> String {
+        if let message = result.outcome.message, !message.isEmpty { return message }
+        switch result.process.timeout {
+        case .wallClock:
+            return "the query timed out\(span(request.timeout).map { " after \($0)" } ?? "") without an answer"
+        case .silence:
+            return "the query went silent\(span(request.inactivityTimeout).map { " for \($0)" } ?? "") and was stopped"
+        case nil:
+            return "the provider reported a failure with no message"
+        }
+    }
+
+    /// A budget as "45s" / "2m" — nil budget, no figure.
+    private nonisolated static func span(_ seconds: TimeInterval?) -> String? {
+        seconds.map { $0 >= 60 ? "\(Int($0 / 60))m" : "\(Int($0))s" }
     }
 }

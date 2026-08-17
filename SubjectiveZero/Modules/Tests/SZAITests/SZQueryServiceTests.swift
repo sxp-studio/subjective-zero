@@ -166,4 +166,40 @@ struct SZQueryServiceTests {
                                         requestJSON: #"{"template": "ghost", "attempt": 0}"#)
         }
     }
+
+    // MARK: - What a failed completion says
+
+    @Test func aSpentBudgetSaysWhichDeadlineFired() {
+        // This lane runs the provider itself, so nothing upstream stamps the timeout — an
+        // unexplained "no message" is exactly the bug.
+        let request = queryRequest()
+        #expect(SZQueryService.failureDetail(failedResult(timeout: .wallClock), request: request)
+                    .contains("timed out after 45s"))
+        #expect(SZQueryService.failureDetail(failedResult(timeout: .silence), request: request)
+                    .contains("went silent for 30s"))
+    }
+
+    @Test func theProvidersOwnWordsAlwaysWin() {
+        var result = failedResult(timeout: .wallClock)
+        result.outcome.message = "usage limit reached"
+        #expect(SZQueryService.failureDetail(result, request: queryRequest()) == "usage limit reached")
+    }
+
+    @Test func aFailureWithNoBudgetAndNoWordsStaysHonest() {
+        #expect(SZQueryService.failureDetail(failedResult(timeout: nil), request: queryRequest())
+                    == "the provider reported a failure with no message")
+    }
+}
+
+/// The query lane's own request shape — the budgets are what the sentence quotes.
+private func queryRequest() -> SZAgentRunRequest {
+    SZAgentRunRequest(prompt: "ask", workingDirectory: FileManager.default.temporaryDirectory,
+                      cacheDirectory: FileManager.default.temporaryDirectory,
+                      timeout: SZQueryBudgets.timeout,
+                      inactivityTimeout: SZQueryBudgets.inactivityTimeout)
+}
+
+private func failedResult(timeout: SZProcessTimeout?) -> SZAgentRunResult {
+    SZAgentRunResult(process: SZProcessResult(exitCode: 124, output: "", timeout: timeout),
+                     outcome: SZAgentOutcome(sessionID: nil, failed: true))
 }

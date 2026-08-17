@@ -236,15 +236,24 @@ struct SZRunBadge: View {
             .background(Capsule().fill(colour))
     }
 
-    @ViewBuilder static func forConclusion(_ conclusion: SZAgentGraphRun.Conclusion?) -> some View {
+    static func forConclusion(_ conclusion: SZAgentGraphRun.Conclusion?) -> SZRunBadge {
+        let style = style(for: conclusion)
+        return SZRunBadge(label: style.label, colour: style.colour)
+    }
+
+    /// An ending's words and colour — the ONE vocabulary, pure so the canvas terminal reads
+    /// the same table and so the mapping is testable without a view.
+    static func style(for conclusion: SZAgentGraphRun.Conclusion?) -> (label: String, colour: Color) {
         switch conclusion {
-        case .failed, .defect: SZRunBadge(label: "failed", colour: SZAgentGraphStyle.failed)
-        case .cancelled:       SZRunBadge(label: "stopped", colour: SZAgentGraphStyle.neutral)
-        case .declined:        SZRunBadge(label: "declined", colour: SZAgentGraphStyle.neutral)
+        case .failed, .defect: ("failed", SZAgentGraphStyle.failed)
+        case .cancelled:       ("stopped", SZAgentGraphStyle.neutral)
+        // Truncated, not decided: it must not read as a user Stop.
+        case .interrupted:     ("interrupted", SZAgentGraphStyle.neutral)
+        case .declined:        ("declined", SZAgentGraphStyle.neutral)
         // A record sealed without a conclusion cannot happen through the host's seal; drawn
         // as a plain ending rather than left blank. The SAME blue the canvas gives a clean
         // exit — a list badge and the terminal capsule are two views of one fact.
-        case .ended, .none:    SZRunBadge(label: "end", colour: SZAgentGraphStyle.ended)
+        case .ended, .none:    ("end", SZAgentGraphStyle.ended)
         }
     }
 }

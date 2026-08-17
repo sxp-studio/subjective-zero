@@ -43,11 +43,18 @@ private func sampleRecords() -> [SZAgentGraphRun] {
                  at: Date(timeIntervalSinceReferenceDate: 301))
     stopped.seal(conclusion: .cancelled, at: Date(timeIntervalSinceReferenceDate: 305))
 
+    // Restored from a truncated file: sealed by the restore policy, not by a traversal.
+    var interrupted = SZAgentGraphRun(id: UUID(), agent: "director", thread: buildID,
+                                      startedAt: Date(timeIntervalSinceReferenceDate: 320))
+    interrupted.note(.init(ordinal: 1, node: "send", phase: .running),
+                     at: Date(timeIntervalSinceReferenceDate: 321))
+    interrupted.sealInterrupted()
+
     var defect = SZAgentGraphRun(id: UUID(), agent: "coding",
                                  startedAt: Date(timeIntervalSinceReferenceDate: 400))
     defect.seal(conclusion: .defect(detail: "unknown node mid-traversal"),
                 at: Date(timeIntervalSinceReferenceDate: 401))
-    return SZAgentGraphRun.ordered([build, child, declined, stopped, defect])
+    return SZAgentGraphRun.ordered([build, child, declined, stopped, interrupted, defect])
 }
 
 @Test func runsRoundTripPreservesEveryConclusionCase() throws {
@@ -63,6 +70,7 @@ private func sampleRecords() -> [SZAgentGraphRun] {
     // Ordered newest-first on the way in, so the conclusion cases read back in that order.
     #expect(loaded.map(\.conclusion) == [
         .defect(detail: "unknown node mid-traversal"),
+        .interrupted,
         .cancelled,
         .declined(reason: "the sketch asks for a camera feed"),
         .failed(reason: "the turn threw"),
@@ -73,8 +81,31 @@ private func sampleRecords() -> [SZAgentGraphRun] {
     let build = try #require(loaded.last)
     #expect(build.trace[0].duration == 29)
     #expect(build.trace.last?.tally == SZAgentGraphRun.Tally(settled: 1, total: 2, failed: 0))
-    let stopped = loaded[1]
+    let stopped = loaded[2]
     #expect(stopped.trace[0].phase == .cancelled)
+    // An interrupted run stays told apart from a user Stop across the trip, detail and all.
+    let interrupted = loaded[1]
+    #expect(interrupted.trace[0].phase == .cancelled)
+    #expect(interrupted.trace[0].detail == SZAgentGraphRun.interruptedDetail)
+}
+
+@Test func saveCapsTheHistorySoNoWritePathExceedsTheBudget() throws {
+    // A run is persisted the moment it BEGINS, before anything caps the host's list — the
+    // budget belongs to the write so the file can never grow past it.
+    let projectURL = temporaryProjectURL()
+    defer { try? FileManager.default.removeItem(at: projectURL) }
+    let leaders: [SZAgentGraphRun] = (0..<24).map { i in
+        let id = UUID()
+        var record = SZAgentGraphRun(id: id, agent: "director", thread: id,
+                                     startedAt: Date(timeIntervalSinceReferenceDate: 1000 + Double(i)))
+        record.seal(conclusion: .ended, at: Date(timeIntervalSinceReferenceDate: 1001 + Double(i)))
+        return record
+    }
+    try SZAgentGraphRunIO.save(SZAgentGraphRun.ordered(leaders), projectURL: projectURL)
+    let loaded = try #require(SZAgentGraphRunIO.load(projectURL: projectURL))
+    #expect(loaded.count == 20)
+    // The oldest are the ones evicted; the newest survive.
+    #expect(loaded.map(\.id) == SZAgentGraphRun.ordered(Array(leaders.suffix(20))).map(\.id))
 }
 
 @Test func runsRoundTripKeepsALiveRecordLive() throws {

@@ -153,6 +153,10 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         case ended
         case failed(reason: String)
         case cancelled
+        /// The app closed while the traversal was in flight — found live on disk at restore,
+        /// never reported by a traversal. Its own class: a Stop is someone's decision and a
+        /// truncated run is nobody's, and the panel must not read them as the same event.
+        case interrupted
         /// The graph REFUSED the work and said why — not a failure (nothing broke), not an
         /// ending (the work was deliberately not done): its own class.
         case declined(reason: String)
@@ -205,16 +209,17 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         }
     }
 
-    /// End the record: stamp the conclusion, flip a still-running last entry to `cancelled`
-    /// (the eager-cancel path arrives before the traversal's own settle ever will), and
-    /// close `endedAt`. IDEMPOTENT and conclusion-guarded: a record that already carries a
-    /// conclusion (its task merely hasn't drained) keeps its real ending.
+    /// End the record: stamp the conclusion, flip EVERY still-running entry to `cancelled`
+    /// (the eager-cancel path arrives before their own settles ever will — and a fan-out
+    /// leaves several visits open at once, not just the last), and close `endedAt`.
+    /// IDEMPOTENT and conclusion-guarded: a record that already carries a conclusion (its
+    /// task merely hasn't drained) keeps its real ending.
     public mutating func seal(conclusion: Conclusion, at now: Date = Date()) {
         guard endedAt == nil else { return }
         if self.conclusion == nil {
-            if let last = trace.indices.last, trace[last].phase == .running {
-                trace[last].phase = .cancelled
-                if trace[last].endedAt == nil { trace[last].endedAt = now }
+            for i in trace.indices where trace[i].phase == .running {
+                trace[i].phase = .cancelled
+                if trace[i].endedAt == nil { trace[i].endedAt = now }
             }
             self.conclusion = conclusion
         }
@@ -222,15 +227,15 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     }
 
     /// The restore policy for a record that was LIVE on disk: the app closed while it ran.
-    /// Sealed `.cancelled` at the trace's latest stamp (or the start), the flipped entry
+    /// Sealed `.interrupted` at the trace's latest stamp (or the start), every flipped entry
     /// carrying the interrupted detail — it reads as an interrupted run, in place.
     public static let interruptedDetail = "the app closed while this run was in flight"
     public mutating func sealInterrupted() {
         guard isLive else { return }
         let latest = trace.compactMap { $0.endedAt ?? $0.startedAt }.max() ?? startedAt
-        let flips = trace.last?.phase == .running
-        seal(conclusion: .cancelled, at: max(latest, startedAt))
-        if flips, let last = trace.indices.last { trace[last].detail = Self.interruptedDetail }
+        let running = trace.indices.filter { trace[$0].phase == .running }
+        seal(conclusion: .interrupted, at: max(latest, startedAt))
+        for i in running where trace[i].phase == .cancelled { trace[i].detail = Self.interruptedDetail }
     }
 
     // MARK: - Reading the trace

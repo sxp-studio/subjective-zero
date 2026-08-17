@@ -33,8 +33,8 @@ public struct SZProcessResult: Sendable {
     public var timeout: SZProcessTimeout?
     /// Signal number when the process died to an uncaught signal (killed/crashed) OUT FROM UNDER
     /// US — a plain `exitCode` can't tell `exit(9)` from SIGKILL. nil on normal exit and whenever
-    /// the kill was ours: timeout (`timedOut` names that cause) or task cancellation (a user Stop
-    /// is a choice, not a crash).
+    /// the kill was ours: a spent budget (`timeout` names which deadline fired) or task
+    /// cancellation (a user Stop is a choice, not a crash).
     public var uncaughtSignal: Int32?
 
     /// True when either deadline fired — the derived form, so the two can never disagree.

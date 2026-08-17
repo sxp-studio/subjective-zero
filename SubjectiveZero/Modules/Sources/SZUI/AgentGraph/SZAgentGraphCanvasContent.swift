@@ -206,19 +206,13 @@ struct SZAgentGraphCanvasContent: View {
                                  label: "end",
                                  colour: invalid ? SZAgentGraphStyle.failed : SZAgentGraphStyle.ended,
                                  subheader: hasSubheader(last, record))
-                    case .failed, .defect:
+                    // Failed, stopped, interrupted, declined: the capsule the RUNS list
+                    // already gives each — one vocabulary, read from `SZRunBadge.style`. A
+                    // refusal stays deliberately neutral, not red.
+                    case .failed, .defect, .cancelled, .interrupted, .declined:
+                        let style = SZRunBadge.style(for: record.conclusion)
                         terminal(after: lastFrame, face: lastFace, outcome: last.outcome,
-                                 label: "failed", colour: SZAgentGraphStyle.failed,
-                                 subheader: hasSubheader(last, record))
-                    case .cancelled:
-                        terminal(after: lastFrame, face: lastFace, outcome: last.outcome,
-                                 label: "stopped", colour: SZAgentGraphStyle.neutral,
-                                 subheader: hasSubheader(last, record))
-                    case .declined:
-                        // A refusal in the graph's own words rides the transcript; the
-                        // canvas keeps the neutral capsule — deliberately not red.
-                        terminal(after: lastFrame, face: lastFace, outcome: last.outcome,
-                                 label: "declined", colour: SZAgentGraphStyle.neutral,
+                                 label: style.label, colour: style.colour,
                                  subheader: hasSubheader(last, record))
                     }
                 }
