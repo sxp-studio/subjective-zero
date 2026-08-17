@@ -12,10 +12,13 @@ import Testing
 @testable import SZCore
 
 private func node(_ title: String, kind: SZNodeKind, rebuildReason: SZRebuildReason? = nil) -> SZNode {
-    SZNode(kind: kind, title: title,
-           contract: SZNodeContract(title: title, sfSymbol: "circle", summary: "",
-                                    outputs: [SZPort(name: "output", type: .texture)]),
-           position: SZPoint(x: 0, y: 0), rebuildReason: rebuildReason)
+    let contract = SZNodeContract(title: title, sfSymbol: "circle", summary: "",
+                                  outputs: [SZPort(name: "output", type: .texture)])
+    // The reason is derived: a stamp whose surface the contract has outgrown reads `.contractChanged`.
+    let stamp: SZBuildStamp? = kind == .generated
+        ? (rebuildReason == .contractChanged ? SZBuildStamp(portSurface: [], prompt: nil) : .trusting(contract: contract, prompt: nil))
+        : nil
+    return SZNode(kind: kind, title: title, contract: contract, position: SZPoint(x: 0, y: 0), buildStamp: stamp)
 }
 
 @Test func theSummaryCarriesEveryNodesIdAndTrueState() {

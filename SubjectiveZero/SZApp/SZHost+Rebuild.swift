@@ -1,39 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A built node whose contract has moved since that build: classifying WHY, and the one-click way out.
 //
-// `SZStore.editPorts` knows a port surface changed but cannot read `Node.swift` (SZCore stays off disk for
-// graph edits), so it records the optimistic `.contractChanged`. Only the host can open the source and tell
-// the two conditions apart:
+// `SZNode.rebuildReason` is DERIVED from evidence, never stored — the build stamp (what the last promote
+// compiled against) gives `.contractChanged` / `.intentChanged`; the host's audit of the live source gives
+// the one fault state:
 //
 //   .contractChanged — the contract declares ports the code hasn't implemented yet. Benign; the node draws,
 //                      the new ports are inert. The ordinary gap between declaring an interface and building it.
+//   .intentChanged   — the prompt moved off the brief the build was written to. Benign, but the fleet must
+//                      regenerate against the new intent.
 //   .sourceMismatch  — the code names ports the contract no longer declares, so every one of those reads
 //                      resolves to nil and the node silently runs on its hardcoded defaults. A real fault:
 //                      `agent_compile_node` refuses to promote source in this state.
 //
 // Classified by CONDITION, not by cause: a port the Director removed and one a human deleted by hand leave the
-// node equally broken.
-//
-// Either way the node heals the same two ways, and both are guaranteed by construction:
-//   1. any run picks it up — `runWorkSet` is built from `needsImplementation`, and `promoteStagedNode` is the
-//      one place the reason is cleared (conditionally: it KEEPS `.intentChanged` when the prompt moved after
-//      the agent was briefed, and never clears `.sourceMismatch` — see `SZRebuildReason.afterPromote`);
-//   2. `stageRebuildFix` composes a message to the node's own Coding Agent (never auto-sent — the V1 ruling
-//      that host-drafted messages COMPOSE), whose cold start seeds it with the current contract + source.
+// node equally broken. Either way the node heals the same two ways: any run picks it up (`runWorkSet` is built
+// from `needsImplementation`; a promote re-stamps it), or `stageRebuildFix` composes a message to the node's
+// own Coding Agent (never auto-sent — host-drafted messages COMPOSE).
 import Foundation
 import SZCore
 import SZUI
 
 @MainActor
 extension SZHost {
-    /// Re-read a node's live source and record why (or whether) it needs a rebuild. Called after any port edit,
-    /// and for every built node when a project opens.
-    ///
-    /// A node the store already flagged `.contractChanged` is only ever *upgraded* to `.sourceMismatch`, never
-    /// cleared: the "contract declares a port the code ignores" half is invisible to a static scan (the audit is
-    /// a string-literal scan, and `NodeLibrary/audio-bands` builds port names at runtime), so absence of errors
-    /// does not mean the code is current. Only `promoteStagedNode` clears a reason, and only the ones its
-    /// compile actually honoured (`SZRebuildReason.afterPromote`).
+    /// Re-audit a node's live source against its contract and set the ephemeral `sourceMismatch` from the
+    /// verdict — set when the code names undeclared ports (with the human-readable detail on the pill),
+    /// cleared when the audit is clean. Called after a port edit, a promote, a hot reload, and for every
+    /// flagged node when a project opens. Never persisted: `SZProjectIO.load` re-derives it.
     func classifyRebuild(node id: SZNodeID) {
         guard let projectURL = loadedProjectURL,
               let node = store.project?.graph.node(id: id), node.kind == .generated,
@@ -42,22 +35,25 @@ extension SZHost {
                                        encoding: .utf8) else { return }
 
         let audit = SZPortBindingAudit.audit(contract: contract, source: source)
-        if !audit.errors.isEmpty {
-            store.setRebuildReason(node: id, .sourceMismatch)
+        let mismatch = !audit.errors.isEmpty
+        if mismatch != node.sourceMismatch {
+            store.mutate { project in
+                guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
+                project.graph.nodes[i].sourceMismatch = mismatch
+            }
+        }
+        if mismatch {
             // Reuse the node's existing error surface: the pill becomes the clickable diagnostic popover.
             nodeAgentState[id, default: SZNodeAgentState()].errorDetail = audit.errors.joined(separator: "\n")
-        } else if node.rebuildReason == .sourceMismatch {
-            // The fault was repaired without a promote (a hand edit). Fall back to the weaker claim rather than
-            // declaring the node current — the scan cannot prove that.
-            store.setRebuildReason(node: id, .contractChanged)
+        } else if node.sourceMismatch {
             nodeAgentState[id]?.errorDetail = nil
         }
     }
 
-    /// Classify every built node after a project loads. `SZProjectIO.load` already set `.sourceMismatch` from the
-    /// same audit; this second pass exists to attach the human-readable diagnostic, which the model doesn't carry.
+    /// After a project loads: `SZProjectIO.load` already audited every built node; this pass attaches the
+    /// human-readable diagnostic to the ones it flagged (the model doesn't carry the text).
     func classifyRebuildsAfterLoad() {
-        for node in store.project?.graph.nodes ?? [] where node.rebuildReason == .sourceMismatch {
+        for node in store.project?.graph.nodes ?? [] where node.sourceMismatch {
             classifyRebuild(node: node.id)
         }
     }

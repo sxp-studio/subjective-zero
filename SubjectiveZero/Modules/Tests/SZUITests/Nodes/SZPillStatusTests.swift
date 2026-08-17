@@ -63,11 +63,20 @@ import SZCore
 
 // MARK: - A built node whose contract has moved
 
+/// A built node in each derived state: the pill keys on `rebuildReason`, which is derived from the build
+/// stamp (surface off the stamp → `.contractChanged`) and the host's audit (`sourceMismatch`).
 @MainActor
 private func built(_ reason: SZRebuildReason?) -> SZNode {
-    SZNode(kind: .generated, title: "Kaleidoscope",
-           contract: SZNodeContract(title: "K", sfSymbol: "sparkles", summary: ""),
-           position: SZPoint(x: 0, y: 0), rebuildReason: reason)
+    let contract = SZNodeContract(title: "K", sfSymbol: "sparkles", summary: "",
+                                  inputs: [SZPort(name: "input", type: .texture)])
+    let stamp: SZBuildStamp
+    switch reason {
+    case .contractChanged: stamp = SZBuildStamp(portSurface: [], prompt: nil)
+    case .intentChanged:   stamp = SZBuildStamp(portSurface: contract.portSurface, prompt: "old brief")
+    default:               stamp = .trusting(contract: contract, prompt: nil)
+    }
+    return SZNode(kind: .generated, title: "Kaleidoscope", contract: contract, position: SZPoint(x: 0, y: 0),
+                  buildStamp: stamp, sourceMismatch: reason == .sourceMismatch)
 }
 
 /// Amber, not red: the contract declares ports the code hasn't written yet. Nothing failed, the node still

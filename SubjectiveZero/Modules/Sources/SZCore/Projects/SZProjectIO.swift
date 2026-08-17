@@ -95,30 +95,30 @@ public enum SZProjectIO {
         return project
     }
 
-    /// ESTABLISH the contract↔code invariant for files nothing vouches for.
+    /// The load-time pass over every built node: seed the build stamp where none is recorded, and audit the
+    /// source against the contract for the one fault a static scan can prove.
     ///
-    /// `SZStore.editPorts` MAINTAINS the invariant across edits by diffing the port surface it is about to write
-    /// against the one the build matched. That diff is unavailable here: a project on disk carries only the
-    /// result, not the edit. So load re-derives what it can by auditing each built node's source against its
-    /// contract. This also covers a hand-edited `project.json` / `Node.swift`.
+    /// Seeding is "trust the build": a `.generated` node with no stamp (built before stamps existed, or a
+    /// hand-assembled bundle) is taken to implement its current contract + prompt — the alternative, flagging
+    /// every such node dirty, would regenerate finished work on open. Its `rebuildReason` derives from the
+    /// stamp from here on (`SZNode.rebuildReason`).
     ///
-    /// Only `errors` — a port the CODE NAMES that the contract does not declare — raise the flag. The audit's
-    /// other half (a contract port the code never names) is unreliable as a staleness signal: it is a
-    /// string-literal scan, so a node that builds a port name at runtime trips it. `NodeLibrary/audio-bands`
-    /// does exactly that (`ctx.setOutputFloat(kBandNames[b], …)`), and a warning-triggered flag would mark it
-    /// dirty on every single open and regenerate it forever. Errors are unambiguous and cannot loop: code that
-    /// names only declared ports audits clean and stays clean.
-    ///
-    /// The cost of errors-only: a port declared but never implemented — with no undeclared reads to give it away
-    /// — is invisible here. `editPorts` catches that at the moment it is introduced, which is the only moment it
-    /// is distinguishable.
+    /// The audit sets the ephemeral `sourceMismatch` (never persisted; the host attaches the diagnostic
+    /// text and re-audits after promote / hot reload). Only `errors` — a port the CODE NAMES that the
+    /// contract does not declare — count. The audit's other half (a contract port the code never names)
+    /// is unreliable: it is a string-literal scan, so a node that builds a port name at runtime
+    /// (`NodeLibrary/audio-bands`: `ctx.setOutputFloat(kBandNames[b], …)`) would read dirty on every open.
     private static func reconcileRebuildFlags(in graph: inout SZGraph, projectURL: URL) {
         for i in graph.nodes.indices {
             let node = graph.nodes[i]
-            guard node.kind == .generated, node.rebuildReason == nil, let contract = node.contract else { continue }
-            guard let source = try? String(contentsOf: nodeSourceURL(projectURL: projectURL, nodeID: node.id),
+            guard node.kind == .generated else { continue }
+            if node.buildStamp == nil {
+                graph.nodes[i].buildStamp = .trusting(contract: node.contract, prompt: node.prompt)
+            }
+            guard let contract = node.contract,
+                  let source = try? String(contentsOf: nodeSourceURL(projectURL: projectURL, nodeID: node.id),
                                            encoding: .utf8) else { continue }
-            graph.nodes[i].rebuildReason = SZPortBindingAudit.rebuildReason(contract: contract, source: source)
+            graph.nodes[i].sourceMismatch = !SZPortBindingAudit.audit(contract: contract, source: source).errors.isEmpty
         }
     }
 

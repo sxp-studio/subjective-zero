@@ -74,51 +74,62 @@ public enum SZNodeKind: String, Codable, Sendable {
 
 /// Why a built node must be regenerated. Classified by the CONDITION of the code, not by who caused it — a
 /// port the Director removed and a port a human deleted by hand leave the node equally broken.
+///
+/// Never stored: `SZNode.rebuildReason` DERIVES it every read from evidence (the build stamp and the source
+/// audit), so an edit that is undone heals by construction and a stale flag cannot outlive its cause.
 public enum SZRebuildReason: String, Codable, Sendable {
-    /// The contract declares ports the code doesn't implement yet. Nothing is wrong: the node draws, the new
-    /// ports are simply inert until a Coding Agent writes them. The ordinary state between declaring an
-    /// interface and building it — the sibling of a `.prompt` node's Draft.
+    /// The contract's port surface differs from the one the build consumed (`SZBuildStamp.portSurface`).
+    /// Nothing is wrong: the node draws, the new ports are simply inert until a Coding Agent writes them.
+    /// The ordinary state between declaring an interface and building it — the sibling of a `.prompt` node's Draft.
     case contractChanged
 
-    /// The node's intent moved: its prompt was edited after it was built. Nothing is broken — the build
-    /// still renders, it just implements what the prompt *used* to say — but the fleet must regenerate it
-    /// against the new intent. Raised by `SZStore.updateNode` on the same terms `editPorts` raises
-    /// `.contractChanged` (a real change, on a built node, never downgrading a reason already raised).
+    /// The node's intent moved: its prompt differs from the brief its build was written to (`SZBuildStamp.prompt`).
+    /// Nothing is broken — the build still renders, it just implements what the prompt *used* to say — but the
+    /// fleet must regenerate it against the new intent.
     case intentChanged
 
     /// The code names ports the contract does not declare, so those reads resolve to `nil` every frame and the
     /// node silently falls back to its hardcoded defaults. A real fault: `agent_compile_node` refuses to
-    /// promote source in this state (`SZPortBindingAudit` calls it an error, not a warning).
+    /// promote source in this state (`SZPortBindingAudit` calls it an error, not a warning). Ephemeral: the
+    /// host re-audits at load, after every promote and after every hot reload (`SZNode.sourceMismatch`).
     case sourceMismatch
+}
 
-    /// What a successful promote leaves behind — the rule `SZHost.promoteStagedNode` applies.
-    ///
-    /// A promote proves ONE thing: this source compiled against this contract. So it discharges
-    /// `.contractChanged` — the surface it built against. It proves NOTHING about the prompt, so an
-    /// `.intentChanged` whose edit landed after the agent was dispatched must survive: the code implements
-    /// what the prompt used to say, and only a rebuild fixes that.
-    ///
-    /// `.sourceMismatch` is never discharged and never overwritten. It is the stronger claim (code reads ports
-    /// the contract doesn't declare — nil every frame), and `SZStore.updateNode`/`editPorts` both refuse to
-    /// downgrade it, so this must too. It CAN reach a promote: `agent_compile_node` only runs the port audit
-    /// when a staged contract exists (`SZMCP+Agent.swift`), and staging source with no contract is a supported
-    /// path — so an audit-free promote is reachable and must not silently soften the fault to `.intentChanged`.
-    ///
-    /// Keyed on the prompt TEXT rather than the flag, because the flag is not reliable evidence. On a rebuild
-    /// run the node already carries `.contractChanged`, so `SZStore.updateNode`'s "never downgrade a reason
-    /// already raised" guard suppresses the `.intentChanged` raise entirely — comparing flags would miss it and
-    /// the re-brief would vanish without trace.
-    ///
-    /// `dispatchedPrompt == nil` means "no dispatch record" (promoted outside a run — a node-scoped chat turn,
-    /// a library instantiate). Then there is nothing to compare and the pre-existing behaviour stands: clear.
-    public static func afterPromote(
-        existing: SZRebuildReason?,
-        dispatchedPrompt: String??,
-        currentPrompt: String?
-    ) -> SZRebuildReason? {
-        if existing == .sourceMismatch { return .sourceMismatch }     // the stronger claim — never downgraded
-        guard let dispatched = dispatchedPrompt else { return nil }   // not dispatched by a run → clear, as before
-        return dispatched == currentPrompt ? nil : .intentChanged     // intent moved under the agent → keep it dirty
+/// What a node's build CONSUMED — the evidence `SZNode.rebuildReason` is derived from. Written by
+/// `promoteStagedNode` from what the compile actually saw (the merged contract's surface, the prompt the agent
+/// was briefed with), and seeded once for a built node that has none ("trust the build": its current contract
+/// + prompt). Persisted with the node in `project.json`.
+public struct SZBuildStamp: Codable, Equatable, Sendable {
+    /// The port surface the source was compiled against (`SZNodeContract.portSurface`).
+    public var portSurface: Set<SZNodeContract.PortSignature>
+    /// The brief the build implements — nil for a contract-first node built with no prompt.
+    public var prompt: String?
+
+    public init(portSurface: Set<SZNodeContract.PortSignature>, prompt: String?) {
+        self.portSurface = portSurface
+        self.prompt = prompt
+    }
+
+    /// The seed for a build nothing recorded: take the node's current contract + prompt as what it implements.
+    public static func trusting(contract: SZNodeContract?, prompt: String?) -> SZBuildStamp {
+        SZBuildStamp(portSurface: contract?.portSurface ?? [], prompt: prompt)
+    }
+
+    // The surface is written in a stable order (direction, name, type) so `project.json` does not churn
+    // with Set iteration order between saves.
+    private enum CodingKeys: String, CodingKey { case portSurface, prompt }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        portSurface = Set(try c.decode([SZNodeContract.PortSignature].self, forKey: .portSurface))
+        prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let ordered = portSurface.sorted {
+            ($0.direction.rawValue, $0.name, $0.type.rawValue) < ($1.direction.rawValue, $1.name, $1.type.rawValue)
+        }
+        try c.encode(ordered, forKey: .portSurface)
+        try c.encodeIfPresent(prompt, forKey: .prompt)
     }
 }
 
@@ -226,22 +237,33 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     public var contract: SZNodeContract?
     public var position: SZPoint
 
-    /// Why this node's build no longer satisfies its contract, or nil when it does. Orthogonal to `kind`: a
-    /// node awaiting a rebuild keeps rendering its existing source rather than going black.
-    ///
-    /// Raised by the port-delta store edit, which is the only place that can *know* a surface moved: after the
-    /// fact, a declared-but-unread port is indistinguishable from a port whose name the code builds by
-    /// interpolation (`SZPortBindingAudit` is a string-literal scan; `NodeLibrary/audio-bands` does exactly
-    /// this). Cleared only by `promoteStagedNode`, and only the reasons its compile honoured
-    /// (`afterPromote`). `SZProjectIO.load` re-establishes it for files nothing vouches for.
-    public var rebuildReason: SZRebuildReason?
+    /// What this node's build consumed — the evidence behind `rebuildReason`. nil until the node is built (or
+    /// seeded on load for a built node that predates the stamp). Only `promoteStagedNode` writes it from a
+    /// real compile; the derived-binding edits carry it along with the table-generic surface they add.
+    public var buildStamp: SZBuildStamp?
+
+    /// The host's audit verdict: the live source names ports the contract does not declare. Ephemeral — never
+    /// encoded; recomputed from `SZPortBindingAudit` at load, after a promote and after a hot reload.
+    public var sourceMismatch: Bool = false
 
     /// What the card renders between header and rows (preview thumbnail / the node's custom card / nothing).
     /// `nil` = unset; the editor applies its legacy auto-preview fallback. Presentation-only: never affects
     /// the render graph or a rebuild.
     public var body: SZNodeBody?
 
-    /// This node has a build that no longer fits its contract.
+    /// Why this node's build no longer satisfies its contract or intent, or nil when it does. DERIVED, never
+    /// stored: the audit fault outranks the stamp comparisons; a built node with no stamp is trusted. Orthogonal
+    /// to `kind`: a node awaiting a rebuild keeps rendering its existing source rather than going black.
+    public var rebuildReason: SZRebuildReason? {
+        guard kind == .generated else { return nil }
+        if sourceMismatch { return .sourceMismatch }
+        guard let stamp = buildStamp else { return nil }
+        if (contract?.portSurface ?? []) != stamp.portSurface { return .contractChanged }
+        if prompt != stamp.prompt { return .intentChanged }
+        return nil
+    }
+
+    /// This node has a build that no longer fits its contract or intent.
     public var needsRebuild: Bool { rebuildReason != nil }
 
     /// The identity a drawn node wears until someone names it. A promote treats these as unset — the
@@ -262,7 +284,8 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         prompt: String? = nil,
         contract: SZNodeContract? = nil,
         position: SZPoint,
-        rebuildReason: SZRebuildReason? = nil,
+        buildStamp: SZBuildStamp? = nil,
+        sourceMismatch: Bool = false,
         body: SZNodeBody? = nil
     ) {
         self.id = id
@@ -272,8 +295,15 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         self.prompt = prompt
         self.contract = contract
         self.position = position
-        self.rebuildReason = rebuildReason
+        self.buildStamp = buildStamp
+        self.sourceMismatch = sourceMismatch
         self.body = body
+    }
+
+    /// `sourceMismatch` is host state, not document state: it stays out of `project.json`. A legacy stored
+    /// `rebuildReason` key is ignored on decode — the reason is derived now.
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, title, sfSymbol, prompt, contract, position, buildStamp, body
     }
 }
 

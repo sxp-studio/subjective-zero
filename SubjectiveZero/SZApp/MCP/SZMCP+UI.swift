@@ -452,9 +452,10 @@ extension SZHostBridge {
         let result = host.store.editPorts(node: id, edit)
         guard result.found else { throw SZMCPError.message("no node \(id)") }
         host.noteMutation("edited ports", [host.mutationTitle(id)], origin: .agent)
-        // The store guessed `.contractChanged`; only reading the live source can tell whether the code is merely
-        // behind the new contract or now names ports that don't exist (dropping a port the code reads leaves
-        // those reads resolving to nil every frame — a fault, not an unfinished feature).
+        // The surface moving off the build stamp reads `.contractChanged`; only reading the live source can tell
+        // whether the code is merely behind the new contract or now names ports that don't exist (dropping a
+        // port the code reads leaves those reads resolving to nil every frame — a fault, not an unfinished
+        // feature). Re-audit either way, so a fault a previous edit opened clears when this one closes it.
         host.classifyRebuild(node: id)
         if result.raisedRebuild { host.noteRunCreatedWork([id]) }
         // Through the host (not a bare store edit) so the new contract + the rebuild flag reach disk and the

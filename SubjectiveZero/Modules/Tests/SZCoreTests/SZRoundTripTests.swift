@@ -28,7 +28,13 @@ private func sampleProject() -> SZProject {
             outputs: [SZPort(name: "texture", type: .texture, display: true)],
             permissions: [.camera]
         ),
-        position: SZPoint(x: 120, y: 200)
+        position: SZPoint(x: 120, y: 200),
+        // Pin the build stamp through both round-trip levels (it rides project.json with the node): the
+        // surface the build compiled against, no prompt (a contract-first build).
+        buildStamp: SZBuildStamp(portSurface: [
+            .init(direction: .input, name: "mirror", type: .bool),
+            .init(direction: .input, name: "camera", type: .enumeration),
+            .init(direction: .output, name: "texture", type: .texture)], prompt: nil)
     )
 
     let grayscale = SZNode(
@@ -36,6 +42,7 @@ private func sampleProject() -> SZProject {
         kind: .generated,
         title: "Make Grayscale",
         sfSymbol: "circle.lefthalf.filled",
+        prompt: "Convert to grayscale.",
         contract: SZNodeContract(
             title: "Make Grayscale",
             sfSymbol: "circle.lefthalf.filled",
@@ -48,6 +55,11 @@ private func sampleProject() -> SZProject {
             outputs: [SZPort(name: "output", type: .texture, display: true)]
         ),
         position: SZPoint(x: 380, y: 200),
+        // A stamp with a prompt: the brief this build was written to.
+        buildStamp: SZBuildStamp(portSurface: [
+            .init(direction: .input, name: "input", type: .texture),
+            .init(direction: .input, name: "amount", type: .float),
+            .init(direction: .output, name: "output", type: .texture)], prompt: "Convert to grayscale."),
         // Pin the card-body field through both round-trip levels (in-memory + the .subz split —
         // body lives in project.json with the node, NOT in the split-out contract).
         body: SZNodeBody(mode: .preview, previewPort: "output")
@@ -180,28 +192,53 @@ private func sampleProject() -> SZProject {
     #expect(loaded == project)
 }
 
-// MARK: - Load re-establishes the contract↔code invariant
+// MARK: - Load: seed the build stamp, audit the source
 //
-// `SZStore.editPorts` can mark a node for rebuild because it sees the edit. A project on disk carries only the
-// RESULT of that edit, so `load` re-derives what it can by auditing each built node's source against its
-// contract. This is what catches drift that predates the fix, or a hand-edited file.
+// A project on disk carries the RESULT of its edits, not the edits, and the rebuild reason is derived from the
+// build stamp. Load seeds a stamp for a built node that has none ("trust the build") — so a bundle written
+// before stamps existed opens Ready — and audits each built node's source against its contract for the one
+// fault a static scan can prove (setting the ephemeral `sourceMismatch`).
 
 @MainActor
-private func projectWithSource(contract: SZNodeContract, source: String,
-                              rebuildReason: SZRebuildReason? = nil) throws -> (url: URL, id: SZNodeID) {
+private func projectWithSource(contract: SZNodeContract, source: String, prompt: String? = nil,
+                              buildStamp: SZBuildStamp? = nil, legacyReason: String? = nil) throws -> (url: URL, id: SZNodeID) {
     let id = SZNodeID()
     var project = SZProject(name: "Drifted")
     project.graph = SZGraph(nodes: [
-        SZNode(id: id, kind: .generated, title: contract.title, contract: contract,
-               position: SZPoint(x: 0, y: 0), rebuildReason: rebuildReason)
+        SZNode(id: id, kind: .generated, title: contract.title, prompt: prompt, contract: contract,
+               position: SZPoint(x: 0, y: 0), buildStamp: buildStamp)
     ])
     let dir = FileManager.default.temporaryDirectory
         .appending(path: "SZLoadAudit-\(UUID().uuidString)")
         .appending(path: "Drifted.subz")
     try SZProjectIO.save(project, to: dir)
     try source.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id), atomically: true, encoding: .utf8)
+    if let legacyReason {
+        // A pre-stamp `project.json` stored the reason on the node. Splice it back in as the old writer would have.
+        let file = dir.appending(path: "project.json")
+        var doc = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+        var proj = doc["project"] as! [String: Any]
+        var graph = proj["graph"] as! [String: Any]
+        var nodes = graph["nodes"] as! [[String: Any]]
+        nodes[0]["rebuildReason"] = legacyReason
+        graph["nodes"] = nodes; proj["graph"] = graph; doc["project"] = proj
+        try JSONSerialization.data(withJSONObject: doc).write(to: file)
+    }
     return (dir, id)
 }
+
+private let kaleidoscopeContract = SZNodeContract(
+    title: "Kaleidoscope", sfSymbol: "sparkles", summary: "",
+    inputs: [SZPort(name: "input", type: .texture), SZPort(name: "audioDrive", type: .float)],
+    outputs: [SZPort(name: "output", type: .texture)])
+private let passthroughSource = """
+    final class Node: SZNode {
+        func update(_ ctx: SZFrameContext) {
+            _ = ctx.inputTexture("input")
+            ctx.outputTexture("output")
+        }
+    }
+    """
 
 /// The reported bug, exactly: the Director re-sent the Kaleidoscope's contract with only `input` + a new
 /// `audioDrive`, deleting `segments`/`spin`/`twist` — while `Node.swift` went on reading them. Nothing noticed,
@@ -210,10 +247,7 @@ private func projectWithSource(contract: SZNodeContract, source: String,
 @MainActor
 @Test func loadMarksRebuildWhenCodeReadsAPortTheContractDropped() throws {
     let (url, id) = try projectWithSource(
-        contract: SZNodeContract(title: "Kaleidoscope", sfSymbol: "sparkles", summary: "",
-                                 inputs: [SZPort(name: "input", type: .texture),
-                                          SZPort(name: "audioDrive", type: .float)],
-                                 outputs: [SZPort(name: "output", type: .texture)]),
+        contract: kaleidoscopeContract,
         source: """
         final class Node: SZNode {
             func update(_ ctx: SZFrameContext) {
@@ -229,9 +263,11 @@ private func projectWithSource(contract: SZNodeContract, source: String,
     let node = try SZProjectIO.load(from: url).graph.node(id: id)!
     // Classified by CONDITION: the code names ports that do not exist, so those reads resolve to nil every
     // frame. That is a fault, not an unfinished feature — the card goes red, not amber.
+    #expect(node.sourceMismatch)
     #expect(node.rebuildReason == .sourceMismatch)
     #expect(node.kind == .generated)   // still has a build, still renders — it is not un-built
     #expect(node.needsImplementation)
+    #expect(node.buildStamp == .trusting(contract: kaleidoscopeContract, prompt: nil))   // seeded regardless
 }
 
 /// The loop guard. `SZPortBindingAudit` is a string-literal scan, so a node that builds a port name at runtime —
@@ -265,14 +301,7 @@ private func projectWithSource(contract: SZNodeContract, source: String,
         contract: SZNodeContract(title: "Passthrough", sfSymbol: "circle", summary: "",
                                  inputs: [SZPort(name: "input", type: .texture)],
                                  outputs: [SZPort(name: "output", type: .texture)]),
-        source: """
-        final class Node: SZNode {
-            func update(_ ctx: SZFrameContext) {
-                _ = ctx.inputTexture("input")
-                ctx.outputTexture("output")
-            }
-        }
-        """)
+        source: passthroughSource)
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
 
     let node = try SZProjectIO.load(from: url).graph.node(id: id)!
@@ -280,13 +309,64 @@ private func projectWithSource(contract: SZNodeContract, source: String,
     #expect(node.needsImplementation == false)
 }
 
-/// A `project.json` written before `needsRebuild` existed must decode, not throw.
-@Test func nodeDecodesWithoutTheNeedsRebuildKey() throws {
+/// The absorbing-state bug: a bundle whose `project.json` still carries a latched reason (nothing on that
+/// version ever cleared `sourceMismatch`) — with a source that audits clean. The stored field is ignored, the
+/// stamp is seeded from the current contract + prompt, and the node opens Ready.
+@MainActor
+@Test func legacyLatchedReasonIsIgnoredAndTheNodeOpensReady() throws {
+    let (url, id) = try projectWithSource(
+        contract: SZNodeContract(title: "Plasma", sfSymbol: "circle", summary: "",
+                                 inputs: [SZPort(name: "input", type: .texture)],
+                                 outputs: [SZPort(name: "output", type: .texture)]),
+        source: passthroughSource, prompt: "Plasma over the input.", legacyReason: "sourceMismatch")
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+    let node = try SZProjectIO.load(from: url).graph.node(id: id)!
+    #expect(node.buildStamp?.prompt == "Plasma over the input.")
+    #expect(node.buildStamp?.portSurface == node.contract?.portSurface)
+    #expect(node.rebuildReason == nil)
+    #expect(node.needsImplementation == false)
+}
+
+/// The same legacy bundle, but the fault is REAL: the audit still runs at load and flags it — seeding trusts the
+/// build's surface, not its correctness.
+@MainActor
+@Test func legacyBundleWithAGenuineMismatchStillFlagsIt() throws {
+    let (url, id) = try projectWithSource(
+        contract: SZNodeContract(title: "Plasma", sfSymbol: "circle", summary: "",
+                                 outputs: [SZPort(name: "output", type: .texture)]),
+        source: passthroughSource,   // reads "input", which this contract no longer declares
+        legacyReason: "contractChanged")
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+    let node = try SZProjectIO.load(from: url).graph.node(id: id)!
+    #expect(node.rebuildReason == .sourceMismatch)
+    #expect(node.buildStamp != nil)
+}
+
+/// A stamped node is compared, not re-seeded: a contract that outgrew its build reads `.contractChanged` on
+/// open even though the source audits clean (the new port is simply unimplemented).
+@MainActor
+@Test func loadKeepsAnExistingStampAndDerivesFromIt() throws {
+    let (url, id) = try projectWithSource(
+        contract: kaleidoscopeContract, source: passthroughSource, prompt: "k",
+        buildStamp: SZBuildStamp(portSurface: [.init(direction: .input, name: "input", type: .texture),
+                                               .init(direction: .output, name: "output", type: .texture)], prompt: "k"))
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+    let node = try SZProjectIO.load(from: url).graph.node(id: id)!
+    #expect(node.rebuildReason == .contractChanged)
+    #expect(node.buildStamp?.portSurface.count == 2)   // not overwritten by the seed
+}
+
+/// A `project.json` written before the stamp existed must decode, not throw — and a stored reason is not read.
+@Test func nodeDecodesWithoutTheStampAndIgnoresAStoredReason() throws {
     let json = """
     {"id":"\(UUID().uuidString)","kind":"generated","title":"Legacy","sfSymbol":"circle",
-     "position":{"x":0,"y":0}}
+     "position":{"x":0,"y":0},"rebuildReason":"sourceMismatch"}
     """
     let node = try JSONDecoder().decode(SZNode.self, from: Data(json.utf8))
     #expect(node.rebuildReason == nil)
+    #expect(node.buildStamp == nil)
     #expect(node.kind == .generated)
 }

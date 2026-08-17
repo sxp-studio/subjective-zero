@@ -96,19 +96,6 @@ public enum SZPortBindingAudit {
         return PromoteAudit(contract: contract, result: result, mergeConflicts: conflicts)
     }
 
-    /// Classify a built node's source against its contract, for `SZNode.rebuildReason`.
-    ///
-    /// ONLY `errors` (the code names a port the contract lacks) may be inferred from the files. The mirror
-    /// case — a contract port the code never names — cannot: this is a string-literal scan, so a node that
-    /// builds a port name at runtime trips it. `NodeLibrary/audio-bands` calls `ctx.setOutputFloat(kBandNames[b], …)`
-    /// and would look permanently dirty. That case is knowable only at the moment the contract is edited, which
-    /// is why `SZStore.editPorts` records `.contractChanged` there and nothing re-derives it later.
-    ///
-    /// Returns nil when the source satisfies the contract as far as a static scan can tell.
-    public static func rebuildReason(contract: SZNodeContract, source: String) -> SZRebuildReason? {
-        audit(contract: contract, source: source).errors.isEmpty ? nil : .sourceMismatch
-    }
-
     /// Blank out `/* … */` and `// …` comments so the scan sees code only. A heuristic: a `//` or `/*`
     /// *inside* a string literal could over-strip, but that only risks a MISSED reference (a lost warning
     /// or an undetected mismatch) — never a false hard error, which is the failure mode we must avoid.

@@ -297,11 +297,12 @@ private func loadedStore() -> SZStore {
 private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZPort] = []) -> SZNodeID {
     let id = store.addPromptNode(prompt: nil, position: SZPoint(x: 0, y: 0))!
     store.editPorts(node: id, .init(upsertInputs: inputs, upsertOutputs: outputs))
-    // `promoteStagedNode` (the only producer of a built node) lives in SZApp, out of reach here.
+    // `promoteStagedNode` (the only producer of a built node) lives in SZApp, out of reach here: flip the kind
+    // and stamp the build with what it "compiled" against, as a promote would.
     store.mutate { p in
         guard let i = p.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
         p.graph.nodes[i].kind = .generated
-        p.graph.nodes[i].rebuildReason = nil
+        p.graph.nodes[i].buildStamp = .trusting(contract: p.graph.nodes[i].contract, prompt: p.graph.nodes[i].prompt)
     }
     return id
 }
@@ -328,8 +329,8 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
     let result = store.editPorts(node: id, .init(upsertInputs: [SZPort(name: "audioDrive", type: .float)]))
     #expect(result.raisedRebuild)
     let node = store.project!.graph.node(id: id)!
-    // The store cannot read Node.swift, so it records the optimistic reason; the host upgrades it after
-    // auditing the live source.
+    // Derived: the surface moved off the build stamp. The store cannot read Node.swift, so whether the code
+    // merely lags or contradicts the contract is the host's audit to say.
     #expect(node.rebuildReason == .contractChanged)
     // The black-frame guard: `renderableSubgraph` keys on `kind`, so a rebuild must never flip it back.
     #expect(node.kind == .generated)
@@ -344,6 +345,19 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
     let result = store.editPorts(node: id, .init(removeInputs: ["level"],
                                                  upsertOutputs: [SZPort(name: "level", type: .float)]))
     #expect(result.raisedRebuild)
+}
+
+/// Derived, not latched: undoing the edit puts the surface back on the stamp, and the node reads clean again
+/// without a rebuild — the flag has no way to outlive its cause.
+@MainActor
+@Test func revertingAPortEditHealsWithoutARebuild() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "input", type: .texture)])
+    #expect(store.editPorts(node: id, .init(upsertInputs: [SZPort(name: "audioDrive", type: .float)])).raisedRebuild)
+    #expect(store.project!.graph.node(id: id)!.needsRebuild)
+    let revert = store.editPorts(node: id, .init(removeInputs: ["audioDrive"]))
+    #expect(revert.raisedRebuild == false)
+    #expect(store.project!.graph.node(id: id)!.needsRebuild == false)
 }
 
 @MainActor
@@ -390,9 +404,9 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
     let store = loadedStore()
     let id = generatedNode(store, inputs: [SZPort(name: "input", type: .texture)])
     store.updateNode(id: id, prompt: "same")
-    store.mutate { p in   // discharge the first raise, as a promote would
+    store.mutate { p in   // re-stamp the build against the new brief, as a promote would
         guard let i = p.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
-        p.graph.nodes[i].rebuildReason = nil
+        p.graph.nodes[i].buildStamp = .trusting(contract: p.graph.nodes[i].contract, prompt: "same")
     }
     let result = store.updateNode(id: id, prompt: "same")
     #expect(result.raisedRebuild == false)
@@ -405,7 +419,7 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
     let id = generatedNode(store, inputs: [SZPort(name: "input", type: .texture)])
     store.mutate { p in   // the host's audit found a real fault
         guard let i = p.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
-        p.graph.nodes[i].rebuildReason = .sourceMismatch
+        p.graph.nodes[i].sourceMismatch = true
     }
     let result = store.updateNode(id: id, prompt: "new intent")
     #expect(result.raisedRebuild == false)   // already awaiting a rebuild — no new work raised

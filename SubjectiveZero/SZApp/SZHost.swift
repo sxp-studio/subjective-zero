@@ -109,12 +109,12 @@ final class SZHost {
     /// and `rollbackGraphOp` clears the shared `hiddenPieces` bag wholesale, so a second concurrent op
     /// would take the first one's pieces down with it. `splitNode`/`mergeNodes` refuse while one is staged.
     internal(set) var pendingGraphOp: SZPendingGraphOp?
-    /// The prompt each node's coding agent was briefed WITH — what `promoteStagedNode` holds it to.
+    /// The prompt each node's coding agent was briefed WITH — what `promoteStagedNode` stamps the build with.
     ///
-    /// A promote proves the source matches the CONTRACT; it proves nothing about the prompt. So if the intent
-    /// moved after the agent was dispatched (the Director's mid-run `ui_update_node` re-brief, or a user edit),
-    /// the node must stay dirty — otherwise it reads clean and current while implementing what the prompt used
-    /// to say. See `SZRebuildReason.afterPromote`.
+    /// A promote proves the source matches the CONTRACT; it proves nothing about the prompt. So the stamp
+    /// records the brief the agent actually built, and if the intent moved after dispatch (the Director's
+    /// mid-run `ui_update_node` re-brief, or a user edit) the node derives `.intentChanged` — otherwise it
+    /// would read clean and current while implementing what the prompt used to say.
     ///
     /// Written in `streamCodingAgent`, NOT snapshotted at `startRun`: the Director decomposes first and each
     /// brief is composed from the live graph after that, so a `startRun` snapshot would flag a
@@ -894,15 +894,6 @@ final class SZHost {
         store.mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
             project.graph.nodes[i].kind = .generated
-            // The one place a rebuild is discharged — but CONDITIONALLY. This source was just compiled against
-            // this contract, so the surface change that raised the flag is honoured. It says nothing about the
-            // PROMPT: if the intent moved after this agent was dispatched (a Director re-brief mid-run, a user
-            // edit), the code implements what the prompt used to say and the node must stay dirty. Comparing
-            // the briefed prompt rather than the flag also catches the case where the raise was suppressed
-            // because a reason was already present. See `SZRebuildReason.afterPromote`.
-            project.graph.nodes[i].rebuildReason = SZRebuildReason.afterPromote(
-                existing: project.graph.nodes[i].rebuildReason,
-                dispatchedPrompt: dispatchPrompts[id], currentPrompt: project.graph.nodes[i].prompt)
             if let stagedContract {
                 // MERGE the authored contract into the node's LIVE boundary rather than letting either side
                 // replace the other (`SZNodeContract.mergingAuthored`): the live contract carries the typed
@@ -920,6 +911,15 @@ final class SZHost {
                 project.graph.nodes[i].title = contract.title
                 project.graph.nodes[i].sfSymbol = contract.sfSymbol
             }
+            // The build stamp — the ONE place it is written from a real compile: what this source was compiled
+            // against (the merged surface above) and the brief the agent was actually given. `rebuildReason`
+            // derives from it: the surface it built against is honoured; a prompt that moved after dispatch
+            // (a Director re-brief mid-run, a user edit) reads `.intentChanged`, because the code implements
+            // what the prompt used to say. No dispatch record (a node-scoped chat turn, an off-run compile)
+            // → the current prompt is the brief.
+            project.graph.nodes[i].buildStamp = SZBuildStamp(
+                portSurface: project.graph.nodes[i].contract?.portSurface ?? [],
+                prompt: dispatchPrompts[id] ?? project.graph.nodes[i].prompt)
             // First card for this node → show it (an explicit `.none` the user chose earlier stands;
             // nil / auto-preview flips to custom). Part of the promote's own store write — it is the
             // run's work, so it does not go through the user/agent fence like `applyNodeBody` would.
@@ -945,6 +945,7 @@ final class SZHost {
         watchNodeSources(in: projectURL)          // a newly-generated node becomes hot-reloadable
         if cardArrived { refreshPreviewStream() } // the card host mounts the body flipped above
         nodeAgentState[id]?.errorDetail = nil     // a successful promote clears any prior failure detail
+        classifyRebuild(node: id)                 // re-audit the promoted source: mismatch is derived, never latched
         // The staged folder has done its job — drop it so a later compile can't re-promote stale bytes
         // (it must re-stage). Failed promotes above keep it for inspection; the rest of `.staging/`
         // (instance.lock, message-queue.json) is not ours to touch.
@@ -981,7 +982,8 @@ final class SZHost {
             if let pi = contract.inputs.firstIndex(where: { $0.name == port }) { contract.inputs[pi].def = value }
         }
         var node = SZNode(kind: .generated, title: contract.title, sfSymbol: contract.sfSymbol,
-                          contract: contract, position: position)
+                          contract: contract, position: position,
+                          buildStamp: .trusting(contract: contract, prompt: nil))   // a shipped build: trusted as-is
         let live = projectURL.appending(path: "nodes/\(node.id.uuidString)")
         try fm.createDirectory(at: live, withIntermediateDirectories: true)
         try fm.copyItem(at: sourceURL, to: live.appending(path: "Node.swift"))
@@ -1476,6 +1478,7 @@ final class SZHost {
                     try runtime.loadProject(at: url)                 // fallback: node not yet in live graph
                 }
                 nodeAgentState[id] = nil                 // → derived .ready
+                classifyRebuild(node: id)                // the hand edit may have opened or closed a port mismatch
                 status = "hot-reloaded \(id.uuidString.prefix(8))"
                 print("[SZHost] hot-reloaded node \(id.uuidString.prefix(8))")
             } catch {

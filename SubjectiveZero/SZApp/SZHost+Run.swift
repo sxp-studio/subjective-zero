@@ -932,12 +932,10 @@ extension SZHost {
             guard node.needsImplementation else { implemented += 1; continue }      // promoted → built & current
             let phase = nodeAgentState[id]?.phase ?? .idle
             // Built, but its intent moved WHILE the agent was implementing it — not a
-            // failure: narrate the truth and let the amber Outdated pill carry it. Gate on
-            // the SAME evidence promote used, not the flag alone; an agent that reported a
-            // real problem always wins.
-            let rebriefed = SZRebuildReason.afterPromote(
-                existing: node.rebuildReason, dispatchedPrompt: dispatchPrompts[id],
-                currentPrompt: node.prompt) == .intentChanged
+            // failure: narrate the truth and let the amber Outdated pill carry it. The reason
+            // derives from the build stamp promote wrote (the brief the agent was given vs the
+            // prompt now); an agent that reported a real problem always wins.
+            let rebriefed = node.rebuildReason == .intentChanged
             if node.kind == .generated, rebriefed, phase != .error, phase != .needsInput {
                 implemented += 1
                 narrateDirector("\(node.title) was built, but its prompt changed mid-run — "

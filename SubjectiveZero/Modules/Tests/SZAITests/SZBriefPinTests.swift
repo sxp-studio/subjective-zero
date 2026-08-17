@@ -101,7 +101,8 @@ private let summaryVariantsGraph = SZGraph(
                    title: "Levels", sfSymbol: "slider.horizontal.3", summary: "Adjusts levels.",
                    inputs: [SZPort(name: "input", type: .texture)],
                    outputs: [SZPort(name: "output", type: .texture, display: true)]),
-               position: SZPoint(x: 1, y: 0), rebuildReason: .contractChanged),
+               position: SZPoint(x: 1, y: 0),
+               buildStamp: SZBuildStamp(portSurface: [], prompt: "Adjust levels.")),   // surface off the stamp → NEEDS REBUILD
     ])
 
 /// The recorder's fixed reconcile inputs.

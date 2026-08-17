@@ -284,11 +284,14 @@ public struct SZNodeContract: Codable, Equatable, Sendable {
     /// One port as generated code sees it: which side it's on, what it's called, what type it carries. Direction
     /// is part of the identity — a `float` named `x` read as an input and one written as an output are different
     /// obligations on the code, so a set that ignored direction would let a port move side without registering.
-    public struct PortSignature: Hashable, Sendable {
-        public enum Direction: Hashable, Sendable { case input, output }
+    public struct PortSignature: Hashable, Codable, Sendable {
+        public enum Direction: String, Hashable, Codable, Sendable { case input, output }
         public var direction: Direction
         public var name: String
         public var type: SZPortType
+        public init(direction: Direction, name: String, type: SZPortType) {
+            self.direction = direction; self.name = name; self.type = type
+        }
     }
 
     /// The part of the contract that generated code must satisfy, and therefore the only part whose change

@@ -125,7 +125,7 @@ extension SZStore {
     public struct SZNodeUpdateResult: Equatable, Sendable {
         /// The node existed and the edit applied.
         public var found: Bool
-        /// The prompt (intent) moved on a node that already had a build, so it must be regenerated.
+        /// This edit turned a clean built node dirty (its intent moved off the build stamp).
         public var raisedRebuild: Bool
 
         /// Public so a caller outside SZCore can report an outcome it settled WITHOUT reaching the store —
@@ -141,13 +141,13 @@ extension SZStore {
 
     /// Update a node's presentation / identity in place (nil = leave that field unchanged).
     ///
-    /// Deliberately CANNOT touch the port surface — that goes through `editPorts`, which is the only path that
-    /// diffs the surface and can therefore raise `.contractChanged`. A whole-contract `PUT` here is what silently
-    /// dropped a node's controls: a caller that re-sent the contract while omitting ports deleted them.
+    /// Deliberately CANNOT touch the port surface — that goes through `editPorts`, the one editorial path for a
+    /// node's typed I/O. A whole-contract `PUT` here is what silently dropped a node's controls: a caller that
+    /// re-sent the contract while omitting ports deleted them.
     ///
     /// A `prompt` change DOES invalidate a build, though: the code still renders, but it implements what the
-    /// prompt used to say. Raised here — the one shared mutation path for the editor's inline prompt commit and
-    /// `ui_update_node` — on the same terms as `editPorts`' surface check below.
+    /// prompt used to say. Nothing is raised here — `SZNode.rebuildReason` derives `.intentChanged` from the
+    /// build stamp — but `raisedRebuild` reports whether THIS edit made the node dirty, so a run can pick it up.
     @discardableResult
     public func updateNode(
         id: SZNodeID,
@@ -165,15 +165,9 @@ extension SZStore {
             if let title { project.graph.nodes[i].title = title }
             if let sfSymbol { project.graph.nodes[i].sfSymbol = sfSymbol }
             if let prompt {
-                // Intent moved on a built node → it needs regenerating. Mirror of the port-surface check in
-                // `editPorts`: only a real change, only on a built node, and never downgrading a reason
-                // already raised (`.sourceMismatch` is the stronger claim).
-                let node = project.graph.nodes[i]
-                if prompt != node.prompt, node.kind == .generated, node.rebuildReason == nil {
-                    project.graph.nodes[i].rebuildReason = .intentChanged
-                    result.raisedRebuild = true
-                }
+                let wasDirty = project.graph.nodes[i].needsRebuild
                 project.graph.nodes[i].prompt = prompt
+                result.raisedRebuild = !wasDirty && project.graph.nodes[i].needsRebuild
             }
 
             // `summary` and `permissions` live inside the contract, so a node that has none yet needs one
@@ -220,7 +214,7 @@ extension SZStore {
     public struct SZPortEditResult: Equatable, Sendable {
         /// The node existed and the edit applied.
         public var found: Bool
-        /// The port surface moved on a node that already had a build, so it must be regenerated.
+        /// This edit turned a clean built node dirty (its surface moved off the build stamp).
         public var raisedRebuild: Bool
         /// Data edges dropped because a port they named vanished or no longer type-matches.
         public var droppedConnections: [SZConnectionID]
@@ -228,8 +222,8 @@ extension SZStore {
         public var clearedRenderEndpoint: Bool
     }
 
-    /// Apply a port delta to a node's contract, prune whatever the new surface invalidated, and raise
-    /// `needsRebuild` if the surface actually moved on a node that already has a build.
+    /// Apply a port delta to a node's contract and prune whatever the new surface invalidated. On a node that
+    /// already has a build, `needsRebuild` follows from the surface moving off the build stamp (derived).
     ///
     /// `upsert` matches by name (replacing that port wholesale, so a retype lands here); `remove` deletes by name.
     /// A node with no contract yet gets one synthesized from its identity — this is how the Director declares a
@@ -250,25 +244,19 @@ extension SZStore {
 
             var contract = node.contract ?? SZNodeContract(
                 title: node.title, sfSymbol: node.sfSymbol, summary: node.prompt ?? node.title)
-            let before = node.contract?.portSurface ?? []
 
             Self.apply(edit.removeInputs, edit.upsertInputs, to: &contract.inputs)
             Self.apply(edit.removeOutputs, edit.upsertOutputs, to: &contract.outputs)
 
             project.graph.nodes[i].contract = contract
 
-            // A surface change invalidates a build. `kind` is NOT touched: the node keeps rendering its existing
-            // source until the fleet regenerates it. Flipping it to `.prompt` would drop it from
-            // `renderableSubgraph` and black it out.
-            //
-            // `.contractChanged` is the optimistic classification — the contract moved, the code hasn't caught
-            // up. Whether the code is merely *behind* the contract or actually *contradicts* it (naming ports
-            // that no longer exist) takes reading the source, which the store cannot do. The host re-audits
-            // after this returns and upgrades to `.sourceMismatch` when warranted.
-            if contract.portSurface != before, node.kind == .generated, node.rebuildReason == nil {
-                project.graph.nodes[i].rebuildReason = .contractChanged
-                result.raisedRebuild = true
-            }
+            // A surface change invalidates a build — derived by `SZNode.rebuildReason` from the surface moving
+            // off the build stamp, so undoing the edit heals it. `kind` is NOT touched: the node keeps
+            // rendering its existing source until the fleet regenerates it (flipping it to `.prompt` would
+            // drop it from `renderableSubgraph` and black it out). Whether the code is merely *behind* the
+            // contract or *contradicts* it (naming ports that no longer exist) takes reading the source,
+            // which the store cannot do; the host re-audits after this returns.
+            result.raisedRebuild = !node.needsRebuild && project.graph.nodes[i].needsRebuild
 
             // Prune every data edge on this node that the new surface no longer supports — a vanished port on
             // this end, or a type that stopped matching the far end after a retype.
@@ -321,6 +309,13 @@ extension SZStore {
                 contract.outputs.append(output)
             }
             project.graph.nodes[ni].contract = contract
+            // The build implements this output by construction (table-generic code), so the stamp's surface
+            // follows the contract — otherwise the derived reason would read the new port as unbuilt.
+            if let stamped = project.graph.nodes[ni].buildStamp?.portSurface {
+                project.graph.nodes[ni].buildStamp?.portSurface = Self.derivedSurface(
+                    stamped, removing: output.name,
+                    adding: .init(direction: .output, name: output.name, type: output.type))
+            }
             if let target {
                 project.graph.connections.removeAll { $0.kind == .data && $0.to == target }
                 project.graph.connections.append(SZConnection(
@@ -348,6 +343,9 @@ extension SZStore {
             contract.inputs[ti].def = .string(tableJSON)
             contract.outputs.removeAll { $0.name == name }
             project.graph.nodes[ni].contract = contract
+            if let stamped = project.graph.nodes[ni].buildStamp?.portSurface {
+                project.graph.nodes[ni].buildStamp?.portSurface = Self.derivedSurface(stamped, removing: name, adding: nil)
+            }
             let source = SZPortRef(node: id, port: name)
             project.graph.connections.removeAll { $0.kind == .data && $0.from == source }
             applied = true
@@ -355,19 +353,12 @@ extension SZStore {
         return applied
     }
 
-    /// Set (or clear) why a node must be rebuilt. The host owns this classification because deciding between
-    /// `.contractChanged` and `.sourceMismatch` means reading the node's `Node.swift` off disk.
-    /// `promoteStagedNode` clears it — the one place a rebuild is discharged, and conditionally: it keeps
-    /// `.intentChanged` when the prompt moved after the agent was briefed (`SZRebuildReason.afterPromote`).
-    @discardableResult
-    public func setRebuildReason(node id: SZNodeID, _ reason: SZRebuildReason?) -> Bool {
-        var found = false
-        mutate { project in
-            guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
-            found = true
-            project.graph.nodes[i].rebuildReason = reason
-        }
-        return found
+    /// A stamp surface with the derived output `name` swapped for `adding` (nil = dropped).
+    private static func derivedSurface(_ surface: Set<SZNodeContract.PortSignature>, removing name: String,
+                                       adding: SZNodeContract.PortSignature?) -> Set<SZNodeContract.PortSignature> {
+        var s = surface.filter { !($0.direction == .output && $0.name == name) }
+        if let adding { s.insert(adding) }
+        return s
     }
 
     /// Remove by name, then upsert by name (append if new, replace in place if it exists — so a port keeps its

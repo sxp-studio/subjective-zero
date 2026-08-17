@@ -81,5 +81,13 @@ private var promptSampleURL: URL {
         .appending(path: "SZSample-\(UUID().uuidString)").appending(path: "copy.subz")
     defer { try? FileManager.default.removeItem(at: copy.deletingLastPathComponent()) }
     try SZProjectIO.save(project, to: copy)
+    // `save` writes project.json + contracts, never Node.swift — carry the sources over too, so the copy's
+    // load-time source audit (`sourceMismatch` is derived from the source on disk, never persisted) sees
+    // the same files.
+    for node in project.graph.nodes {
+        let src = SZProjectIO.nodeSourceURL(projectURL: sampleURL, nodeID: node.id)
+        guard FileManager.default.fileExists(atPath: src.path) else { continue }
+        try FileManager.default.copyItem(at: src, to: SZProjectIO.nodeSourceURL(projectURL: copy, nodeID: node.id))
+    }
     #expect(try SZProjectIO.load(from: copy) == project)
 }
