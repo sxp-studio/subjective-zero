@@ -47,7 +47,8 @@ private func node(_ title: String, kind: SZNodeKind, rebuildReason: SZRebuildRea
 /// The summary must say otherwise, or the Director will not queue the rebuild it just caused.
 @Test func theSummaryFlagsANodeWhoseContractOutranItsBuild() {
     let drifted = node("Kaleidoscope", kind: .generated, rebuildReason: .contractChanged)
-    #expect(SZDirectorPrompt.graphSummary(SZGraph(nodes: [drifted])).contains("NEEDS REBUILD"))
+    // The derived reason names itself, so the Director reads WHICH kind of drift — not a generic flag.
+    #expect(SZDirectorPrompt.graphSummary(SZGraph(nodes: [drifted])).contains("NEEDS REBUILD — contractChanged"))
 
     let clean = node("Kaleidoscope", kind: .generated)
     #expect(!SZDirectorPrompt.graphSummary(SZGraph(nodes: [clean])).contains("NEEDS REBUILD"))
@@ -139,4 +140,16 @@ private func graphWithBlank() -> (SZGraph, SZNode) {
     #expect(out.contains(blankNodeRule))
     #expect(out.contains(blankNodeHandsOff))
     #expect(out.contains("\(blank.id.uuidString)` \"New Node\" — prompt, no contract yet — prompt: (empty —"))
+}
+
+/// The audit-semantics section is agent-facing truth: `agent_docs_read {topic:"node-contract"}` (and the
+/// cold-start brief that embeds it) must state what the port audit compares — names, nothing else — and the
+/// three derived rebuild reasons, so no agent theorizes about byte-level file equality again.
+@Test func theContractDocStatesWhatTheAuditComparesAndTheThreeReasons() {
+    let doc = SZAgentDocs.read("node-contract") ?? ""
+    for needle in ["sourceMismatch", "contractChanged", "intentChanged", "rebuildDetail",
+                   "The audit compares the port names", "can never cause or clear a mismatch",
+                   "merges per port, by name"] {
+        #expect(doc.contains(needle), "node-contract.md lost: \(needle)")
+    }
 }

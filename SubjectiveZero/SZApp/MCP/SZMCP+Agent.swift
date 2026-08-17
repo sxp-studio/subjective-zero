@@ -11,8 +11,8 @@ import SZRuntime
 extension SZHostBridge {
     nonisolated static var agentToolDefinitions: [[String: Any]] {
         [
-            tool("agent_read_graph", "Return the full project graph (nodes with contracts, connections, render endpoint) as JSON."),
-            tool("agent_read_node", "Return one node (title, kind, prompt, contract) as JSON.",
+            tool("agent_read_graph", "Return the full project graph (nodes with contracts, connections, render endpoint) as JSON. A built node that needs a rebuild carries `rebuildReason` (contractChanged | intentChanged | sourceMismatch) and `rebuildDetail` (the port audit's offending port names, or the ports off the build stamp)."),
+            tool("agent_read_node", "Return one node (title, kind, prompt, contract, hasCard) as JSON, plus `rebuildReason` / `rebuildDetail` when it needs a rebuild — the audit's port names, so you reconcile those instead of guessing.",
                  properties: ["node": ["type": "string", "description": "node id (UUID)"]]),
             tool("agent_library_index", "The built-in node library, grouped by category: one line per node saying what it does. Cheap — read it whole and decide for yourself whether any node does YOUR node's job. Nothing is ranked or filtered; a similar name is not a match. Fetch at most once per turn (it does not change), and not at all if your brief already includes it."),
             tool("agent_library_card", "Read one library node's card (CARD.md) — reuse guidance, gotchas, and setup notes — to confirm or reject it as a reference without fetching full source. When the node is already the likely reference, request its card and source together in one round.",
@@ -118,7 +118,14 @@ extension SZHostBridge {
 
     private func agentReadGraph() throws -> String {
         guard let project = host.store.project else { throw SZMCPError.message("no project loaded") }
-        return encodeJSON(project.graph)
+        let encoded = encodeJSON(project.graph)
+        guard var json = try? JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+              let nodes = json["nodes"] as? [[String: Any]] else { return encoded }
+        json["nodes"] = nodes.map { node in
+            guard let id = (node["id"] as? String).flatMap(SZNodeID.init(uuidString:)) else { return node }
+            return annotatingRebuild(node, id: id)
+        }
+        return SZJSONRPC.encode(json)
     }
 
     private func agentReadNode(_ arguments: [String: Any]) throws -> String {
@@ -129,7 +136,18 @@ extension SZHostBridge {
             return encodeJSON(node)
         }
         json["hasCard"] = host.nodeHasCardSource(id)
-        return SZJSONRPC.encode(json)
+        return SZJSONRPC.encode(annotatingRebuild(json, id: id))
+    }
+
+    /// `rebuildReason` is derived, not encoded with the node, and its evidence is host state — both ride on the
+    /// agent surface as `rebuildReason` / `rebuildDetail` (the audit's port lines, or the ports off the build
+    /// stamp), so an agent sees WHY a node is flagged instead of guessing at the files. Absent when clean.
+    private func annotatingRebuild(_ json: [String: Any], id: SZNodeID) -> [String: Any] {
+        guard let reason = host.store.project?.graph.node(id: id)?.rebuildReason else { return json }
+        var json = json
+        json["rebuildReason"] = reason.rawValue
+        if let detail = host.rebuildDetail(node: id) { json["rebuildDetail"] = detail }
+        return json
     }
 
     /// Scan the repo's `NodeLibrary/` for node folders (a `node-contract.json` inside) and assemble the

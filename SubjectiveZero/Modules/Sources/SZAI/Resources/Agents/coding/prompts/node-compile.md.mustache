@@ -27,6 +27,11 @@ an `output` texture). Never remove or retype a declared port to make room.
 
 {{boundary}}
 
+The port lines above omit `ui` ranges on purpose: the promote MERGES your contract into the live one by port
+name — a port that is already live keeps its live `ui` and current `default` (the user's value), ports you add
+are appended, ports you omit are kept — so give every scalar you add a sensible `ui`/`default` and never spend
+a turn matching a range you were not shown; you cannot overwrite the user's.
+
 CRITICAL: read every scalar input (bool/float/vector/color) LIVE inside `update(ctx)` exactly as shown
 above, every frame — NEVER hardcode its value. A hardcoded `let mirror = false` makes the user's toggle a
 dead control. `ctx.inputFloat(name)` returns the current UI value each frame; a `bool` input reads as

@@ -9,6 +9,12 @@ needsInput: the contract's `mode` options are ambiguous — which value is the d
 ## A message from the Director — follow this
 Use Rec.709 luma weights.
 
+If the blocker is a port-audit line ("Node.swift reads input port … but node-contract.json declares no such
+input"), that IS the whole finding: the audit compares the port NAMES your code passes to the `ctx` accessors
+against the names the contract declares — never `ui` ranges, defaults, port order or file bytes, and none of
+those can clear it. Declare the named port or drop that read/write (keep the node's behaviour), re-stage and
+compile; do not re-emit an unchanged file hoping the state resets — a clean promote clears it by itself.
+
 ## The current contract — the typed boundary you must honor
 The Director may have ADJUSTED this since your last attempt. Conform to THIS boundary exactly (declare
 the ports with these names/types/`ui`/`default`s, and read every scalar input LIVE in `update(ctx)`):
@@ -18,6 +24,10 @@ Inputs:
 
 Outputs:
 - `output` — texture — fill with `ctx.outputTexture("output")`
+
+The port lines above omit `ui` ranges on purpose: the promote MERGES your contract into the live one by port
+name — a live port keeps its live `ui` and current `default` (the user's value), ports you add are appended,
+ports you omit are kept — so you cannot overwrite the user's ranges, and never need to guess them.
 
 ## What the node must do
 Convert the incoming camera texture to grayscale (per-pixel luminance).

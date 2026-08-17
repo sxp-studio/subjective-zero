@@ -84,3 +84,37 @@ the card shows). Omit the block entirely for a node without a `Card.swift`. See 
 Notes: `min`/`max`/`step` (inside `ui`) only apply to `slider`/numeric kinds. `colorRGB/RGBA` are distinct
 from `float3/4` purely by their color-well UI. **Never hardcode an input you declared** — read it live each
 frame, or the user's control is a dead knob. Full runtime ABI: `agent_docs_read { "topic": "node-abi" }`.
+
+## What a promote keeps — the live contract merges with yours
+
+`agent_compile_node` never replaces the live contract with yours; it **merges per port, by name**. A port that
+is already live keeps its live `type`, `ui` and current `default` (that default is the user's slider value);
+ports you add are appended; ports you omit are kept (removing a port is `ui_edit_ports`' job). So declare a
+sensible `ui`/`default` for every scalar you add, and never worry about matching a range you were not shown —
+you cannot overwrite the user's.
+
+## What makes a built node "outdated" — the port audit and the build stamp
+
+A built node reads **outdated / needs rebuild** for exactly one of three reasons. Nothing is stored: each is
+derived every read from evidence, and nothing else can raise or clear it.
+
+- **`sourceMismatch`** — the port audit found a fault: `Node.swift` reads or writes a port **name** the
+  contract does not declare (`ctx.inputFloat("scale")` with no input `scale`; `ctx.setOutputFloat("level", …)`
+  with no output `level`). The audit compares the port names your code passes to the `ctx` accessors against the
+  names the contract declares, per direction — **nothing else**. `ui` ranges, `default` values, port order,
+  `title`/`summary`, JSON formatting and byte-identical files can never cause or clear a mismatch. The same
+  audit gates `agent_compile_node`: while it errors nothing is promoted and the reply quotes the offending port
+  names (`{ok:false, errors}`); a declared port the code never touches is only a warning. The host re-audits the
+  live source at load, after every promote and after every hot reload, so a clean promote clears the state —
+  there is nothing to reset and no point re-emitting an unchanged file.
+- **`contractChanged`** — the contract's port surface (direction · name · type of every port) differs from the
+  one the last promote compiled against (the build stamp). Benign: the node keeps rendering and the new ports
+  are inert until you implement them. Cleared by a promote (the stamp is rewritten from what the compile saw)
+  or by the surface moving back.
+- **`intentChanged`** — the node's `prompt` differs from the brief its build was written to. Benign; cleared by
+  a promote against the current prompt.
+
+The audit fault outranks the two stamp comparisons. `agent_read_node` / `agent_read_graph` report the reason as
+`rebuildReason` and, when there is one, the audit's port lines (or the surface diff) as `rebuildDetail` — read
+those instead of theorizing about the files. The fix for a mismatch is a **name reconciliation**: declare the
+port the code needs, or drop that read/write — whichever keeps the node's behavior — then re-stage and compile.

@@ -53,6 +53,30 @@ extension SZHost {
         return errors.joined(separator: "\n")
     }
 
+    /// The evidence behind a node's `rebuildReason`, for the agent surface (`agent_read_node`'s `rebuildDetail`):
+    /// the port audit's lines for `.sourceMismatch` (live, else the cached pill detail), the ports off the build
+    /// stamp for `.contractChanged`; nil for `.intentChanged` (the prompt is its own evidence) and for a clean node.
+    func rebuildDetail(node id: SZNodeID) -> String? {
+        guard let node = store.project?.graph.node(id: id), let reason = node.rebuildReason else { return nil }
+        switch reason {
+        case .sourceMismatch:
+            return liveAuditErrors(id) ?? nodeAgentState[id]?.errorDetail
+        case .contractChanged:
+            guard let stamp = node.buildStamp else { return nil }
+            let now = node.contract?.portSurface ?? []
+            func list(_ ports: Set<SZNodeContract.PortSignature>) -> String {
+                ports.map { "\($0.direction.rawValue) \"\($0.name)\":\($0.type.rawValue)" }.sorted().joined(separator: ", ")
+            }
+            var parts: [String] = []
+            let added = now.subtracting(stamp.portSurface), removed = stamp.portSurface.subtracting(now)
+            if !added.isEmpty { parts.append("ports added since the build: \(list(added))") }
+            if !removed.isEmpty { parts.append("ports removed since the build: \(list(removed))") }
+            return parts.isEmpty ? nil : parts.joined(separator: "; ")
+        case .intentChanged:
+            return nil
+        }
+    }
+
     /// Run `SZPortBindingAudit` over a built node's live source + contract; nil when it cannot run.
     private func auditErrors(_ node: SZNode) -> [String]? {
         guard let projectURL = loadedProjectURL, node.kind == .generated, let contract = node.contract,

@@ -216,8 +216,9 @@ public enum SZDirectorPrompt {
                 prompt = ""
             }
             // `needsRebuild` is not implied by `kind` — a built node whose contract moved still reads
-            // `generated`, and the Director must see that it is nonetheless pending work.
-            let rebuild = n.needsRebuild ? " (NEEDS REBUILD — its code predates the current contract)" : ""
+            // `generated`, and the Director must see that it is nonetheless pending work. The derived reason
+            // rides along; the toolbelt defines the three and `agent_read_node` carries the detail.
+            let rebuild = n.rebuildReason.map { " (NEEDS REBUILD — \($0.rawValue))" } ?? ""
             return "- `\(n.id.uuidString)` \"\(n.title)\" — \(n.kind.rawValue)\(rebuild), \(io)\(prompt)"
         }.joined(separator: "\n")
 

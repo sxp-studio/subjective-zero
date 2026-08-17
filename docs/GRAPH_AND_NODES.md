@@ -142,13 +142,13 @@ to be the final output, but the user can toggle any texture output to preview it
 Two distinct edge types - they are *not* always the same, and conflating them is a mistake
 worth avoiding:
 
-- **Flow** - intent / scheduling. Expresses "this leads to that" and orders work; used when the
-  user is drafting before contracts exist, and to express scheduling intent.
-  - *Consumed since M7c as the pre-contract topology signal:* the procedural strategy drafts a
-    contract-less drawn node's texture I/O from its flow edges (`SZGraph.draftContractsFromFlow`,
-    contract-first authorship), and the LLM Director Agent reads flow as its who-feeds-whom signal
-    on a not-yet-contracted graph. The *scheduler* still orders execution by **data** edges only
-    (see [AGENT_ORCHESTRATION.md](AGENT_ORCHESTRATION.md)).
+- **Flow** - drawing intent. Expresses "this leads to that" while the user drafts before contracts
+  exist; it orders nothing at runtime and schedules nothing - the scheduler orders execution by
+  **data** edges only (see [AGENT_ORCHESTRATION.md](AGENT_ORCHESTRATION.md)).
+  - *Consumed as the pre-contract topology signal:* the procedural strategy drafts a contract-less
+    drawn node's texture I/O from its flow edges (`SZGraph.draftContractsFromFlow`, contract-first
+    authorship), and the LLM Director Agent reads flow as its who-feeds-whom signal on a
+    not-yet-contracted graph. Laying the data edge along a flow arrow realizes and clears it.
 - **Data** - a typed value flowing from a specific output port to a specific input port of a
   compatible type. This is what the runtime actually reads at execution time.
 
@@ -169,7 +169,12 @@ visible intent and narrated, never silently dropped.
 1. User adds a **prompt node** (flow-connected to neighbors).
 2. Director Agent assigns a **coding agent**, which drafts `node-contract.json` (→ `ui_update_node`, UI
    reflows) and `Node.swift` (staged).
-3. Runtime compiles + hot-reloads; node becomes **generated** and starts executing.
+3. Runtime compiles + hot-reloads; node becomes **generated** and starts executing. The promote
+   records a **build stamp** (the port surface + prompt the compile consumed); a built node reads
+   *needs rebuild* only by derivation from it - `contractChanged` (surface off the stamp),
+   `intentChanged` (prompt off the stamp) - or from the port audit (`sourceMismatch`: `Node.swift`
+   names a port the contract doesn't declare; names only, never `ui`/defaults/formatting). Nothing
+   is latched: the next promote re-stamps and re-audits.
 4. User iterates: edit defaults, draw data connections, chat with the node's agent, or split/merge.
 
 ## Split / merge as graph transactions

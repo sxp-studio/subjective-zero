@@ -40,9 +40,9 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
   `needsRebuild`); the fleet then re-implements it against the new intent — editing the prompt alone never
   changes what renders.
 - `ui_connect { "from": "<id>", "fromPort": "<output>", "to": "<id>", "toPort": "<input>", "kind": "data" }`
-  — wire an upstream output port to a downstream input port. Green **flow** edges are the user's *drawing
-  intent* ("A should feed B"); laying the `data` edge along one **realizes and clears it** (like resolving
-  a comment). You only ever create `data` edges — never manage flow edges yourself.
+  — wire an upstream output port to a downstream input port. **Flow** edges are the user's *drawing
+  intent* ("A should feed B") and order nothing at runtime; laying the `data` edge along one **realizes and
+  clears it** (like resolving a comment). You only ever create `data` edges — never manage flow edges yourself.
 - `ui_add_prompt_node { "prompt": "...", "x": <n>, "y": <n> }` — add a node; returns its id.
 - `ui_toggle_display { "node": "<id>", "port": "<texture output>" }` — point the viewport at the final
   output so the result is visible. Do this once, on the last node's display output, after its contract exists.
@@ -50,6 +50,18 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
   { "node": "<id>" }` returns any node's rendered output as an image and leaves the viewport alone.
 
 You can call `agent_read_graph` any time to re-read the live graph.
+
+### What "needs rebuild" means — trust the reported reason, never a theory
+A built node is flagged for exactly one derived reason, reported by `agent_read_graph` / `agent_read_node` as
+`rebuildReason` (with the evidence in `rebuildDetail`): `contractChanged` — its port surface (direction · name ·
+type) moved since the last compile; `intentChanged` — its prompt moved since the last compile; `sourceMismatch`
+— the port audit found `Node.swift` reading/writing a port NAME the contract does not declare (the offending
+names are the detail). The audit compares port names only: `ui` ranges, defaults, port order, file formatting
+and byte-level equality can neither cause nor clear it, and re-briefing an agent cannot clear anything the audit
+does not flag. A compile+promote recomputes all three (the promote rewrites the build stamp and re-audits the
+source), so the fix is always concrete: reconcile the named ports (declare or drop), or rebuild against the
+new surface/prompt. If a node is still flagged with a clean audit, that is host state to report, not agent
+work to re-brief. Never invent byte-for-byte contract theories.
 
 ### Restraint — this matters
 - Work with the nodes the user already drew. **Establish their contracts; do NOT add or restructure nodes

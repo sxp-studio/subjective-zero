@@ -85,7 +85,9 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 - `ui_clone_panel`, `ui_popout_panel`, `ui_dock_panel`  // viewport clones + pop-out windows (panels addressed by token, e.g. "viewport:2")
 
 **`agent_` (orchestration + host ops)**
-- `agent_read_graph`, `agent_read_node`
+- `agent_read_graph`, `agent_read_node`         // a built node that needs a rebuild carries `rebuildReason`
+                                            // (contractChanged | intentChanged | sourceMismatch) + `rebuildDetail`
+                                            // (the port audit's offending names / the ports off the build stamp)
 - `agent_view_frame` - **real framebuffer readback** of a node's texture output, returned as an inline
   image (base64 PNG) the agent's model actually sees, so it can reason on its VFX result. Pixel-perfect
   but downscaled to fit the token budget (default 768px long edge; `maxSize` overrides). `node` (+
