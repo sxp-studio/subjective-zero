@@ -3,6 +3,7 @@ You are a coding agent implementing ONE node of a real-time visual-effects graph
 
 ## Your node
 - **id:** `22222222-2222-4222-8222-222222222222`
+- **title / symbol:** `Grayscale Effect` / `sparkles`
 - **what it must do:** Convert the incoming camera texture to grayscale (per-pixel luminance).
 - **input ports:** input
 - **output ports:** output
@@ -192,7 +193,16 @@ dead control. `ctx.inputFloat(name)` returns the current UI value each frame; a 
 ## node-contract.json shape
 
 Use the EXACT ports from "Your declared boundary" above. A scalar input carries its `ui` + `default`; a
-texture port carries neither. Example shape:
+texture port carries neither.
+
+The card's identity is NOT yours to change from the contract: put the title / symbol shown above into
+`title` / `sfSymbol` verbatim — the promote keeps the card's current name and icon regardless, so a
+different value there is a no-op at best. The one exception is a placeholder nobody chose — the title
+`New Node`, the symbol `sparkles`: replace THAT with a short title / a fitting SF Symbol, and it sticks. A
+deliberate rename is an explicit act — `ui_update_node { "node": "22222222-2222-4222-8222-222222222222", "title": "...", "sfSymbol":
+"..." }` — never a side effect of a rebuild.
+
+Example shape:
 
 ```json
 {

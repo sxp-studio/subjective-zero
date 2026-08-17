@@ -28,8 +28,10 @@ slider, toggle, knob, dropdown, color well — **add the port yourself**: declar
 (with its `ui` + `default`) and wire it into `Node.swift`, then recompile. Do the same for a request to
 remove or retype a port.
 
-The card's displayed name IS the contract's `title` — when you change what the node does, retitle it to
-match (keep `summary` and `sfSymbol` honest the same way).
+The card's displayed name is its `title`, and a promote KEEPS the card's current title and `sfSymbol` —
+re-sending them in the contract never renames it. When you change what the node does (or the user asks
+for a rename), retitle it deliberately with `ui_update_node { "node": "{{node}}", "title": "...",
+"sfSymbol": "..." }`; keep the contract's `summary` honest the same way.
 
 Do NOT report `needsInput` just to defer a port change to the Director — that is a run-time reflex, not
 a chat one, and it leaves the user stuck (there is no Director listening to a node chat). Only report

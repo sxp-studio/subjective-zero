@@ -907,7 +907,9 @@ final class SZHost {
                 // resets every slider and can retype a wired port. The live contract at THIS moment is the
                 // boundary — not a dispatch-time snapshot — so a mid-run `ui_edit_ports`, a slider drag, and
                 // an off-run chat rebuild are all honoured. A node with no live contract yet (a drawn prompt
-                // node whose agent authors the whole boundary) takes the authored one wholesale.
+                // node whose agent authors the whole boundary) takes the authored one wholesale — identity
+                // included; with a live boundary the merge keeps ITS title/symbol, so a promote never renames
+                // the card (a rename is an explicit `ui_update_node`).
                 let contract = project.graph.nodes[i].contract.map {
                     SZNodeContract.mergingAuthored(stagedContract, intoBoundary: $0).contract
                 } ?? stagedContract

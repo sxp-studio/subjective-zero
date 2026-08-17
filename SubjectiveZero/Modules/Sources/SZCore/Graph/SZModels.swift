@@ -244,6 +244,11 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// This node has a build that no longer fits its contract.
     public var needsRebuild: Bool { rebuildReason != nil }
 
+    /// The identity a drawn node wears until someone names it. A promote treats these as unset — the
+    /// agent's authored title/symbol fill them once — where a chosen identity is kept.
+    public static let placeholderTitle = "New Node"
+    public static let placeholderSymbol = "sparkles"
+
     /// The fleet must (re)implement this node: it never had a build, or its build no longer fits its contract.
     /// The single question every "is there work here" reader should ask — as opposed to `kind`, which answers
     /// only "can this be rendered".
@@ -253,7 +258,7 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         id: SZNodeID = SZNodeID(),
         kind: SZNodeKind = .prompt,
         title: String,
-        sfSymbol: String = "sparkles",
+        sfSymbol: String = SZNode.placeholderSymbol,
         prompt: String? = nil,
         contract: SZNodeContract? = nil,
         position: SZPoint,

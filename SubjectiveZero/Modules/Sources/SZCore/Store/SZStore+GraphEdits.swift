@@ -31,7 +31,7 @@ extension SZStore {
     @discardableResult
     public func addPromptNode(prompt: String?, position: SZPoint,
                               seed: SZPromptSeed? = nil) -> SZNodeID? {
-        var node = SZNode(kind: .prompt, title: "New Node", prompt: prompt, position: position)
+        var node = SZNode(kind: .prompt, title: SZNode.placeholderTitle, prompt: prompt, position: position)
         if let seed {
             let ports: (inputs: [SZPort], outputs: [SZPort])
             switch seed {

@@ -33,8 +33,62 @@ private func contract(_ title: String = "Node",
     #expect(merged.contract.inputs.map(\.name) == ["src", "amount"])
     #expect(merged.contract.outputs.map(\.name) == ["out", "level"])
     #expect(merged.contract.inputs[1].def == .float(0.25))
-    // Identity is the agent's.
-    #expect(merged.contract.title == "Wobble")
+    // Identity is the boundary's — the promote does not rename the card.
+    #expect(merged.contract.title == "Node")
+    // The summary describes the implementation, so it is the agent's.
+    #expect(merged.contract.summary == "Wobble summary")
+}
+
+// MARK: - identity
+
+@Test func boundaryTitleAndSymbolSurviveAnAuthoredRename() {
+    // The card's name and icon belong to whoever named the node; an agent that authored `"title": "Dark
+    // Tank"` alongside a rebuild of "Fish" must not rename the card, and a rebuild must not churn the icon.
+    var boundary = contract("Fish")
+    boundary.sfSymbol = "fish"
+    var authored = contract("Dark Tank")
+    authored.sfSymbol = "waveform.path.ecg"
+
+    let merged = SZNodeContract.mergingAuthored(authored, intoBoundary: boundary)
+
+    #expect(merged.contract.title == "Fish")
+    #expect(merged.contract.sfSymbol == "fish")
+    #expect(merged.contract.summary == "Dark Tank summary")
+    #expect(merged.conflicts.isEmpty)
+}
+
+@Test func authoredIdentityFillsAnEmptyBoundaryField() {
+    // A boundary drafted without an icon (or a blank title) takes the agent's — a fill, not an override.
+    var boundary = contract("Fish")
+    boundary.sfSymbol = ""
+    var authored = contract("Dark Tank")
+    authored.sfSymbol = "fish"
+    let symbolFilled = SZNodeContract.mergingAuthored(authored, intoBoundary: boundary)
+    #expect(symbolFilled.contract.title == "Fish")
+    #expect(symbolFilled.contract.sfSymbol == "fish")
+
+    let blankTitle = SZNodeContract.mergingAuthored(authored, intoBoundary: contract(""))
+    #expect(blankTitle.contract.title == "Dark Tank")
+    #expect(blankTitle.contract.sfSymbol == "circle")
+}
+
+@Test func authoredIdentityNamesAPlaceholderBoundary() {
+    // A drawn node's boundary (drafted from flow or a wire seed) still wears the placeholder identity;
+    // nobody named it, so the agent's title/symbol land — once. The next rebuild then keeps them.
+    var boundary = contract(SZNode.placeholderTitle)
+    boundary.sfSymbol = SZNode.placeholderSymbol
+    var authored = contract("Swirl")
+    authored.sfSymbol = "tornado"
+
+    let named = SZNodeContract.mergingAuthored(authored, intoBoundary: boundary)
+    #expect(named.contract.title == "Swirl")
+    #expect(named.contract.sfSymbol == "tornado")
+
+    var rebuilt = contract("Dark Swirl")
+    rebuilt.sfSymbol = "hurricane"
+    let again = SZNodeContract.mergingAuthored(rebuilt, intoBoundary: named.contract)
+    #expect(again.contract.title == "Swirl")
+    #expect(again.contract.sfSymbol == "tornado")
 }
 
 @Test func boundaryDefaultWinsSoASliderSurvivesARebuild() {

@@ -28,9 +28,11 @@ slider, toggle, dropdown, color well — is YOURS to add: declare the port in th
 (with its `ui` + `default`) and wire it into `Node.swift`. Same for removing or retyping
 a port they asked about.
 
-The card's displayed name IS the contract's `title`. When you change what the node does,
-retitle it to match — a node that gained a second effect and a toggle is not still named
-after the first effect alone. Keep `summary` and `sfSymbol` honest the same way.
+The card's displayed name is its `title`, and a promote KEEPS the card's current title and
+`sfSymbol` — re-sending them in the contract never renames it. When you change what the node
+does, retitle it deliberately with `ui_update_node { "node": "{{node}}", "title": "...",
+"sfSymbol": "..." }` — a node that gained a second effect and a toggle is not still named
+after the first effect alone. Keep the contract's `summary` honest the same way.
 
 If the message turns out to ask for no change after all, answer it and change nothing —
 do not stage writes to look busy.

@@ -145,7 +145,7 @@ public struct SZBriefRenderer: Sendable {
     public static let knownTokens: Set<String> = [
         "graph", "message", "toolbelt", "cards", "node", "contract", "source",
         "round", "cap", "blockers", "inbox", "instruction",
-        "prompt", "inputs", "outputs", "boundary", "abi", "reference", "schema",
+        "prompt", "title", "symbol", "inputs", "outputs", "boundary", "abi", "reference", "schema",
         "blocker", "director_message",
         "original", "intent", "stage", "count", "constituents",
     ]
@@ -227,6 +227,10 @@ public struct SZBriefRenderer: Sendable {
             let p = try plan()
             return SZPromptTemplate.defused(p.node.prompt ?? p.node.title)
         }
+        // The card's current identity — shown so the agent keeps it in the contract it authors
+        // (a promote keeps the boundary's title/symbol; a rename is an explicit `ui_update_node`).
+        try add("title") { SZPromptTemplate.defused(try plan().node.title) }
+        try add("symbol") { SZPromptTemplate.defused(try plan().node.sfSymbol) }
         try add("inputs") { try plan().inputs.map(\.name).joined(separator: ", ") }
         try add("outputs") { try plan().outputs.map(\.name).joined(separator: ", ") }
         try add("boundary") {

@@ -38,9 +38,9 @@ extension SZGraph {
             let outputs = (k == pieces - 1) ? externalOutputs : [Self.boundaryPort("output")]
             let title = "\(n.title) (\(k + 1)/\(pieces))"
             return SZNode(
-                kind: .prompt, title: title, sfSymbol: "sparkles", prompt: nil,
+                kind: .prompt, title: title, sfSymbol: SZNode.placeholderSymbol, prompt: nil,
                 contract: SZNodeContract(
-                    title: title, sfSymbol: "sparkles",
+                    title: title, sfSymbol: SZNode.placeholderSymbol,
                     summary: "Stage \(k + 1) of \(pieces) of \(n.title).",
                     inputs: inputs, outputs: outputs,
                     permissions: (k == 0) ? permissions : nil),
@@ -125,9 +125,9 @@ extension SZGraph {
         let permissions = Self.mergedPermissions(members)
         let title = members.map(\.title).joined(separator: " + ")
         let m = SZNode(
-            kind: .prompt, title: title, sfSymbol: "sparkles", prompt: nil,
+            kind: .prompt, title: title, sfSymbol: SZNode.placeholderSymbol, prompt: nil,
             contract: SZNodeContract(
-                title: title, sfSymbol: "sparkles", summary: "Merged from \(members.count) nodes.",
+                title: title, sfSymbol: SZNode.placeholderSymbol, summary: "Merged from \(members.count) nodes.",
                 inputs: inputs, outputs: outputs,
                 permissions: permissions.isEmpty ? nil : permissions),
             position: centroid(of: ordered) ?? members[0].position)

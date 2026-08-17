@@ -38,6 +38,17 @@ struct SZBriefRendererDataTests {
         #expect(out.contains("{ {graph}} literally please"))
     }
 
+    @Test func theWorkBriefCarriesTheNodesCurrentTitleAndSymbol() throws {
+        // The compile brief shows the card's identity so the agent authors it in, not blind — a promote
+        // keeps the boundary's title/symbol, so a blind retitle would be a silent no-op.
+        let r = renderer(["prompts/node-compile.md.mustache": "titled {{title}} ({{symbol}})"])
+        let node = SZNode(title: "Fish", sfSymbol: "fish", prompt: "a fish tank",
+                          position: SZPoint(x: 0, y: 0))
+        let world = SZWorld(graph: SZGraph(nodes: [node]), node: node.id)
+        let out = try r.render(agent: "coding", template: "node-compile", message: "", world: world)
+        #expect(out == "titled Fish (fish)")
+    }
+
     @Test func aTemplateAuthoredTokenNothingSubstitutesRefuses() {
         let r = renderer(["prompts/chat.md.mustache": "Hello {{bogus}}"])
         #expect(throws: SZBriefRenderError.self) {

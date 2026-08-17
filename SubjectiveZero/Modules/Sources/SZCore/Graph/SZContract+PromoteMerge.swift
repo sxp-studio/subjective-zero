@@ -53,11 +53,19 @@ extension SZNodeContract {
     /// node). Accepted tradeoff: a union can resurrect a permission the Director removed mid-run — that is an
     /// over-grant prompt the user answers, not a fault.
     ///
-    /// Identity (`title`/`sfSymbol`/`summary`) is the agent's, unchanged.
+    /// Identity: `title`/`sfSymbol` are the BOUNDARY's — the card's name and icon belong to whoever named the
+    /// node (Director, user), not to the agent that last rebuilt its source; the authored values only fill a
+    /// boundary field that is empty or still the drawn-node placeholder (`SZNode.placeholderTitle` /
+    /// `placeholderSymbol`). A deliberate rename is an explicit `ui_update_node`, never a promote side
+    /// effect. `summary` stays the agent's: it describes the implementation just written.
     public static func mergingAuthored(_ authored: SZNodeContract,
                                        intoBoundary boundary: SZNodeContract) -> SZBoundaryMergeResult {
         var conflicts: [String] = []
         var merged = authored
+        let unnamed = boundary.title.isEmpty || boundary.title == SZNode.placeholderTitle
+        let uniconed = boundary.sfSymbol.isEmpty || boundary.sfSymbol == SZNode.placeholderSymbol
+        merged.title = unnamed ? authored.title : boundary.title
+        merged.sfSymbol = uniconed ? authored.sfSymbol : boundary.sfSymbol
         merged.inputs = mergedPorts(authored: authored.inputs, boundary: boundary.inputs,
                                     side: "input", conflicts: &conflicts)
         merged.outputs = mergedPorts(authored: authored.outputs, boundary: boundary.outputs,
