@@ -319,8 +319,8 @@ extension SZHostBridge {
                 // the promote merges this into the node's live boundary (`SZNodeContract.mergingAuthored`),
                 // so auditing the authored one would clear a source the merge then contradicts. Conflicts
                 // (an authored retype the boundary refused) ride back as warnings so the agent learns of it.
-                let merge = host.store.project?.graph.node(id: id)?.contract
-                    .map { SZNodeContract.mergingAuthored(authored, intoBoundary: $0) }
+                let merge = host.store.project?.graph.node(id: id)
+                    .map { SZNodeContract.mergingAuthored(authored, intoNode: $0) }
                 let contract = merge?.contract ?? authored
                 warnings = merge?.conflicts ?? []
                 // Contract + source must agree on port names: a port the code reads/writes that the contract

@@ -72,6 +72,47 @@ private func contract(_ title: String = "Node",
     #expect(blankTitle.contract.sfSymbol == "circle")
 }
 
+@Test func aDirectorTitledNodeWithoutAContractKeepsItsName() {
+    // `ui_update_node { title }` on a prompt node sets only the node's title (there is no contract to
+    // mirror into); the run then dispatches it contract-less. The node IS the identity boundary, so the
+    // authored ports land verbatim while the Director's name and icon stand.
+    var authored = contract("Dark Tank",
+                            inputs: [SZPort(name: "src", type: .texture)],
+                            outputs: [SZPort(name: "out", type: .texture)],
+                            permissions: [.camera])
+    authored.sfSymbol = "waveform.path"
+    let node = SZNode(title: "Fish", sfSymbol: "fish", prompt: "a fish tank", position: SZPoint(x: 0, y: 0))
+
+    let merged = SZNodeContract.mergingAuthored(authored, intoNode: node)
+
+    #expect(merged.contract.title == "Fish")
+    #expect(merged.contract.sfSymbol == "fish")
+    #expect(merged.contract.summary == "Dark Tank summary")
+    #expect(merged.contract.inputs == authored.inputs)
+    #expect(merged.contract.outputs == authored.outputs)
+    #expect(merged.contract.permissions == [.camera])
+    #expect(merged.conflicts.isEmpty)
+
+    // A drawn, never-named node still takes the agent's identity.
+    let drawn = SZNode(title: SZNode.placeholderTitle, prompt: "swirl", position: SZPoint(x: 0, y: 0))
+    #expect(SZNodeContract.mergingAuthored(authored, intoNode: drawn).contract.title == "Dark Tank")
+}
+
+@Test func theNodesDisplayedIdentityBeatsADriftedContractIdentity() {
+    // A bundle whose node and contract identities disagree resolves to what the card shows.
+    var live = contract("Old Fish", inputs: [SZPort(name: "src", type: .texture)])
+    live.sfSymbol = "circle"
+    var node = SZNode(title: "Fish", sfSymbol: "fish", contract: live, position: SZPoint(x: 0, y: 0))
+    let merged = SZNodeContract.mergingAuthored(contract("Dark Tank"), intoNode: node)
+    #expect(merged.contract.title == "Fish")
+    #expect(merged.contract.sfSymbol == "fish")
+    #expect(merged.contract.inputs.map(\.name) == ["src"])
+
+    // The port boundary is still the live contract's.
+    node.contract?.inputs[0].def = .float(1)
+    #expect(SZNodeContract.mergingAuthored(contract("Dark Tank"), intoNode: node).contract.inputs[0].def == .float(1))
+}
+
 @Test func authoredIdentityNamesAPlaceholderBoundary() {
     // A drawn node's boundary (drafted from flow or a wire seed) still wears the placeholder identity;
     // nobody named it, so the agent's title/symbol land — once. The next rebuild then keeps them.

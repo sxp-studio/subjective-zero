@@ -79,6 +79,20 @@ extension SZNodeContract {
         return SZBoundaryMergeResult(contract: merged, conflicts: conflicts)
     }
 
+    /// The promote's entry: fold an authored contract into a NODE — its live contract as the port
+    /// boundary (none → an empty one, so the authored ports land verbatim) and the node's displayed
+    /// `title`/`sfSymbol` as the identity boundary. The node, not its contract, is the identity truth: a
+    /// Director-titled node the run dispatched contract-less keeps its name, and a bundle whose node and
+    /// contract identities drifted apart resolves to what the card shows. Placeholders still count as unset.
+    /// Host-named pieces ("X (1/2)", "A + B") are real names, so a stage agent keeps them too — intended.
+    public static func mergingAuthored(_ authored: SZNodeContract, intoNode node: SZNode) -> SZBoundaryMergeResult {
+        var boundary = node.contract
+            ?? SZNodeContract(title: node.title, sfSymbol: node.sfSymbol, summary: authored.summary)
+        boundary.title = node.title
+        boundary.sfSymbol = node.sfSymbol
+        return mergingAuthored(authored, intoBoundary: boundary)
+    }
+
     /// One side's ports merged by name — see `mergingAuthored` for the rules. `side` only names the port
     /// direction in the conflict lines.
     private static func mergedPorts(authored: [SZPort], boundary: [SZPort],
