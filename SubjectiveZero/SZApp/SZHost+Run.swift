@@ -111,8 +111,14 @@ extension SZHost {
             if let turnListener { request.mcpServerPort = turnListener.port }
         }
         defer { turnListener?.stop() }
-        let result = try await SZTrace.$context.withValue(traceContext) { [request] in
+        var result = try await SZTrace.$context.withValue(traceContext) { [request] in
             try await streamAgentTurn(provider: provider, request: request, into: scope, message: assistantID)
+        }
+        // A spent budget is OUR outcome — no provider ever words it — so the turn carries the
+        // sentence from here. Everything downstream reads `outcome.message`: the transcript line,
+        // the graph's turn report (RUNS record reason, run narration) and a node's failure pill.
+        if let timeout = result.process.timeout {
+            result.outcome.message = Self.timeoutDetail(timeout, request: request)
         }
         if let stats = result.outcome.reportedStats {
             SZTrace.record(stats.turnEvent(started: started), turnID: assistantID)
@@ -165,34 +171,57 @@ extension SZHost {
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
         // (timeout, CLI error) is invisible and the node reads as a silent Draft.
         if result.outcome.failed {
-            let detail: String
             if result.process.timedOut {
-                detail = Self.timeoutDetail(budget: request.timeout)
+                // Our budget ran out, not the provider's fault — a plain warning line.
+                appendWarningLine(Self.turnFailureDetail(result), to: scope)
             } else if let providerDetail = await providerFailureDetail(result: result, provider: provider) {
                 // A mid-turn provider death: the red pill carries the same actionable detail —
                 // set BEFORE the run's end so `surfaceUnresolvedNodes` doesn't overwrite it.
-                detail = providerDetail
-                recordNodeStatus(node: node, phase: .error, message: detail)
+                recordNodeStatus(node: node, phase: .error, message: providerDetail)
+                appendProviderErrorLine(providerDetail, to: scope)
             } else {
-                detail = result.outcome.message ?? "the provider reported a failure with no message"
+                appendProviderErrorLine(Self.turnFailureDetail(result), to: scope)
             }
-            appendProviderErrorLine(detail, to: scope)
         }
         return result
     }
 
-    /// The one timeout sentence every lane reports (transcript line, run/mailbox failure reason)
-    /// — `budget` is the request's wall clock (nil → no figure).
-    nonisolated static func timeoutDetail(budget: TimeInterval?) -> String {
-        let after = budget.map { $0 >= 60 ? " after \(Int($0 / 60))m" : " after \(Int($0))s" } ?? ""
-        return "the agent timed out\(after) without finishing — the task may be too large for one turn (try splitting it up or allowing a longer budget)"
+    /// The one timeout sentence every lane reports — `deliver` stamps it onto the turn's outcome so
+    /// the transcript line, the RUNS record, the node pill and the run narration all read the same.
+    /// Wall clock and silence are different stories, so they get different words.
+    nonisolated static func timeoutDetail(_ timeout: SZProcessTimeout, request: SZAgentRunRequest) -> String {
+        switch timeout {
+        case .wallClock:
+            let after = span(request.timeout).map { " after \($0)" } ?? ""
+            return "the agent timed out\(after) without finishing — the task may be too large for one turn (try splitting it up or allowing a longer budget)"
+        case .silence:
+            let quiet = span(request.inactivityTimeout).map { " for \($0)" } ?? ""
+            return "the agent went silent\(quiet) and was stopped — it may have wedged mid-turn (try again, or allow a longer silence budget)"
+        }
+    }
+
+    /// A failed turn's reason, in the words it already carries (`deliver` stamps timeouts).
+    nonisolated static func turnFailureDetail(_ result: SZAgentRunResult) -> String {
+        result.outcome.message ?? "the provider reported a failure with no message"
+    }
+
+    /// A budget as "15m" / "45s" — nil budget, no figure.
+    private nonisolated static func span(_ seconds: TimeInterval?) -> String? {
+        seconds.map { $0 >= 60 ? "\(Int($0 / 60))m" : "\(Int($0))s" }
     }
 
     /// The terminal "⚠️ Provider error:" line beneath a streamed turn — one composer for the
-    /// run-path scopes; the flush lands it after `deliver`'s turn-end flush.
+    /// run-path scopes; the flush lands it after `deliver`'s turn-end flush. Reserved for genuine
+    /// provider failures: anything of ours (a spent budget) uses `appendWarningLine`.
     @MainActor
     func appendProviderErrorLine(_ detail: String, to scope: SZChatScope) {
-        store.appendChatMessage(SZChatMessage(role: .assistant, text: "⚠️ Provider error: \(detail)"), to: scope)
+        appendWarningLine("Provider error: \(detail)", to: scope)
+    }
+
+    /// The terminal "⚠️ …" line beneath a streamed turn, in whatever words the caller has.
+    @MainActor
+    func appendWarningLine(_ text: String, to scope: SZChatScope) {
+        store.appendChatMessage(SZChatMessage(role: .assistant, text: "⚠️ \(text)"), to: scope)
         flushTranscript(scope)
     }
 
@@ -230,7 +259,7 @@ extension SZHost {
         // would otherwise vanish — land it in the Director tab like a coding turn's error line.
         if result.outcome.failed {
             if result.process.timedOut {
-                appendProviderErrorLine(Self.timeoutDetail(budget: request.timeout), to: scope)
+                appendWarningLine(Self.turnFailureDetail(result), to: scope)
             } else if let detail = await providerFailureDetail(result: result, provider: provider) {
                 appendProviderErrorLine(detail, to: scope)
             }

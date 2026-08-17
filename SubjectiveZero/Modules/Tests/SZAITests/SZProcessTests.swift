@@ -62,7 +62,8 @@ struct SZProcessTests {
     @Test func silenceKillsAtTheInactivityBoundNotTheWallClock() async throws {
         let started = ContinuousClock.now
         let result = try await runner.run("/bin/sh", ["-c", "sleep 30"], timeout: 25, inactivityTimeout: 1)
-        #expect(result.timedOut)
+        // WHICH deadline fired is reported, not just that one did — the two get different words.
+        #expect(result.timeout == .silence)
         #expect(ContinuousClock.now - started < .seconds(10), "silent process outlived the inactivity bound")
     }
 
@@ -82,7 +83,7 @@ struct SZProcessTests {
         let result = try await runner.run(
             "/bin/sh", ["-c", "while true; do echo tick; sleep 0.2; done"],
             timeout: 1, inactivityTimeout: 10)
-        #expect(result.timedOut)
+        #expect(result.timeout == .wallClock)
         #expect(ContinuousClock.now - started < .seconds(10), "wall-clock cap did not fire")
     }
 

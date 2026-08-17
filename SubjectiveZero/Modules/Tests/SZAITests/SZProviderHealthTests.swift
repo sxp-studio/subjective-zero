@@ -66,7 +66,7 @@ private let grokDeviceAuthBanner = SZProcessResult(
     output: "To sign in, open this URL in your browser:\n\n" +
             "  https://accounts.x.ai/oauth2/device?user_code=XXXX-XXXX\n\n" +
             "Confirm this code in your browser:\n\n  XXXX-XXXX\n\nWaiting for authorization...",
-    timedOut: true)
+    timeout: .wallClock)
 private let piVersionOK = SZProcessResult(exitCode: 0, output: "0.80.6")
 private let piListModelsLoggedIn = SZProcessResult(
     exitCode: 0,
@@ -215,7 +215,7 @@ private let museMissing = SZProcessResult(
 @Test func healthFailedOnVersionTimeout() async {
     let report = await SZCodexProvider().healthReport(runner: ScriptedStubRunner([
         .init(argvPrefix: ["codex", "--version"],
-              result: SZProcessResult(exitCode: 124, output: "", timedOut: true)),
+              result: SZProcessResult(exitCode: 124, output: "", timeout: .wallClock)),
     ]))
     #expect(report.status == .healthFailed)
     #expect(report.diagnostics[0].timedOut)
@@ -288,7 +288,7 @@ private let museMissing = SZProcessResult(
 
 @Test func probeHealthFailedOnTimeout() async {
     let report = await SZClaudeProvider().healthProbe(runner: ScriptedStubRunner([
-        .init(argvPrefix: ["claude"], result: SZProcessResult(exitCode: 124, output: "", timedOut: true)),
+        .init(argvPrefix: ["claude"], result: SZProcessResult(exitCode: 124, output: "", timeout: .wallClock)),
     ]))
     #expect(report.status == .healthFailed)
     #expect(report.message.contains("timed out"))
@@ -338,7 +338,7 @@ private let museMissing = SZProcessResult(
     // The zero-output hang (a logged-out run WITHOUT --offline was observed doing this): no
     // marker can classify nothing, so the honest verdict is the timeout.
     let hang = await SZPiProvider().healthProbe(runner: ScriptedStubRunner([
-        .init(argvPrefix: ["pi"], result: SZProcessResult(exitCode: 124, output: "", timedOut: true)),
+        .init(argvPrefix: ["pi"], result: SZProcessResult(exitCode: 124, output: "", timeout: .wallClock)),
     ]))
     #expect(hang.status == .healthFailed)
     #expect(hang.diagnostics[0].timedOut)

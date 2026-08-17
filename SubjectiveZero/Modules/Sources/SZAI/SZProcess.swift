@@ -17,21 +17,33 @@
 import Foundation
 import Synchronization
 
+/// Which deadline ended a run. The two read very differently to a user — a wall-clock kill means
+/// the work was too big for one turn, a silence kill means the CLI stopped saying anything at all —
+/// so the runner names which one fired rather than collapsing both into a bool.
+public enum SZProcessTimeout: Sendable, Equatable {
+    case wallClock     // the hard cap elapsed
+    case silence       // no output for the inactivity budget
+}
+
 /// The outcome of one subprocess run. `exitCode` is 124 on timeout (matching `timeout(1)`).
 public struct SZProcessResult: Sendable {
     public var exitCode: Int32
     public var output: String          // stdout + stderr, interleaved
-    public var timedOut: Bool
+    /// Which deadline killed the run; nil when it ended on its own (or was cancelled).
+    public var timeout: SZProcessTimeout?
     /// Signal number when the process died to an uncaught signal (killed/crashed) OUT FROM UNDER
     /// US — a plain `exitCode` can't tell `exit(9)` from SIGKILL. nil on normal exit and whenever
     /// the kill was ours: timeout (`timedOut` names that cause) or task cancellation (a user Stop
     /// is a choice, not a crash).
     public var uncaughtSignal: Int32?
 
-    public init(exitCode: Int32, output: String, timedOut: Bool = false, uncaughtSignal: Int32? = nil) {
+    /// True when either deadline fired — the derived form, so the two can never disagree.
+    public var timedOut: Bool { timeout != nil }
+
+    public init(exitCode: Int32, output: String, timeout: SZProcessTimeout? = nil, uncaughtSignal: Int32? = nil) {
         self.exitCode = exitCode
         self.output = output
-        self.timedOut = timedOut
+        self.timeout = timeout
         self.uncaughtSignal = uncaughtSignal
     }
 }
@@ -166,8 +178,9 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         // Task (not `async let`) so the kill path below can bound and cancel it.
         let collectTask = Task { await Self.collect(pipe.fileHandleForReading, onOutput: observedOutput) }
 
-        let timedOut = await Self.awaitExit(terminations, timeout: timeout,
-                                            inactivityTimeout: inactivityTimeout, activity: activity, pid: pid)
+        let expired = await Self.awaitExit(terminations, timeout: timeout,
+                                           inactivityTimeout: inactivityTimeout, activity: activity, pid: pid)
+        let timedOut = expired != nil
         let cancelled = Task.isCancelled
         // On timeout the cancellation handler didn't fire; on cancel it only SIGTERM'd. Either way
         // SIGKILL so the process actually exits, the pipe reaches EOF (`collect` completes), and we
@@ -191,7 +204,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         return SZProcessResult(
             exitCode: exitCode,
             output: String(decoding: output, as: UTF8.self),
-            timedOut: timedOut,
+            timeout: expired,
             uncaughtSignal: uncaughtSignal
         )
     }
@@ -270,21 +283,21 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         return output
     }
 
-    /// Wait for the process to exit, returning `true` if either deadline — wall clock, or silence past
-    /// `inactivityTimeout` — won the race. SIGTERMs on cancel.
+    /// Wait for the process to exit, returning WHICH deadline — wall clock, or silence past
+    /// `inactivityTimeout` — won the race (nil = the process exited on its own). SIGTERMs on cancel.
     private static func awaitExit(_ terminations: AsyncStream<Void>, timeout: TimeInterval?,
                                   inactivityTimeout: TimeInterval? = nil, activity: SZActivityClock? = nil,
-                                  pid: Int32) async -> Bool {
+                                  pid: Int32) async -> SZProcessTimeout? {
         await withTaskCancellationHandler {
-            await withTaskGroup(of: Bool.self) { group in
+            await withTaskGroup(of: SZProcessTimeout?.self) { group in
                 group.addTask {
                     for await _ in terminations {}   // finishes when terminationHandler fires
-                    return false
+                    return nil
                 }
                 if let timeout {
                     group.addTask {
-                        do { try await Task.sleep(for: .seconds(timeout)); return true }
-                        catch { return false }       // cancelled because the process exited first
+                        do { try await Task.sleep(for: .seconds(timeout)); return .wallClock }
+                        catch { return nil }         // cancelled because the process exited first
                     }
                 }
                 if let inactivityTimeout, let activity {
@@ -294,15 +307,15 @@ public struct SZSystemProcessRunner: SZProcessRunning {
                         // truly elapsed in silence.
                         while true {
                             let deadline = activity.lastActivity.advanced(by: .seconds(inactivityTimeout))
-                            if ContinuousClock.now >= deadline { return true }
+                            if ContinuousClock.now >= deadline { return .silence }
                             do { try await Task.sleep(until: deadline, clock: .continuous) }
-                            catch { return false }   // cancelled because the process exited first
+                            catch { return nil }     // cancelled because the process exited first
                         }
                     }
                 }
-                let timedOut = await group.next() ?? false
+                let expired = await group.next() ?? nil
                 group.cancelAll()
-                return timedOut
+                return expired
             }
         } onCancel: {
             signalProcessTree(pid, SIGTERM)

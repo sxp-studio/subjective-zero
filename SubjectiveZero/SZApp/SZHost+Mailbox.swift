@@ -212,7 +212,7 @@ extension SZHost {
                 // A timeout is its own outcome — the same sentence the run path lands, and NO
                 // stale-session probation: a killed-at-the-clock turn is no evidence the restored
                 // session is dead (the cold retry would only run down the same clock again).
-                let detail = Self.timeoutDetail(budget: SZAgentTurnBudgets.codingTimeout)
+                let detail = Self.turnFailureDetail(result)
                 reply((empty ? "" : "\n") + "⚠️ \(detail)")
                 status = "chat turn timed out"
                 mailbox.markFailed(envelopeID, reason: detail)
