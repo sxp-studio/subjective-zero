@@ -35,7 +35,9 @@ For EACH unresolved node above, make the **smallest** change that will unblock i
 - It just needs another attempt (e.g. a transient build error the agent can fix itself) → leave it as
   is; it will be retried automatically.
 
-Change ONLY what will unblock these nodes — do not restructure the rest of the graph. You can call
-`agent_read_graph` to re-read the live graph. When done, say one short line about what you changed.
+Change ONLY what will unblock these nodes — do not restructure the rest of the graph. Nodes marked
+`(empty — …)` are the user's undecided placeholders: mention them in your one-line summary and leave them
+untouched — no prompt, no ports, no wiring — unless the user's instruction for THIS run names them. You can
+call `agent_read_graph` to re-read the live graph. When done, say one short line about what you changed.
 The nodes you addressed are retried automatically after your turn (their Coding Agents resume their own
 sessions, so you don't re-implement anything).

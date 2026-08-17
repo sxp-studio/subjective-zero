@@ -88,3 +88,52 @@ private func node(_ title: String, kind: SZNodeKind, rebuildReason: SZRebuildRea
     #expect(summary.contains("\(short(cam.id)) → \(short(blend.id)),"))
     #expect(summary.contains("\(short(cam.id)).output → \(short(blend.id)).mask"))
 }
+
+// MARK: - The build lane's blank-node rule (decompose + reconcile, through the shipped pack)
+
+private let shippedPacksRoot = URL(filePath: #filePath)
+    .deletingLastPathComponent()   // SZAITests
+    .deletingLastPathComponent()   // Tests
+    .deletingLastPathComponent()   // Modules
+    .appending(path: "Sources/SZAI/Resources/Agents")
+
+/// The rule both run briefs state next to their job description — not only in the toolbelt. (Asserted by
+/// fragments that never straddle the templates' line wraps.)
+private let blankNodeRule = "`(empty — …)` are the user's undecided placeholders"
+private let blankNodeHandsOff = "no prompt, no ports, no wiring"
+
+/// A described node plus one blank placeholder, as a Build sees them.
+private func graphWithBlank() -> (SZGraph, SZNode) {
+    var described = node("Glow", kind: .prompt)
+    described.prompt = "make the input texture glow"
+    let blank = SZNode(kind: .prompt, title: "New Node", prompt: "", position: SZPoint(x: 0, y: 0))
+    return (SZGraph(nodes: [described, blank]), blank)
+}
+
+/// A Build with no instruction once "set up the one missing contract" for a blank node the user had left
+/// undecided — the decompose brief said "give every prompt node a contract" and only the toolbelt at the
+/// bottom disagreed. The brief now scopes its job to described nodes and states the rule beside it, and
+/// the blank node arrives marked `(empty — …)` so the rule has something to bind to.
+@Test func theDecomposeBriefTellsTheDirectorToLeaveBlankNodesAlone() throws {
+    let (graph, blank) = graphWithBlank()
+    let out = try SZBriefRenderer(packRoot: shippedPacksRoot).render(
+        agent: "director", template: "decompose", message: "",
+        world: SZWorld(graph: graph, run: SZRun(workSet: [], round: 1, roundCap: 1, steers: [], instruction: "")))
+    #expect(out.contains("that the user has described"))
+    #expect(out.contains(blankNodeRule))
+    #expect(out.contains(blankNodeHandsOff))
+    #expect(out.contains("\(blank.id.uuidString)` \"New Node\" — prompt, no contract yet — prompt: (empty —"))
+    // The rule sits with the job description, before the graph — not only in the toolbelt at the end.
+    #expect(out.range(of: blankNodeRule)!.lowerBound < out.range(of: "## The current graph")!.lowerBound)
+}
+
+/// Reconcile carries no toolbelt, so it saw the `(empty — …)` marker with no rule at all.
+@Test func theReconcileBriefTellsTheDirectorToLeaveBlankNodesAlone() throws {
+    let (graph, blank) = graphWithBlank()
+    let out = try SZBriefRenderer(packRoot: shippedPacksRoot).render(
+        agent: "director", template: "reconcile", message: "",
+        world: SZWorld(graph: graph, run: SZRun(workSet: [], round: 1, roundCap: 2, steers: [], instruction: "")))
+    #expect(out.contains(blankNodeRule))
+    #expect(out.contains(blankNodeHandsOff))
+    #expect(out.contains("\(blank.id.uuidString)` \"New Node\" — prompt, no contract yet — prompt: (empty —"))
+}
