@@ -38,7 +38,14 @@ extension SZHost {
             status = denial
             return false
         }
+        let previous = store.project?.graph.node(id: id)?.body
         guard store.setNodeBody(id: id, body: body) else { return false }
+        // What the card SHOWS is a decision; its GEOMETRY is not. Auto-size settles and the backdrop's
+        // aspect follow re-apply `.custom` with fresh rows all session long (SZCardHostController), so
+        // journaling every row commit would fill the Director's delta with "USER set card body".
+        if body?.mode != previous?.mode || body?.previewPort != previous?.previewPort {
+            noteMutation("set card body", ["\(mutationTitle(id)): \(body?.mode.rawValue ?? "auto")"], origin: origin)
+        }
         previewFrames.frame(for: id).surface = nil
         persistProject()
         refreshPreviewStream()

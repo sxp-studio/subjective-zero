@@ -145,6 +145,10 @@ final class SZHost {
     /// (SZMessageQueue). Sends that can't run immediately enqueue here instead of being rejected;
     /// the host's pump delivers them as their resources free (SZHost+Mailbox.swift).
     let mailbox = SZMessageQueue()
+    /// The graph-edit journal — who changed what, appended at the origin-carrying mutation funnels
+    /// (SZHost+MutationJournal.swift); the reconcile brief lists the entries since the Director's
+    /// last turn. In-memory, bounded, cleared with the project.
+    var mutationJournal = SZMutationJournal(capacity: 200)
     /// In-flight pump deliveries (bounded by `deliveryCap` so a run-end release can't spawn one CLI
     /// process per queued scope at once). Pump-owned; mutated only on the MainActor.
     var activeDeliveries = 0
@@ -740,6 +744,7 @@ final class SZHost {
         assert(!ledger.anyWaiting && !mailbox.anyAwaiting,
                "project teardown with a parked wait — a continuation would leak")
         forcedFailNodes = [:]
+        mutationJournal.removeAll()
         // IN-MEMORY reset only, like the mailbox: the OLD project's runs.json is written at
         // each begin/note/seal (a pending coalesced write is dropped, never redirected at the
         // new project); the new project's history is restored right after the swap.
@@ -955,7 +960,8 @@ final class SZHost {
     /// palette). Returns the new node's id.
     @discardableResult
     func instantiateLibraryNode(libraryID: String, position: SZPoint,
-                                inputDefaults: [String: SZPortValue] = [:]) throws -> SZNodeID {
+                                inputDefaults: [String: SZPortValue] = [:],
+                                origin: SZMutationOrigin = .user) throws -> SZNodeID {
         guard let projectURL = loadedProjectURL else { throw SZMCPError.message("no project loaded") }
         let fm = FileManager.default
         let src = Self.libraryURL.appending(path: libraryID)
@@ -987,6 +993,7 @@ final class SZHost {
         }
 
         store.mutate { $0.graph.nodes.append(node) }
+        noteMutation("added node", [node.title], origin: origin)
         if let project = store.project { try SZProjectIO.save(project, to: projectURL) }
         // A node declaring a permission the app doesn't hold yet (microphone, camera) prompts BEFORE its
         // `setup()` runs — like project open and the run path do — otherwise the node boots unauthorized
@@ -1016,13 +1023,14 @@ final class SZHost {
     /// Returns the ids it created, in order — a spawn that failed to instantiate is simply absent, so a
     /// caller that must answer for what happened (the MCP tool) can compare against what it asked for.
     @discardableResult
-    func createMediaNodes(_ spawns: [(libraryID: String, path: String, position: SZPoint)]) -> [SZNodeID] {
+    func createMediaNodes(_ spawns: [(libraryID: String, path: String, position: SZPoint)],
+                          origin: SZMutationOrigin = .user) -> [SZNodeID] {
         var created: [SZNodeID] = []
         for spawn in spawns {
             do {
                 created.append(try instantiateLibraryNode(
                     libraryID: spawn.libraryID, position: spawn.position,
-                    inputDefaults: ["path": .string(spawn.path)]))
+                    inputDefaults: ["path": .string(spawn.path)], origin: origin))
             } catch {
                 status = "drop failed: \(error)"
                 print("[SZHost] media drop failed for \(spawn.libraryID): \(error)")
@@ -1077,7 +1085,9 @@ final class SZHost {
             status = denial
             return false
         }
+        let edge = mutationEdge(id)
         guard store.disconnect(connection: id) else { return false }
+        noteMutation("disconnected", [edge ?? "a connection"], origin: origin)
         persistGraphEditAndReload(action: "removed connection")
         return true
     }
@@ -1095,6 +1105,7 @@ final class SZHost {
         }
         switch store.tryConnect(from: from, to: to, kind: kind) {
         case .connected(let id):
+            noteMutation("connected", ["\(mutationLabel(from)) → \(mutationLabel(to))"], origin: origin)
             persistGraphEditAndReload(action: "connected")
             return id
         case .cycleRefused(let path):
@@ -1123,8 +1134,8 @@ final class SZHost {
         }
         guard let old = store.project?.graph.connections.first(where: { $0.id == id }),
               store.disconnect(connection: id) else { return false }
-        let result = store.tryConnect(from: end == .from ? newRef : old.from,
-                                      to: end == .to ? newRef : old.to, kind: old.kind)
+        let newFrom = end == .from ? newRef : old.from, newTo = end == .to ? newRef : old.to
+        let result = store.tryConnect(from: newFrom, to: newTo, kind: old.kind)
         guard case .connected = result else {
             // A refused re-add must never silently lose the wire: put the removed edge back.
             store.mutate { $0.graph.connections.append(old) }
@@ -1133,6 +1144,8 @@ final class SZHost {
             }
             return false
         }
+        noteMutation("moved endpoint", ["\(mutationLabel(old.from)) → \(mutationLabel(old.to)) now "
+                                       + "\(mutationLabel(newFrom)) → \(mutationLabel(newTo))"], origin: origin)
         persistGraphEditAndReload(action: "reconnected")
         return true
     }
@@ -1208,7 +1221,12 @@ final class SZHost {
         if let floats = value.floats { runtime?.setInputValue(node: node, port: port, floats: floats) }     // live (v3)
         if let string = value.string { runtime?.setInputString(node: node, port: port, string: string) }   // live (v4)
         guard store.setInputDefault(node: node, port: port, value: value) else { return value }
-        if persist { persistProject() }
+        // Journaled on the committed write only — a slider drag's live ticks are not decisions yet.
+        if persist {
+            noteMutation("set default", ["\(mutationTitle(node)).\(port) = \(Self.mutationValue(value))"],
+                         origin: origin)
+            persistProject()
+        }
         return value
     }
 
@@ -1277,6 +1295,13 @@ final class SZHost {
             id: id, title: title, sfSymbol: sfSymbol, prompt: prompt,
             summary: summary, permissions: permissions)
         guard result.found else { return result }
+        if let title, title != node.title { noteMutation("retitled", ["\(node.title) → \(title)"], origin: origin) }
+        if let prompt, prompt != node.prompt { noteMutation("re-prompted", [node.title], origin: origin) }
+        if (summary != nil && summary != node.contract?.summary)
+            || (permissions != nil && permissions != node.contract?.permissions)
+            || (sfSymbol != nil && sfSymbol != node.sfSymbol) {
+            noteMutation("edited node", [node.title], origin: origin)
+        }
         if result.raisedRebuild { noteRunCreatedWork([id]) }
         persistGraphEditAndReload(action: "update node")
         return result
@@ -1295,6 +1320,8 @@ final class SZHost {
         let ref = SZPortRef(node: node, port: port)
         let newEndpoint: SZPortRef? = (store.project?.graph.renderEndpoint == ref) ? nil : ref
         guard store.setRenderEndpoint(newEndpoint) else { return store.project?.graph.renderEndpoint }
+        noteMutation("toggled display", [newEndpoint.map { "→ \(mutationLabel($0))" } ?? "off (was \(mutationLabel(ref)))"],
+                     origin: origin)
         runtime?.setRenderEndpoint(newEndpoint)
         persistProject()
         return newEndpoint

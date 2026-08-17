@@ -23,6 +23,10 @@ import SZCore
 /// bystander on the same origin.
 enum SZToolCaller {
     @TaskLocal static var claim: SZClaimToken?
+    /// The calling turn's chat scope — bound alongside `claim` by the per-turn listener. Tells a
+    /// Coding Agent's turn from the Director's under one shared run claim (the mutation journal's
+    /// actor); nil on the standing buses.
+    @TaskLocal static var scope: SZChatScope?
 }
 
 extension SZHost {

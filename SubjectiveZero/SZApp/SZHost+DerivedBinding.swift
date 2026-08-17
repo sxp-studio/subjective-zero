@@ -92,6 +92,11 @@ extension SZHost {
             bindingLearn?.cancel()
             bindingLearn = nil
         }
+        // Kind names the ACT, subjects name what it touched — like every other journal entry (the
+        // status `action` above is separate prose, for the UI's edit line).
+        noteMutation(target == nil ? "learned control" : "bound control",
+                     ["\(key) → \(target.map(mutationLabel) ?? "\(mutationTitle(source)).\(portName)")"],
+                     origin: origin)
         return BindingResult(key: key, port: portName, min: min, max: max, target: target)
     }
 
@@ -112,6 +117,7 @@ extension SZHost {
             throw SZMCPError.message("binding removal failed — node/table missing")
         }
         runtime?.setInputString(node: source, port: SZBindingSource.tableInput, string: table)
+        noteMutation("removed binding", ["\(mutationTitle(source)).\(portName)"], origin: origin)
         persistGraphEditAndReload(action: "removed binding \(portName)")
     }
 

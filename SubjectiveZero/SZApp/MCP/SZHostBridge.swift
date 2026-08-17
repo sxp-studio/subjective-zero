@@ -113,7 +113,8 @@ final class SZHostBridge {
     /// not text) are tried first; the text surfaces stay `String?` and are wrapped in `.text`.
     func callTool(name: String, arguments: [String: Any], surface: Surface = .full,
                   forcedContext: SZTraceContext? = nil,
-                  caller: SZClaimToken? = nil) throws -> SZMCPToolResult {
+                  caller: SZClaimToken? = nil,
+                  callerScope: SZChatScope? = nil) throws -> SZMCPToolResult {
         // Withheld, not merely unlisted: knowing the name from somewhere else must not be enough.
         guard !Self.debugToolNames.contains(name) || surface.exposesDebugTools else {
             throw SZMCPError.message("\(name) is not available to agents")
@@ -137,6 +138,7 @@ final class SZHostBridge {
         // unidentified call must SHADOW any ambient identity, never inherit one) so the mutation
         // fence downstream can tell a turn touching its own held node from a bystander.
         return try SZToolCaller.$claim.withValue(caller) {
+        try SZToolCaller.$scope.withValue(callerScope) {
         try SZTrace.$context.withValue(traceContext) {
             // The span closes with the RESULT's approximate context weight (chars/4): every tool
             // result feeds straight back into the agent's context, and these payloads — library
@@ -158,6 +160,7 @@ final class SZHostBridge {
                 if let result = try handleBindingTool(name: name, arguments: arguments) { return .text(result) }
                 throw SZMCPError.message("unknown tool: \(name)")
             }
+        }
         }
         }
     }

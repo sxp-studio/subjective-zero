@@ -217,6 +217,7 @@ extension SZHostBridge {
             throw SZMCPError.message("no project loaded")
         }
         host.noteRunCreatedWork([id])   // a node the fleet's own tooling adds mid-run joins the work set
+        host.noteMutation("added node", [host.mutationTitle(id)], origin: .agent)
         return SZJSONRPC.encode(["id": id.uuidString, "x": position.x, "y": position.y])
     }
 
@@ -249,7 +250,7 @@ extension SZHostBridge {
             x: arguments.double("x") ?? 240, y: arguments.double("y") ?? 240,
             cardSize: CGSize(width: SZNodeLayout.width, height: SZNodeLayout.promptHeight))
         let specs = SZMediaSource.specs(for: urls, origin: origin)
-        let created = host.createMediaNodes(specs)
+        let created = host.createMediaNodes(specs, origin: .agent)
         guard created.count == specs.count else {   // a disk/compile failure part-way; the rest did land
             throw SZMCPError.message(
                 "created \(created.count) of \(specs.count) source nodes — read the graph to see which")
@@ -450,6 +451,7 @@ extension SZHostBridge {
         try requireUnfenced([id])
         let result = host.store.editPorts(node: id, edit)
         guard result.found else { throw SZMCPError.message("no node \(id)") }
+        host.noteMutation("edited ports", [host.mutationTitle(id)], origin: .agent)
         // The store guessed `.contractChanged`; only reading the live source can tell whether the code is merely
         // behind the new contract or now names ports that don't exist (dropping a port the code reads leaves
         // those reads resolving to nil every frame — a fault, not an unfinished feature).
@@ -732,7 +734,8 @@ extension SZHostBridge {
         guard let library = arguments.string("library") else { throw SZMCPError.message("ui_add_library_node needs `library` (a NodeLibrary id, e.g. corner-pin)") }
         let x = (arguments["x"] as? NSNumber)?.doubleValue ?? 0
         let y = (arguments["y"] as? NSNumber)?.doubleValue ?? 0
-        let id = try host.instantiateLibraryNode(libraryID: library, position: SZPoint(x: x, y: y))
+        let id = try host.instantiateLibraryNode(libraryID: library, position: SZPoint(x: x, y: y),
+                                                 origin: .agent)
         var response: [String: Any] = ["node": id.uuidString, "library": library]
         if let body = host.store.project?.graph.node(id: id)?.body { response["body"] = body.mode.rawValue }
         return SZJSONRPC.encode(response)

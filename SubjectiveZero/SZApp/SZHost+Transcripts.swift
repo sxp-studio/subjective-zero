@@ -168,6 +168,7 @@ extension SZHost {
         let titles = ids.compactMap { store.project?.graph.node(id: $0)?.title }
         let removed = ids.filter { store.removeNode(id: $0) }
         guard !removed.isEmpty else { return false }
+        noteMutation("removed node", titles.isEmpty ? ["\(removed.count) node(s)"] : titles, origin: origin)
         purgeChatArtifacts(for: removed)
         persistGraphEditAndReload(action: "deleted \(titles.isEmpty ? "\(removed.count) node(s)" : titles.joined(separator: ", "))")
         return true

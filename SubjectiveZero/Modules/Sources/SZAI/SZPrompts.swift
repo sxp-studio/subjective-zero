@@ -157,6 +157,46 @@ public enum SZDirectorPrompt {
         inbox.isEmpty ? "- (none)" : inbox.map { "- \($0)" }.joined(separator: "\n")
     }
 
+    /// How many mutation lines a brief prints — the rest are summarized as a count, so a long run's
+    /// delta stays a readable list instead of a wall the model skims past.
+    static let mutationLineCap = 40
+
+    /// The reconcile brief's `{{mutations}}` value — one line per graph edit since the Director's
+    /// last turn, oldest first, each led by its actor: `USER`, `DIRECTOR`, `EXTERNAL`, or the Coding
+    /// Agent named by its node's title. A repeated edit collapses to its latest state with a `×N`.
+    static func mutationLines(_ mutations: [SZGraphMutation], graph: SZGraph?) -> String {
+        guard !mutations.isEmpty else { return "- (nothing changed since your last turn)" }
+        var folded: [(mutation: SZGraphMutation, repeats: Int)] = []
+        for m in mutations {
+            if let last = folded.last, last.mutation.coalescingKey == m.coalescingKey {
+                folded[folded.count - 1] = (m, last.repeats + 1)   // keep the LATEST state
+            } else {
+                folded.append((m, 1))
+            }
+        }
+        var lines = folded.suffix(mutationLineCap).map { entry -> String in
+            let m = entry.mutation
+            let subjects = m.subjects.isEmpty ? "" : " " + m.subjects.joined(separator: ", ")
+            let times = entry.repeats > 1 ? " (×\(entry.repeats))" : ""
+            return "- \(actorLabel(m.actor, graph: graph)) \(m.kind)\(subjects)\(times)"
+        }
+        if folded.count > mutationLineCap {
+            lines.insert("- (… and \(folded.count - mutationLineCap) earlier edits)", at: 0)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// How a mutation's actor is named in the brief.
+    private static func actorLabel(_ actor: SZGraphMutation.Actor, graph: SZGraph?) -> String {
+        switch actor {
+        case .user: return "USER"
+        case .director: return "DIRECTOR"
+        case .external: return "EXTERNAL"
+        case .agent(let id):
+            return "Coding Agent (\(graph?.node(id: id)?.title ?? String(id.uuidString.prefix(8))))"
+        }
+    }
+
     /// A compact, agent-readable description of the graph: each node's id/title/kind/contract-state/prompt,
     /// then the flow (drawing-intent) + data edges and the render endpoint — enough for the Director to
     /// target `ui_*` calls. Flow edges are the user's intent to realize; laying a data edge resolves them.

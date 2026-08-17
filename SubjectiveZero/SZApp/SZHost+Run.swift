@@ -107,7 +107,7 @@ extension SZHost {
             turnListener = try? SZMCPServer.start(bridge: bridge, surface: .agent,
                                                   from: (agentMCPServer?.port ?? 42100) + 1,
                                                   traceContext: traceContext,
-                                                  caller: claim ?? selfClaim)
+                                                  caller: claim ?? selfClaim, callerScope: scope)
             if let turnListener { request.mcpServerPort = turnListener.port }
         }
         defer { turnListener?.stop() }
@@ -541,10 +541,14 @@ extension SZHost {
                     graph: graph, statuses: self.nodeStatusLines, node: nil,
                     resuming: self.agentSessions[SZChatScope.director.key] != nil,
                     run: SZRun(workSet: scoped, round: state.round, roundCap: roundCap,
-                               steers: state.steers, instruction: instruction))
+                               steers: state.steers, instruction: instruction),
+                    mutations: self.mutationJournal.entries(since: state.mutationCursor))
             },
             turn: { [weak self] order in
                 guard let self else { return SZTurnReport(failed: true, detail: "the host is gone") }
+                // The brief above was rendered against everything before this cursor; the next
+                // Director brief lists what lands from here on (this turn's own edits included).
+                state.mutationCursor = self.mutationJournal.count
                 do {
                     let result = try await self.runDirectorTurn(
                         prompt: order.brief, session: order.session, providerID: providerID,
@@ -592,13 +596,16 @@ extension SZHost {
     }
 
     /// The run's live pieces the world closures and the fleet share: the set supervisor,
-    /// the round the last set closed at, and the steers drained while a fleet was out.
+    /// the round the last set closed at, the steers drained while a fleet was out, and the
+    /// mutation-journal cursor of the last Director turn.
     @MainActor
     final class BuildState {
         var supervisor = SZDispatchSupervisor(bounds: SZHost.dispatchSupervisorBounds())
         var round = 0
         var steers: [String] = []
         var pendingSteers: [String] = []
+        /// The journal count at the last Director turn start — the reconcile brief's delta floor.
+        var mutationCursor = 0
     }
 
     /// Declared outcomes per step node, attached at load — what the engine checks a step's

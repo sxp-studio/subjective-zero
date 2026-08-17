@@ -14,6 +14,16 @@ Flow edges (drawing intent — realize each into typed data wiring; laying the d
 Data edges: 11111111.texture → 22222222.input
 Render endpoint (blitted to the viewport): 22222222.output
 
+## What changed since your last turn — and who did it
+- USER connected MacBook Camera.output → Grayscale Effect.input
+- DIRECTOR re-prompted Grayscale Effect
+- Coding Agent (Grayscale Effect) toggled display → Grayscale Effect.output
+
+Lines marked USER are the user's decisions: build on them, never revert them. Lines marked DIRECTOR
+are your own earlier edits; EXTERNAL is a caller you cannot identify — treat it like USER, not as
+your own work. If a Coding Agent changed something outside its own node, that is worth a steer
+(`ui_send_chat` to that node) — do not undo it silently.
+
 ## Nodes that did not complete — with what each Coding Agent reported
 - `22222222-2222-4222-8222-222222222222` "Grayscale Effect" — no contract — intent: "Convert the incoming camera texture to grayscale (per-pixel luminance)."
   reported: needsInput: the contract's `mode` options are ambiguous — which value is the default?

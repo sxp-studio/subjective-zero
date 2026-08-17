@@ -744,6 +744,7 @@ struct SZApp: App {
                               onPickContextSuggestion: { host.pickContextSuggestion($0) },
                               onContextFreeText: { host.contextFreeText(target: $0, text: $1) },
                               onCreateMediaNodes: { host.createMediaNodes($0) },
+                              onNodeAdded: { host.noteNodeAdded($0) },
                               // The HUD gear menu — an in-canvas mirror of the macOS menu bar (Project /
                               // View / Graph), plus AI Providers… and community links. Built here where
                               // `host`, panelVisibilityBinding, and the app-bundle Discord asset are in

@@ -109,6 +109,14 @@ private let grayStatus =
     "needsInput: the contract's `mode` options are ambiguous — which value is the default?"
 private let fleetInboxLine =
     "node \(grayID.uuidString): the boundary declares `mode` but no options were provided"
+/// The recorder's fixed mutation delta — one entry per actor kind.
+private let reconcileMutations = [
+    SZGraphMutation(actor: .user, kind: "connected",
+                    subjects: ["MacBook Camera.output → Grayscale Effect.input"]),
+    SZGraphMutation(actor: .director, kind: "re-prompted", subjects: ["Grayscale Effect"]),
+    SZGraphMutation(actor: .agent(grayID), kind: "toggled display",
+                    subjects: ["→ Grayscale Effect.output"]),
+]
 private let libraryIndexText = "## Sources\n- `camera.macos` — the live camera\n"
 
 // MARK: - The gate
@@ -206,7 +214,8 @@ struct SZBriefPinTests {
             agent: "director", template: "reconcile", message: "",
             world: SZWorld(graph: base, statuses: [grayID: grayStatus],
                            run: run(workSet: [grayID], round: 1, roundCap: 2,
-                                    steers: [fleetInboxLine])))
+                                    steers: [fleetInboxLine]),
+                           mutations: reconcileMutations))
         // Round 2: the inbox drained on round 1; the statuses are the run's last-reported.
         out["director-reconcile-r2.md"] = try renderer.render(
             agent: "director", template: "reconcile", message: "",

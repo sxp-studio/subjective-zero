@@ -43,6 +43,9 @@ extension SZHost {
         guard let staged, let firstPiece = staged.pieceIDs.first else { return nil }
         store.mutate { $0.graph = staged.graph }
         let pieceIDs = staged.pieceIDs
+        // The op is journaled ONCE, where it is decided. Its deferred settle (commit/rollback) runs on
+        // the run's tail with no caller identity — it is this entry's consequence, not a new decision.
+        noteMutation("split node", ["\(title) → \(pieceIDs.count) stages"], origin: .agent)
         seedSplitPrompts(pieceIDs, original: title, intent: intent, source: source, instruction: instruction)
         _ = firstPiece
 
@@ -107,6 +110,7 @@ extension SZHost {
         guard let staged else { return nil }
         store.mutate { $0.graph = staged.graph }
         let mergedID = staged.mergedID
+        noteMutation("merged nodes", constituents.map(\.title), origin: .agent)   // see `splitNode`
         if let contract = store.project?.graph.node(id: mergedID)?.contract,
            let prompt = renderSeed(template: "merge", graphOp: SZBriefExtras.GraphOp(
                 count: constituents.count,

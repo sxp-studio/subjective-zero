@@ -81,6 +81,10 @@ public struct SZNodeEditorPanel: View {
     // Files dropped on the canvas → create media library nodes (video-file / image-file) with `path`
     // pre-set. The panel classifies + converts the drop point to graph space; the host instantiates.
     private let onCreateMediaNodes: ([(libraryID: String, path: String, position: SZPoint)]) -> Void
+    /// A prompt node the user just created on the canvas (HUD "+", double-click, wire-drop spawn).
+    /// Those adds write the store directly — there is no host funnel for an add — so this callback is
+    /// where the host learns who added a node.
+    private let onNodeAdded: (SZNodeID) -> Void
     // The HUD gear menu's CONTENT (Project/View/Graph commands, AI Providers…, community links). Built
     // by the host (SZApp) where `host` + the app-bundle Discord asset are in scope, injected as an
     // erased view — the panel just renders it inside a HUD-styled Menu. Empty by default (previews/tests).
@@ -157,6 +161,7 @@ public struct SZNodeEditorPanel: View {
                 onPickContextSuggestion: @escaping (SZContextSuggestion) -> Void = { _ in },
                 onContextFreeText: @escaping (SZCanvasContextTarget, String) -> Void = { _, _ in },
                 onCreateMediaNodes: @escaping ([(libraryID: String, path: String, position: SZPoint)]) -> Void = { _ in },
+                onNodeAdded: @escaping (SZNodeID) -> Void = { _ in },
                 gearMenu: AnyView = AnyView(EmptyView())) {
         self.store = store
         self.project = project
@@ -203,6 +208,7 @@ public struct SZNodeEditorPanel: View {
         self.onPickContextSuggestion = onPickContextSuggestion
         self.onContextFreeText = onContextFreeText
         self.onCreateMediaNodes = onCreateMediaNodes
+        self.onNodeAdded = onNodeAdded
         self.gearMenu = gearMenu
     }
 
@@ -1042,6 +1048,7 @@ public struct SZNodeEditorPanel: View {
     private func addPromptNode(atScreen screen: CGPoint) {
         let center = snappedPromptCenter(camera.worldPoint(screen: screen))
         if let id = store.addPromptNode(prompt: "", position: SZPoint(x: center.x, y: center.y)) {
+            onNodeAdded(id)
             selectedNodeID = id
             autoEditNodeID = id   // the new card opens into editing + grabs the field (see SZPromptNodeView)
         }
@@ -1174,6 +1181,7 @@ public struct SZNodeEditorPanel: View {
             guard let newRef = spawnPromptNode(for: kind, source: source, downstream: downstream,
                                                at: SZPoint(x: snapped.x, y: snapped.y))
             else { break }
+            onNodeAdded(newRef.node)
             // Oriented by the drag: downstream = source feeds new, else new feeds source.
             let (fromRef, toRef) = downstream ? (source, newRef) : (newRef, source)
             switch kind {

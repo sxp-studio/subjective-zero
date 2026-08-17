@@ -18,16 +18,20 @@ public struct SZWorld: Sendable {
     public var run: SZRun?
     /// The standing work assigned to this scope, surviving the retry loop.
     public var assignment: SZAssignment?
+    /// Graph edits since this scope's previous turn, with their actors — the reconcile brief's
+    /// `{{mutations}}`. Host-side like the graph; never crosses the step ABI.
+    public var mutations: [SZGraphMutation]
 
     public init(graph: SZGraph? = nil, statuses: [SZNodeID: String] = [:],
                 node: SZNodeID? = nil, resuming: Bool = false, run: SZRun? = nil,
-                assignment: SZAssignment? = nil) {
+                assignment: SZAssignment? = nil, mutations: [SZGraphMutation] = []) {
         self.graph = graph
         self.statuses = statuses
         self.node = node
         self.resuming = resuming
         self.run = run
         self.assignment = assignment
+        self.mutations = mutations
     }
 
     /// The step-visible slice: the wire document an evaluation (and its asks) is pinned to.
