@@ -170,7 +170,9 @@ extension SZHost {
                                        claim: claim ?? runClaim).result
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
         // (timeout, CLI error) is invisible and the node reads as a silent Draft.
-        if result.outcome.failed {
+        // A user Stop kills the CLI mid-turn: that is a choice, not a provider failure — no error
+        // line for it (mirrors `providerFailureDetail`'s own guard).
+        if result.outcome.failed, !Task.isCancelled {
             if result.process.timedOut {
                 // Our budget ran out, not the provider's fault — a plain warning line.
                 appendWarningLine(Self.turnFailureDetail(result), to: scope)
@@ -416,6 +418,7 @@ extension SZHost {
         }
         runClaim = claim   // `.steer` ack waits derive their consumer from the `.run` holder
         runWorkSet = workSet
+        promotedThisRun = []    // evidence starts fresh — an off-run promote vouches for nothing here
         runStartedAt = Date()   // the rollup's wall-clock anchor
         runStartedMono = ContinuousClock.now
         runTurnLog = []
@@ -444,6 +447,7 @@ extension SZHost {
                     runTurnLog = []
                     runID = nil
                     dispatchPrompts = dispatchPrompts.filter { hiddenPieces.contains($0.key) }
+                    promotedThisRun = []
                 }
                 // Every traversal seals itself as its engine returns; this sweep is the belt
                 // for an abnormal unwind, thread-scoped so a zombie can't touch a newer run's.
@@ -468,6 +472,15 @@ extension SZHost {
                     // restart must not fold the NEW run's live log onto its own narration.
                     if runClaim == claim { attachRunRollup(to: narrationID) }
                 }
+            } catch is CancellationError {
+                // A user Stop is not a failure: no red pills, no per-node "didn't finish" lines — the
+                // unfinished nodes simply keep their Draft / Outdated pills. Count what is left.
+                status = "run cancelled"
+                if !ownsGraphOp {
+                    let unfinished = unfinishedRunNodeCount()
+                    narrateDirector("Run cancelled — \(unfinished) node\(unfinished == 1 ? "" : "s") unfinished.")
+                }
+                print("[SZHost] agent run cancelled")
             } catch {
                 status = "agent run failed: \(error)"
                 if !ownsGraphOp {
@@ -920,35 +933,48 @@ extension SZHost {
         persistAgentSessions()
     }
 
-    /// After a run, surface nodes that never finished. Node success is signalled ONLY by
-    /// voluntary agent MCP calls; any work-set node still `.prompt` here gets an error pill
-    /// + a Director-tab line, unless its agent already explained itself. Returns
-    /// (implemented, failed) for the run summary.
+    /// After a run, account for every work-set node from EVIDENCE — a promote that landed during the
+    /// run plus the node's derived state now (`SZRunNodeVerdict`). Implemented nodes are silent unless
+    /// they moved after their build; a node its agent already explained keeps the agent's words; only a
+    /// silent, unpromoted node gets the generic line. Returns (implemented, failed) for the run summary.
     @discardableResult
-    private func surfaceUnresolvedNodes() -> (implemented: Int, failed: Int) {
+    func surfaceUnresolvedNodes() -> (implemented: Int, failed: Int) {
         var implemented = 0, failed = 0
         for id in runWorkSet {                                                     // this run's captured work (grown)
             guard let node = store.project?.graph.node(id: id) else { continue }   // removed mid-run (merge)
-            guard node.needsImplementation else { implemented += 1; continue }      // promoted → built & current
-            let phase = nodeAgentState[id]?.phase ?? .idle
-            // Built, but its intent moved WHILE the agent was implementing it — not a
-            // failure: narrate the truth and let the amber Outdated pill carry it. The reason
-            // derives from the build stamp promote wrote (the brief the agent was given vs the
-            // prompt now); an agent that reported a real problem always wins.
-            let rebriefed = node.rebuildReason == .intentChanged
-            if node.kind == .generated, rebriefed, phase != .error, phase != .needsInput {
-                implemented += 1
+            let verdict = SZRunNodeVerdict.classify(
+                promoted: promotedThisRun.contains(id), stillDirty: node.needsImplementation,
+                derivedReason: node.rebuildReason, phase: nodeAgentState[id]?.phase ?? .idle)
+            if verdict.isImplemented { implemented += 1 } else { failed += 1 }
+            switch verdict {
+            case .implemented, .failedAsReported:
+                break
+            case .implementedButRebriefed:
                 narrateDirector("\(node.title) was built, but its prompt changed mid-run — "
                     + "it needs a rebuild against the new intent.")
-                continue
+            case .implementedButContractMoved:
+                narrateDirector("\(node.title) was built, but its ports changed after the build — "
+                    + "it needs a rebuild against the current contract.")
+            case .failedSourceMismatch:
+                // The live audit is the detail (a cached one stands in if the source is unreadable).
+                if let audit = liveAuditErrors(id) { nodeAgentState[id, default: SZNodeAgentState()].errorDetail = audit }
+                let reason = "its source reads ports the contract doesn't declare"
+                recordRunFailure(node: id, fallback: reason)
+                narrateDirector("\(node.title) was built, but \(reason) — see the flagged node.")
+            case .failedSilently:
+                let reason = "the agent never compiled this node or reported a blocker"
+                recordRunFailure(node: id, fallback: reason)
+                narrateDirector("\(node.title) didn't finish — \(reason).")
             }
-            failed += 1
-            if phase == .error || phase == .needsInput { continue }                 // agent already explained it
-            let reason = "the agent never compiled this node or reported a blocker"
-            recordNodeStatus(node: id, phase: .error, message: reason)
-            narrateDirector("\(node.title) didn't finish — \(reason).")
         }
         return (implemented, failed)
+    }
+
+    /// The work-set nodes a cancelled run left dirty — for the cancel narration only; touches nothing.
+    private func unfinishedRunNodeCount() -> Int {
+        runWorkSet.reduce(0) { n, id in
+            n + ((store.project?.graph.node(id: id)?.needsImplementation ?? false) ? 1 : 0)
+        }
     }
 
     /// The ledger resources one agent turn on `scope` occupies: the transcript (one turn per

@@ -123,6 +123,11 @@ final class SZHost {
     /// a different thing and preserves the pre-existing clear-on-promote behaviour for off-run paths (a
     /// node-scoped chat turn that compiles, a library instantiate).
     internal(set) var dispatchPrompts: [SZNodeID: String?] = [:]
+    /// The nodes `promoteStagedNode` landed during the CURRENT run — the run's success evidence
+    /// (`surfaceUnresolvedNodes`). Reset at run start and in the run task's claim-guarded settle (a
+    /// cancelled run's zombie must not clear a newer run's set); a promote outside a run is dropped at the
+    /// next start, so it can never vouch for work it did not do.
+    internal(set) var promotedThisRun: Set<SZNodeID> = []
     /// The id of the assistant message currently STREAMING per scope (set/cleared by `deliver`).
     /// Transcript flushes exclude it, so a sidecar only ever contains completed turns — a crash
     /// mid-stream restores up to the last finished message, never a half-reply.
@@ -755,6 +760,7 @@ final class SZHost {
         hiddenPieces = []
         pendingGraphOp = nil
         dispatchPrompts = [:]
+        promotedThisRun = []
         agentSessions = [:]
         restoredSessions = [:]
         inFlightAssistantIDs = [:]
@@ -944,8 +950,9 @@ final class SZHost {
         }
         watchNodeSources(in: projectURL)          // a newly-generated node becomes hot-reloadable
         if cardArrived { refreshPreviewStream() } // the card host mounts the body flipped above
-        nodeAgentState[id]?.errorDetail = nil     // a successful promote clears any prior failure detail
+        clearTransientAgentStateAfterPromote(id)  // a green compile outranks any earlier utterance
         classifyRebuild(node: id)                 // re-audit the promoted source: mismatch is derived, never latched
+        promotedThisRun.insert(id)                // the run's success evidence
         // The staged folder has done its job — drop it so a later compile can't re-promote stale bytes
         // (it must re-stage). Failed promotes above keep it for inspection; the rest of `.staging/`
         // (instance.lock, message-queue.json) is not ours to touch.
@@ -1373,6 +1380,31 @@ final class SZHost {
         state.errorDetail = phase == .error ? (message.isEmpty ? phase.rawValue : message) : nil
         nodeAgentState[node] = state
         print("[SZHost] node \(node.uuidString) → \(phase.rawValue) \(message)")
+    }
+
+    /// A promote is strictly newer evidence than any prior report: drop the failure detail and message,
+    /// and demote a stale `.error` / `.needsInput` pill to `.ok` (an in-flight chat flag is untouched).
+    /// Without this a red pill outlives the green build that answered it.
+    func clearTransientAgentStateAfterPromote(_ id: SZNodeID) {
+        guard var state = nodeAgentState[id] else { return }
+        state.errorDetail = nil
+        state.message = ""
+        if state.phase == .error || state.phase == .needsInput { state.phase = .ok }
+        nodeAgentState[id] = state
+    }
+
+    /// The run-end writer for a node that failed WITHOUT explaining itself: red pill, but a specific
+    /// diagnostic already on the node (a port audit, a provider death) survives — `fallback` fills only
+    /// what is empty. Never `recordNodeStatus`, which would overwrite that detail with the generic line
+    /// and feed it onward as the node's blocker.
+    func recordRunFailure(node: SZNodeID, fallback: String) {
+        guard isInGraph(node) else { return }
+        var state = nodeAgentState[node] ?? SZNodeAgentState()
+        state.phase = .error
+        if state.message.isEmpty { state.message = fallback }
+        state.errorDetail = state.errorDetail ?? fallback
+        nodeAgentState[node] = state
+        print("[SZHost] node \(node.uuidString) → error (run end) \(state.message)")
     }
 
     /// Set/clear the mid-chat-turn flag on a node (its Coding Agent is editing it) — editor shows

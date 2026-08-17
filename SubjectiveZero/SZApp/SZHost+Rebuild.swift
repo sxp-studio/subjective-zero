@@ -28,14 +28,8 @@ extension SZHost {
     /// cleared when the audit is clean. Called after a port edit, a promote, a hot reload, and for every
     /// flagged node when a project opens. Never persisted: `SZProjectIO.load` re-derives it.
     func classifyRebuild(node id: SZNodeID) {
-        guard let projectURL = loadedProjectURL,
-              let node = store.project?.graph.node(id: id), node.kind == .generated,
-              let contract = node.contract else { return }
-        guard let source = try? String(contentsOf: SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: id),
-                                       encoding: .utf8) else { return }
-
-        let audit = SZPortBindingAudit.audit(contract: contract, source: source)
-        let mismatch = !audit.errors.isEmpty
+        guard let node = store.project?.graph.node(id: id), let errors = auditErrors(node) else { return }
+        let mismatch = !errors.isEmpty
         if mismatch != node.sourceMismatch {
             store.mutate { project in
                 guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
@@ -44,10 +38,27 @@ extension SZHost {
         }
         if mismatch {
             // Reuse the node's existing error surface: the pill becomes the clickable diagnostic popover.
-            nodeAgentState[id, default: SZNodeAgentState()].errorDetail = audit.errors.joined(separator: "\n")
+            nodeAgentState[id, default: SZNodeAgentState()].errorDetail = errors.joined(separator: "\n")
         } else if node.sourceMismatch {
             nodeAgentState[id]?.errorDetail = nil
         }
+    }
+
+    /// The live audit's human-readable errors for a built node (one line each), nil when the audit is clean
+    /// or cannot run (no project / not built / unreadable source). Recomputed on demand — the fix draft and
+    /// the run-end accounting read the source as it is NOW, not a cached verdict.
+    func liveAuditErrors(_ id: SZNodeID) -> String? {
+        guard let node = store.project?.graph.node(id: id), let errors = auditErrors(node), !errors.isEmpty
+        else { return nil }
+        return errors.joined(separator: "\n")
+    }
+
+    /// Run `SZPortBindingAudit` over a built node's live source + contract; nil when it cannot run.
+    private func auditErrors(_ node: SZNode) -> [String]? {
+        guard let projectURL = loadedProjectURL, node.kind == .generated, let contract = node.contract,
+              let source = try? String(contentsOf: SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: node.id),
+                                       encoding: .utf8) else { return nil }
+        return SZPortBindingAudit.audit(contract: contract, source: source).errors
     }
 
     /// After a project loads: `SZProjectIO.load` already audited every built node; this pass attaches the
@@ -76,8 +87,9 @@ extension SZHost {
         let ask: String
         switch reason {
         case .sourceMismatch:
-            let detail = nodeAgentState[id]?.errorDetail.map { " \(Self.oneLineDetail($0))" } ?? ""
-            ask = " is out of step with its contract:\(detail) Work out which side is stale — if those ports still "
+            // Fresh audit first — the cached detail is a fallback for a source that cannot be read now.
+            let detail = (liveAuditErrors(id) ?? nodeAgentState[id]?.errorDetail).map { ": \(Self.oneLineDetail($0))" } ?? ""
+            ask = " is out of step with its contract\(detail). Work out which side is stale — if those ports still "
                 + "matter, declare them in the contract again; if they were dropped on purpose, remove the reads. "
                 + "Prefer whichever keeps the node's existing behaviour, and say which you chose and why."
         case .contractChanged:
@@ -90,8 +102,11 @@ extension SZHost {
         injectComposerDraft(SZComposerDraft(segments: [mention, .text(ask)]), scope: .node(id))
     }
 
+    /// One line, bounded, with no trailing terminator (the template supplies the sentence's own).
     private static func oneLineDetail(_ s: String) -> String {
-        let flat = s.split(whereSeparator: \.isNewline).joined(separator: "; ")
-        return flat.count > 120 ? String(flat.prefix(117)) + "…" : flat
+        var flat = s.split(whereSeparator: \.isNewline).joined(separator: "; ")
+        if flat.count > 120 { flat = String(flat.prefix(117)) + "…" }
+        while let last = flat.last, last == "." || last == ";" || last == " " { flat.removeLast() }
+        return flat
     }
 }
