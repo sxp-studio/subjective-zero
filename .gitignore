@@ -41,3 +41,4 @@ internal/
 
 # Coverage artifacts (swift test)
 *.profraw
+.dd/
