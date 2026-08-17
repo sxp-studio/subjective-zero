@@ -61,8 +61,9 @@ import Testing
 }
 
 @Test @MainActor func everyDeclaredPropertyIsAJSONSchemaObject() {
-    // A property is a schema object naming a JSON-Schema type — or, where a tool deliberately accepts
-    // more than one (`ui_set_input_default.value`), a described untyped one. Never a bare value.
+    // A property is a schema object naming a JSON-Schema type — a single one, or a list of them where a
+    // tool deliberately accepts more than one (`ui_set_input_default.value`) — or, failing that, a
+    // described untyped one. Never a bare value.
     let jsonTypes: Set<String> = ["string", "number", "integer", "boolean", "array", "object", "null"]
     for def in SZHostBridge.toolDefinitions(for: .full) {
         let name = def["name"] as? String ?? "?"
@@ -77,6 +78,11 @@ import Testing
                 if type == "array" {
                     #expect(schema["items"] as? [String: Any] != nil, "\(name).\(key) is an array without items")
                 }
+            } else if let types = schema["type"] as? [String] {
+                #expect(!types.isEmpty && types.allSatisfy(jsonTypes.contains),
+                        "\(name).\(key) declares an unknown type in \(types)")
+                #expect((schema["description"] as? String)?.isEmpty == false,
+                        "\(name).\(key) is a union type, so it must describe what it accepts")
             } else {
                 #expect((schema["description"] as? String)?.isEmpty == false,
                         "\(name).\(key) declares no type, so it must describe what it accepts")

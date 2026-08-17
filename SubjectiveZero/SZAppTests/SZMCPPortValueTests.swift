@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// `SZHostBridge.portValue(_:from:)` — the coercion table between a JSON argument and a typed
-// `SZPortValue`. It is what stands between an agent's `ui_set_port` call and the store, so every port
+// `SZHostBridge.portValue(_:from:)` — the coercion table between a JSON argument (typed, or the
+// numeric strings MCP clients send for a loosely-typed argument) and a typed `SZPortValue`. It is what stands between an agent's `ui_set_port` call and the store, so every port
 // type's accepted form (and its refusal) is pinned here.
 import Foundation
 import SZCore
@@ -39,10 +39,44 @@ import Testing
     #expect(try coerce(.float4x4, Array(repeating: 2.0, count: 16)) == .float4x4(Array(repeating: 2.0, count: 16)))
 }
 
-@Test @MainActor func arrayCoercionDropsNonNumericEntriesRatherThanRejectingThem() throws {
-    // Current behavior, pinned so a change to it is deliberate: a mixed array yields only its numbers,
-    // and arity is not checked here (the store owns the port's declared component count).
-    #expect(try coerce(.float3, [1, "two", 3]) == .float3([1, 3]))
+@Test @MainActor func arrayCoercionChecksArityAndRejectsNonNumericEntries() {
+    // The port type fixes the component count; a short/long or mixed array is refused with the count named.
+    #expect(throws: SZMCPError.self) { try coerce(.float3, [1, "two", 3]) }
+    #expect(throws: SZMCPError.self) { try coerce(.float2, [14]) }
+    #expect(throws: SZMCPError.self) { try coerce(.colorRGB, [0, 0, 0, 1]) }
+}
+
+// MARK: - numeric strings (what MCP clients send for a loosely-typed `value`)
+
+@Test @MainActor func coercesNumericStringsForFloats() throws {
+    #expect(try coerce(.float, "14") == .float(14))
+    #expect(try coerce(.float, "14.0") == .float(14))
+    #expect(try coerce(.float, " 0.6 ") == .float(0.6))
+    #expect(try coerce(.float, 14) == .float(14))
+}
+
+@Test @MainActor func coercesBoolStrings() throws {
+    #expect(try coerce(.bool, "true") == .bool(true))
+    #expect(try coerce(.bool, "False") == .bool(false))
+    #expect(try coerce(.bool, "1") == .bool(true))
+    #expect(try coerce(.bool, "0") == .bool(false))
+    #expect(throws: SZMCPError.self) { try coerce(.bool, "yes") }
+}
+
+@Test @MainActor func coercesJSONArrayStringsForArrayBackedTypes() throws {
+    #expect(try coerce(.colorRGBA, "[0.1,0.2,0.3,1]") == .colorRGBA([0.1, 0.2, 0.3, 1]))
+    #expect(try coerce(.float2, "[14, 2]") == .float2([14, 2]))
+    #expect(throws: SZMCPError.self) { try coerce(.float2, "[14]") }        // needs 2
+    #expect(throws: SZMCPError.self) { try coerce(.float2, "[1, \"x\"]") }
+    #expect(throws: SZMCPError.self) { try coerce(.float3, "0.5") }        // a scalar is not an array
+}
+
+@Test @MainActor func refusalNamesWhatWasReceived() {
+    #expect {
+        try coerce(.float, "14x")
+    } throws: { error in
+        "\(error)".contains("14x")
+    }
 }
 
 // MARK: - strings and events
@@ -61,9 +95,9 @@ import Testing
 // MARK: - refusals
 
 @Test @MainActor func refusesTheWrongShapeForEachFamily() {
-    #expect(throws: SZMCPError.self) { try coerce(.float, "1.5") }
+    #expect(throws: SZMCPError.self) { try coerce(.float, "abc") }
     #expect(throws: SZMCPError.self) { try coerce(.float, nil) }
-    #expect(throws: SZMCPError.self) { try coerce(.bool, "true") }
+    #expect(throws: SZMCPError.self) { try coerce(.bool, "maybe") }
     #expect(throws: SZMCPError.self) { try coerce(.float3, 1.0) }
     #expect(throws: SZMCPError.self) { try coerce(.colorRGBA, "#ff0000") }
     #expect(throws: SZMCPError.self) { try coerce(.string, 12) }
@@ -85,7 +119,11 @@ import Testing
         case .bool: true
         case .enumeration, .string: "x"
         case .event: 0
-        default: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        case .float2: [1.0, 1.0]
+        case .float3, .colorRGB: [1.0, 1.0, 1.0]
+        case .float4, .colorRGBA: [1.0, 1.0, 1.0, 1.0]
+        case .float3x3: Array(repeating: 1.0, count: 9)
+        case .float4x4, .texture, .floatArray: Array(repeating: 1.0, count: 16)
         }
         if refused {
             #expect(throws: SZMCPError.self) { try coerce(type, raw) }

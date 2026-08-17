@@ -95,10 +95,11 @@ extension SZHostBridge {
                  ]),
             tool("ui_message_status", "Delivery state of a message you sent (`message_id` from ui_send_chat): {state: queued|delivering|processed|failed, reason?}. `failed` carries the reason. Unknown ids (e.g. from before an app restart) return {state: \"unknown\"}. Poll between your own steps — the send never blocks.",
                  properties: ["message_id": ["type": "string"]]),
-            tool("ui_set_input_default", "Set an unconnected input's default value (mirrors its slider/toggle/dropdown) — changes the live render. `value` is coerced to the port's declared type (number, bool, or array of numbers). A slider port's value is clamped to its `ui.min/max` and snapped to `ui.step`, exactly as dragging the slider would; the returned `value` is the APPLIED one, which may differ from what you asked for.",
+            tool("ui_set_input_default", "Set an unconnected input's default value (mirrors its slider/toggle/dropdown) — changes the live render. `value` is coerced to the port's declared type (number, bool, or array of numbers); numbers may be sent as JSON numbers or numeric strings (\"14\", \"[0.1, 0.2, 0.3, 1]\"). A slider port's value is clamped to its `ui.min/max` and snapped to `ui.step`, exactly as dragging the slider would; the returned `value` is the APPLIED one, which may differ from what you asked for.",
                  properties: [
                     "node": ["type": "string"], "port": ["type": "string"],
-                    "value": ["description": "number, bool, or array of numbers (per the port type)"],
+                    "value": ["type": ["number", "boolean", "array", "string"],
+                              "description": "number, bool, or array of numbers (per the port type); numeric strings are accepted"],
                  ]),
             tool("ui_toggle_display", "Toggle a node's texture output as the viewport render endpoint (mirrors clicking the node card's monitor icon) — switches the live viewport to that output. Pointing at the current endpoint clears it. `port` must be a `texture` output.",
                  properties: ["node": ["type": "string"], "port": ["type": "string"]]),
@@ -737,32 +738,59 @@ extension SZHostBridge {
         return SZJSONRPC.encode(response)
     }
 
-    /// Coerce a JSON `value` to the port's declared type.
+    /// Coerce a JSON `value` to the port's declared type. Numbers arrive as JSON numbers or as numeric
+    /// strings ("14", "true", "[0.1, 0.2]") — MCP clients serialise a loosely-typed argument as text.
     static func portValue(_ type: SZPortType, from raw: Any?) throws -> SZPortValue {
-        func number() throws -> Double {
-            guard let n = raw as? NSNumber else { throw SZMCPError.message("value must be a number") }
-            return n.doubleValue
+        func got() -> String {
+            switch raw {
+            case nil: "nothing"
+            case let s as String: "\"\(s)\""
+            case let v?: "\(v)"
+            }
         }
-        func array() throws -> [Double] {
-            guard let a = raw as? [Any] else { throw SZMCPError.message("value must be an array of numbers") }
-            return a.compactMap { ($0 as? NSNumber)?.doubleValue }
+        func number() throws -> Double {
+            if let n = raw as? NSNumber { return n.doubleValue }
+            if let s = raw as? String, let d = Double(s.trimmingCharacters(in: .whitespaces)) { return d }
+            throw SZMCPError.message("value must be a number (got \(got()))")
+        }
+        func array(_ count: Int) throws -> [Double] {
+            var elements: [Any]? = raw as? [Any]
+            if elements == nil, let s = raw as? String, let data = s.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+                elements = parsed as? [Any]
+            }
+            let numbers = elements?.compactMap { ($0 as? NSNumber)?.doubleValue }
+            guard let numbers, numbers.count == elements?.count else {
+                throw SZMCPError.message("value must be an array of \(count) numbers (got \(got()))")
+            }
+            guard numbers.count == count else {
+                throw SZMCPError.message("value must be an array of \(count) numbers (got \(numbers.count))")
+            }
+            return numbers
         }
         func string() throws -> String {
-            guard let s = raw as? String else { throw SZMCPError.message("value must be a string") }
+            guard let s = raw as? String else { throw SZMCPError.message("value must be a string (got \(got()))") }
             return s
         }
         switch type {
         case .float: return .float(try number())
         case .bool:
             if let n = raw as? NSNumber { return .bool(n.boolValue) }
-            return .bool(try number() != 0)
-        case .float2: return .float2(try array())
-        case .float3: return .float3(try array())
-        case .float4: return .float4(try array())
-        case .colorRGB: return .colorRGB(try array())
-        case .colorRGBA: return .colorRGBA(try array())
-        case .float3x3: return .float3x3(try array())
-        case .float4x4: return .float4x4(try array())
+            if let s = raw as? String {
+                switch s.trimmingCharacters(in: .whitespaces).lowercased() {
+                case "true", "1": return .bool(true)
+                case "false", "0": return .bool(false)
+                default: break
+                }
+            }
+            throw SZMCPError.message("value must be a bool (got \(got()))")
+        case .float2: return .float2(try array(2))
+        case .float3: return .float3(try array(3))
+        case .float4: return .float4(try array(4))
+        case .colorRGB: return .colorRGB(try array(3))
+        case .colorRGBA: return .colorRGBA(try array(4))
+        case .float3x3: return .float3x3(try array(9))
+        case .float4x4: return .float4x4(try array(16))
         case .enumeration: return .enumeration(try string())
         case .string: return .string(try string())
         case .event: return .event
