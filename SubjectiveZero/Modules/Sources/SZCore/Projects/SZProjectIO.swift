@@ -40,6 +40,12 @@ public enum SZProjectIO {
 
     private static func encoder() -> JSONEncoder { SZJSON.encoder() }
 
+    /// The one serialization of a `node-contract.json` — used by `save` for the live file AND by the
+    /// staging writer, so a staged contract is byte-comparable to the live one (no serializer noise).
+    public static func contractData(_ contract: SZNodeContract) throws -> Data {
+        try encoder().encode(contract)
+    }
+
     /// Write `project` into the `.subz` directory at `url`: `project.json` (with node contracts stripped)
     /// + one `node-contract.json` per node that has a contract. Leaves any existing `Node.swift` files
     /// untouched (node source is owned by the runtime/host, not this splitter).
@@ -59,8 +65,7 @@ public enum SZProjectIO {
             guard let contract = node.contract else { continue }
             let folder = nodesDir.appending(path: node.id.description)
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-            let contractData = try encoder().encode(contract)
-            try contractData.write(to: folder.appending(path: contractFileName), options: .atomic)
+            try contractData(contract).write(to: folder.appending(path: contractFileName), options: .atomic)
         }
     }
 

@@ -139,3 +139,44 @@ private func output(_ name: String, _ type: SZPortType = .texture) -> SZPort { S
     """
     #expect(SZPortBindingAudit.audit(contract: c, source: src).errors.isEmpty)
 }
+
+// MARK: - the promote gate (auditForPromote)
+
+@Test func sourceOnlyRestageIsAuditedAgainstTheLiveContract() {
+    // No staged contract, but the node HAS a live one: the source must agree with the LIVE contract —
+    // a read of an undeclared port is refused, never promoted unaudited.
+    let live = contract(inputs: [input("gain")], outputs: [output("texture")])
+    let src = """
+    let g = ctx.inputFloat("gain") ?? 1
+    let s = ctx.inputFloat("speed") ?? 0   // not in the live contract
+    _ = (g, s, ctx.outputTexture("texture"))
+    """
+    let a = SZPortBindingAudit.auditForPromote(source: src, authored: nil, live: live)
+    #expect(a.contract == live)
+    #expect(a.result.errors.count == 1)
+    #expect(a.result.errors[0].contains("\"speed\""))
+    #expect(a.mergeConflicts.isEmpty)
+}
+
+@Test func stagedContractIsAuditedAsMergedIntoTheLiveBoundary() {
+    // The authored contract adds "speed"; merged with the live boundary the source audits clean, and a
+    // retype the boundary refuses comes back as a merge conflict (a warning, not an error).
+    let live = contract(inputs: [input("gain")], outputs: [output("texture")])
+    let authored = contract(inputs: [input("gain", .texture), input("speed")], outputs: [output("texture")])
+    let src = """
+    let g = ctx.inputFloat("gain") ?? 1
+    let s = ctx.inputFloat("speed") ?? 0
+    _ = (g, s, ctx.outputTexture("texture"))
+    """
+    let a = SZPortBindingAudit.auditForPromote(source: src, authored: authored, live: live)
+    #expect(a.result.errors.isEmpty)
+    #expect(a.contract?.inputs.map(\.name) == ["gain", "speed"])
+    #expect(a.contract?.inputs[0].type == .float)      // boundary held
+    #expect(a.mergeConflicts.count == 1)
+}
+
+@Test func uncontractedNodeHasNothingToAuditAgainst() {
+    let a = SZPortBindingAudit.auditForPromote(source: "_ = ctx.inputFloat(\"x\")", authored: nil, live: nil)
+    #expect(a.contract == nil)
+    #expect(a.result == SZPortBindingAudit.Result(errors: [], warnings: []))
+}

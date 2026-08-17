@@ -945,6 +945,10 @@ final class SZHost {
         watchNodeSources(in: projectURL)          // a newly-generated node becomes hot-reloadable
         if cardArrived { refreshPreviewStream() } // the card host mounts the body flipped above
         nodeAgentState[id]?.errorDetail = nil     // a successful promote clears any prior failure detail
+        // The staged folder has done its job — drop it so a later compile can't re-promote stale bytes
+        // (it must re-stage). Failed promotes above keep it for inspection; the rest of `.staging/`
+        // (instance.lock, message-queue.json) is not ours to touch.
+        try? fm.removeItem(at: staging)
         status = "promoted \(id.uuidString.prefix(8))"
     }
 

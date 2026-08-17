@@ -269,9 +269,22 @@ extension SZHostBridge {
         let dir = projectURL.appending(path: ".staging/nodes/\(id.uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try source.write(to: dir.appending(path: "Node.swift"), atomically: true, encoding: .utf8)
+        // The contract, when given, is decoded and re-encoded through the SAME serializer the live
+        // `node-contract.json` uses, so staged vs live diff on content only (never on float formatting).
+        // A contract staged in an earlier write of the SAME attempt stays (a source-only fix after a red
+        // compile keeps its knobs); a successful promote clears the whole staged folder.
         if let contract = arguments.object("contract") {
-            let data = try JSONSerialization.data(withJSONObject: contract, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: dir.appending(path: "node-contract.json"))
+            let authored: SZNodeContract
+            do {
+                let raw = try JSONSerialization.data(withJSONObject: contract)
+                authored = try JSONDecoder().decode(SZNodeContract.self, from: raw)
+            } catch {
+                // Same self-correction channel as a build failure. Node.swift IS staged at this point.
+                let msg = Self.contractSchemaError(error, then: "Fix node-contract.json and re-stage (Node.swift was staged; the previous staged contract, if any, is untouched).")
+                host.recordBuildErrors(msg)
+                return SZJSONRPC.encode(["ok": false, "errors": msg])
+            }
+            try SZProjectIO.contractData(authored).write(to: dir.appending(path: "node-contract.json"), options: .atomic)
         }
         // Staging mirrors the LAST write: a card staged earlier and omitted now is removed, so a
         // stale card can never re-promote over a live one the user has since hand-edited.
@@ -304,37 +317,32 @@ extension SZHostBridge {
             // A staged contract that's PRESENT but doesn't decode must be a hard error the agent fixes —
             // NOT silently dropped (which would promote a source whose ports the contract never declares →
             // dead/missing UI controls; the #knobs bug). Validate before promoting; source+contract stay
-            // consistent. (An ABSENT staged contract is fine — the node keeps its live one.)
+            // consistent.
             let stagedContract = projectURL.appending(path: ".staging/nodes/\(id.uuidString)/node-contract.json")
             var warnings: [String] = []
+            var authored: SZNodeContract?
             if let data = try? Data(contentsOf: stagedContract), !data.isEmpty {
-                let authored: SZNodeContract
                 do { authored = try JSONDecoder().decode(SZNodeContract.self, from: data) }
                 catch {
-                    let msg = Self.contractSchemaError(error)
+                    let msg = Self.contractSchemaError(error, then: "Fix node-contract.json (re-stage with agent_write_node_staged) and call agent_compile_node again.")
                     host.recordBuildErrors(msg)
                     return SZJSONRPC.encode(["ok": false, "errors": msg])
                 }
-                // Audit against what the promote will actually PUT LIVE, not the authored contract alone —
-                // the promote merges this into the node's live boundary (`SZNodeContract.mergingAuthored`),
-                // so auditing the authored one would clear a source the merge then contradicts. Conflicts
-                // (an authored retype the boundary refused) ride back as warnings so the agent learns of it.
-                let merge = host.store.project?.graph.node(id: id)
-                    .map { SZNodeContract.mergingAuthored(authored, intoNode: $0) }
-                let contract = merge?.contract ?? authored
-                warnings = merge?.conflicts ?? []
-                // Contract + source must agree on port names: a port the code reads/writes that the contract
-                // never declares is a hard error (the source is NOT promoted); a declared-but-unused port is a
-                // non-fatal warning (likely a dead control). See SZPortBindingAudit.
-                if let source = try? String(contentsOf: staged, encoding: .utf8) {
-                    let audit = SZPortBindingAudit.audit(contract: contract, source: source)
-                    if !audit.errors.isEmpty {
-                        let msg = Self.portBindingError(audit.errors)
-                        host.recordBuildErrors(msg)
-                        return SZJSONRPC.encode(["ok": false, "errors": msg])
-                    }
-                    warnings += audit.warnings
+            }
+            // Audit against what the promote will actually PUT LIVE (`SZPortBindingAudit.auditForPromote`):
+            // the authored contract merged into the node's live boundary, or — with no staged contract —
+            // the LIVE contract itself, so a source-only re-stage never bypasses the gate. A port the code
+            // reads/writes that the contract never declares is a hard error (nothing is promoted); a
+            // declared-but-unused port and any boundary-merge conflict ride back as warnings.
+            if let source = try? String(contentsOf: staged, encoding: .utf8) {
+                let live = host.store.project?.graph.node(id: id)?.contract
+                let audit = SZPortBindingAudit.auditForPromote(source: source, authored: authored, live: live)
+                if !audit.result.errors.isEmpty {
+                    let msg = Self.portBindingError(audit.result.errors)
+                    host.recordBuildErrors(msg)
+                    return SZJSONRPC.encode(["ok": false, "errors": msg])
                 }
+                warnings = audit.mergeConflicts + audit.result.warnings
             }
             // The card half: a staged Card.swift must compile too, or nothing promotes — a green
             // node with a red card would mount the failed chip in the agent's name. Same
@@ -359,7 +367,7 @@ extension SZHostBridge {
     /// wrong (e.g. `"ui": "knob"` instead of the `ui` object). Surfaced through the same `{ok:false, errors}`
     /// channel as a build failure, so the coding agent's fix loop self-corrects. See `agent_docs_read`
     /// (`node-contract`) for the full schema.
-    private static func contractSchemaError(_ error: Error) -> String {
+    private static func contractSchemaError(_ error: Error, then next: String) -> String {
         """
         node-contract.json is invalid and was NOT applied (the source was not promoted): \(error)
 
@@ -369,7 +377,7 @@ extension SZHostBridge {
             "default": { "type": "float", "value": 0.5 } }
         - `ui` is an OBJECT, not a string; `kind` ∈ slider | field | colorWell | toggle | dropdown | filePicker (there is no "knob").
         - `min` / `max` live INSIDE `ui`. `default` is an OBJECT `{ "type", "value" }`.
-        Fix node-contract.json (re-stage with agent_write_node_staged) and call agent_compile_node again.
+        \(next)
         Call agent_docs_read { "topic": "node-contract" } for the full schema.
         """
     }
