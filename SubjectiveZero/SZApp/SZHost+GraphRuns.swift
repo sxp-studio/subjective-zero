@@ -4,7 +4,8 @@
 // engine's note type (SZAI) maps onto the record's own trace entry (SZCore) here, and
 // nowhere else. Live records persist too — written at begin, coalesced per note, and
 // immediately at seal — so a crash mid-run leaves the run on disk to be restored as
-// interrupted; the history caps per budget and is replaced wholesale on project switch.
+// interrupted (and re-written sealed at once, so the disk mirrors memory); the history
+// caps per budget and is replaced wholesale on project switch.
 import Foundation
 import SZAI
 import SZCore
@@ -107,13 +108,16 @@ extension SZHost {
             return
         }
         // A record restored live was in flight when the app closed: resurrect it sealed as
-        // interrupted, not live — a phantom live record would pulse forever.
-        let restored = (SZAgentGraphRunIO.load(projectURL: projectURL) ?? []).map { record in
+        // interrupted, not live — a phantom live record would pulse forever. Written back
+        // at once when that happened, so a second crash before any write keeps the seal.
+        let loaded = SZAgentGraphRunIO.load(projectURL: projectURL) ?? []
+        let restored = loaded.map { record in
             var sealed = record
             sealed.sealInterrupted()
             return sealed
         }
         agentGraphRuns = SZAgentGraphRun.ordered(restored)
+        if restored != loaded { persistAgentGraphRuns() }
     }
 
     // MARK: - What the panel reads
