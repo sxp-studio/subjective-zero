@@ -10,7 +10,9 @@ private let header: CGFloat = 28
 private func at(_ y: CGFloat) -> HoverPhase { .active(CGPoint(x: 10, y: y)) }
 private let grace: Duration = .milliseconds(20)
 @MainActor private func model() -> SZHeaderRevealModel { SZHeaderRevealModel(hideGrace: grace) }
-private func settle() async { try? await Task.sleep(for: grace * 10) }
+/// Await the grace timer itself rather than sleeping past it: these run on the MainActor alongside
+/// tests that block it for seconds (node compiles), where a wall-clock sleep proves nothing.
+@MainActor private func settle(_ m: SZHeaderRevealModel) async { await m.pendingHide?.value }
 
 @MainActor @Test func hiddenUntilHoveredInBandAndAlwaysShownWhenAutoHideOff() {
     let m = model()
@@ -30,10 +32,10 @@ private func settle() async { try? await Task.sleep(for: grace * 10) }
     m.hover(at(4), triggerBand: 8, headerHeight: header)
     #expect(m.visible)
     m.hover(at(20), triggerBand: 8, headerHeight: header)   // on the header, outside the 8pt band
-    await settle()
+    await settle(m)
     #expect(m.visible)
     m.hover(at(header + 1), triggerBand: 8, headerHeight: header)
-    await settle()
+    await settle(m)
     #expect(!m.visible)
 }
 
@@ -43,10 +45,10 @@ private func settle() async { try? await Task.sleep(for: grace * 10) }
     m.hover(.ended, triggerBand: band, headerHeight: header)
     #expect(m.visible)   // not yet — grace
     m.hover(at(0), triggerBand: band, headerHeight: header)   // back before the timer fires
-    await settle()
+    await settle(m)
     #expect(m.visible)
     m.hover(.ended, triggerBand: band, headerHeight: header)
-    await settle()
+    await settle(m)
     #expect(!m.visible)
 }
 
@@ -55,11 +57,11 @@ private func settle() async { try? await Task.sleep(for: grace * 10) }
     m.hover(at(0), triggerBand: band, headerHeight: header)
     m.pinned = true
     m.hover(at(500), triggerBand: band, headerHeight: header)
-    await settle()
+    await settle(m)
     #expect(m.visible)
     #expect(m.shown(autoHide: true))
     m.unpin()
     #expect(!m.pinned)
-    await settle()
+    await settle(m)
     #expect(!m.visible)
 }

@@ -14,6 +14,9 @@ final class SZHeaderRevealModel: ObservableObject {
     /// (the SZHoverTip pattern: re-check state after the sleep instead of juggling cancellation).
     private var inRevealBand = false
     private var hidePending = false
+    /// The in-flight grace timer, so a test can await the hide instead of sleeping past it — under a
+    /// busy MainActor (a sibling test compiling a node) a wall-clock sleep is not a deadline.
+    private(set) var pendingHide: Task<Void, Never>?
 
     /// Grace before sliding away once the cursor leaves the band — absorbs brief overshoots
     /// (reaching for the ✕ and drifting past) without flicker. Injectable so tests don't sleep.
@@ -57,12 +60,13 @@ final class SZHeaderRevealModel: ObservableObject {
     private func scheduleHide() {
         guard visible, !hidePending else { return }
         hidePending = true
-        Task { @MainActor in
+        pendingHide = Task { @MainActor in
             try? await Task.sleep(for: hideGrace)
             hidePending = false
             if !inRevealBand && !pinned {
                 withAnimation(.easeInOut(duration: 0.18)) { visible = false }
             }
+            pendingHide = nil
         }
     }
 }
