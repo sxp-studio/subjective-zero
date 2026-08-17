@@ -151,7 +151,8 @@ extension SZHost {
                 model: generation.model,
                 reasoningEffort: generation.reasoningEffort,
                 fastMode: generation.fastMode ?? false,
-                timeout: 300)
+                timeout: SZAgentTurnBudgets.codingTimeout,
+                inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
             return try await deliver(scope: scope, request: request, provider: provider,
                                      existingAssistantID: assistantID, claim: claim).result
         }
@@ -206,6 +207,17 @@ extension SZHost {
                 mailbox.markProcessed(envelopeID)
                 return
             }
+            let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
+            if result.outcome.failed, result.process.timedOut {
+                // A timeout is its own outcome — the same sentence the run path lands, and NO
+                // stale-session probation: a killed-at-the-clock turn is no evidence the restored
+                // session is dead (the cold retry would only run down the same clock again).
+                let detail = Self.timeoutDetail(budget: SZAgentTurnBudgets.codingTimeout)
+                reply((empty ? "" : "\n") + "⚠️ \(detail)")
+                status = "chat turn timed out"
+                mailbox.markFailed(envelopeID, reason: detail)
+                return
+            }
             if result.outcome.failed, dropSessionIfStale(scope) {
                 // The probation self-heal just fired: ONE cold-start redelivery — bounded
                 // structurally: with the session gone, a second failure lands in markFailed.
@@ -215,7 +227,6 @@ extension SZHost {
                 return   // the defer's release re-fires the pump → redelivery
             }
             status = result.outcome.failed ? "chat turn failed" : "chat reply ready"
-            let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
             if let detail = await providerFailureDetail(result: result, provider: provider) {
                 reply((empty ? "" : "\n") + "⚠️ Provider error: \(detail)")
             } else if empty {

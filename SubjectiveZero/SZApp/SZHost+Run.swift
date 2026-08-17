@@ -167,8 +167,7 @@ extension SZHost {
         if result.outcome.failed {
             let detail: String
             if result.process.timedOut {
-                let budget = request.timeout.map { $0 >= 60 ? " after \(Int($0 / 60))m" : " after \(Int($0))s" } ?? ""
-                detail = "the agent timed out\(budget) without finishing — the task may be too large for one turn (try splitting it up or allowing a longer budget)"
+                detail = Self.timeoutDetail(budget: request.timeout)
             } else if let providerDetail = await providerFailureDetail(result: result, provider: provider) {
                 // A mid-turn provider death: the red pill carries the same actionable detail —
                 // set BEFORE the run's end so `surfaceUnresolvedNodes` doesn't overwrite it.
@@ -180,6 +179,13 @@ extension SZHost {
             appendProviderErrorLine(detail, to: scope)
         }
         return result
+    }
+
+    /// The one timeout sentence every lane reports (transcript line, run/mailbox failure reason)
+    /// — `budget` is the request's wall clock (nil → no figure).
+    nonisolated static func timeoutDetail(budget: TimeInterval?) -> String {
+        let after = budget.map { $0 >= 60 ? " after \(Int($0 / 60))m" : " after \(Int($0))s" } ?? ""
+        return "the agent timed out\(after) without finishing — the task may be too large for one turn (try splitting it up or allowing a longer budget)"
     }
 
     /// The terminal "⚠️ Provider error:" line beneath a streamed turn — one composer for the
@@ -212,7 +218,9 @@ extension SZHost {
             allowedMCPTools: SZHostBridge.agentCallableToolNames,
             resumeSessionID: session == .resume ? agentSessions[scope.key]?.sessionID : nil,
             model: generation.model, reasoningEffort: generation.reasoningEffort,
-            fastMode: generation.fastMode ?? false, timeout: 300)
+            fastMode: generation.fastMode ?? false,
+            timeout: SZAgentTurnBudgets.codingTimeout,
+            inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
         // Under the CAPTURED claim like the fleet path — never the live `runClaim`: a zombie
         // director turn resuming after cancel-and-restart would otherwise adopt the NEW run's
         // claim, pass deliver's holder guard, and stream into a transcript someone else owns.
@@ -220,8 +228,12 @@ extension SZHost {
                                        claim: claim ?? runClaim).result
         // The run re-reads the graph rather than the reply, so a mid-turn provider death
         // would otherwise vanish — land it in the Director tab like a coding turn's error line.
-        if result.outcome.failed, let detail = await providerFailureDetail(result: result, provider: provider) {
-            appendProviderErrorLine(detail, to: scope)
+        if result.outcome.failed {
+            if result.process.timedOut {
+                appendProviderErrorLine(Self.timeoutDetail(budget: request.timeout), to: scope)
+            } else if let detail = await providerFailureDetail(result: result, provider: provider) {
+                appendProviderErrorLine(detail, to: scope)
+            }
         }
         ensureRenderEndpointFromDisplay()   // safety net: a Director that declared a displayed output but
         return result                       // forgot ui_toggle_display still renders (mirrors the draft path)

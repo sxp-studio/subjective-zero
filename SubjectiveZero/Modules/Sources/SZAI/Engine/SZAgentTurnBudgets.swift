@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Foundation
 
-/// Per-coding-turn budgets, in seconds. The working bound is SILENCE, not wall clock: a
+/// Per-agent-turn budgets, in seconds — ONE pair for every lane (implement, node chat/edit,
+/// Director run turns): same agents, same work. The working bound is SILENCE, not wall clock: a
 /// turn dies after `codingInactivityTimeout` with no output (every streamed chunk resets
 /// the clock), so a large node whose agent is still visibly working is never cut off —
 /// `codingTimeout` remains the hard cap for a CLI that wedges while still emitting.
