@@ -86,10 +86,12 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 
 **`agent_` (orchestration + host ops)**
 - `agent_read_graph`, `agent_read_node`
-- `agent_view_frame` - **real framebuffer readback** of the render endpoint, returned as an inline
+- `agent_view_frame` - **real framebuffer readback** of a node's texture output, returned as an inline
   image (base64 PNG) the agent's model actually sees, so it can reason on its VFX result. Pixel-perfect
-  but downscaled to fit the token budget (default 768px long edge; `maxSize` overrides). Captures the
-  CURRENT display endpoint (what's on screen) - call `ui_toggle_display` first to retarget the viewport.
+  but downscaled to fit the token budget (default 768px long edge; `maxSize` overrides). `node` (+
+  optional `port`, default: the node's first texture output) reads that node's last-rendered texture off
+  the render pool without moving the viewport - never `ui_toggle_display` just to look. Without `node`
+  it captures the CURRENT display endpoint (what's on screen).
 - `agent_apply_plan`, `agent_spawn_coding_agents`, `agent_await_all`
 - `agent_write_node_staged`, `agent_compile_node`   // `card` = an optional Card.swift; a red card blocks the promote
 - `agent_library_index`, `agent_library_card`, `agent_library_source`  // 3-tier, see NODE_LIBRARY.md

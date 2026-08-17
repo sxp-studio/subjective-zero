@@ -43,6 +43,8 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
 - `ui_add_prompt_node { "prompt": "...", "x": <n>, "y": <n> }` — add a node; returns its id.
 - `ui_toggle_display { "node": "<id>", "port": "<texture output>" }` — point the viewport at the final
   output so the result is visible. Do this once, on the last node's display output, after its contract exists.
+  The viewport is the user's live view — never toggle it just to LOOK at a node: `agent_view_frame
+  { "node": "<id>" }` returns any node's rendered output as an image and leaves the viewport alone.
 
 You can call `agent_read_graph` any time to re-read the live graph.
 

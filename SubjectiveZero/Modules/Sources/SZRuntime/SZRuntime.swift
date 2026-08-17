@@ -720,55 +720,83 @@ public final class SZRuntime: @unchecked Sendable {
     /// Real framebuffer readback of the render-endpoint texture (`agent_view_frame`). Renders a fresh
     /// frame and blits the endpoint into a fresh `.shared` capture texture INSIDE the same command
     /// buffer — immune to live frames re-encoding the endpoint — then waits and reads back OUTSIDE the
-    /// lock, so a capture (or an agent polling captures) never stalls the viewport. The capture texture
-    /// is per-call (captures are rare debug ops): a cached one could not cross the lock boundary under
-    /// region isolation. `nil` if nothing rendered.
+    /// lock, so a capture (or an agent polling captures) never stalls the viewport. `nil` if nothing
+    /// rendered.
     ///
     /// Note the capture encode runs the node schedule on the CALLER'S thread (main, in practice):
     /// `update()` is serialized against live frames by the lock — never concurrent — but nodes must not
     /// assume a single render thread identity (documented in the node ABI's threading contract).
     public func captureFrame() -> SZImageBytes? {
-        let result = engine.withLock { state -> (buffer: (any MTLCommandBuffer)?, capture: (any MTLTexture)?) in
-            // Blit `endpoint` into a fresh `.shared` capture texture on `commandBuffer` (CPU-readable after
-            // the blit completes) and return it. Per-call: captures are rare debug ops.
-            func captureEndpoint(_ commandBuffer: any MTLCommandBuffer, _ endpoint: any MTLTexture) -> (any MTLTexture)? {
-                let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-                    pixelFormat: .bgra8Unorm, width: endpoint.width, height: endpoint.height, mipmapped: false)
-                descriptor.storageMode = .shared
-                guard let target = assets.device.makeTexture(descriptor: descriptor) else { return nil }
-                Self.encodeCopy(endpoint, into: target, width: endpoint.width, height: endpoint.height,
-                                on: commandBuffer)
-                return target
-            }
-
+        let job = engine.withLock { state -> CaptureJob? in
             // Paused → capture the HELD endpoint without advancing the schedule, matching the live
             // viewport (both freeze the whole graph at the runtime level). The non-allocating read
             // matters here too: renderSize can have moved under a paused hold (viewport resized),
             // and an allocating read at the new size would destroy the held frame — the capture
             // reports the held texture's own dimensions, which is the truth.
             if state.timeline.paused {
-                guard let endpoint = state.scheduler?.heldEndpointTexture(assets: assets),
-                      let commandBuffer = assets.commandQueue.makeCommandBuffer(),
-                      let capture = captureEndpoint(commandBuffer, endpoint) else { return (nil, nil) }
-                commandBuffer.commit()
-                return (commandBuffer, capture)
+                guard let endpoint = state.scheduler?.heldEndpointTexture(assets: assets) else { return nil }
+                return commitCapture(of: endpoint)
             }
-
             var capture: (any MTLTexture)?
             let (buffer, _) = encodeAndCommitFrame(&state, width: state.renderSize.width,
                                                    height: state.renderSize.height) { commandBuffer, endpoint in
-                if let endpoint { capture = captureEndpoint(commandBuffer, endpoint) }
+                if let endpoint { capture = encodeCapture(of: endpoint, on: commandBuffer) }
             }
-            return (buffer, capture)
+            guard let buffer, let capture else { return nil }
+            return CaptureJob(buffer: buffer, capture: capture)
         }
-        guard let buffer = result.buffer, let capture = result.capture else { return nil }
+        return readBack(job)
+    }
 
-        // GPU wait + CPU readback — no lock held; `capture` is only ever written by the buffer above.
-        buffer.waitUntilCompleted()
-        let width = capture.width, height = capture.height
+    /// Readback of ONE node's texture output straight off the asset pool (`agent_view_frame {node}`) —
+    /// a look at any rendered port without moving the render endpoint. Reads the last-written pool
+    /// texture (at most one frame stale) via its own blit + command buffer, committed under the lock
+    /// and read back outside it, like `captureFrame`. `nil` if the port has never rendered (an
+    /// unimplemented node, or no frame yet) — never a fabricated blank.
+    public func captureTexture(node: SZNodeID, port: String) -> SZImageBytes? {
+        let job = engine.withLock { _ -> CaptureJob? in
+            guard let source = assets.existing(id: SZScheduler.textureID(node: node, port: port)),
+                  source.pixelFormat == .bgra8Unorm else { return nil }
+            return commitCapture(of: source)
+        }
+        return readBack(job)
+    }
+
+    /// A committed capture: the buffer to wait on + the `.shared` texture it fills.
+    private struct CaptureJob {
+        let buffer: any MTLCommandBuffer
+        let capture: any MTLTexture
+    }
+
+    /// Blit `source` into a fresh `.shared` capture texture on `commandBuffer` (CPU-readable after the
+    /// blit completes). Per-call: captures are rare debug ops, and a cached target could not cross the
+    /// lock boundary under region isolation. Caller holds the engine lock.
+    private func encodeCapture(of source: any MTLTexture, on commandBuffer: any MTLCommandBuffer) -> (any MTLTexture)? {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: source.width, height: source.height, mipmapped: false)
+        descriptor.storageMode = .shared
+        guard let target = assets.device.makeTexture(descriptor: descriptor) else { return nil }
+        Self.encodeCopy(source, into: target, width: source.width, height: source.height, on: commandBuffer)
+        return target
+    }
+
+    /// `encodeCapture` on its own command buffer, committed (commit-under-lock). Caller holds the lock.
+    private func commitCapture(of source: any MTLTexture) -> CaptureJob? {
+        guard let commandBuffer = assets.commandQueue.makeCommandBuffer(),
+              let capture = encodeCapture(of: source, on: commandBuffer) else { return nil }
+        commandBuffer.commit()
+        return CaptureJob(buffer: commandBuffer, capture: capture)
+    }
+
+    /// GPU wait + CPU readback of a committed capture — no lock held; the capture texture is only ever
+    /// written by its own buffer.
+    private func readBack(_ job: CaptureJob?) -> SZImageBytes? {
+        guard let job else { return nil }
+        job.buffer.waitUntilCompleted()
+        let width = job.capture.width, height = job.capture.height
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         bytes.withUnsafeMutableBytes { raw in
-            capture.getBytes(
+            job.capture.getBytes(
                 raw.baseAddress!,
                 bytesPerRow: width * 4,
                 from: MTLRegionMake2D(0, 0, width, height),

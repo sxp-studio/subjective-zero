@@ -36,8 +36,12 @@ extension SZHostBridge {
             tool("agent_docs_index", "List the reference docs you can fetch (id, title, summary) — the canonical contract schema, the runtime ABI, etc. Cheap; read a topic's body only when you need it (e.g. before authoring a node-contract.json)."),
             tool("agent_docs_read", "Fetch one reference doc's full markdown by topic id (from agent_docs_index) — e.g. \"node-contract\" for the contract/ui/default schema, \"node-abi\" for the runtime ABI, \"card-abi\" for authoring a node's Card.swift. Use this instead of guessing the schema — but skip any doc your brief already embeds, and batch it with your other reads (e.g. the library index) rather than spending a round on it alone.",
                  properties: ["topic": ["type": "string", "description": "a topic id from agent_docs_index, e.g. node-contract"]]),
-            tool("agent_view_frame", "Capture what the live viewport is rendering and return it as an inline image so you can SEE your VFX result — composition, color, motion, artifacts. Pixel-perfect (real framebuffer readback), downscaled to fit the token budget (default 768px long edge; pass maxSize to change). Captures the CURRENT display endpoint (what's on screen) — use ui_toggle_display to change which node's output the viewport shows. Pair with debug_set_paused to freeze time and A/B an input.",
-                 properties: ["maxSize": ["type": "integer", "description": "max long-edge px of the returned image (default 768, clamped 64–1280). Full render is 1280×800."]]),
+            tool("agent_view_frame", "Return a node's rendered texture output as an inline image so you can SEE your VFX result — composition, color, motion, artifacts. Pass `node` to look at THAT node's output (default: its first `texture` output; `port` picks another) — read straight off the render pool, the user's viewport is untouched. Never toggle the display just to look — pass `node`. Without `node`: what the viewport currently shows (the display endpoint). Pixel-perfect (real framebuffer readback), downscaled to fit the token budget (default 768px long edge; pass maxSize to change). Pair with debug_set_paused to freeze time and A/B an input.",
+                 properties: [
+                    "node": ["type": "string", "description": "node id (UUID) whose output to look at; omit for the viewport's current endpoint"],
+                    "port": ["type": "string", "description": "which texture output of `node` (default: its first texture output)"],
+                    "maxSize": ["type": "integer", "description": "max long-edge px of the returned image (default 768, clamped 64–1280). Full render is 1280×800."],
+                 ]),
         ]
     }
 
@@ -50,11 +54,30 @@ extension SZHostBridge {
         }
     }
 
-    /// Read back the current render endpoint (what the viewport displays), downscale to `maxSize`, and
-    /// return it as an inline PNG the model can look at.
+    /// Read back a node's texture output (`node` given — the endpoint stays where the user put it) or the
+    /// current render endpoint (what the viewport displays), downscale to `maxSize`, and return it as an
+    /// inline PNG the model can look at.
     private func agentViewFrame(_ arguments: [String: Any]) throws -> SZMCPToolResult {
-        guard let frame = host.runtime?.captureFrame() else {
-            throw SZMCPError.message("no frame rendered yet")
+        let frame: SZImageBytes
+        if arguments["node"] != nil {
+            guard let id = arguments.uuid("node") else { throw SZMCPError.message("agent_view_frame `node` must be a UUID") }
+            guard let node = host.store.project?.graph.node(id: id) else { throw SZMCPError.message("no node \(id)") }
+            let textureOutputs = node.contract?.outputs.filter { $0.type == .texture }.map(\.name) ?? []
+            guard let port = arguments.string("port") ?? textureOutputs.first else {
+                throw SZMCPError.message("`\(node.title)` has no texture output to look at")
+            }
+            guard textureOutputs.contains(port) else {
+                throw SZMCPError.message("`\(node.title)` has no texture output `\(port)` — outputs: \(textureOutputs.joined(separator: ", "))")
+            }
+            guard let captured = host.runtime?.captureTexture(node: id, port: port) else {
+                throw SZMCPError.message("`\(node.title)` `\(port)` has not rendered yet — only implemented (compiled) nodes render; build it first, or wait a frame")
+            }
+            frame = captured
+        } else {
+            guard let captured = host.runtime?.captureFrame() else {
+                throw SZMCPError.message("no frame rendered yet")
+            }
+            frame = captured
         }
         let maxDim = min(max(arguments.int("maxSize") ?? 768, 64), 1280)
         guard let png = frame.pngData(maxDimension: maxDim) else {
