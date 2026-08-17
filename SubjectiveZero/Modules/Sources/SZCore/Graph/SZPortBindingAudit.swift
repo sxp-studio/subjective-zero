@@ -71,29 +71,31 @@ public enum SZPortBindingAudit {
     }
 
     /// What a promote would put live, plus the audit of `source` against it. The gate every promote passes:
-    /// an authored (staged) contract merges into the live boundary; without one the LIVE contract is the
-    /// truth the source must agree with — so a source-only re-stage can never skip the port audit. `nil`
-    /// contract only when the node has neither (an uncontracted node: nothing to audit against).
+    /// an authored (staged) contract merges into the node (`mergingAuthored(_:intoNode:)`); without one the
+    /// LIVE contract is the truth the source must agree with — so a source-only re-stage can never skip the
+    /// port audit.
     public struct PromoteAudit: Equatable, Sendable {
+        /// The contract the promote must WRITE: the authored one folded into the node. nil when the agent
+        /// staged none — the node's live contract (and its identity) then stand untouched.
         public var contract: SZNodeContract?
         public var result: Result
         /// Boundary-merge notes (`SZBoundaryMergeResult.conflicts`), for the agent as warnings.
         public var mergeConflicts: [String]
     }
-    public static func auditForPromote(source: String, authored: SZNodeContract?, live: SZNodeContract?) -> PromoteAudit {
+
+    /// The merge runs HERE and only here, so what the gate audits is what the promote lands.
+    public static func auditForPromote(source: String, authored: SZNodeContract?, node: SZNode) -> PromoteAudit {
         var conflicts: [String] = []
-        let contract: SZNodeContract?
-        switch (authored, live) {
-        case let (a?, l?):
-            let merge = SZNodeContract.mergingAuthored(a, intoBoundary: l)
-            contract = merge.contract
+        var merged: SZNodeContract?
+        if let authored {
+            let merge = SZNodeContract.mergingAuthored(authored, intoNode: node)
+            merged = merge.contract
             conflicts = merge.conflicts
-        case let (a?, nil): contract = a
-        case let (nil, l?): contract = l
-        case (nil, nil):    contract = nil
         }
-        let result = contract.map { audit(contract: $0, source: source) } ?? Result(errors: [], warnings: [])
-        return PromoteAudit(contract: contract, result: result, mergeConflicts: conflicts)
+        // Nothing to audit against only when the node has neither an authored nor a live contract.
+        let audited = merged ?? node.contract
+        let result = audited.map { audit(contract: $0, source: source) } ?? Result(errors: [], warnings: [])
+        return PromoteAudit(contract: merged, result: result, mergeConflicts: conflicts)
     }
 
     /// Blank out `/* … */` and `// …` comments so the scan sees code only. A heuristic: a `//` or `/*`

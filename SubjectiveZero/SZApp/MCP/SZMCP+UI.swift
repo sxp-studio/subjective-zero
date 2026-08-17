@@ -99,6 +99,7 @@ extension SZHostBridge {
                  properties: [
                     "node": ["type": "string"], "port": ["type": "string"],
                     "value": ["type": ["number", "boolean", "array", "string"],
+                              "items": ["type": "number"],
                               "description": "number, bool, or array of numbers (per the port type); numeric strings are accepted"],
                  ]),
             tool("ui_toggle_display", "Toggle a node's texture output as the viewport render endpoint (mirrors clicking the node card's monitor icon) — switches the live viewport to that output. Pointing at the current endpoint clears it. `port` must be a `texture` output.",
@@ -217,7 +218,7 @@ extension SZHostBridge {
             throw SZMCPError.message("no project loaded")
         }
         host.noteRunCreatedWork([id])   // a node the fleet's own tooling adds mid-run joins the work set
-        host.noteMutation("added node", [host.mutationTitle(id)], origin: .agent)
+        host.noteNodeAdded(id, origin: .agent)
         return SZJSONRPC.encode(["id": id.uuidString, "x": position.x, "y": position.y])
     }
 
@@ -752,10 +753,15 @@ extension SZHostBridge {
             case let v?: "\(v)"
             }
         }
+        // A numeric string is parsed with the JSON number grammar, NOT `Double(_:)` — which also accepts
+        // "nan", "inf" and hex floats ("0x1p3"). And whatever the form, the value must be FINITE: a NaN
+        // compares false against every bound, so it survives the slider's clamp and lands in the runtime's
+        // uniform buffer as a black frame nobody can trace back to a tool call.
+        func finite(_ value: Double?) -> Double? { (value?.isFinite ?? false) ? value : nil }
         func number() throws -> Double {
-            if let n = raw as? NSNumber { return n.doubleValue }
-            if let s = raw as? String, let d = Double(s.trimmingCharacters(in: .whitespaces)) { return d }
-            throw SZMCPError.message("value must be a number (got \(got()))")
+            if let n = raw as? NSNumber, let d = finite(n.doubleValue) { return d }
+            if let s = raw as? String, let d = finite(Self.jsonNumber(s)) { return d }
+            throw SZMCPError.message("value must be a finite number (got \(got()))")
         }
         func array(_ count: Int) throws -> [Double] {
             var elements: [Any]? = raw as? [Any]
@@ -763,12 +769,11 @@ extension SZHostBridge {
                let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
                 elements = parsed as? [Any]
             }
-            let numbers = elements?.compactMap { ($0 as? NSNumber)?.doubleValue }
-            guard let numbers, numbers.count == elements?.count else {
-                throw SZMCPError.message("value must be an array of \(count) numbers (got \(got()))")
-            }
-            guard numbers.count == count else {
-                throw SZMCPError.message("value must be an array of \(count) numbers (got \(numbers.count))")
+            let numbers = elements?.compactMap { finite(($0 as? NSNumber)?.doubleValue) }
+            // One refusal for every way the array can be wrong (missing, mistyped entry, wrong arity), and
+            // like the others it names what the agent SENT — a count would answer a question nobody asked.
+            guard let numbers, numbers.count == elements?.count, numbers.count == count else {
+                throw SZMCPError.message("value must be an array of \(count) finite numbers (got \(got()))")
             }
             return numbers
         }
@@ -800,6 +805,17 @@ extension SZHostBridge {
         case .event: return .event
         case .texture, .floatArray: throw SZMCPError.message("\(type.rawValue) inputs have no default value")
         }
+    }
+
+    /// A numeric string read with the JSON number grammar — the same one the array form parses with, so
+    /// "14" / " 0.6 " / "1e3" pass while "nan", "inf", "0x1p3" and "14x" do not. The leading-character
+    /// guard keeps JSON's other literals out: `true` would otherwise parse as the number 1.
+    private static func jsonNumber(_ text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let first = trimmed.first, first == "-" || first.isNumber else { return nil }
+        guard let parsed = try? JSONSerialization.jsonObject(with: Data(trimmed.utf8),
+                                                            options: [.fragmentsAllowed]) else { return nil }
+        return (parsed as? NSNumber)?.doubleValue
     }
 
     private func uiSelectChat(_ arguments: [String: Any]) throws -> String {

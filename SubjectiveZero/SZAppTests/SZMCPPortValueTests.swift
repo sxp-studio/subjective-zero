@@ -40,10 +40,20 @@ import Testing
 }
 
 @Test @MainActor func arrayCoercionChecksArityAndRejectsNonNumericEntries() {
-    // The port type fixes the component count; a short/long or mixed array is refused with the count named.
+    // The port type fixes the component count; a short/long or mixed array is refused.
     #expect(throws: SZMCPError.self) { try coerce(.float3, [1, "two", 3]) }
     #expect(throws: SZMCPError.self) { try coerce(.float2, [14]) }
     #expect(throws: SZMCPError.self) { try coerce(.colorRGB, [0, 0, 0, 1]) }
+}
+
+@Test @MainActor func everyArrayRefusalNamesWhatWasSent() {
+    // Including the arity one: a bare count ("got 3") answers a question the agent didn't ask, and
+    // reads as a different failure than the neighbouring refusals.
+    #expect {
+        try coerce(.float2, [14, 2, 9])
+    } throws: { error in
+        "\(error)".contains("14") && "\(error)".contains("9")
+    }
 }
 
 // MARK: - numeric strings (what MCP clients send for a loosely-typed `value`)
@@ -69,6 +79,24 @@ import Testing
     #expect(throws: SZMCPError.self) { try coerce(.float2, "[14]") }        // needs 2
     #expect(throws: SZMCPError.self) { try coerce(.float2, "[1, \"x\"]") }
     #expect(throws: SZMCPError.self) { try coerce(.float3, "0.5") }        // a scalar is not an array
+}
+
+@Test @MainActor func numericStringsFollowTheJSONNumberGrammar() throws {
+    // `Double(_:)` would take all of these. A NaN survives every clamp and lands in the runtime's
+    // uniform buffer; "0x1p3"/"infinity" are not numbers any agent meant to send.
+    for text in ["nan", "NaN", "inf", "-inf", "infinity", "0x1p3"] {
+        #expect(throws: SZMCPError.self, "\"\(text)\" must be refused") { try coerce(.float, text) }
+    }
+    #expect(throws: SZMCPError.self) { try coerce(.float, "true") }   // a JSON literal is not a number
+    #expect(throws: SZMCPError.self) { try coerce(.float2, "[1, nan]") }
+    #expect(try coerce(.float, "1e3") == .float(1000))                // real JSON numbers still pass
+    #expect(try coerce(.float, "-0.5") == .float(-0.5))
+}
+
+@Test @MainActor func nonFiniteNumbersAreRefusedWhateverFormTheyArriveIn() {
+    #expect(throws: SZMCPError.self) { try coerce(.float, Double.nan) }
+    #expect(throws: SZMCPError.self) { try coerce(.float, Double.infinity) }
+    #expect(throws: SZMCPError.self) { try coerce(.float3, [1.0, Double.nan, 3.0]) }
 }
 
 @Test @MainActor func refusalNamesWhatWasReceived() {

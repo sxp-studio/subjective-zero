@@ -200,12 +200,13 @@ dead control. `ctx.inputFloat(name)` returns the current UI value each frame; a 
 Use the EXACT ports from "Your declared boundary" above. A scalar input carries its `ui` + `default`; a
 texture port carries neither.
 
-The card's identity is NOT yours to change from the contract: put the title / symbol shown above into
-`title` / `sfSymbol` verbatim — the promote keeps the card's current name and icon regardless, so a
-different value there is a no-op at best. The one exception is a placeholder nobody chose — the title
-`New Node`, the symbol `sparkles`: replace THAT with a short title / a fitting SF Symbol, and it sticks. A
-deliberate rename is an explicit act — `ui_update_node { "node": "22222222-2222-4222-8222-222222222222", "title": "...", "sfSymbol":
-"..." }` — never a side effect of a rebuild.
+One rule for the card's identity, applied to `title` and `sfSymbol` INDEPENDENTLY: copy the value shown
+under "Your node" above — unless that value is the placeholder a drawn node starts with (title `New Node`,
+symbol `sparkles`), and then choose a real one (a short title / a fitting SF Symbol). A placeholder you
+replace sticks; a name someone chose is kept by the promote regardless, so a different value there is a
+no-op at best. Expect to be filling in one of the two: a node commonly arrives with a real title and the
+placeholder symbol. A deliberate rename is an explicit act — `ui_update_node { "node": "22222222-2222-4222-8222-222222222222", "title":
+"...", "sfSymbol": "..." }` — never a side effect of a rebuild.
 
 Example shape:
 

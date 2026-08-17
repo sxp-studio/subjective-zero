@@ -81,6 +81,11 @@ import Testing
             } else if let types = schema["type"] as? [String] {
                 #expect(!types.isEmpty && types.allSatisfy(jsonTypes.contains),
                         "\(name).\(key) declares an unknown type in \(types)")
+                // `items` is required of a union that accepts an array too — a strict client validator
+                // rejects the whole tool over it, not just the array branch.
+                if types.contains("array") {
+                    #expect(schema["items"] as? [String: Any] != nil, "\(name).\(key) accepts an array without items")
+                }
                 #expect((schema["description"] as? String)?.isEmpty == false,
                         "\(name).\(key) is a union type, so it must describe what it accepts")
             } else {

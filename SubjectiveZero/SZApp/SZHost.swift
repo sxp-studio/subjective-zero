@@ -850,21 +850,24 @@ final class SZHost {
     // MARK: - Staging → promote
 
     /// Promote a successfully compile-checked staged node into the live project (STATE.md):
-    /// copy `.staging/nodes/<id>/Node.swift` → live, merge the staged contract into the node's live one
-    /// (kind → generated), persist `project.json` + contracts, then reload the runtime so the new
-    /// module renders. Called by `agent_compile_node` ONLY after `compileNodeSource` returns `.ok`,
-    /// so a broken source can never reach here — live state stays intact on failure.
-    func promoteStagedNode(id: SZNodeID) throws {
+    /// copy `.staging/nodes/<id>/Node.swift` → live, apply `contract` (kind → generated), persist
+    /// `project.json` + contracts, then reload the runtime so the new module renders. Called by
+    /// `agent_compile_node` ONLY after `compileNodeSource` returns `.ok`, so a broken source can never
+    /// reach here — live state stays intact on failure.
+    ///
+    /// `contract` is what the promote gate already merged and audited (`SZPortBindingAudit.auditForPromote`)
+    /// — nil when the agent staged none, and the node's live contract then stands.
+    func promoteStagedNode(id: SZNodeID, contract: SZNodeContract?) throws {
         // Host sequencing measured as a SPAN (closure, not begin/defer) so the reload sub-span
         // nests UNDER promote in the event tree — rendered flat, promote and reload read as
         // siblings whose numbers double-count. A thrown promote still records (span guarantees).
         try SZTrace.span(SZTurnStage.promote) {
-            try promoteStagedNodeInner(id: id)
+            try promoteStagedNodeInner(id: id, contract: contract)
         }
         trackNodeBuiltTelemetry()   // reached only on success — a throw above skips it
     }
 
-    private func promoteStagedNodeInner(id: SZNodeID) throws {
+    private func promoteStagedNodeInner(id: SZNodeID, contract: SZNodeContract?) throws {
         guard let projectURL = loadedProjectURL else { throw SZMCPError.message("no project loaded") }
         let fm = FileManager.default
         let staging = projectURL.appending(path: ".staging/nodes/\(id.uuidString)")
@@ -895,25 +898,21 @@ final class SZHost {
             cardArrived = !hadCard
         }
 
-        // Fold the staged contract (if any) into the store and flip the node to generated.
-        let stagedContract = (try? Data(contentsOf: staging.appending(path: "node-contract.json")))
-            .flatMap { try? JSONDecoder().decode(SZNodeContract.self, from: $0) }
+        // Apply the merged contract (if the agent staged one) and flip the node to generated.
         store.mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
             project.graph.nodes[i].kind = .generated
-            if let stagedContract {
-                // MERGE the authored contract into the node's LIVE boundary rather than letting either side
-                // replace the other (`SZNodeContract.mergingAuthored`): the live contract carries the typed
-                // boundary the graph is wired against AND the user's current input values, while the agent
-                // just authored the control ports its new source reads. Taking the live one deletes those
-                // ports (the source then reads what the contract never declares); taking the authored one
-                // resets every slider and can retype a wired port. The live contract at THIS moment is the
-                // boundary — not a dispatch-time snapshot — so a mid-run `ui_edit_ports`, a slider drag, and
-                // an off-run chat rebuild are all honoured. A node with no live contract yet (a drawn prompt
-                // node whose agent authors the whole boundary) takes the authored ports wholesale. Identity is
-                // the NODE's either way — the merge keeps the card's title/symbol (placeholders aside), so a
-                // promote never renames a card (a rename is an explicit `ui_update_node`).
-                let contract = SZNodeContract.mergingAuthored(stagedContract, intoNode: project.graph.nodes[i]).contract
+            if let contract {
+                // The contract the gate MERGED (`SZNodeContract.mergingAuthored(_:intoNode:)`) rather than
+                // either side wholesale: the live contract carries the typed boundary the graph is wired
+                // against AND the user's current input values, while the agent just authored the control
+                // ports its new source reads. Taking the live one deletes those ports (the source then reads
+                // what the contract never declares); taking the authored one resets every slider and can
+                // retype a wired port. The merge reads the live state at promote time — the same MainActor
+                // turn as this write — so a mid-run `ui_edit_ports`, a slider drag, and an off-run chat
+                // rebuild are all honoured, and the audit that gated the promote saw exactly this contract.
+                // Identity is the NODE's (placeholders aside), so a promote never renames a card — a rename
+                // is an explicit `ui_update_node`.
                 project.graph.nodes[i].contract = contract
                 project.graph.nodes[i].title = contract.title
                 project.graph.nodes[i].sfSymbol = contract.sfSymbol
@@ -1007,7 +1006,7 @@ final class SZHost {
         }
 
         store.mutate { $0.graph.nodes.append(node) }
-        noteMutation("added node", [node.title], origin: origin)
+        noteNodeAdded(node.id, origin: origin)
         if let project = store.project { try SZProjectIO.save(project, to: projectURL) }
         // A node declaring a permission the app doesn't hold yet (microphone, camera) prompts BEFORE its
         // `setup()` runs — like project open and the run path do — otherwise the node boots unauthorized

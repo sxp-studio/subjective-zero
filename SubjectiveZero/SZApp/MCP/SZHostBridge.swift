@@ -97,6 +97,7 @@ final class SZHostBridge {
     /// tool as plain async work on the calling connection's task.
     nonisolated func callOffMainTool(name: String, arguments: [String: Any],
                                      surface: Surface) async throws -> SZMCPToolResult {
+        let arguments = Self.omittingNulls(arguments)
         guard !Self.debugToolNames.contains(name) || surface.exposesDebugTools else {
             throw SZMCPError.message("\(name) is not available to agents")
         }
@@ -115,6 +116,7 @@ final class SZHostBridge {
                   forcedContext: SZTraceContext? = nil,
                   caller: SZClaimToken? = nil,
                   callerScope: SZChatScope? = nil) throws -> SZMCPToolResult {
+        let arguments = Self.omittingNulls(arguments)
         // Withheld, not merely unlisted: knowing the name from somewhere else must not be enough.
         guard !Self.debugToolNames.contains(name) || surface.exposesDebugTools else {
             throw SZMCPError.message("\(name) is not available to agents")
@@ -165,6 +167,25 @@ final class SZHostBridge {
         }
     }
 
+    /// Arguments with every JSON `null` VALUE dropped, at any depth — the one place "absent" is
+    /// decided, for every tool.
+    ///
+    /// A client that materializes its declared-but-unused optional properties as `null` sends
+    /// `{"node": null}` for the argument-less call, and `arguments["node"] != nil` (or any accessor
+    /// reaching for `NSNull`) then answers a question the caller never asked. Handlers must not each
+    /// remember to special-case it. Array ELEMENTS are left alone: a null inside a list is a shape
+    /// fact (arity, an unparseable entry) the coercions still have to refuse.
+    nonisolated static func omittingNulls(_ arguments: [String: Any]) -> [String: Any] {
+        arguments.compactMapValues { value -> Any? in
+            if value is NSNull { return nil }
+            if let nested = value as? [String: Any] { return omittingNulls(nested) }
+            if let list = value as? [Any] {
+                return list.map { ($0 as? [String: Any]).map(omittingNulls) ?? $0 }
+            }
+            return value
+        }
+    }
+
     /// ~tokens a tool result adds to the caller's context: text at the chars/4 rule of thumb;
     /// an image at its base64 length/4 (rough, but honest about being the payload's scale).
     private nonisolated static func contextWeight(of result: SZMCPToolResult) -> Int {
@@ -198,11 +219,29 @@ final class SZHostBridge {
         return scope
     }
 
+    /// The ONE shape a tool's JSON payload takes: pretty, key-sorted, slashes unescaped. An agent
+    /// reads these, and one tool answering in a different shape than its neighbours is a trap — so
+    /// both encoders below spell the same three options (their option types differ; a test pins the
+    /// two paths byte-equal).
+    nonisolated static let jsonFormatting: JSONEncoder.OutputFormatting =
+        [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
+    nonisolated static let jsonWriting: JSONSerialization.WritingOptions =
+        [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
+
     /// JSON-encode a Codable value for a tool's text payload.
     func encodeJSON<T: Encodable>(_ value: T) -> String {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        encoder.outputFormatting = Self.jsonFormatting
         guard let data = try? encoder.encode(value) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The same shape for a payload already decoded into a dictionary (an annotated `agent_read_*`
+    /// answer), so the annotated and fallback paths cannot drift. `fallback` covers a value
+    /// `JSONSerialization` refuses.
+    func encodeJSON(_ json: [String: Any], fallback: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: json, options: Self.jsonWriting)
+        else { return fallback }
         return String(decoding: data, as: UTF8.self)
     }
 }

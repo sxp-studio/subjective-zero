@@ -135,6 +135,17 @@ struct SZHostMutationJournalTests {
         #expect(host.mutationJournal.entries.last?.subjects == ["Camera"])
     }
 
+    @Test func anAgentsAddedNodeGoesThroughTheSameFunnel() throws {
+        // `ui_add_prompt_node` journals via `noteNodeAdded` like the canvas add does — one entry, the
+        // node's title, attributed to the calling turn's scope.
+        let host = host()
+        _ = try SZHostBridge(host: host).callTool(name: "ui_add_prompt_node", arguments: [:],
+                                                  callerScope: .director)
+        #expect(host.mutationJournal.entries.map(\.kind) == ["added node"])
+        #expect(host.mutationJournal.entries.last?.actor == .director)
+        #expect(host.mutationJournal.entries.last?.subjects == [SZNode.placeholderTitle])
+    }
+
     /// A journaled number is prose the model reads — plain decimals, never `1.23e+03`.
     @Test func journaledNumbersArePlainDecimals() {
         #expect(SZHost.mutationValue(.float(1234.5)) == "1234.5")

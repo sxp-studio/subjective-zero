@@ -125,7 +125,7 @@ extension SZHostBridge {
             guard let id = (node["id"] as? String).flatMap(SZNodeID.init(uuidString:)) else { return node }
             return annotatingRebuild(node, id: id)
         }
-        return reencodeJSON(json, fallback: encoded)
+        return encodeJSON(json, fallback: encoded)
     }
 
     private func agentReadNode(_ arguments: [String: Any]) throws -> String {
@@ -137,7 +137,7 @@ extension SZHostBridge {
             return encoded
         }
         json["hasCard"] = host.nodeHasCardSource(id)
-        return reencodeJSON(annotatingRebuild(json, id: id), fallback: encoded)
+        return encodeJSON(annotatingRebuild(json, id: id), fallback: encoded)
     }
 
     /// `rebuildReason` is derived, not encoded with the node, and its evidence is host state — both ride on the
@@ -153,15 +153,6 @@ extension SZHostBridge {
         json["rebuildReason"] = reason.rawValue
         if let detail = host.rebuildDetail(node: id) { json["rebuildDetail"] = detail }
         return json
-    }
-
-    /// Re-encode an annotated payload in the same shape `encodeJSON` produces (pretty, key-sorted) — an agent
-    /// reads these, and one tool silently answering in a different shape than its neighbours is a trap.
-    private func reencodeJSON(_ json: [String: Any], fallback: String) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: json,
-                                                     options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        else { return fallback }
-        return String(decoding: data, as: UTF8.self)
     }
 
     /// Scan the repo's `NodeLibrary/` for node folders (a `node-contract.json` inside) and assemble the
@@ -362,18 +353,22 @@ extension SZHostBridge {
                 }
             }
             // Audit against what the promote will actually PUT LIVE (`SZPortBindingAudit.auditForPromote`):
-            // the authored contract merged into the node's live boundary, or — with no staged contract —
-            // the LIVE contract itself, so a source-only re-stage never bypasses the gate. A port the code
+            // the authored contract merged into the node, or — with no staged contract — the LIVE
+            // contract itself, so a source-only re-stage never bypasses the gate. A port the code
             // reads/writes that the contract never declares is a hard error (nothing is promoted); a
             // declared-but-unused port and any boundary-merge conflict ride back as warnings.
-            if let source = try? String(contentsOf: staged, encoding: .utf8) {
-                let live = host.store.project?.graph.node(id: id)?.contract
-                let audit = SZPortBindingAudit.auditForPromote(source: source, authored: authored, live: live)
+            // The merge happens ONCE, here: its result is what the promote writes, so the gate audits
+            // exactly what lands.
+            var merged: SZNodeContract?
+            if let node = host.store.project?.graph.node(id: id),
+               let source = try? String(contentsOf: staged, encoding: .utf8) {
+                let audit = SZPortBindingAudit.auditForPromote(source: source, authored: authored, node: node)
                 if !audit.result.errors.isEmpty {
                     let msg = Self.portBindingError(audit.result.errors)
                     host.recordBuildErrors(msg)
                     return SZJSONRPC.encode(["ok": false, "errors": msg])
                 }
+                merged = audit.contract
                 warnings = audit.mergeConflicts + audit.result.warnings
             }
             // The card half: a staged Card.swift must compile too, or nothing promotes — a green
@@ -388,7 +383,7 @@ extension SZHostBridge {
                 }
             }
             host.recordBuildErrors(nil)
-            try host.promoteStagedNode(id: id)
+            try host.promoteStagedNode(id: id, contract: merged)
             return warnings.isEmpty
                 ? SZJSONRPC.encode(["ok": true])
                 : SZJSONRPC.encode(["ok": true, "warnings": warnings])

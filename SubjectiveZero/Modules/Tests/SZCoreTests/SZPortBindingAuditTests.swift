@@ -142,25 +142,30 @@ private func output(_ name: String, _ type: SZPortType = .texture) -> SZPort { S
 
 // MARK: - the promote gate (auditForPromote)
 
+private func node(_ contract: SZNodeContract?, title: String = "T", symbol: String = "circle") -> SZNode {
+    SZNode(kind: .generated, title: title, sfSymbol: symbol, contract: contract, position: SZPoint(x: 0, y: 0))
+}
+
 @Test func sourceOnlyRestageIsAuditedAgainstTheLiveContract() {
     // No staged contract, but the node HAS a live one: the source must agree with the LIVE contract —
-    // a read of an undeclared port is refused, never promoted unaudited.
+    // a read of an undeclared port is refused, never promoted unaudited. Nothing is merged, so the
+    // promote has no contract to write: the live one stands.
     let live = contract(inputs: [input("gain")], outputs: [output("texture")])
     let src = """
     let g = ctx.inputFloat("gain") ?? 1
     let s = ctx.inputFloat("speed") ?? 0   // not in the live contract
     _ = (g, s, ctx.outputTexture("texture"))
     """
-    let a = SZPortBindingAudit.auditForPromote(source: src, authored: nil, live: live)
-    #expect(a.contract == live)
+    let a = SZPortBindingAudit.auditForPromote(source: src, authored: nil, node: node(live))
+    #expect(a.contract == nil)
     #expect(a.result.errors.count == 1)
     #expect(a.result.errors[0].contains("\"speed\""))
     #expect(a.mergeConflicts.isEmpty)
 }
 
-@Test func stagedContractIsAuditedAsMergedIntoTheLiveBoundary() {
-    // The authored contract adds "speed"; merged with the live boundary the source audits clean, and a
-    // retype the boundary refuses comes back as a merge conflict (a warning, not an error).
+@Test func stagedContractIsAuditedAsMergedIntoTheNode() {
+    // The authored contract adds "speed"; merged into the node the source audits clean, and a retype the
+    // boundary refuses comes back as a merge conflict (a warning, not an error).
     let live = contract(inputs: [input("gain")], outputs: [output("texture")])
     let authored = contract(inputs: [input("gain", .texture), input("speed")], outputs: [output("texture")])
     let src = """
@@ -168,15 +173,31 @@ private func output(_ name: String, _ type: SZPortType = .texture) -> SZPort { S
     let s = ctx.inputFloat("speed") ?? 0
     _ = (g, s, ctx.outputTexture("texture"))
     """
-    let a = SZPortBindingAudit.auditForPromote(source: src, authored: authored, live: live)
+    let a = SZPortBindingAudit.auditForPromote(source: src, authored: authored, node: node(live))
     #expect(a.result.errors.isEmpty)
     #expect(a.contract?.inputs.map(\.name) == ["gain", "speed"])
     #expect(a.contract?.inputs[0].type == .float)      // boundary held
     #expect(a.mergeConflicts.count == 1)
 }
 
+@Test func theAuditedContractCarriesTheNodesIdentity() {
+    // The gate merges exactly once, and what it returns is what the promote writes — so the identity
+    // rule (`mergingAuthored(_:intoNode:)`) is applied HERE: the node's chosen title stands over the
+    // agent's, and a placeholder symbol the node never had chosen is filled from the authored contract.
+    let live = contract(outputs: [output("texture")])
+    var authored = contract(outputs: [output("texture")])
+    authored.title = "Agent Title"
+    authored.sfSymbol = "wand.and.stars"
+    let named = node(live, title: "Grayscale", symbol: SZNode.placeholderSymbol)
+    let a = SZPortBindingAudit.auditForPromote(source: "_ = ctx.outputTexture(\"texture\")",
+                                               authored: authored, node: named)
+    #expect(a.contract?.title == "Grayscale")
+    #expect(a.contract?.sfSymbol == "wand.and.stars")
+}
+
 @Test func uncontractedNodeHasNothingToAuditAgainst() {
-    let a = SZPortBindingAudit.auditForPromote(source: "_ = ctx.inputFloat(\"x\")", authored: nil, live: nil)
+    let a = SZPortBindingAudit.auditForPromote(source: "_ = ctx.inputFloat(\"x\")",
+                                               authored: nil, node: node(nil))
     #expect(a.contract == nil)
     #expect(a.result == SZPortBindingAudit.Result(errors: [], warnings: []))
 }

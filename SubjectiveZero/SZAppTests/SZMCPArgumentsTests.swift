@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The typed accessors every `ui_*`/`agent_*` handler reads its arguments through (SZHostBridge.swift).
-// Arguments arrive off the wire via JSONSerialization, so the fixtures below are decoded from real JSON
-// rather than hand-built — the NSNumber bridging these accessors exist for is the whole point.
+// The argument seam every `ui_*`/`agent_*` handler reads through (SZHostBridge.swift): the typed
+// accessors, and the null-stripping the dispatcher applies before any of them run. Arguments arrive off
+// the wire via JSONSerialization, so the fixtures below are decoded from real JSON rather than hand-built
+// — the NSNumber bridging these accessors exist for is the whole point. The tail pins the one JSON shape
+// every tool answers in.
 import Foundation
+import SZCore
 import Testing
 @testable import SubjectiveZero
 
@@ -74,4 +77,51 @@ private func arguments(_ json: String) throws -> [String: Any] {
     #expect(inputs.stringList("remove") == ["gain"])
     #expect(args.object("node") == nil)
     #expect(args.object("missing") == nil)
+}
+
+// MARK: - `null` reads as absent
+
+@Test func nullValuedArgumentsAreDroppedAtEveryDepth() throws {
+    // A client that materializes its declared-but-unused optional properties sends `null`; every handler
+    // must see the same thing it sees for an argument that was never sent.
+    let args = SZHostBridge.omittingNulls(
+        try arguments(#"{"node": null, "port": "out", "contract": {"title": "T", "card": null}}"#))
+    #expect(args["node"] == nil)
+    #expect(args.string("port") == "out")
+    #expect(args.object("contract")?["card"] == nil)
+    #expect(args.object("contract")?["title"] as? String == "T")
+}
+
+@Test func aNullInsideAnArrayStandsAsAnElement() throws {
+    // A list's shape is the caller's: dropping an element would silently change an arity the value
+    // coercions are there to refuse.
+    let args = SZHostBridge.omittingNulls(try arguments(#"{"value": [1, null, 3]}"#))
+    #expect((args["value"] as? [Any])?.count == 3)
+}
+
+@Test @MainActor func anArgumentSentAsNullTakesTheArgumentLessPath() throws {
+    // `agent_view_frame { "node": null }` must behave exactly like `agent_view_frame {}` — read the
+    // viewport's endpoint — not fail on "`node` must be a UUID".
+    let host = SZHost()
+    host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [])))
+    let bridge = SZHostBridge(host: host)
+    #expect {
+        _ = try bridge.callTool(name: "agent_view_frame", arguments: ["node": NSNull()])
+    } throws: { error in
+        "\(error)".contains("no frame rendered yet")     // the endpoint path, with nothing rendered yet
+    }
+}
+
+// MARK: - one JSON shape
+
+@Test @MainActor func annotatedAndPlainPayloadsAreEncodedIdentically() throws {
+    // `agent_read_graph`/`agent_read_node` re-encode a decoded payload to annotate it; that path and the
+    // plain `Encodable` one must produce the same bytes, or one tool answers in a shape its neighbours
+    // don't (slashes in a file path being the visible tell).
+    let bridge = SZHostBridge(host: SZHost())
+    let contract = SZNodeContract(title: "T", sfSymbol: "circle", summary: "a/b",
+                                  inputs: [SZPort(name: "path", type: .string)], outputs: [])
+    let encoded = bridge.encodeJSON(contract)
+    let json = try #require(try JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any])
+    #expect(bridge.encodeJSON(json, fallback: "") == encoded)
 }

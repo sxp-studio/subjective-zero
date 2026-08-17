@@ -16,6 +16,11 @@ file). pi ships no MCP support at all, so the pi provider stages a small extensi
 (`<workdir>/.subz/mcp-bridge.mjs`, bundled in SZAI's resources) that dials the listener directly
 and registers each host tool via `pi.registerTool` — same wire protocol, no extra process.
 
+Arguments: a JSON `null` reads as ABSENT, for every tool, stripped once at the bridge's dispatch —
+clients routinely serialize a declared-but-unused optional property as `null`, and no handler should
+have to tell that apart from an argument the caller meant to send. (Inside an array a null stands: a
+list's shape is the caller's, and the value coercions refuse it.)
+
 ## Structure
 
 One main server class (in SZApp); commands are defined in **extension files**, grouped by prefix, so
