@@ -337,6 +337,7 @@ extension SZHost {
         let task = SZTask(title: title ?? SZTask.title(fromInstruction: instruction, nodeCount: 0),
                           instruction: instruction, workSet: nodes)
         pendingTasks.append(task)
+        admissionSuspended = false   // a new ask is the user acting again
         flushTaskQueue()
         if isRunning {
             let ahead = pendingTasks.count - 1
@@ -387,6 +388,8 @@ extension SZHost {
     /// a terminal refusal is narrated once and leaves the queue — without that, every pump pass
     /// would replay it ("nothing to implement" forever, the provider sheet re-presenting per pass).
     func admitPendingTasks() {
+        // Held after a Stop until the user acts again (see `cancelRun`).
+        guard !admissionSuspended else { return }
         // Oldest first, and a task that must wait does NOT block the ones behind it: two asks over
         // disjoint nodes both start, overlapping ones queue behind the holder. A task that must
         // wait keeps its place quietly; a terminal refusal leaves the queue (retrying cannot help).
@@ -460,6 +463,23 @@ extension SZHost {
         }
         let implementable = candidates.work
         let blankIDs = candidates.blank
+        // A task that NAMED its nodes and has none of them available must not run: an empty run
+        // spends a Director turn to conclude there is nothing to do, and drops the ask on the
+        // floor. Two different situations, two different answers.
+        if !task.workSet.isEmpty, implementable.isEmpty {
+            if !candidates.taken.isEmpty {
+                // The work exists and is being built right now — WAIT for the holder. The task
+                // stays queued and the holder's release re-fires the pump.
+                status = "waiting for \(candidates.taken.count) node(s) another task is building"
+                return .waiting
+            }
+            showChat()
+            narrateDirector(blankIDs.isEmpty
+                ? "Nothing to build there — that node is already built and current. Say what should change and I'll take it to its agent."
+                : "That node has no prompt yet — describe what it should do, then build.")
+            status = "nothing to build for that ask"
+            return .refused
+        }
         let dirty = candidates.work.union(candidates.blank).union(candidates.taken)
         // Nothing to implement, nothing asked → skip the run entirely (a full run would burn
         // a decompose turn to conclude "no work"). A run WITH an instruction still goes
@@ -1021,7 +1041,13 @@ extension SZHost {
     /// Cancel EVERY live run (the `Stop` HUD action, and `ui_stop`). Pending tasks stand: Stop
     /// ends what is running, it does not empty the queue.
     func cancelRun() {
-        for run in activeRuns.values { cancelRun(run) }
+        // SNAPSHOT first: `cancelRun(_:)` deregisters, and mutating the table while iterating its
+        // own values leaves runs alive. Live-caught — Stop stopped one of two.
+        for run in Array(activeRuns.values) { cancelRun(run) }
+        // A Stop must not be answered by the queue immediately starting the next ask: the user
+        // just said stop, and spending tokens on the next thing reads as ignoring them. The
+        // queue STANDS — the next thing the user does releases it.
+        admissionSuspended = true
     }
 
     /// Cancel ONE run. Task cancellation propagates into the fleet's task group; nodes already

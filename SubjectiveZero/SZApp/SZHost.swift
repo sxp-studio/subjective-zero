@@ -357,6 +357,9 @@ final class SZHost {
     /// door's scheduling effect append here; the pump's head admits every task whose work set is
     /// free — ahead of any queued prose, and a blocked task never blocks a later disjoint one.
     internal(set) var pendingTasks: [SZTask] = []
+    /// Set by Stop, cleared by the next thing the user asks for. Without it, stopping a run is
+    /// answered by the queue starting the next one — which reads as the app ignoring the Stop.
+    internal(set) var admissionSuspended = false
 
 
     /// The provider new agent sessions use — Director Agent runs and a first-turn Director Agent chat.

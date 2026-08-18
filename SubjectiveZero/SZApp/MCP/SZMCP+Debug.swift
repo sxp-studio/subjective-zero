@@ -26,12 +26,14 @@ extension SZHostBridge {
                  properties: ["run": ["type": "string", "description": "a runID (or unique prefix) from debug_turn_timings; omit for the latest run"]]),
             tool("debug_turn_prompt", "The rendered prompt a turn ACTUALLY sent to its CLI, verbatim — inspect what the agent was briefed with. Survives relaunches via the on-disk debug capture (newest \(SZHost.debugTurnCaptureCap) turns; tool-result payloads live beside it in Application Support/SubjectiveZero/debug-turns/<turnID>/).",
                  properties: ["turn": ["type": "string", "description": "a turnID from debug_turn_timings; omit for the most recent turn"]]),
-            tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (a run in flight), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
+            tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (any run in flight), `runningTasks` (how many), `tasks` (SCHEDULED and not yet started, oldest first), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
             tool("debug_fail_node_once", "Test affordance: force a node to fail its NEXT coding dispatch — report `needsInput` without running an agent — so the reconcile loop fires live & repeatably (the agents rarely fail on their own). Consumed once. Call before ui_run.",
                  properties: [
                     "node": ["type": "string", "description": "node id (UUID)"],
                     "message": ["type": "string", "description": "the blocker the node reports (optional) — a realistic one steers the Director's reconcile turn"],
                  ]),
+            tool("debug_send_user_chat", "Send a message AS THE USER — the command-bus mirror of typing in the composer and hitting Return, which no other tool provides (`ui_send_chat` is the agent bus and its sends are agent-origin, so mid-run they become steers rather than queued user messages). Debug-only: it exists so the human path — queueing, folding, the door's triage of prose — is testable headlessly. Returns what the composer's send returns: {status: queued|recorded|rejected, message_id?, detail?}.",
+                 properties: ["message": ["type": "string", "description": "the message text, as typed"]]),
             tool("debug_set_paused", "Freeze or resume the render clock (mirrors the HUD Pause/Play button). `paused:true` freezes time + frame index so successive `agent_view_frame`s render the same instant — the deterministic way to A/B an input (e.g. sweep a slider and compare frames without the camera/animation drifting between captures). `paused:false` resumes. Idempotent; returns the applied `paused`.",
                  properties: ["paused": ["type": "boolean", "description": "true = pause, false = resume"]]),
             tool("debug_quit", "Quit the app cleanly, exactly like ⌘Q (windows close, state persists, the camera stops). Test-bus only — the way an automated drive ends a session instead of resorting to kill signals that skip teardown. Replies before terminating."),
@@ -55,6 +57,7 @@ extension SZHostBridge {
         case "debug_turn_prompt":      return try debugTurnPrompt(arguments)
         case "debug_agent_state":      return debugAgentState()
         case "debug_fail_node_once":   return try debugFailNodeOnce(arguments)
+        case "debug_send_user_chat":   return try debugSendUserChat(arguments)
         case "debug_set_paused":       return try debugSetPaused(arguments)
         case "debug_quit":             return debugQuit()
         // debug_check_pack never lands here — SZMCPServer routes it down the off-main lane
@@ -66,6 +69,23 @@ extension SZHostBridge {
     /// Freeze/resume the render clock via the same host path as the HUD Pause/Play button, so its icon
     /// stays in sync. Explicit boolean (not a toggle) so a scripted A/B — pause, set an input, capture,
     /// change the input, capture — is deterministic regardless of the current state.
+    /// The GUI composer's send, driven from the bus. Origin `.user` is the whole point: an
+    /// agent-origin send mid-run is recorded as a steer, so it can never exercise the queue.
+    private func debugSendUserChat(_ arguments: [String: Any]) throws -> String {
+        guard let message = arguments.string("message"),
+              !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SZMCPError.message("debug_send_user_chat needs a non-empty `message`")
+        }
+        switch host.sendChat(scope: .director, message: message, origin: .user) {
+        case .queued(let id):
+            return SZJSONRPC.encode(["status": "queued", "message_id": id.uuidString])
+        case .recordedForReconcile(let id):
+            return SZJSONRPC.encode(["status": "recorded", "message_id": id.uuidString])
+        case .rejected:
+            return SZJSONRPC.encode(["status": "rejected", "detail": host.status])
+        }
+    }
+
     private func debugSetPaused(_ arguments: [String: Any]) throws -> String {
         guard let paused = arguments["paused"] as? Bool else {
             throw SZMCPError.message("debug_set_paused needs `paused` (bool)")
@@ -167,6 +187,13 @@ extension SZHostBridge {
     private func debugAgentState() -> String {
         SZJSONRPC.encode([
             "isRunning": host.isRunning,
+            // The scheduled queue, in the order the strip lists it — a task that has not started
+            // is state you can only otherwise see by looking at the window.
+            "tasks": host.pendingTasks.map { [
+                "id": $0.id.uuidString, "title": $0.title,
+                "instruction": $0.instruction, "nodes": $0.workSet.map(\.uuidString),
+            ] },
+            "runningTasks": host.activeRuns.count,
             "sessions": Array(host.agentSessions.keys).sorted(),
             "chatting": host.nodeAgentState.filter(\.value.isChatting).keys.map(\.uuidString).sorted(),       // chat tab order (left→right), Director first
             // node uuid → last reported status line (the reconcile signal).

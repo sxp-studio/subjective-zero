@@ -199,7 +199,10 @@ extension SZHost {
 
         // A user send reveals the panel. An agent's does not — background traffic lands in the
         // one feed on its own, and there is no tab left for it to steal.
-        if origin == .user { showChat() }
+        if origin == .user {
+            showChat()
+            admissionSuspended = false   // the user is asking again; the queue may move
+        }
 
         // A pre-flight rejection: shown in the tab but TRANSIENT — never flushed, never recapped.
         // It isn't conversation; restoring "(busy…)" as assistant history (or replaying it to a

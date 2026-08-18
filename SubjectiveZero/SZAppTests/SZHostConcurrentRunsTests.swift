@@ -214,3 +214,52 @@ struct SZHostScopedTaskTests {
         #expect(host.pendingTasks.first?.workSet == [a])
     }
 }
+
+/// Stop, with more than one run live. Both were live-caught: Stop left a run alive because the
+/// loop mutated the table it was walking, and the queue answered a Stop by starting the next ask.
+@MainActor
+struct SZHostStopTests {
+
+    private func live(_ host: SZHost, _ node: SZNodeID, _ label: String) -> SZRunState {
+        let claim = SZClaimToken(label: label)
+        #expect(host.ledger.tryAcquire([.node(node), .transcript(.node(node))], as: claim))
+        let run = SZRunState(taskID: UUID(), claim: claim, instruction: label,
+                             ownsGraphOp: false, workSet: [node])
+        host.activeRuns[run.taskID] = run
+        return run
+    }
+
+    @Test func stopEndsEveryLiveRunNotJustOne() {
+        let host = SZHost()
+        live(host, SZNodeID(), "run a")
+        live(host, SZNodeID(), "run b")
+        live(host, SZNodeID(), "run c")
+        host.cancelRun()
+        // Snapshot-then-cancel: walking `activeRuns.values` while deregistering skipped runs.
+        #expect(host.activeRuns.isEmpty)
+        #expect(!host.isRunning)
+    }
+
+    @Test func stopLeavesTheQueueStandingWithoutStartingIt() {
+        let host = SZHost()
+        live(host, SZNodeID(), "run a")
+        host.mintRun(instruction: "the next thing")
+        host.cancelRun()
+        // The ask survives…
+        #expect(host.pendingTasks.map(\.instruction) == ["the next thing"])
+        // …and is NOT launched on the way out of a Stop.
+        host.admitPendingTasks()
+        #expect(host.pendingTasks.count == 1)
+        #expect(!host.isRunning)
+    }
+
+    @Test func theNextAskReleasesTheQueueAgain() {
+        let host = SZHost()
+        live(host, SZNodeID(), "run a")
+        host.mintRun(instruction: "queued")
+        host.cancelRun()
+        #expect(host.admissionSuspended)
+        host.mintRun(instruction: "a new ask")   // the user acting again
+        #expect(!host.admissionSuspended)
+    }
+}
