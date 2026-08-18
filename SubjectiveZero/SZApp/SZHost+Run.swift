@@ -333,9 +333,9 @@ extension SZHost {
     /// moment its work set is free, ahead of any queued prose. Returns the task's id so the
     /// caller that minted it can withdraw it again (a stopped Director turn discards its own).
     @discardableResult
-    func mintRun(instruction: String, title: String? = nil) -> UUID {
+    func mintRun(instruction: String, title: String? = nil, nodes: Set<SZNodeID> = []) -> UUID {
         let task = SZTask(title: title ?? SZTask.title(fromInstruction: instruction, nodeCount: 0),
-                          instruction: instruction)
+                          instruction: instruction, workSet: nodes)
         pendingTasks.append(task)
         flushTaskQueue()
         if isRunning {
@@ -424,9 +424,10 @@ extension SZHost {
     /// path auto-retries that case, so per-attempt narration would be advice to a user who
     /// has nothing to do.
     @discardableResult
-    func startRun(instruction: String = "", narrateContention: Bool = true) -> RunStart {
+    func startRun(instruction: String = "", nodes: Set<SZNodeID> = [],
+                  narrateContention: Bool = true) -> RunStart {
         startRun(task: SZTask(title: SZTask.title(fromInstruction: instruction, nodeCount: 0),
-                              instruction: instruction),
+                              instruction: instruction, workSet: nodes),
                  narrateContention: narrateContention)
     }
 
@@ -448,7 +449,15 @@ extension SZHost {
         }
         // This run's WORK SET candidates — the rule lives in `workSetCandidates`.
         let taken = runWorkSet
-        let candidates = Self.workSetCandidates(in: store.project?.graph.nodes ?? [], excluding: taken)
+        var candidates = Self.workSetCandidates(in: store.project?.graph.nodes ?? [], excluding: taken)
+        // A task that NAMES its nodes takes only those. This is what lets two asks about different
+        // parts of the graph run at once: without it every run computes "everything dirty", the
+        // first takes the lot, and the second has nothing left to be concurrent with.
+        if !task.workSet.isEmpty {
+            candidates = (work: candidates.work.intersection(task.workSet),
+                          blank: candidates.blank.intersection(task.workSet),
+                          taken: candidates.taken.intersection(task.workSet))
+        }
         let implementable = candidates.work
         let blankIDs = candidates.blank
         let dirty = candidates.work.union(candidates.blank).union(candidates.taken)

@@ -181,3 +181,36 @@ struct SZHostTaskAmendTests {
         #expect(!host.withdrawTask(live.taskID))
     }
 }
+
+/// Scoping a task to named nodes — the thing that makes concurrency reachable at all. Without it
+/// every run computes "everything dirty", the first takes the lot, and a second ask has nothing
+/// left to be concurrent with.
+@MainActor
+struct SZHostScopedTaskTests {
+
+    private func draft(_ title: String) -> SZNode {
+        SZNode(kind: .prompt, title: title, prompt: "do \(title)", position: SZPoint(x: 0, y: 0))
+    }
+
+    @Test func aNamedWorkSetTakesOnlyThoseNodes() {
+        let a = draft("A"), b = draft("B")
+        let all = SZHost.workSetCandidates(in: [a, b], excluding: [])
+        #expect(all.work == [a.id, b.id])   // unscoped: an ask takes everything pending
+
+        // Scoped by the caller (`ui_run { nodes: [...] }`), the same graph yields one node — which
+        // is what leaves B free for a second task to claim.
+        let scoped = all.work.intersection([a.id])
+        #expect(scoped == [a.id])
+        #expect(all.work.subtracting(scoped) == [b.id])
+    }
+
+    @Test func aScopedTaskCarriesItsNodesFromTheStart() {
+        let host = SZHost()
+        let a = SZNodeID()
+        let id = host.mintRun(instruction: "just this one", nodes: [a])
+        // The nodes ride on the TASK, so they survive the queue and are known before admission —
+        // that is what the strip reads to say what a pending task is waiting behind.
+        #expect(host.pendingTasks.first?.id == id)
+        #expect(host.pendingTasks.first?.workSet == [a])
+    }
+}

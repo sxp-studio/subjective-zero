@@ -85,6 +85,8 @@ extension SZHostBridge {
             tool("ui_run", "Start the implementation run over the current graph — a Coding Agent per pending node, with the active provider. `instruction` (optional) steers the run. Called from your own chat turn, the task is QUEUED and starts when your turn ends (finish your reply; do not wait for it). A task asked for while another is running is queued too — never refused — and starts when the work it needs is free.",
                  properties: [
                     "instruction": ["type": "string", "description": "optional free-text steer for the run"],
+                    "nodes": ["type": "array", "items": ["type": "string"],
+                              "description": "optional node ids to SCOPE this task to. Naming them is what lets it run ALONGSIDE another task over different nodes; omit to take every pending node not already being built."],
                  ]),
             tool("ui_amend_task", "Fold more words into a SCHEDULED task that has not started yet — what a follow-up like \"actually blue, not red\" does to an ask still waiting its turn. `task_id` comes from the task list in your brief. The words are APPENDED (the task keeps what was already asked), because a later message usually refines an earlier one rather than replacing it. Returns {amended: true}, or {amended: false, reason} if the task already started (message its agents instead — that is a steer, not an amend) or no longer exists.",
                  properties: [
@@ -572,9 +574,12 @@ extension SZHostBridge {
 
     private func uiRun(_ arguments: [String: Any]) -> String {
         let instruction = arguments.string("instruction") ?? ""
+        // Naming nodes SCOPES the task to them — the only way two asks can be concurrent.
+        let nodes = Set((arguments["nodes"] as? [Any] ?? [])
+            .compactMap { ($0 as? String).flatMap(UUID.init(uuidString:)) })
         // A second ask is SCHEDULED, never dropped: it starts when the work it needs is free.
         if host.isRunning {
-            host.mintRun(instruction: instruction)
+            host.mintRun(instruction: instruction, nodes: nodes)
             return SZJSONRPC.encode(["status": "queued", "position": host.pendingTasks.count,
                                      "detail": "a task is already running — this one starts when its work is free"])
         }
@@ -589,11 +594,11 @@ extension SZHostBridge {
         }
         // The START's own answer, not `isRunning`: with several runs live, another one being in
         // flight says nothing about whether THIS ask started.
-        switch host.startRun(instruction: instruction) {   // returns immediately; it streams into the tabs
+        switch host.startRun(instruction: instruction, nodes: nodes) {   // returns immediately; it streams into the tabs
         case .started: break
         case .waiting:
             // A transient claim holds what it needs — schedule it rather than lose it.
-            host.mintRun(instruction: instruction)
+            host.mintRun(instruction: instruction, nodes: nodes)
             return SZJSONRPC.encode(["status": "queued", "position": host.pendingTasks.count,
                                      "detail": host.status])
         case .refused:
