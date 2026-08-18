@@ -30,6 +30,8 @@ public struct SZChatPanel: View {
     private let runStartedAt: Date?                // the live run's start → the run strip's ticker
     private let runGraphRunID: UUID?               // the live run's record → the run strip's link
     private let agentGraphRuns: [SZAgentGraphRun]  // the RUNS records → the run strip's fleet lanes
+    private let scheduledTasks: [SZScheduledRow]   // work queued and not yet started → the strip
+    private let onCancelScheduledTask: ((UUID) -> Void)?   // a scheduled row's ✕
     private let isQueued: (UUID) -> Bool           // message id → still waiting in the mailbox (queued chip)
     private let onSend: (String, [URL]) -> Void    // (message, attachment source URLs)
     private let onClearTranscript: (SZChatScope) -> Void   // header trash — full reset (transcript + agent)
@@ -118,6 +120,8 @@ public struct SZChatPanel: View {
                 runStartedAt: Date? = nil,
                 runGraphRunID: UUID? = nil,
                 agentGraphRuns: [SZAgentGraphRun] = [],
+                scheduledTasks: [SZScheduledRow] = [],
+                onCancelScheduledTask: ((UUID) -> Void)? = nil,
                 isQueued: @escaping (UUID) -> Bool = { _ in false },
                 onSend: @escaping (String, [URL]) -> Void,
                 onClearTranscript: @escaping (SZChatScope) -> Void = { _ in },
@@ -148,6 +152,8 @@ public struct SZChatPanel: View {
         self.runStartedAt = runStartedAt
         self.runGraphRunID = runGraphRunID
         self.agentGraphRuns = agentGraphRuns
+        self.scheduledTasks = scheduledTasks
+        self.onCancelScheduledTask = onCancelScheduledTask
         self.isQueued = isQueued
         self.onSend = onSend
         self.onClearTranscript = onClearTranscript
@@ -189,7 +195,7 @@ public struct SZChatPanel: View {
             contextLine
             Divider().overlay(Color.white.opacity(0.08))
             transcript(feed)
-            if isRunning { runStrip }
+            if isRunning || !scheduledTasks.isEmpty { runStrip }
             composer
         }
         .background(Color(white: 0.12))
@@ -325,7 +331,9 @@ public struct SZChatPanel: View {
                    title: { id in SZNodeID(uuidString: id).flatMap { project?.graph.node(id: $0)?.title } },
                    since: runStartedAt,
                    onOpen: revealInAgentGraph.map { reveal in { reveal($0) } },
-                   threadID: runGraphRunID)
+                   threadID: runGraphRunID,
+                   scheduled: scheduledTasks,
+                   onCancelScheduled: onCancelScheduledTask)
     }
 
     private var emptyState: some View {

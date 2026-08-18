@@ -772,6 +772,8 @@ struct SZApp: App {
                         runStartedAt: host.oldestRun?.startedAt,
                         runGraphRunID: host.oldestRun?.thread,
                         agentGraphRuns: host.agentGraphRuns,
+                        scheduledTasks: host.scheduledTaskRows,
+                        onCancelScheduledTask: { host.withdrawTask($0) },
                         isQueued: { queuedIDs.contains($0) },   // envelope id == bubble id (sendChat)
                         onSend: { host.sendChat(scope: .director, message: $0, attachments: $1) },
                         onClearTranscript: { host.clearChatTranscript($0) },

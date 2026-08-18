@@ -27,6 +27,11 @@ struct SZRunStrip: View {
     let onOpen: ((UUID) -> Void)?
     /// The leader record, for the fallback line's link. nil = nothing to land on yet.
     let threadID: UUID?
+    /// Work SCHEDULED and not yet started, oldest first — the asks that survived being second.
+    /// They sit under the live lanes because that is the order they will happen in.
+    var scheduled: [SZScheduledRow] = []
+    /// Drop a scheduled task (its ✕). nil = the surface isn't wired; the rows are a readout.
+    var onCancelScheduled: ((UUID) -> Void)?
 
     /// Past this many lanes the strip would own more of the panel than the conversation does; the
     /// rest are one honest line rather than a silent truncation.
@@ -34,12 +39,16 @@ struct SZRunStrip: View {
 
     private var shown: [SZAgentGraphRun] { Array(lanes.prefix(Self.laneCap)) }
     private var hidden: Int { max(0, lanes.count - Self.laneCap) }
+    private var shownScheduled: [SZScheduledRow] { Array(scheduled.prefix(Self.laneCap)) }
+    private var hiddenScheduled: Int { max(0, scheduled.count - Self.laneCap) }
 
     var body: some View {
         VStack(spacing: 0) {
             Divider().overlay(Color.white.opacity(0.08))
             VStack(spacing: SZAgentGraphLayout.laneGap) {
-                if lanes.isEmpty {
+                if lanes.isEmpty, !scheduled.isEmpty {
+                    // Nothing running, but work is waiting — the strip is the queue's only home.
+                } else if lanes.isEmpty {
                     waitingLine
                 } else {
                     ForEach(shown) { run in
@@ -55,10 +64,49 @@ struct SZRunStrip: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                ForEach(shownScheduled) { row in scheduledRow(row) }
+                if hiddenScheduled > 0 {
+                    Text("+\(hiddenScheduled) more queued")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
         }
+    }
+
+    /// One scheduled task: what was asked, and why it has not started. Deliberately quieter than
+    /// a live lane — it is waiting, not working — with a ✕ because an ask you changed your mind
+    /// about should cost nothing to drop.
+    private func scheduledRow(_ row: SZScheduledRow) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock")
+                .font(.system(size: 8))
+                .foregroundStyle(.quaternary)
+            Text(row.title)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            if let waiting = row.waitingOn {
+                Text("· behind \(waiting)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.quaternary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if let onCancelScheduled {
+                Button { onCancelScheduled(row.id) } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Drop this scheduled task")
+            }
+        }
+        .frame(height: SZAgentGraphLayout.laneHeight)
     }
 
     /// Before the fleet goes out — the Director is deciding, and the run is still the thing in
@@ -86,6 +134,21 @@ struct SZRunStrip: View {
         .contentShape(Rectangle())
         .onTapGesture { if let threadID { onOpen?(threadID) } }
         .help(threadID != nil ? "Open this run in the Agent Graph" : "")
+    }
+}
+
+/// One row of the strip's scheduled section — a task waiting its turn.
+public struct SZScheduledRow: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    /// What was asked, in one line.
+    public let title: String
+    /// What it is waiting for, when something holds its work ("Blur"); nil when it is simply next.
+    public let waitingOn: String?
+
+    public init(id: UUID, title: String, waitingOn: String? = nil) {
+        self.id = id
+        self.title = title
+        self.waitingOn = waitingOn
     }
 }
 

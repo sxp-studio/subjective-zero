@@ -47,6 +47,17 @@ extension SZHost {
         return candidates
     }
 
+    /// The scheduled work the chat strip lists: what was asked, and — when something holds the
+    /// nodes it needs — what it is behind, so a queued task never reads as a stalled one.
+    var scheduledTaskRows: [SZScheduledRow] {
+        pendingTasks.map { task in
+            let blocker = task.workSet
+                .compactMap { ledger.holder(of: .node($0))?.label }
+                .first
+            return SZScheduledRow(id: task.id, title: task.title, waitingOn: blocker)
+        }
+    }
+
     /// The node card's chat button: put a reference to that node in the message you are writing.
     /// With one conversation there is no tab to open — talking about a node means MENTIONING it,
     /// which the Director's triage reads as the target. The panel inserts it at the caret and
