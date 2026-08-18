@@ -554,7 +554,7 @@ extension SZHost {
             }
             do {
                 try await runBuildDelivery(
-                    instruction: instruction, thread: thread, claim: claim,
+                    run: run, instruction: instruction, thread: thread, claim: claim,
                     packsRoot: packsRoot, providerID: providerID, mcpPort: mcpPort,
                     projectURL: projectURL, cacheDirectory: cacheDirectory)
                 // Liveness-guarded as a whole: after a cancel-and-restart this task is a ZOMBIE,
@@ -611,7 +611,7 @@ extension SZHost {
     /// (its world minted with the run), and let the engine run the graph — the fleet is
     /// served through `deliverFleet` while the dispatch node waits.
     private func runBuildDelivery(
-        instruction: String, thread: UUID, claim: SZClaimToken, packsRoot: URL,
+        run: SZRunState, instruction: String, thread: UUID, claim: SZClaimToken, packsRoot: URL,
         providerID: String, mcpPort: UInt16, projectURL: URL, cacheDirectory: URL
     ) async throws {
         let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
@@ -654,7 +654,10 @@ extension SZHost {
                 guard let self else { return SZWorld() }
                 let graph = self.store.project?.graph
                 let candidates = (graph?.nodes ?? []).filter(\.needsImplementation).map(\.id)
-                let scoped = candidates.filter(self.runWorkSet.contains)
+                // THIS run's work set, never the host-wide union: another live run's nodes are
+                // not ours to dispatch to, and delivering to one would present a claim we do not
+                // hold (deliver's holder guard would trip).
+                let scoped = candidates.filter(run.workSet.contains)
                 return SZWorld(
                     graph: graph, statuses: self.nodeStatusLines, node: nil,
                     resuming: self.agentSessions[SZChatScope.director.key] != nil,

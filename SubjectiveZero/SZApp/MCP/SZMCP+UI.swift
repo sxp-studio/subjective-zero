@@ -577,24 +577,21 @@ extension SZHostBridge {
         // Naming nodes SCOPES the task to them — the only way two asks can be concurrent.
         let nodes = Set((arguments["nodes"] as? [Any] ?? [])
             .compactMap { ($0 as? String).flatMap(UUID.init(uuidString:)) })
-        // A second ask is SCHEDULED, never dropped: it starts when the work it needs is free.
-        if host.isRunning {
-            host.mintRun(instruction: instruction, nodes: nodes)
-            return SZJSONRPC.encode(["status": "queued", "position": host.pendingTasks.count,
-                                     "detail": "a task is already running — this one starts when its work is free"])
-        }
+        // NOT gated on "something is already running" — that is the whole point: an ask over
+        // other nodes starts alongside. Only a claim it cannot get makes it wait, and that is
+        // `startRun`'s own verdict below.
         // Called from the Director Agent's OWN streaming chat turn: starting now would race that
         // turn on the same transcript (deliver's one-in-flight-marker-per-scope invariant), so the
         // run is MINTED — the door's `requestBuild` lane, one home for supersede + narration —
         // and admitted at the pump's head when that turn's claim frees.
         if host.chatInFlight.contains(SZChatScope.directorKey) {
-            host.mintRun(instruction: instruction)
+            host.mintRun(instruction: instruction, nodes: nodes)
             return SZJSONRPC.encode(["status": "queued",
                                      "detail": "the run starts when your current turn ends"])
         }
         // The START's own answer, not `isRunning`: with several runs live, another one being in
         // flight says nothing about whether THIS ask started.
-        switch host.startRun(instruction: instruction, nodes: nodes) {   // returns immediately; it streams into the tabs
+        switch host.startRun(instruction: instruction, nodes: nodes) {   // returns immediately
         case .started: break
         case .waiting:
             // A transient claim holds what it needs — schedule it rather than lose it.
