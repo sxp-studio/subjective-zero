@@ -72,9 +72,9 @@ floats over the viewport" sketch - panels are tiled sections, not overlays): a b
 ```
 ┌─ SZApp window ──────────────────────────────────┐
 │ ┌ Viewport ────────────────┐  ┌ Chat ─────────┐ │
-│ │  (Metal live render)     │  │  Director /   │ │
-│ ├ Node Editor ─────────────┤  │  node tabs    │ │
-│ │  ●Camera ─▶ ●Grayscale   │  │               │ │
+│ │  (Metal live render)     │  │  one feed     │ │
+│ ├ Node Editor ─────────────┤  │               │ │
+│ │  ●Camera ─▶ ●Grayscale   │  │  run strip    │ │
 │ │            [HUD capsule] │  │  composer     │ │
 │ └──────────────────────────┘  └───────────────┘ │
 └──────────────────────────────────────────────────┘
@@ -135,50 +135,49 @@ are REAL messages to real agents; determinism stays in the agents' `ui_*` tools)
 - Every menu has a **free-text row** seeded with the target's mention - the recipient is always
   explicit in the message itself.
 
-Clicking a row lands the draft in the composer (panel auto-opens on the recipient's tab, send
-pulses until acted on - V1 ruling: compose, never auto-send). The node card has NO buttons
+Clicking a row lands the draft in the composer (the panel opens, send pulses until acted on -
+V1 ruling: compose, never auto-send). The node card has NO buttons
 anymore (speech bubble and file button both removed): the card renders state, acting on a node is
 the right-click menu's job. Suggestion derivation is host-side
 (`SZHost+CanvasSuggestions.swift`); the menu renders dumb values only.
 
 ## Chat panel
 
-- Converse with the **Director Agent** (the **Project** tab - the tab names the place, the agent
-  keeps its role name) or with a **single node's Coding Agent**.
-- Messages map to `ui_send_chat`; agent responses stream back into the transcript.
-- **@mentions** are the addressing substrate: `@project`, `@all`, `@<node title>` - typed via an
-  autocomplete (`@` at a word boundary), inserted as atomic accent tokens, stored as canonical
-  markup (`@[Blur](node:UUID)`, SZCore `SZMentionMarkup`), expanded for the CLI at every egress
-  (send + recap: inline `@display` + a manifest of uuid + live title), and rendered as accent
-  chips in the transcript (a deleted node's mention dims + strikes through).
-- **Routing** (`SZChatRouting.resolveRecipient` - the one swappable policy function): a message
-  that LEADS with a mention goes to that entity's agent (node → its Coding Agent direct;
-  `@project`/`@all` → the Director Agent); no leading mention → the shown tab's agent. Other
-  mentions are references. The composer's **→ recipient indicator** mirrors the rule live.
-- **Tab activity dots**: pulsing while that scope's agent streams; AMBER while the agent is
-  blocked on the user (`needsInput` - persists until the state resolves); a static blue unread
-  dot once a turn finishes off-screen, until the tab is visited.
-- **The send slot is THE action slot** (one place, three states - a stop that wanders reads as
-  two controls): whole-run **Stop** on the Project tab while a run is in flight; per-turn **Stop**
-  while the shown tab's own interactive turn streams (session + partial reply survive); else
-  send. Click only - Return never stops anything. Other tabs disable send mid-run with the reason
-  shown in the indicator slot (mid-run user messaging is deferred - drafts still compose). The
-  Project composer's placeholder hints the paradigm when nodes are pending ("Try: @project -
-  implement the N pending nodes").
-- The **composer** is a Codex-style rounded two-row card floating on the panel
-  background: the growing text field on top; a bottom bar with `+` attach (left) and the
-  **provider generation picker** + circular send (right). (A project context chip
-  under the card was tried and CUT - it duplicated the window title and wasn't interactive; a
-  chip row can return when chips do something.) The picker (`SZProviderGenerationPickerView`)
-  is one pill (`[health dot] [bolt] model · effort ⌄`) opening a nested menu: providers
-  (unhealthy = dimmed), model / reasoning-effort (hidden for a CLI with no effort concept) /
-  fast-mode submenus, and "Agent Providers…" into the setup sheet. Selection is **global**
-  (one selection, every tab, always what Run uses - per-agent-type overrides deliberately
-  deferred to agent profiles); a provider *switch* resets agent sessions (transcripts stay;
-  the next message cold-starts on the transcript recap) and is refused while agents are busy.
+**One conversation.** There are no tabs: every message goes to the Director's door, which
+triages it and routes the work. What you see is one feed of what agents said to YOU — the whole
+Director conversation, plus each node agent's own replies, attributed by node. The fleet's
+implementation turns are not in it: they carry the run they belong to and are read in the Agent
+Graph panel.
+
+- The feed is DERIVED (`SZHost.chatFeed`) from the per-scope transcripts, which remain the
+  storage — sessions and cold-start recaps are per scope and stay that way.
+- **@mentions** are the addressing substrate turned into a targeting HINT: `@project`, `@all`,
+  `@<node title>` — typed via an autocomplete (`@` at a word boundary), inserted as atomic accent
+  tokens, stored as canonical markup (`@[Blur](node:UUID)`, SZCore `SZMentionMarkup`), expanded
+  for the CLI at every egress, and rendered as accent chips (a deleted node's mention dims +
+  strikes through). A mention no longer routes: the Director's triage reads it.
+- **A node card's chat button MENTIONS that node** — it inserts the token at the caret (through
+  the composer's own relay, so it lands in the sentence you were already writing) and focuses the
+  field. The context-menu row is "Mention in Chat".
+- **The run strip** sits between the transcript and the composer, outside the ScrollView (a run
+  is a state, not a message — it must not enter the LazyVStack the bottom-pin anchor drives). It
+  shows one lane per work child — the same `SZAgentSubagentLane` the Agent Graph draws under a
+  dispatch card, so the two surfaces are one picture at two zoom levels — and under them the
+  SCHEDULED tasks: what was asked, what it is behind, and a ✕ to drop it. Every row is a door
+  into the Agent Graph panel. Presence, not a lock.
+- **The send slot is THE action slot** (one place, three states): whole-run **Stop** while a run
+  is in flight; per-turn **Stop** while an interactive turn streams (session + partial reply
+  survive); else send. Click only — Return never stops anything. The composer is never disabled:
+  a send while something streams simply queues, with a chip on its bubble.
+- The **composer** is a Codex-style rounded two-row card floating on the panel background: the
+  growing text field on top; a bottom bar with `+` attach (left) and the **provider generation
+  picker** + circular send (right). The picker (`SZProviderGenerationPickerView`) is one pill
+  (`[health dot] [bolt] model · effort ⌄`) opening a nested menu: providers (unhealthy = dimmed),
+  model / reasoning-effort (hidden for a CLI with no effort concept) / fast-mode submenus, and
+  "Agent Providers…" into the setup sheet. Selection is **global** (always what Run uses); a
+  provider *switch* resets agent sessions (transcripts stay) and is refused while agents are busy.
 - A **streaming turn's working row** shows dots + elapsed only; stopping lives in the composer's
-  action slot (see above) - per-turn for the shown tab's interactive turn, whole-run on the
-  Project tab. A stopped turn keeps its session and partial reply.
+  action slot. A stopped turn keeps its session and partial reply.
 - This is a **from-scratch** design - keep it clean and native.
 
 ## HUD
@@ -243,5 +242,5 @@ the right-click menu's job. Suggestion derivation is host-side
 
 - A `ui_update_node` (from an agent or a test) reflows a node's ports identically to a user edit.
 - Toggling display on a different texture output updates the viewport with no rebuild.
-- Chat scoped to a node sends messages only to that node's agent.
+- A mention of a node reaches that node's agent, through the Director.
 - Provider health and permission states render correctly for each combination.

@@ -14,8 +14,8 @@ host's MCP server ([MCP.md](MCP.md)).
 > strategies in Swift.
 >
 > What remains true here, and what the source headers cite this file for: the **roles**
-> (Director and Coding agents), **cross-agent messaging**, and how work is **routed** to a
-> node's agent. Read the JSON trees below as history — the authored format that replaced
+> (Director and Coding agents), **cross-agent messaging**, how work is **routed**, and the
+> **task** vocabulary. Read the JSON trees below as history — the authored format that replaced
 > them is specced in AGENT_GRAPHS.md, and the authoring loop in
 > [AUTHORING.md](AUTHORING.md).
 >
@@ -183,36 +183,51 @@ A user chatting with a single node's agent enters at a `message` node with `{{us
 loops through `implement → write → compile`, and re-reports - iterating just that node without
 involving the Director Agent.
 
-## Message routing (the run-UX paradigm)
+## Message routing
 
-- Every USER send resolves its recipient through **`SZChatRouting.resolveRecipient`** (SZCore) -
-  THE one-function routing-policy seam. V1 policy: a message that LEADS with a mention goes to
-  that entity's agent (`@<node>` → its Coding Agent DIRECT - no relay turn in the tight
-  iterate-on-a-node loop; `@project` / `@all` → the Director Agent); no leading mention → the
-  composing tab's agent. Non-leading mentions are REFERENCES, expanded for the recipient
-  (`SZMentionExpansion`: inline `@display` + a manifest of uuid + live title; `@all` enumerates
-  the node snapshot). A message is never duplicated to multiple Coding Agents - multi-node asks
-  lead with `@project` and the Director reroutes via `ui_send_chat`. Swapping the policy (or
-  making it data - the future behavior-tree seam) is an edit to that one function.
-- **The Director Agent's chat turn IS the decompose turn.** A fresh Director chat is framed by
-  `director/chat.md.mustache` (persona + live graph + the shared `director/toolbelt.md.mustache`
-  every Director framing injects as `{{toolbelt}}`). When implementation should proceed it calls
-  `ui_run { instruction }` - called from its OWN streaming turn the run is QUEUED
-  (`SZHost.pendingDirectorRun`) and starts at turn end (starting mid-turn would race the same
-  transcript), with `directorAlreadyBriefed` so the agentic strategy skips its decompose turn
-  (one Director turn per message-triggered run). The reconcile loop still catches under-shaped
-  dispatches.
+- **Every user message goes to the Director's door**, which triages it.
+  `SZChatRouting.resolveRecipient` (SZCore) is still THE one routing-policy seam, but it no
+  longer takes an active scope and no longer has a direct-to-node lane: with the single chat
+  panel there is no tab to address, and with tasks running concurrently a message that reached
+  a Coding Agent without passing the Director could mutate a node a scheduled or live task
+  holds. A **mention is a targeting HINT**, not an address — it stays in the words, and the
+  triage reads it (`@Blur make it softer` is still unambiguous). Non-leading mentions are
+  references, expanded for the recipient (`SZMentionExpansion`).
+- **The door decides what the words mean** ([AGENT_GRAPHS.md](AGENT_GRAPHS.md)): answer, build,
+  or fold into work already scheduled. An `implement` ruling carries the `requestBuild` effect,
+  which SCHEDULES A TASK — the run is the reply. An `amend` ruling routes to a turn holding
+  `ui_amend_task` / `ui_cancel_task`, because deciding *which* scheduled ask a follow-up belongs
+  with is judgement, not a routing token.
+- **A node question still reaches its agent**: the Director relays it with `ui_send_chat`, and
+  the reply lands in the one feed attributed to that node.
+
+## Tasks: what is scheduled, and what is running
+
+A **task** is the scheduled unit of intent — instruction, work set, state (`SZTask`). A **run**
+is one traversal of an agent graph, recorded (`SZAgentGraphRun`). A task is *scheduled*; a run is
+*executed and recorded*; an admitted task produces exactly one thread-leading run.
+
+- A second ask is **queued, never dropped**. `SZHost.pendingTasks` is the FIFO;
+  `admitPendingTasks` runs at the head of every mailbox pump pass, so a task always beats queued
+  prose to a freed resource.
+- **Runs are scoped by their work set, not serialized.** A run claims its work set's node +
+  transcript pairs through `SZResourceLedger`; disjoint runs are live together, overlapping ones
+  wait on the holder. The Director transcript is claimed **per turn**, not per run, so two runs'
+  decompose turns serialize while their fleets do not.
+- `workSetCandidates` is the single home of "what would a new run take": dirty, minus
+  undescribed, minus what another run already holds.
+- Pending tasks persist to `.subz/.staging/tasks.json` (`SZTaskQueueIO`) — under staging because
+  a task spends tokens when it starts. A RUNNING task is never restored.
 
 ## Cross-agent messaging
 
-- Director Agent → a node's Coding Agent DURING a run: `ui_send_chat` is recorded
-  (`pendingDirectorMessages`, keyed by node) and folded into the node's reconcile retry - never a
-  nested turn inside a synchronous MCP handler. The note also lands in the node's transcript as a
-  `.director`-role message (and marks the tab unread).
-- A coding agent reports back via `agent_report_status`; the reconcile loop reads those statuses.
-- **Deferred (seams earned):** the per-scope async mailbox for MID-RUN USER messaging - user
-  sends are refused while a run is in flight (the composer disables send with the reason and
-  keeps the draft); the mailbox would ride the same recorded-delivery lane when it lands.
+- Director Agent → a node's Coding Agent DURING a run: `ui_send_chat` is recorded as a `.steer`
+  envelope and folded into that node's reconcile retry — never a nested turn inside a synchronous
+  MCP handler. The note also lands in the node's transcript as a `.director`-role message.
+- A coding agent reports back via `agent_report_status`; the reconcile loop reads those statuses,
+  and its messages to the Director are rendered into the reconcile prompt's `{{inbox}}`.
+- **A mid-run user message is a steer; a message about work not yet started is an amend.** Both
+  mechanisms already exist — the door picks which by whether the task has been admitted.
 
 ## Failure recovery
 

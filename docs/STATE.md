@@ -91,6 +91,15 @@ session ids are bound to this machine's CLI state, so they live beside app-state
 project path - never in the bundle. The `.debug` scratch transcript stays ephemeral. Sidecars load
 forgivingly: a missing or corrupt file means an empty transcript, never a project-open error.
 
+**Undelivered work is machine-local, deliberately.** Two queues persist under `.subz/.staging/`:
+undelivered chat envelopes (`message-queue.json`, `SZMessageQueueIO`) and SCHEDULED-not-yet-started
+tasks (`tasks.json`, `SZTaskQueueIO`). Both spend tokens the moment they are acted on, so neither
+may travel in a bundle someone else opens - `.staging` is stripped on Save As and machine-local by
+convention, and same-machine restart survival (the actual requirement) comes free. Only PENDING
+tasks persist: a task that was RUNNING is never restored, because its claim, its fleet and its
+traversal all died with the process, and re-admitting it would redo work that may already have
+landed. Both load forgivingly, and a broken entry drops alone rather than sinking the file.
+
 ### JSON shapes (portability)
 
 State serializes to human-diffable JSON. Representative shape (illustrative, not final):

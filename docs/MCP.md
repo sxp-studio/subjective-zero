@@ -81,7 +81,14 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
                                             // committed — or rolled back, so a failed split never
                                             // destroys the original. Joins an in-flight run; one staged
                                             // op at a time
-- `ui_run`, `ui_send_chat`                  // start Director Agent / send a chat message to an agent
+- `ui_run`, `ui_send_chat`                  // schedule a task / send a chat message to an agent.
+                                            // `ui_run` NEVER refuses for being second: a task asked
+                                            // for while another runs is queued and starts when the
+                                            // work it needs is free (`{status:"queued", position}`)
+- `ui_amend_task`, `ui_cancel_task`         // fold words into — or drop — work SCHEDULED and not yet
+                                            // started. Merging two asks is an amend plus a cancel.
+                                            // Both refuse a task already running: that is a steer,
+                                            // sent with ui_send_chat to its agents
 - `ui_set_provider`                         // active provider + optional model / reasoning_effort /
                                             // fast_mode (mirrors the composer picker; a provider
                                             // CHANGE resets agent sessions and is refused while

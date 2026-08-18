@@ -104,8 +104,8 @@ providers), injects them, owns the run loop, and **hosts the MCP server**. It im
 `HostBridge`: every `ui_`/`agent_` MCP command and every UI intent lands here and becomes either a
 `Store` edit op or a service call. Beyond routing, the host owns the procedures that *span* the
 packages - promote a staged node (merging its authored contract into the live boundary), commit/rollback a split/merge,
-drive a run end-to-end (`startRun` → orchestration context → post-run surfacing), and track
-per-node agent state (`SZNodeAgentState`) + chat sessions/tabs. That state is transient and
+drive a run end-to-end (`startRun` → `SZRunState` → post-run surfacing), schedule and admit
+tasks, and track per-node agent state (`SZNodeAgentState`) + chat sessions. That state is transient and
 observable, never model truth - the model stays in `SZCore`.
 
 **The MCP server lives in the host, not `SZAI`.** It is the app's **command bus** - a 1:1 mirror of UI

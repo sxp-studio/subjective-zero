@@ -21,7 +21,8 @@ state that is true between messages, minted by the host, read by steps and brief
 
 | world state | true while | minted by |
 |---|---|---|
-| `run` | a granted build is live — its work set, round, retry cap, steers, standing instruction | the Build press, `ui_run`, or the door's `requestBuild` effect |
+| `run` | a granted build is live — its work set, round, retry cap, steers, standing instruction | admitting a scheduled task |
+| `pendingTasks` | always — the asks scheduled and not yet started | the Build press, `ui_run`, or the door's `requestBuild` effect |
 | `assignment` | work stands assigned to this scope — the attempt, the sender's note | a dispatch node's fleet delivery |
 | `graph`, `statuses` | always — the live project document and the agents' reported statuses | the app |
 | `node`, `resuming` | the delivery's binding: which node it is about, whether the scope already has a session | the delivering host |
@@ -35,9 +36,11 @@ fleet and settles onward over its own edge, so the whole journey from delivery t
 conclusion is a single connected traversal — and the RUNS list maps one row to one message
 received.
 
-**Vocabulary.** A build is a **thread**: the build traversal and the work children it
-dispatched, sharing the build record's own id. A **turn** is one agent running because a
-turn node asked — the unit that spends model time. Turn ⊂ traversal ⊂ thread.
+**Vocabulary.** A **task** is the scheduled unit of intent — what was asked, over which nodes;
+it is *scheduled*, and produces one run when admitted. A build is a **thread**: the build
+traversal and the work children it dispatched, sharing the build record's own id. A **turn** is
+one agent running because a turn node asked — the unit that spends model time.
+Turn ⊂ traversal ⊂ thread, and one admitted task ↔ one thread.
 
 ## One folder per agent
 
@@ -90,19 +93,23 @@ like any step; nothing routes *into* it. The shipped director's door, whole:
 // director/steps/door/Step.swift
 struct Ruling: Codable { let outcome: String }
 
-let step = SZStep(outcomes: ["build", "answer", "answer-resumed", "implement"]) { ctx in
+let step = SZStep(outcomes: ["build", "answer", "answer-resumed", "implement", "amend"]) { ctx in
     if ctx.run != nil { return "build" }        // a granted build arrives PRE-RULED
     let ruling = try await ctx.ask("triage", as: Ruling.self)
-    if ruling.outcome == "implement" {
-        return .outcome("implement", effects: [.requestBuild])   // the run is the reply
+    if ruling.outcome == "amend", !ctx.pendingTasks.isEmpty { return "amend" }
+    if ruling.outcome == "implement" || ruling.outcome == "amend" {
+        return .outcome("implement", effects: [.requestBuild])   // the task is the reply
     }
     return ctx.resuming ? "answer-resumed" : "answer"
 }
 ```
 
 Every line is a real decision: a grant goes straight to work (re-triaging it would spend a
-token to maybe drop a build), prose is triaged by the model, and an `implement` ruling
-mints the run. The coding agent's whole decision surface is one file, same shape:
+token to maybe drop a build), prose is triaged by the model, an `implement` ruling schedules
+the task, and an `amend` ruling only stands when there is something scheduled to fold into —
+otherwise the ask is a fresh one, because routing a hallucinated amend would reach a turn with
+no work to do. Amending is a TURN (`ui_amend_task` / `ui_cancel_task`), not an effect: naming
+*which* task needs an argument, and deciding which is judgement. The coding agent's whole decision surface is one file, same shape:
 assigned work is deterministic (a retry continues the node's session), and the user's
 prose is judged by its own pack-local `triage` ask — a change request takes the `edit`
 lane (a work order re-grounded on the node's live files), a question stays conversation:
@@ -174,8 +181,9 @@ return .outcome("implement", effects: [.requestBuild])
 ```
 
 The set is `SZEffect` in the facts spec — one case today, because one has a live
-consumer: `requestBuild` mints a run with the delivered message as its standing
-instruction. Effects are performed after the step returns and before its edge routes.
+consumer: `requestBuild` SCHEDULES A TASK with the delivered message as its standing
+instruction. A plain string enum by grammar, so an effect can never carry an argument;
+anything needing one is a turn with a tool. Effects are performed after the step returns and before its edge routes.
 
 ## Facts: one spec, compiled twice
 
@@ -225,12 +233,17 @@ Every message is delivered the same way: the host builds one **`SZDelivery`** �
 message's words, a live world projection for the delivery's binding, the turn transport,
 and (for a build) the fleet seam — and the engine runs the agent's graph against it.
 
-- **Prose** is queued in the mailbox and pumped when the recipient's resources free; the
-  door's `requestBuild` effect mints a run, which the pump admits at the head of its next
-  pass — ahead of any queued prose — the moment the director transcript frees.
-- **A build** is one traversal: the Build press mints the run (work set, instruction,
+- **Prose** is queued in the mailbox and pumped when the recipient's resources free.
+  Consecutive queued messages from the same sender to one recipient **fold into one
+  delivery** (`SZMessageQueue.fold`), so three clarifications typed in a row are one turn that
+  answers all three rather than three turns each blind to the next.
+- **A task** is scheduled by the Build press, `ui_run`, or the door's `requestBuild` effect,
+  and admitted at the head of the next pump pass — ahead of any queued prose — the moment the
+  work it needs is free. A second ask is queued, never dropped.
+- **A build** is one traversal: admitting the task mints the run (work set, instruction,
   claims), and the director's engine runs from door to conclusion, holding at the
-  dispatch while the fleet works.
+  dispatch while the fleet works. **Runs whose work sets are disjoint run at the same time**;
+  the Director transcript is claimed per TURN, so their decompose turns take it in turn.
 - **Work children** are not queued: the waiting dispatch delivers them directly as child
   traversals under the run's own claim — same engine, same seam, same record shape.
 
