@@ -26,7 +26,7 @@ extension SZHostBridge {
                  properties: ["run": ["type": "string", "description": "a runID (or unique prefix) from debug_turn_timings; omit for the latest run"]]),
             tool("debug_turn_prompt", "The rendered prompt a turn ACTUALLY sent to its CLI, verbatim — inspect what the agent was briefed with. Survives relaunches via the on-disk debug capture (newest \(SZHost.debugTurnCaptureCap) turns; tool-result payloads live beside it in Application Support/SubjectiveZero/debug-turns/<turnID>/).",
                  properties: ["turn": ["type": "string", "description": "a turnID from debug_turn_timings; omit for the most recent turn"]]),
-            tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (a run in flight), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `tabs` (chat tab order, left→right), and `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
+            tool("debug_agent_state", "Agent/chat state for closed-loop tests: `isRunning` (a run in flight), `sessions` (scopes with a resumable agent session), `chatting` (node ids whose Coding Agent is mid-chat-turn → shown Coding + locked), `statuses` (each node's last `agent_report_status` — the reconcile-loop signal)."),
             tool("debug_fail_node_once", "Test affordance: force a node to fail its NEXT coding dispatch — report `needsInput` without running an agent — so the reconcile loop fires live & repeatably (the agents rarely fail on their own). Consumed once. Call before ui_run.",
                  properties: [
                     "node": ["type": "string", "description": "node id (UUID)"],
@@ -168,8 +168,7 @@ extension SZHostBridge {
         SZJSONRPC.encode([
             "isRunning": host.isRunning,
             "sessions": Array(host.agentSessions.keys).sorted(),
-            "chatting": host.nodeAgentState.filter(\.value.isChatting).keys.map(\.uuidString).sorted(),
-            "tabs": host.chatTabs.map(\.key),       // chat tab order (left→right), Director first
+            "chatting": host.nodeAgentState.filter(\.value.isChatting).keys.map(\.uuidString).sorted(),       // chat tab order (left→right), Director first
             // node uuid → last reported status line (the reconcile signal).
             "statuses": Dictionary(uniqueKeysWithValues: host.nodeStatusLines.map { ($0.key.uuidString, $0.value) }),
         ])

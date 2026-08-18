@@ -62,6 +62,25 @@ public enum SZChatScope: Hashable, Sendable {
     }
 }
 
+/// One line of the single chat feed: a message, and the conversation it came from.
+///
+/// The feed is DERIVED from the per-scope transcripts, never a second copy of them — sessions and
+/// cold-start recaps are per scope and stay that way. What it shows is what an agent said to YOU:
+/// the whole Director conversation, plus a node agent's own replies. What it leaves out is the
+/// fleet's implementation turns, which carry the run they belong to (`graphRunID`) and are read in
+/// that task's own drill-in.
+public struct SZChatFeedItem: Identifiable, Equatable, Sendable {
+    /// Where the message lives — its transcript, and who is speaking when it is not the Director.
+    public let scope: SZChatScope
+    public let message: SZChatMessage
+    public var id: UUID { message.id }
+
+    public init(scope: SZChatScope, message: SZChatMessage) {
+        self.scope = scope
+        self.message = message
+    }
+}
+
 /// A resumable agent session captured from a run. The provider is remembered alongside the
 /// id because a resume turn must go back to the same CLI that minted/owns the session. Codable for
 /// the machine-local session store (SZAgentSessionIO) — both fields are hard-required; a session

@@ -341,35 +341,21 @@ final class SZHost {
         return isUntitledProject ? "\(project.name) — not saved" : project.name
     }
 
-    // Chat panel UI state — host-owned so BOTH the SwiftUI panel and the `ui_*` MCP surface drive it
-    // (the command bus; lets a closed-loop test select a tab the way a user clicks one).
+    // Chat panel UI state — host-owned so BOTH the SwiftUI panel and the `ui_*` MCP surface
+    // drive it. There is ONE conversation, so there is no selection to keep.
     /// Panel shown? Now derived from the layout tree — chat visibility IS chat's presence in it.
     var chatVisible: Bool { panelLayout.contains(.chat) }
-    internal(set) var activeChatScope: SZChatScope = .director   // the selected tab (Director / a node / the debug chat agent)
-    internal(set) var tabOrder: [SZChatScope] = [.director]   // every open tab in user order (Director movable)
     /// A host-drafted composer message awaiting the panel (a context-menu suggestion click). The
     /// panel consumes it exactly once (`consumeComposerDraft`) so a re-render can't stomp edits.
     internal(set) var pendingComposerDraft: SZComposerDraftInjection?
+    /// A node mention awaiting the composer (a card's chat button). Consumed once, like the draft.
+    internal(set) var pendingComposerMention: SZComposerMentionInjection?
 
     /// THE SCHEDULED TASKS awaiting admission, oldest first. The Build press, `ui_run` and the
     /// door's scheduling effect append here; the pump's head admits every task whose work set is
     /// free — ahead of any queued prose, and a blocked task never blocks a later disjoint one.
     internal(set) var pendingTasks: [SZTask] = []
 
-    /// Scopes whose latest agent turn finished while the user was elsewhere — the tab's static
-    /// unread dot, cleared when the tab is visited (`showChat`). During runs, node tabs finish at
-    /// different times; this keeps "which ones have I not looked at" legible.
-    internal(set) var unreadScopes: Set<String> = []
-
-    /// The open tabs in user order — the Director plus every open node chat that still exists in the graph
-    /// (deleted nodes drop out) plus the debug chat tab when open. The Director is always present even if
-    /// it somehow fell out of the order.
-    var chatTabs: [SZChatScope] {
-        let present = Set(store.project?.graph.nodes.map(\.id) ?? [])
-        var tabs = tabOrder.filter { $0 == .director || $0 == .debug || $0.nodeID.map(present.contains) == true }
-        if !tabs.contains(.director) { tabs.insert(.director, at: 0) }
-        return tabs
-    }
 
     /// The provider new agent sessions use — Director Agent runs and a first-turn Director Agent chat.
     /// Resuming a node's Coding Agent ignores this (a resume must continue on the CLI that owns it). Set
@@ -773,8 +759,6 @@ final class SZHost {
         inFlightAssistantIDs = [:]
         optionsCache = [:]
         lastBuildErrors = nil
-        tabOrder = [.director]
-        activeChatScope = .director
         // A freshly opened project starts playing from t=0 — reset the render clock and clear any pause
         // carried over from the previous project. (Deliberately here, not in `runtime.loadProject`, so
         // incremental live reloads — promote / graph edits — never yank the animation back to 0.)
@@ -1501,7 +1485,7 @@ final class SZHost {
             message: SZChatMessage(role: .director, text: text))
         mailbox.enqueue(envelope)
         store.appendChatMessage(SZChatMessage(role: .director, text: bubbleText), to: scope)
-        if scope.key != activeChatScope.key { unreadScopes.insert(scope.key) }
+
         flushTranscript(scope)
         return envelope.id
     }

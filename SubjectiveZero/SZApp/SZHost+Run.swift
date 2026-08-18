@@ -58,6 +58,10 @@ extension SZHost {
         }
         let assistantID = existingAssistantID ?? store.appendChatMessage(SZChatMessage(role: .assistant, text: ""), to: scope)
         inFlightAssistantIDs[scope.key] = assistantID   // also flips chatInFlight (derived)
+        // A turn a RUN dispatched belongs to that run: the stamp is what the chat feed reads to
+        // tell the fleet's implementation work from a conversation, and what its task's drill-in
+        // collects by. A turn the user started carries none.
+        if let run = activeRun(for: claim) { store.setChatGraphRun(run.thread, assistantID, in: scope) }
         // The run identity is CAPTURED here: finalize re-checks it against the live runs, so a
         // zombie turn settling after cancel-and-restart can't log itself into the new run.
         let turnRunID = activeRun(for: claim)?.traceID
@@ -80,8 +84,6 @@ extension SZHost {
                                       request.reasoningEffort,
                                       request.fastMode ? "fast" : nil]
                             .compactMap(\.self).joined(separator: " · "))
-            // A turn finishing off-screen marks its tab unread (static dot until visited).
-            if scope.key != activeChatScope.key { unreadScopes.insert(scope.key) }
             // Turn end = flush point: the just-completed message (no longer in-flight) lands on disk,
             // and whatever this turn did to the session map is persisted machine-locally.
             flushTranscript(scope)
@@ -151,7 +153,6 @@ extension SZHost {
         // and throw WITHOUT running an agent — so the reconcile loop fires live & repeatably
         // (`debug_fail_node_once`).
         if let blocker = forcedFailNodes.removeValue(forKey: node) {
-            openChatTab(scope)
             store.appendChatMessage(SZChatMessage(role: .assistant,
                 text: "(debug) forced needsInput — skipping implementation this attempt to exercise the reconcile loop."), to: scope)
             recordNodeStatus(node: node, phase: .needsInput, message: blocker)
@@ -167,7 +168,6 @@ extension SZHost {
         // every other run-state write here: a cancelled run's zombie dispatch must not erase the promote
         // evidence the NEW run just recorded for this node.
         activeRun(for: claim)?.promoted.remove(node)
-        openChatTab(scope)
         // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
         // A cancelled run's zombie dispatch presents its released token; deliver detects that and
         // bows out instead of double-streaming into a scope someone else now owns.

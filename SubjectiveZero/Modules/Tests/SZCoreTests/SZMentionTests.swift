@@ -85,30 +85,18 @@ private let skyID = SZNodeID(uuidString: "22222222-2222-2222-2222-222222222222")
 
 // MARK: - Routing policy table
 
-@Test func routingLeadingNodeMentionGoesDirect() {
-    let text = "@[Blur](node:\(blurID.uuidString)) soften it"
-    #expect(SZChatRouting.resolveRecipient(message: text, activeScope: .director) == .node(blurID))
-}
+// One conversation, one recipient: every user message goes to the Director's door, which triages
+// it. A mention is no longer an address — it stays in the words as a targeting HINT the triage
+// reads, and the expansion tests below pin that the reference still resolves.
 
-@Test func routingProjectAndAllGoToDirector() {
-    for key in ["project", "all"] {
-        let text = "@[\(key)](\(key)) do something"
-        #expect(SZChatRouting.resolveRecipient(message: text, activeScope: .node(blurID)) == .director)
-    }
-}
-
-@Test func routingNoLeadingMentionFallsBackToActiveTab() {
-    #expect(SZChatRouting.resolveRecipient(message: "make it pop", activeScope: .node(blurID)) == .node(blurID))
-    #expect(SZChatRouting.resolveRecipient(message: "make it pop", activeScope: .director) == .director)
-    // References mid-text never route.
+@Test func everyUserMessageGoesToTheDirector() {
+    let leadingNode = "@[Blur](node:\(blurID.uuidString)) soften it"
+    let leadingProject = "@[project](project) do something"
+    let noMention = "make it pop"
     let reference = "match @[Sky](node:\(skyID.uuidString))'s tones"
-    #expect(SZChatRouting.resolveRecipient(message: reference, activeScope: .node(blurID)) == .node(blurID))
-}
-
-@Test func routingMultiMentionLeadingWins() {
-    // "@Blur match @Sky" → Blur (Sky is a reference); never duplicated to both.
-    let text = "@[Blur](node:\(blurID.uuidString)) match @[Sky](node:\(skyID.uuidString))"
-    #expect(SZChatRouting.resolveRecipient(message: text, activeScope: .director) == .node(blurID))
+    for text in [leadingNode, leadingProject, noMention, reference] {
+        #expect(SZChatRouting.resolveRecipient(message: text) == .director)
+    }
 }
 
 // MARK: - Expansion

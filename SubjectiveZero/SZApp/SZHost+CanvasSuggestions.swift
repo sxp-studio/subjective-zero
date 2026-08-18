@@ -85,8 +85,7 @@ extension SZHost {
     }
 
     private func stageComposerDraft(_ draft: SZComposerDraft) {
-        let scope = SZChatRouting.resolveRecipient(message: draft.canonicalText,
-                                                   activeScope: activeChatScope)
+        let scope = SZChatRouting.resolveRecipient(message: draft.canonicalText)
         injectComposerDraft(draft, scope: scope)
     }
 

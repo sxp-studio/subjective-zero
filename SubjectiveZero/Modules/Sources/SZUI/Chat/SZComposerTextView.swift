@@ -291,6 +291,9 @@ struct SZComposerTextView: NSViewRepresentable {
         /// Undo-coherent: goes through shouldChangeText/didChangeText.
         func insertMention(_ candidate: SZMentionCandidate) {
             guard let tv = textView, let storage = tv.textStorage else { return }
+            // A mention put here from OUTSIDE (a node card's chat button) means the user is about
+            // to type about it — take focus so they can, without a click of their own.
+            tv.window?.makeFirstResponder(tv)
             let range = mentionSessionRange ?? tv.selectedRange()
             let insertion = NSMutableAttributedString()
             insertion.append(Self.mentionToken(target: candidate.target, display: candidate.title))

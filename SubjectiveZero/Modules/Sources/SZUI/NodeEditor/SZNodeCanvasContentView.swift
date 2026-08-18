@@ -60,7 +60,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     var onEdgeDragEnded: () -> Void = {}
     var autoEditNodeID: SZNodeID? = nil                   // a just-added prompt node → open its field for typing
     var onOpenNodeMenu: (SZNodeID) -> Void = { _ in }     // a card's "⋯" → open that node's context menu
-    var onOpenNodeChat: (SZNodeID) -> Void = { _ in }     // a card's speech button → the node's Coding Agent chat
+    var onMentionNodeInChat: (SZNodeID) -> Void = { _ in }   // a card's speech button → mention it in chat
     var onOpenNodeSource: (SZNodeID) -> Void = { _ in }   // a card's file button → the node's Node.swift
     var onFixNode: (SZNodeID) -> Void = { _ in }          // Outdated/Error pill → compose a rebuild request
     var onSetInputDefault: (SZNodeID, String, SZPortValue, Bool) -> Void = { _, _, _, _ in }
@@ -156,7 +156,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             previewFrame: previewFrames?.frame(for: node.id),
             cardProvider: cardProvider,
             onOpenSource: { onOpenNodeSource(node.id) },
-            onOpenChat: { onOpenNodeChat(node.id) },
+            onOpenChat: { onMentionNodeInChat(node.id) },
             onOpenMenu: { onOpenNodeMenu(node.id) },
             onSetInput: { port, value, persist in onSetInputDefault(node.id, port, value, persist) },
             onToggleDisplay: { port in onToggleDisplay(node.id, port) },

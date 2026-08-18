@@ -197,7 +197,6 @@ extension SZHost {
         for id in ids {
             resetScopeChat(.node(id))
             nodeAgentState[id] = nil
-            closeChatTab(.node(id))
             stopWatchingNodeSource(id)
         }
         persistAgentSessions()

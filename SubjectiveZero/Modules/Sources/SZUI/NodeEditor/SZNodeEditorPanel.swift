@@ -53,7 +53,7 @@ public struct SZNodeEditorPanel: View {
     @State private var visiblePublishTask: Task<Void, Never>?
     @State private var lastPublishedVisible: Set<SZNodeID>?
     private let cameraCommand: SZCameraCommand?   // host-raised one-shot: Center View / Zoom to Fit
-    private let onOpenNodeChat: (SZNodeID) -> Void   // context menu "Open Transcript" → the node's chat tab
+    private let onMentionNodeInChat: (SZNodeID) -> Void   // a card's chat button / "Mention in Chat"
     private let onOpenNodeSource: (SZNodeID) -> Void  // a node's file button → open its Node.swift in the editor
     private let onFixNode: (SZNodeID) -> Void         // Outdated/Error pill → compose a rebuild request
     private let onToggleDirectorChat: () -> Void     // HUD message icon → Director Agent chat
@@ -139,7 +139,7 @@ public struct SZNodeEditorPanel: View {
                 onVisibleNodesChanged: ((Set<SZNodeID>) -> Void)? = nil,
                 cameraCommand: SZCameraCommand? = nil,
                 selectedNodeID: Binding<SZNodeID?>,
-                onOpenNodeChat: @escaping (SZNodeID) -> Void,
+                onMentionNodeInChat: @escaping (SZNodeID) -> Void,
                 onOpenNodeSource: @escaping (SZNodeID) -> Void = { _ in },
                 onFixNode: @escaping (SZNodeID) -> Void = { _ in },
                 onToggleDirectorChat: @escaping () -> Void,
@@ -186,7 +186,7 @@ public struct SZNodeEditorPanel: View {
         self.onVisibleNodesChanged = onVisibleNodesChanged
         self.cameraCommand = cameraCommand
         self._selectedNodeID = selectedNodeID
-        self.onOpenNodeChat = onOpenNodeChat
+        self.onMentionNodeInChat = onMentionNodeInChat
         self.onOpenNodeSource = onOpenNodeSource
         self.onFixNode = onFixNode
         self.onToggleDirectorChat = onToggleDirectorChat
@@ -682,8 +682,8 @@ public struct SZNodeEditorPanel: View {
         switch target {
         case .node(let id):
             guard let node = project?.graph.node(id: id) else { return [] }
-            var actions = [SZContextAction(kind: .openTranscript(id), label: "Open Transcript",
-                                           sfSymbol: "text.quote")]
+            var actions = [SZContextAction(kind: .mentionInChat(id), label: "Mention in Chat",
+                                           sfSymbol: "text.bubble")]
             if node.kind == .generated {
                 actions.append(SZContextAction(kind: .openSource(id), label: "Open Node.swift",
                                                sfSymbol: "doc.text"))
@@ -717,7 +717,7 @@ public struct SZNodeEditorPanel: View {
         let anchor = contextMenu?.anchor   // read before dismiss nils the session
         dismissContextMenu()
         switch action.kind {
-        case .openTranscript(let id): onOpenNodeChat(id)
+        case .mentionInChat(let id): onMentionNodeInChat(id)
         case .openSource(let id): onOpenNodeSource(id)
         case .addNode: if let anchor { addPromptNode(atScreen: anchor) }
         case .toggleCard(let id, let on): cardProvider?.setCardShown(node: id, on)
@@ -823,7 +823,7 @@ public struct SZNodeEditorPanel: View {
             onEdgeDragEnded: { endWireDrag(); stopAutoPan() },
             autoEditNodeID: autoEditNodeID,
             onOpenNodeMenu: { openNodeMenu($0) },
-            onOpenNodeChat: onOpenNodeChat,
+            onMentionNodeInChat: onMentionNodeInChat,
             onOpenNodeSource: onOpenNodeSource,
             onFixNode: onFixNode,
             onSetInputDefault: onSetInputDefault,

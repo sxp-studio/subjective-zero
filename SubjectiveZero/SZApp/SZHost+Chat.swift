@@ -10,6 +10,24 @@ import SZUI
 import UniformTypeIdentifiers
 
 extension SZHost {
+
+    /// THE feed the one chat panel shows: every Director message, plus each node agent's own
+    /// conversation, in the order they were said. A node's fleet turns are left out — they carry
+    /// the run they belong to and are read in that task's drill-in, not in the conversation.
+    ///
+    /// Derived per body evaluation from the per-scope transcripts (a few hundred messages at
+    /// most); the transcripts stay the storage, so sessions and recaps are untouched.
+    var chatFeed: [SZChatFeedItem] {
+        var items = store.messages(for: .director).map { SZChatFeedItem(scope: .director, message: $0) }
+        for node in store.project?.graph.nodes ?? [] {
+            let scope = SZChatScope.node(node.id)
+            items += store.messages(for: scope)
+                .filter { $0.graphRunID == nil }   // a fleet turn belongs to its task, not to us
+                .map { SZChatFeedItem(scope: scope, message: $0) }
+        }
+        return items.sorted { $0.message.timestamp < $1.message.timestamp }
+    }
+
     /// The composer autocomplete's pickable @mentions — the addressable ENTITIES: the project
     /// (routed to the Director Agent), every node (broadcast intent, also the Director Agent's to
     /// fan out), and each node (its Coding Agent). Computed from the live graph so a rename shows
@@ -27,6 +45,23 @@ extension SZHost {
                 sfSymbol: node.sfSymbol, subtitle: "Coding Agent"))
         }
         return candidates
+    }
+
+    /// The node card's chat button: put a reference to that node in the message you are writing.
+    /// With one conversation there is no tab to open — talking about a node means MENTIONING it,
+    /// which the Director's triage reads as the target. The panel inserts it at the caret and
+    /// focuses the field.
+    func mentionNodeInComposer(_ id: SZNodeID) {
+        guard let node = store.project?.graph.node(id: id) else { return }
+        pendingComposerMention = SZComposerMentionInjection(candidate: SZMentionCandidate(
+            target: .node(id), title: node.title.isEmpty ? "Untitled" : node.title,
+            sfSymbol: node.sfSymbol, subtitle: "Coding Agent"))
+        showChat()
+    }
+
+    /// The panel inserted a mention — id-checked so a stale consume can't drop a newer one.
+    func consumeComposerMention(_ id: UUID) {
+        if pendingComposerMention?.id == id { pendingComposerMention = nil }
     }
 
     /// Land a host-drafted message in the composer (a context-menu suggestion click): stage the
@@ -47,27 +82,9 @@ extension SZHost {
         if pendingComposerDraft?.id == id { pendingComposerDraft = nil }
     }
 
-    /// Scopes whose agent reported it's blocked on the USER (`needsInput`) — the amber tab dot.
-    /// Derived live from the typed per-node state, so it clears the moment the agent moves on.
-    var needsInputScopes: Set<String> {
-        Set(nodeAgentState.filter { $0.value.phase == .needsInput }
-            .map { SZChatScope.node($0.key).key })
-    }
-
-    /// Select/open a chat tab (a node's bubble, a tab click, or `ui_select_chat`). A node or debug scope
-    /// opens a tab if new; either way it becomes active and the panel is shown.
-    func showChat(_ scope: SZChatScope) {
-        if scope != .director, !tabOrder.contains(scope) { tabOrder.append(scope) }
-        activeChatScope = scope
-        unreadScopes.remove(scope.key)   // visiting a tab clears its unread dot
-        showPanel(.chat)
-    }
-
-    /// Open a chat tab WITHOUT making it active or stealing focus — used during a Director run so each
-    /// dispatched node's Coding Agent tab appears (and the panel is shown) while the active tab stays put
-    /// (the user watches the Director tab; they click into a node tab to see its detail). Idempotent.
-    func openChatTab(_ scope: SZChatScope) {
-        if scope != .director, !tabOrder.contains(scope) { tabOrder.append(scope) }
+    /// Show the one chat panel. There is a single conversation, so nothing is selected or opened
+    /// — the scope argument survives only because callers name who they are speaking about.
+    func showChat(_ scope: SZChatScope = .director) {
         showPanel(.chat)
     }
 
@@ -83,35 +100,9 @@ extension SZHost {
         !isRunning && pendingNodeCount > 0
     }
 
-    /// The active node is mid-split/merge → its composer is locked (the node may not exist when the
-    /// op settles, so queueing to it would be a lie). A node that is merely mid-chat no longer
-    /// locks its composer: a send while its agent streams simply queues — the whole point of the
-    /// mailbox — and the queue serializes delivery.
-    var activeScopeLocked: Bool {
-        guard case .node(let id) = activeChatScope else { return false }
-        return graphOpStatus[id] != nil
-    }
-
-    /// HUD message icon — a plain toggle for the Director Agent chat: show it (scoped to the Director)
-    /// or hide it if it's already the shown Director chat. Kicking off pending work now lives on the
-    /// HUD Build button, so this icon no longer drafts an implement message.
+    /// HUD message icon — show the chat, or hide it if it is already showing.
     func toggleDirectorChat() {
-        if chatVisible && activeChatScope == .director {
-            closePanel(.chat)
-        } else {
-            activeChatScope = .director
-            unreadScopes.remove(SZChatScope.directorKey)
-            showPanel(.chat)
-        }
-    }
-
-    /// Close a node or debug chat tab (its ✕ / `ui_close_chat_tab`). The Director tab can't be closed;
-    /// closing the active tab falls back to the Director.
-    func closeChatTab(_ scope: SZChatScope) {
-        guard scope != .director else { return }
-        tabOrder.removeAll { $0 == scope }
-        unreadScopes.remove(scope.key)
-        if activeChatScope == scope { activeChatScope = .director }
+        if chatVisible { closePanel(.chat) } else { showPanel(.chat) }
     }
 
     /// Clear a chat tab (the header trash) — a FULL reset via the shared scope teardown
@@ -126,17 +117,6 @@ extension SZHost {
         persistAgentSessions()
     }
 
-    /// Reorder tabs (drag-to-reorder): move the dragged tab in front of `target`, or to the end when
-    /// `target` is nil (dropped past the last tab). Any tab — including the Director — can be moved.
-    func reorderChatTabs(move dragged: SZChatScope, before target: SZChatScope?) {
-        guard let i = tabOrder.firstIndex(of: dragged) else { return }
-        tabOrder.remove(at: i)
-        if let target, let j = tabOrder.firstIndex(of: target) {
-            tabOrder.insert(dragged, at: j)
-        } else {
-            tabOrder.append(dragged)            // nil target (or target gone) → drop at the end
-        }
-    }
 
     /// Who initiated a chat send — the panel composer (`.user`) or an MCP `ui_send_chat` call
     /// (`.agent`, e.g. the Director Agent). The one place the two senders legitimately diverge is a
@@ -175,7 +155,7 @@ extension SZHost {
         // re-routed by mentions inside its own words.
         var scope = scope
         if origin == .user {
-            let resolved = SZChatRouting.resolveRecipient(message: trimmed, activeScope: scope)
+            let resolved = SZChatRouting.resolveRecipient(message: trimmed)
             if case .node(let id) = resolved, store.project?.graph.node(id: id) == nil {
                 // The leading mention names a node that no longer exists — refuse in the composing
                 // tab (transient, like the other pre-flight rejections) rather than streaming into
@@ -206,9 +186,9 @@ extension SZHost {
             // A node the run does NOT own falls through to the normal enqueue path below.
         }
 
-        // A user send reveals/focuses the tab — 1:1 with clicking it before typing. An AGENT send
-        // must never steal the user's active tab (background traffic); it surfaces without focus.
-        if origin == .user { showChat(scope) } else { openChatTab(scope) }
+        // A user send reveals the panel. An agent's does not — background traffic lands in the
+        // one feed on its own, and there is no tab left for it to steal.
+        if origin == .user { showChat() }
 
         // A pre-flight rejection: shown in the tab but TRANSIENT — never flushed, never recapped.
         // It isn't conversation; restoring "(busy…)" as assistant history (or replaying it to a

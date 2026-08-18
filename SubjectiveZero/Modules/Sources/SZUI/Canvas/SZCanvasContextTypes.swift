@@ -56,7 +56,7 @@ struct SZContextMenuSession: Identifiable {
 /// a message), the card glyphs = a body-mode flip.
 public struct SZContextAction: Identifiable, Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
-        case openTranscript(SZNodeID), openSource(SZNodeID), addNode
+        case mentionInChat(SZNodeID), openSource(SZNodeID), addNode
         case toggleCard(SZNodeID, on: Bool), openCard(SZNodeID), newCard(SZNodeID)
     }
     public let kind: Kind

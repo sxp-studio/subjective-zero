@@ -90,7 +90,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
         "onSelectNode", "onSelectConnection", "onNodeDragChanged", "onNodeDragEnded",
         "onSocketDragChanged", "onSocketDragEnded", "onEdgeDragChanged", "onEdgeDragEnded",
         "autoEditNodeID",
-        "onOpenNodeMenu", "onOpenNodeChat", "onOpenNodeSource", "onFixNode", "onSetInputDefault",
+        "onOpenNodeMenu", "onMentionNodeInChat", "onOpenNodeSource", "onFixNode", "onSetInputDefault",
         "onToggleDisplay", "onTogglePreview", "optionsFor", "onCommitPrompt", "onPromptEditingChanged",
         "onLivePrompt",
         // the preview-box registry — stable host-owned ref; per-node boxes are observed by the

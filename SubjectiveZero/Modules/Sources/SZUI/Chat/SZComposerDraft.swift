@@ -88,3 +88,17 @@ public struct SZComposerDraftInjection: Equatable, Sendable {
         self.replacesNonEmpty = replacesNonEmpty
     }
 }
+
+/// A host request to drop ONE mention token into the composer at the caret — the node card's chat
+/// button. With a single conversation there is no tab to open, so "talk about this node" means
+/// putting a reference to it in the message you are already writing, and focusing the field.
+/// Consumed once by id, like a draft injection, so a re-render can't insert it twice.
+public struct SZComposerMentionInjection: Equatable, Sendable {
+    public let id: UUID
+    public let candidate: SZMentionCandidate
+
+    public init(id: UUID = UUID(), candidate: SZMentionCandidate) {
+        self.id = id
+        self.candidate = candidate
+    }
+}

@@ -123,15 +123,6 @@ extension SZHostBridge {
             // The chat-tab and panel tools below are view/window navigation — no graph or render
             // effect — so they are withheld from agents (`agentCallable: false`); only the human
             // (and the `.full` test bus) drives the workspace layout.
-            tool("ui_select_chat", "Open/select a chat tab (mirrors clicking a tab or a node's chat bubble) and show the panel. `scope` = a node uuid (opens that node's Coding Agent chat) or \"director\".",
-                 properties: ["scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"]], agentCallable: false),
-            tool("ui_close_chat_tab", "Close a node's (or the Debug) chat tab, mirroring its ✕ — `scope` is required. Returns {closed:true, scope}. The Director tab has no ✕ and can't be closed: that returns {closed:false, reason}.",
-                 properties: ["scope": ["type": "string", "description": "a node uuid, or \"debug\""]], agentCallable: false),
-            tool("ui_reorder_chat_tab", "Reorder chat tabs (mirrors dragging a tab): move the `scope` tab in front of the `before` tab. Each is a node uuid or \"director\" (any tab can move, including the Director).",
-                 properties: [
-                    "scope": ["type": "string", "description": "the tab to move: a node uuid or \"director\""],
-                    "before": ["type": "string", "description": "move it in front of this tab: a node uuid or \"director\""],
-                 ], agentCallable: false),
             tool("ui_show_panel", "Show a top-level panel (mirrors its View-menu toggle) — reopens at its remembered spot; a popped-out panel docks back instead. Returns the resulting layout tree.",
                  properties: ["panel": Self.panelProperty], agentCallable: false),
             tool("ui_close_panel", "Close a top-level panel (mirrors its header ✕) — its split collapses and its spot is remembered; a popped-out panel's window closes and its record is dropped. Returns {closed:true, layout, popped_out_panels}. The last panel can't be closed, and a panel that isn't open can't either: both return {closed:false, reason, layout, popped_out_panels}.",
@@ -196,9 +187,6 @@ extension SZHostBridge {
         case "ui_set_input_default": return try uiSetInputDefault(arguments)
         case "ui_toggle_display":  return try uiToggleDisplay(arguments)
         case "ui_set_node_body":   return try uiSetNodeBody(arguments)
-        case "ui_select_chat":     return try uiSelectChat(arguments)
-        case "ui_close_chat_tab":  return try uiCloseChatTab(arguments)
-        case "ui_reorder_chat_tab": return try uiReorderChatTab(arguments)
         case "ui_show_panel":      return try uiShowPanel(arguments)
         case "ui_close_panel":     return try uiClosePanel(arguments)
         case "ui_move_panel":      return try uiMovePanel(arguments)
@@ -865,38 +853,6 @@ extension SZHostBridge {
         guard let parsed = try? JSONSerialization.jsonObject(with: Data(trimmed.utf8),
                                                             options: [.fragmentsAllowed]) else { return nil }
         return (parsed as? NSNumber)?.doubleValue
-    }
-
-    private func uiSelectChat(_ arguments: [String: Any]) throws -> String {
-        let scope = try chatScope(arguments, tool: "ui_select_chat")
-        host.showChat(scope)
-        return SZJSONRPC.encode(["scope": scope.key])
-    }
-
-    private func uiCloseChatTab(_ arguments: [String: Any]) throws -> String {
-        // `chatScope` defaults a missing scope to the Director, so without this an argument-less call
-        // would come back as the Director refusal below — answering a question the caller never asked.
-        guard arguments.string("scope") != nil else {
-            throw SZMCPError.message("ui_close_chat_tab needs a `scope` (a node uuid, or \"debug\")")
-        }
-        let scope = try chatScope(arguments, tool: "ui_close_chat_tab")
-        // The Director tab has no ✕ in the UI and `closeChatTab` no-ops on it. Say so, rather than
-        // reporting the close we didn't do. A well-formed request refused by a rule is a structured
-        // answer (cf. ui_run's `refused`), not a tool error.
-        guard scope != .director else {
-            return SZJSONRPC.encode(["closed": false, "reason": "the Director tab can't be closed"])
-        }
-        host.closeChatTab(scope)
-        return SZJSONRPC.encode(["closed": true, "scope": scope.key])
-    }
-
-    private func uiReorderChatTab(_ arguments: [String: Any]) throws -> String {
-        guard arguments.string("scope") != nil, arguments.string("before") != nil else {
-            throw SZMCPError.message("ui_reorder_chat_tab needs `scope` and `before` node ids")
-        }
-        host.reorderChatTabs(move: try chatScope(arguments, tool: "ui_reorder_chat_tab"),
-                             before: try chatScope(arguments, tool: "ui_reorder_chat_tab", key: "before"))
-        return SZJSONRPC.encode(["tabs": host.chatTabs.map(\.key)])
     }
 
     private func uiShowPanel(_ arguments: [String: Any]) throws -> String {
