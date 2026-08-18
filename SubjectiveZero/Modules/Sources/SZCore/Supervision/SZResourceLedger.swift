@@ -41,8 +41,6 @@ public struct SZResourceID: Hashable, Sendable, CustomStringConvertible {
     }
     /// The single staged split/merge slot.
     public static let graphOp = SZResourceID(key: "graph-op")
-    /// The one-run-at-a-time slot.
-    public static let run = SZResourceID(key: "run")
 }
 
 /// The identity of one activity that holds or waits on resources. The label is what every

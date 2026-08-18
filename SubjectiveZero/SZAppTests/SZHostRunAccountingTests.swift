@@ -28,13 +28,19 @@ struct SZHostRunAccountingTests {
         SZNode(kind: .prompt, title: "Draft", prompt: "p", position: SZPoint(x: 0, y: 0))
     }
 
+    /// A host with one live run over every given node — the accounting reads that run's own
+    /// captured work set and promote evidence, so the fixture builds a real `SZRunState`.
     private func host(_ nodes: [SZNode], promoted: Set<SZNodeID> = []) -> SZHost {
         let host = SZHost()
         host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: nodes)))
-        host.runWorkSet = Set(nodes.map(\.id))
-        host.promotedThisRun = promoted
+        let run = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "run"), instruction: "",
+                             ownsGraphOp: false, workSet: Set(nodes.map(\.id)))
+        run.promoted = promoted
+        host.activeRuns[run.taskID] = run
         return host
     }
+    /// The fixture's single run.
+    private func run(_ host: SZHost) -> SZRunState { host.activeRuns.values.first! }
     private func directorLines(_ host: SZHost) -> [String] { host.store.messages(for: .director).map(\.text) }
 
     // MARK: surfaceUnresolvedNodes
@@ -42,7 +48,7 @@ struct SZHostRunAccountingTests {
     @Test func twoGreenPromotesReadTwoImplementedAndNoPills() {
         let a = Self.built(), b = Self.built()
         let host = host([a, b], promoted: [a.id, b.id])
-        let (done, failed) = host.surfaceUnresolvedNodes()
+        let (done, failed) = host.surfaceUnresolvedNodes(run(host))
         #expect(done == 2 && failed == 0)
         #expect(host.nodeAgentState[a.id] == nil && host.nodeAgentState[b.id] == nil)
         #expect(directorLines(host).isEmpty)
@@ -51,7 +57,7 @@ struct SZHostRunAccountingTests {
     @Test func aSilentUnpromotedDraftFailsWithTheGenericLineButAGreenOneStillCounts() {
         let a = Self.built(), b = Self.draft()
         let host = host([a, b], promoted: [a.id])
-        let (done, failed) = host.surfaceUnresolvedNodes()
+        let (done, failed) = host.surfaceUnresolvedNodes(run(host))
         #expect(done == 1 && failed == 1)
         #expect(host.nodeAgentState[b.id]?.phase == .error)
         #expect(host.nodeAgentState[b.id]?.errorDetail == "the agent never compiled this node or reported a blocker")
@@ -61,7 +67,7 @@ struct SZHostRunAccountingTests {
     @Test func aRebriefedPromoteIsImplementedAndNarrated() {
         let a = Self.built(prompt: "new intent", stampPrompt: "old intent")
         let host = host([a], promoted: [a.id])
-        let (done, failed) = host.surfaceUnresolvedNodes()
+        let (done, failed) = host.surfaceUnresolvedNodes(run(host))
         #expect(done == 1 && failed == 0)
         #expect(host.nodeAgentState[a.id] == nil)   // amber Outdated pill only — no error state
         #expect(directorLines(host).first?.contains("prompt changed mid-run") == true)
@@ -71,7 +77,7 @@ struct SZHostRunAccountingTests {
         let b = Self.draft()
         let host = host([b])
         host.recordNodeStatus(node: b.id, phase: .needsInput, message: "which palette?")
-        let (done, failed) = host.surfaceUnresolvedNodes()
+        let (done, failed) = host.surfaceUnresolvedNodes(run(host))
         #expect(done == 0 && failed == 1)
         #expect(host.nodeAgentState[b.id]?.phase == .needsInput)
         #expect(host.nodeAgentState[b.id]?.message == "which palette?")
@@ -91,7 +97,7 @@ struct SZHostRunAccountingTests {
         host.concludeAgentGraphRun(record, .failed(reason: "the agent timed out after 15m without finishing"))
         #expect(host.nodeAgentState[a.id]?.phase == .error)          // the pill while the run is still up
         #expect(host.nodeAgentState[a.id]?.reportedByAgent == false)  // …written by the host, not the agent
-        let (done, failed) = host.surfaceUnresolvedNodes()
+        let (done, failed) = host.surfaceUnresolvedNodes(run(host))
         #expect(done == 1 && failed == 0)
         #expect(host.nodeAgentState[a.id]?.phase == .ok)
         #expect(host.nodeAgentState[a.id]?.errorDetail == nil)
@@ -105,7 +111,7 @@ struct SZHostRunAccountingTests {
         let b = Self.draft()
         let host = host([b])
         host.recordHostFailure(node: b.id, message: "the agent went silent for 5m and was stopped")
-        let (done, failed) = host.surfaceUnresolvedNodes()
+        let (done, failed) = host.surfaceUnresolvedNodes(run(host))
         #expect(done == 0 && failed == 1)
         #expect(host.nodeAgentState[b.id]?.message == "the agent went silent for 5m and was stopped")
         #expect(directorLines(host) == ["Draft didn't finish — the agent went silent for 5m and was stopped."])
@@ -122,7 +128,7 @@ struct SZHostRunAccountingTests {
         host.nodeAgentState[a.id] = SZNodeAgentState(
             phase: .ok, errorDetail: "Node.swift creates an AVAudioEngine, which keeps running when the "
                 + "graph's clock stops. Stop it in `func setPaused(_ paused: Bool)` — see node-abi.")
-        let (done, failed) = host.surfaceUnresolvedNodes()
+        let (done, failed) = host.surfaceUnresolvedNodes(run(host))
         #expect(done == 0 && failed == 1)
         let line = try #require(directorLines(host).first)
         #expect(line.contains("setPaused"))
@@ -133,8 +139,8 @@ struct SZHostRunAccountingTests {
     @Test func aNodeGoneFromTheGraphIsUncounted() {
         let a = Self.built()
         let host = host([a], promoted: [a.id])
-        host.runWorkSet.insert(SZNodeID())   // merged away mid-run
-        let (done, failed) = host.surfaceUnresolvedNodes()
+        run(host).workSet.insert(SZNodeID())   // merged away mid-run
+        let (done, failed) = host.surfaceUnresolvedNodes(run(host))
         #expect(done == 1 && failed == 0)
     }
 

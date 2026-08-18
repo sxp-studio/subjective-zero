@@ -590,11 +590,16 @@ extension SZHostBridge {
             return SZJSONRPC.encode(["status": "queued",
                                      "detail": "the run starts when your current turn ends"])
         }
-        host.startRun(instruction: instruction)   // returns immediately; the run streams into the tabs
-        // startRun can refuse synchronously (its atomic claim hits a chat turn / delivery holding a
-        // work-set node) — answering "started" then would leave the caller waiting on a run that
-        // doesn't exist. `isRunning` right after the call is the truth (both on the MainActor).
-        guard host.isRunning else {
+        // The START's own answer, not `isRunning`: with several runs live, another one being in
+        // flight says nothing about whether THIS ask started.
+        switch host.startRun(instruction: instruction) {   // returns immediately; it streams into the tabs
+        case .started: break
+        case .waiting:
+            // A transient claim holds what it needs — schedule it rather than lose it.
+            host.mintRun(instruction: instruction)
+            return SZJSONRPC.encode(["status": "queued", "position": host.pendingTasks.count,
+                                     "detail": host.status])
+        case .refused:
             return SZJSONRPC.encode(["status": "refused", "reason": host.status])
         }
         return SZJSONRPC.encode(["status": "started", "provider": host.activeProviderID])

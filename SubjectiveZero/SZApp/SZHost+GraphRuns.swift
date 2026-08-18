@@ -87,10 +87,10 @@ extension SZHost {
     /// Point one of the run's OWN narrations ("Run started…", "Run complete…") at its record, so
     /// the line stays a way back into the run long after it scrolled into history. Not gated on
     /// tracing, unlike the Profiler's sibling link — the Agent Graph panel ships everywhere.
-    /// No-op off a run.
-    func linkNarrationToRun(_ messageID: UUID) {
-        guard let runThread else { return }
-        store.setChatGraphRun(runThread, messageID, in: .director)
+    /// The thread is passed, never looked up: with several runs live there is no "the" run, and
+    /// a narration always knows which one it is speaking for.
+    func linkNarrationToRun(_ messageID: UUID, thread: UUID) {
+        store.setChatGraphRun(thread, messageID, in: .director)
     }
 
     /// The transcript's jump: open the Agent Graph panel and land on the given run.

@@ -49,7 +49,7 @@ extension SZHost {
             }
             guard let holder = ledger.holder(of: .node(id)) else { continue }
             if origin == .agent {
-                if let runClaim, holder == runClaim { continue }   // the run's own fleet work
+                if isRunClaim(holder) { continue }                 // a run's own fleet work
                 // The caller's own turn holds this node: mutating it mid-turn IS the turn's work.
                 // Only a match against the CALLER's token passes — a different agent (a Director
                 // turn, another node's agent, an outside drive) presents no claim or someone
@@ -69,7 +69,7 @@ extension SZHost {
     /// SETTLED generated node is the user's again — the canvas unlocks it at promote, and the
     /// fence agrees. Only in-flight (`.prompt`) run work refuses the user.
     private func userLockDenies(holder: SZClaimToken, node id: SZNodeID) -> Bool {
-        if let runClaim, holder == runClaim,
+        if isRunClaim(holder),
            store.project?.graph.node(id: id)?.kind == .generated { return false }
         return true
     }
@@ -114,7 +114,7 @@ extension SZHost {
             guard let self else { return nil }
             for id in ids {
                 guard let holder = self.ledger.holder(of: .node(id)) else { continue }
-                if holder == self.runClaim { continue }       // the run mutates its own work set
+                if self.isRunClaim(holder) { continue }       // a run mutates its own work set
                 if holder == self.graphOpClaim { continue }   // op machinery settles its own staging
                 if holder == SZToolCaller.claim { continue }  // the caller's own turn — the agent
                                                               // rule the fence permits (task-local

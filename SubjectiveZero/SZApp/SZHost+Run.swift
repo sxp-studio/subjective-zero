@@ -58,10 +58,9 @@ extension SZHost {
         }
         let assistantID = existingAssistantID ?? store.appendChatMessage(SZChatMessage(role: .assistant, text: ""), to: scope)
         inFlightAssistantIDs[scope.key] = assistantID   // also flips chatInFlight (derived)
-        let runTurn = claim != nil && claim == runClaim
-        // The run identity is CAPTURED here: finalize re-checks it against the live run, so a
+        // The run identity is CAPTURED here: finalize re-checks it against the live runs, so a
         // zombie turn settling after cancel-and-restart can't log itself into the new run.
-        let turnRunID = runTurn ? runID : nil
+        let turnRunID = activeRun(for: claim)?.traceID
         let started = Date()
         let startedMono = ContinuousClock.now
         defer {
@@ -167,13 +166,13 @@ extension SZHost {
         // Without this a second agent that dies silently still counts as implemented. Claim-guarded like
         // every other run-state write here: a cancelled run's zombie dispatch must not erase the promote
         // evidence the NEW run just recorded for this node.
-        if let dispatchClaim = claim ?? runClaim, dispatchClaim == runClaim { promotedThisRun.remove(node) }
+        activeRun(for: claim)?.promoted.remove(node)
         openChatTab(scope)
         // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
         // A cancelled run's zombie dispatch presents its released token; deliver detects that and
         // bows out instead of double-streaming into a scope someone else now owns.
         let result = try await deliver(scope: scope, request: request, provider: provider,
-                                       claim: claim ?? runClaim).result
+                                       claim: claim).result
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
         // (timeout, CLI error) is invisible and the node reads as a silent Draft.
         switch await turnFailure(result, provider: provider) {
@@ -274,11 +273,17 @@ extension SZHost {
             fastMode: generation.fastMode ?? false,
             timeout: SZAgentTurnBudgets.codingTimeout,
             inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
-        // Under the CAPTURED claim like the fleet path — never the live `runClaim`: a zombie
-        // director turn resuming after cancel-and-restart would otherwise adopt the NEW run's
-        // claim, pass deliver's holder guard, and stream into a transcript someone else owns.
+        // The Director transcript is claimed for THIS TURN, not for the run's life — that is what
+        // lets two runs' fleets work at once while their Director turns take the transcript in
+        // turn. Under the run's CAPTURED claim (reentrant per token), never a live lookup: a
+        // zombie director turn resuming after cancel-and-restart would otherwise adopt another
+        // run's claim, pass deliver's holder guard, and stream into a transcript someone owns.
+        if let claim {
+            try await ledger.acquire([.transcript(scope)], as: claim)
+        }
+        defer { if let claim { ledger.release([.transcript(scope)], by: claim) } }
         let result = try await deliver(scope: scope, request: request, provider: provider,
-                                       claim: claim ?? runClaim).result
+                                       claim: claim).result
         // The run re-reads the graph rather than the reply, so a mid-turn provider death
         // would otherwise vanish — land it in the Director tab like a coding turn's error line.
         switch await turnFailure(result, provider: provider) {
@@ -295,11 +300,11 @@ extension SZHost {
     /// Point the viewport at what this run just built — unless the Director's own
     /// `ui_toggle_display` already aimed it at one of this run's nodes. "Terminal" means it
     /// feeds NOTHING; a node built upstream of a live chain adopts nothing.
-    private func adoptRunRenderEndpoint() {
+    private func adoptRunRenderEndpoint(_ run: SZRunState) {
         guard let graph = store.project?.graph else { return }
-        if let endpoint = graph.renderEndpoint, runWorkSet.contains(endpoint.node) { return }
+        if let endpoint = graph.renderEndpoint, run.workSet.contains(endpoint.node) { return }
         // Never adopt a STAGED piece — it is still hidden; its commit moves the endpoint.
-        guard let ref = graph.runRenderEndpoint(workSet: runWorkSet.subtracting(hiddenPieces)),
+        guard let ref = graph.runRenderEndpoint(workSet: run.workSet.subtracting(hiddenPieces)),
               graph.renderEndpoint != ref,
               store.setRenderEndpoint(ref) else { return }
         runtime?.setRenderEndpoint(ref)
@@ -356,38 +361,60 @@ extension SZHost {
     /// reason was narrated once; retrying cannot help).
     enum RunStart { case started, waiting, refused }
 
-    /// Pump head: admit the minted run the moment it can claim what it needs. Structural
-    /// ordering: the run always beats the next queued Director message to the freed
-    /// transcript. A `waiting` start keeps the slot and retries QUIETLY on the next
-    /// release; a terminal refusal narrated once and clears the slot — without this,
-    /// every pump pass would replay the refusal ("nothing to implement" forever, the
-    /// provider sheet re-presenting per pass).
-    func admitPendingRunIfPossible() {
-        guard !pendingTasks.isEmpty, !isRunning,
-              ledger.holder(of: .transcript(.director)) == nil else { return }
-        // Walk the queue oldest-first and admit what can start. A task that must wait keeps its
-        // place quietly; a terminal refusal leaves the queue (retrying cannot help).
+    /// Pump head: admit every scheduled task that can claim what it needs. Structural ordering:
+    /// admission runs before the prose scan, so a task always beats the next queued message to a
+    /// freed resource. A `waiting` task keeps its place and retries QUIETLY on the next release;
+    /// a terminal refusal is narrated once and leaves the queue — without that, every pump pass
+    /// would replay it ("nothing to implement" forever, the provider sheet re-presenting per pass).
+    func admitPendingTasks() {
+        // Oldest first, and a task that must wait does NOT block the ones behind it: two asks over
+        // disjoint nodes both start, overlapping ones queue behind the holder. A task that must
+        // wait keeps its place quietly; a terminal refusal leaves the queue (retrying cannot help).
         var index = 0
         while index < pendingTasks.count {
-            let task = pendingTasks[index]
-            switch startRun(instruction: task.instruction, narrateContention: false) {
+            switch startRun(task: pendingTasks[index], narrateContention: false) {
             case .started, .refused: pendingTasks.remove(at: index)
             case .waiting: index += 1
             }
-            // One run at a time still, until the run state is per-task: stop at the first start.
-            if !isRunning { continue } else { break }
         }
     }
 
+    /// What a NEW run would take: the nodes dirty right now, minus the undescribed ones (an empty
+    /// prompt is "undecided", not "build something"), minus the ones a run already holds — without
+    /// that last subtraction every run computes the same set and only the first can ever claim it.
+    /// `taken` is reported separately so a refusal can say "already being built" instead of
+    /// "nothing to implement", which would be a lie.
+    static func workSetCandidates(
+        in nodes: [SZNode], excluding claimed: Set<SZNodeID>
+    ) -> (work: Set<SZNodeID>, blank: Set<SZNodeID>, taken: Set<SZNodeID>) {
+        let isBlank: (SZNode) -> Bool = {
+            $0.kind == .prompt && ($0.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }
+        let dirty = nodes.filter(\.needsImplementation)
+        let blank = Set(dirty.filter(isBlank).map(\.id))
+        let described = Set(dirty.map(\.id)).subtracting(blank)
+        return (described.subtracting(claimed), blank, described.intersection(claimed))
+    }
+
     /// Start a run over the current graph with the active provider (the Build press and
-    /// `ui_run`'s direct entry). One run at a time — the single choke point every entry
-    /// shares; a second Build while one is live is refused by the claim.
+    /// `ui_run`'s direct entry). Runs are scoped by their WORK SET, not serialized: a second
+    /// build over disjoint nodes starts alongside; one that overlaps waits for the holder.
     /// `narrateContention` quiets ONLY the transient claim-contention line — the admission
     /// path auto-retries that case, so per-attempt narration would be advice to a user who
     /// has nothing to do.
     @discardableResult
     func startRun(instruction: String = "", narrateContention: Bool = true) -> RunStart {
-        guard !isRunning else { return .waiting }
+        startRun(task: SZTask(title: SZTask.title(fromInstruction: instruction, nodeCount: 0),
+                              instruction: instruction),
+                 narrateContention: narrateContention)
+    }
+
+    /// Admit a SCHEDULED task: claim its work set and run it. The task carries the identity every
+    /// per-run write is keyed by.
+    @discardableResult
+    func startRun(task: SZTask, narrateContention: Bool = true) -> RunStart {
+        let taskID = task.id
+        let instruction = task.instruction
         // Land any prompt the user is mid-typing before we read the graph or claim a node.
         flushPendingPromptEdit()
         // Was this run STARTED FOR a staged split/merge? Then it narrates at commit and owns the
@@ -398,23 +425,23 @@ extension SZHost {
             // raced project load fires when the pump next wakes with a project there.
             print("[SZHost] cannot run — MCP server or project not ready"); return .waiting
         }
-        // This run's WORK SET candidates: the nodes dirty right now. An undescribed prompt
-        // node is NOT handed to the fleet — an empty prompt is "undecided", not "build
-        // something"; only the coding work set excludes them.
-        let nodes = store.project?.graph.nodes ?? []
-        let dirty = Set(nodes.filter(\.needsImplementation).map(\.id))
-        let isBlank: (SZNode) -> Bool = {
-            $0.kind == .prompt && ($0.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-        }
-        let blankIDs = Set(nodes.filter { $0.needsImplementation && isBlank($0) }.map(\.id))
-        let implementable = dirty.subtracting(blankIDs)
+        // This run's WORK SET candidates — the rule lives in `workSetCandidates`.
+        let taken = runWorkSet
+        let candidates = Self.workSetCandidates(in: store.project?.graph.nodes ?? [], excluding: taken)
+        let implementable = candidates.work
+        let blankIDs = candidates.blank
+        let dirty = candidates.work.union(candidates.blank).union(candidates.taken)
         // Nothing to implement, nothing asked → skip the run entirely (a full run would burn
         // a decompose turn to conclude "no work"). A run WITH an instruction still goes
         // through — the Director may CREATE work mid-run — and a staged split/merge always
         // runs: its pieces are the work.
         if implementable.isEmpty, instruction.isEmpty, !ownsGraphOp {
             showChat(.director)
-            if blankIDs.isEmpty {
+            if !candidates.taken.isEmpty {
+                // Every dirty node belongs to a run already — say THAT, not "nothing to implement".
+                status = "already building"
+                narrateDirector("Everything that needs implementing is already being built.")
+            } else if blankIDs.isEmpty {
                 narrateDirector("Nothing to implement — every node is built and current.")
                 status = "nothing to implement"
             } else {
@@ -447,7 +474,7 @@ extension SZHost {
         // own tooling creates work (`noteRunCreatedWork`); a node the user adds mid-run never joins.
         let workSet = implementable
         // Claim ONLY what this run touches — atomically, refuse on contention.
-        var claimSet: Set<SZResourceID> = [.run, .transcript(.director)]
+        var claimSet: Set<SZResourceID> = []
         for id in workSet {
             claimSet.insert(.node(id))
             claimSet.insert(.transcript(.node(id)))
@@ -461,43 +488,33 @@ extension SZHost {
             }
             return .waiting
         }
-        runClaim = claim   // `.steer` ack waits derive their consumer from the `.run` holder
-        runWorkSet = workSet
-        promotedThisRun = []    // evidence starts fresh — an off-run promote vouches for nothing here
-        runStartedAt = Date()   // the rollup's wall-clock anchor
-        runStartedMono = ContinuousClock.now
-        runTurnLog = []
-        runID = UUID()          // the run's trace identity (stamped into run-owned turns' events)
+        // The run's own state object — the claim IS its identity, and every write below goes to
+        // THIS object, so a zombie can never touch a sibling's. The RUNS thread id is the build
+        // traversal's own record id (its children share it), minted here so the opening narration
+        // can carry it — that stamp is the transcript's durable way back once it scrolls away.
+        let run = SZRunState(taskID: taskID, claim: claim, instruction: instruction,
+                             ownsGraphOp: ownsGraphOp, workSet: workSet)
+        activeRuns[taskID] = run
+        let thread = run.thread
         status = "running \(providerID)…"
         showChat(.director)                                  // a run narrates into the Director Agent tab
-        // The RUNS thread id = the build traversal's own record id (its children share it). Minted
-        // BEFORE the narration so the opening line can carry it — that stamp is the transcript's
-        // durable way back into this run once it has scrolled into history.
-        let thread = UUID()
-        runThread = thread
-        let dirtyCount = runWorkSet.count
+        let dirtyCount = run.workSet.count
         let startedID = narrateDirector(dirtyCount == 0
             ? "Run started (\(providerID)) — no nodes need implementing."
             : "Run started (\(providerID)) — implementing \(dirtyCount) node\(dirtyCount == 1 ? "" : "s")…")
-        linkNarrationToRun(startedID)
-        runTask = Task { @MainActor in
+        linkNarrationToRun(startedID, thread: thread)
+        run.task = Task { @MainActor in
             defer {
-                // Release the CAPTURED claim, not `runClaim` — after an eager `cancelRun` this is
-                // the zombie task's idempotent second settle, and `runClaim` may already belong to
-                // a newer run (guarded so we never clobber it).
-                if runClaim == claim { sweepUnconsumedSteers() }
+                // The CAPTURED run, never a live lookup — after an eager `cancelRun` this is the
+                // zombie task's idempotent second settle, and the slot may hold a newer run.
+                if isLive(run) { sweepUnconsumedSteers() }
                 ledger.releaseAll(of: claim)
-                if runClaim == claim {
-                    runClaim = nil
-                    runTask = nil
-                    runWorkSet = []        // run over → the work set is cleared
-                    runStartedAt = nil
-                    runStartedMono = nil
-                    runTurnLog = []
-                    runID = nil
-                    runThread = nil
-                    dispatchPrompts = dispatchPrompts.filter { hiddenPieces.contains($0.key) }
-                    promotedThisRun = []
+                if isLive(run) {
+                    activeRuns[taskID] = nil
+                    // Only THIS run's dispatch prompts — a sibling run's are still live evidence.
+                    dispatchPrompts = dispatchPrompts.filter {
+                        !run.workSet.contains($0.key) || hiddenPieces.contains($0.key)
+                    }
                 }
                 // Every traversal seals itself as its engine returns; this sweep is the belt
                 // for an abnormal unwind, thread-scoped so a zombie can't touch a newer run's.
@@ -510,40 +527,40 @@ extension SZHost {
                     instruction: instruction, thread: thread, claim: claim,
                     packsRoot: packsRoot, providerID: providerID, mcpPort: mcpPort,
                     projectURL: projectURL, cacheDirectory: cacheDirectory)
-                // Claim-guarded as a whole, like the per-run state: after a cancel-and-restart this
-                // task is a ZOMBIE, and every line below reads or paints the run's nodes — accounting
-                // for, repainting and narrating over the NEW run's work.
-                if runClaim == claim {
+                // Liveness-guarded as a whole: after a cancel-and-restart this task is a ZOMBIE,
+                // and every line below reads or paints the run's nodes — accounting for, repainting
+                // and narrating over work that is no longer this run's.
+                if isLive(run) {
                     status = "agent run complete"
                     if !ownsGraphOp {
-                        adoptRunRenderEndpoint()   // show what this run just built
-                        let (done, failed) = surfaceUnresolvedNodes()
+                        adoptRunRenderEndpoint(run)   // show what this run just built
+                        let (done, failed) = surfaceUnresolvedNodes(run)
                         let narrationID = narrateDirector(
                             failed == 0
                                 ? (done == 0 ? "Run complete." : "Run complete — \(done) node\(done == 1 ? "" : "s") implemented.")
                                 : "Run finished — \(done) implemented, \(failed) failed. See the flagged node\(failed == 1 ? "" : "s").")
-                        linkNarrationToRun(narrationID)
-                        attachRunRollup(to: narrationID)
+                        linkNarrationToRun(narrationID, thread: thread)
+                        attachRunRollup(to: narrationID, run: run)
                     }
                 }
             } catch is CancellationError {
                 // A user Stop is not a failure: no red pills, no per-node "didn't finish" lines. This branch
                 // runs SECONDS after `cancelRun` (the CLIs have to die first) and is therefore a zombie —
-                // `runWorkSet` and `status` may already belong to a NEWER run. `cancelRun` narrates and
-                // counts synchronously, while the set is still ours; here we stay silent unless the claim
-                // is somehow still held (a cancellation that did not come through `cancelRun`).
-                if runClaim == claim { status = "run cancelled" }
+                // the run is already deregistered. `cancelRun` narrates and counts synchronously,
+                // while the set is still ours; here we stay silent unless the run is somehow still
+                // registered (a cancellation that did not come through `cancelRun`).
+                if isLive(run) { status = "run cancelled" }
                 print("[SZHost] agent run cancelled")
             } catch {
-                // Claim-guarded like the success branch: a zombie unwinding on a non-cancellation
-                // error must not paint failure pills onto the nodes the NEW run is building.
-                if runClaim == claim {
+                // Guarded like the success branch: a zombie unwinding on a non-cancellation error
+                // must not paint failure pills onto nodes another run is building.
+                if isLive(run) {
                     status = "agent run failed: \(error)"
                     if !ownsGraphOp {
-                        let (done, failed) = surfaceUnresolvedNodes()
+                        let (done, failed) = surfaceUnresolvedNodes(run)
                         let narrationID = narrateDirector("Run failed: \(error). \(done) implemented, \(failed) unfinished.")
-                        linkNarrationToRun(narrationID)
-                        attachRunRollup(to: narrationID)
+                        linkNarrationToRun(narrationID, thread: thread)
+                        attachRunRollup(to: narrationID, run: run)
                     }
                 }
                 print("[SZHost] agent run failed: \(error)")
@@ -968,30 +985,35 @@ extension SZHost {
         }
     }
 
-    /// Cancel the in-flight run (the `Stop` HUD action). Task cancellation propagates into
-    /// the fleet's task group; nodes already promoted stay promoted.
+    /// Cancel EVERY live run (the `Stop` HUD action, and `ui_stop`). Pending tasks stand: Stop
+    /// ends what is running, it does not empty the queue.
     func cancelRun() {
-        runTask?.cancel()
-        runTask = nil
+        for run in activeRuns.values { cancelRun(run) }
+    }
+
+    /// Cancel ONE run. Task cancellation propagates into the fleet's task group; nodes already
+    /// promoted stay promoted.
+    func cancelRun(_ run: SZRunState) {
+        guard isLive(run) else { return }
+        run.task?.cancel()
         // Eager release: composers and project ops unlock NOW, not when the cancelled task's
         // CLI agents finally die. The zombie task's deferred releaseAll of the same token is
         // an idempotent no-op; its still-streaming turns stay safe because the pump's
         // delivery precondition also checks the scope's in-flight marker.
-        if let claim = runClaim {
-            sweepUnconsumedSteers()
-            ledger.releaseAll(of: claim)
-            runClaim = nil
-        }
+        sweepUnconsumedSteers()
+        ledger.releaseAll(of: run.claim)
+        // Deregistered BEFORE the narration: everything below reads this run's own captured
+        // state, and nothing else may now mistake the zombie task for a live run.
+        activeRuns[run.taskID] = nil
         status = "run cancelled"
-        // Count and narrate HERE, once: the cancelled task's own catch fires seconds later (the CLIs
-        // must die first), by which time `runWorkSet` can already be a newer run's — its narration
-        // would land under that run's start line. Everything this needs is live right now.
-        let unfinished = unfinishedRunNodeCount()
+        // Count and narrate HERE, once: the cancelled task's own catch fires seconds later (the
+        // CLIs must die first), and by then this run is gone. Everything this needs is live now.
+        let unfinished = unfinishedRunNodeCount(run)
         let cancelledID = narrateDirector(unfinished == 0
             ? "Run cancelled."
             : "Run cancelled — \(unfinished) node\(unfinished == 1 ? "" : "s") unfinished.")
-        linkNarrationToRun(cancelledID)
-        clearInFlightPhasesAfterCancel()
+        linkNarrationToRun(cancelledID, thread: run.thread)
+        clearInFlightPhasesAfterCancel(run)
         // Settle a staged split/merge NOW rather than waiting on the cancelled task —
         // leaving the op staged strands the pieces. The drain is idempotent.
         drainPendingGraphOp()
@@ -1006,11 +1028,11 @@ extension SZHost {
     /// reason a node that built NOTHING gets, never a verdict on a build that landed. Only a node with no
     /// promote and no reason at all gets the generic line. Returns (implemented, failed) for the summary.
     @discardableResult
-    func surfaceUnresolvedNodes() -> (implemented: Int, failed: Int) {
+    func surfaceUnresolvedNodes(_ run: SZRunState) -> (implemented: Int, failed: Int) {
         var implemented = 0, failed = 0
-        for id in runWorkSet {                                                     // this run's captured work (grown)
+        for id in run.workSet {                                                    // this run's captured work (grown)
             guard let node = store.project?.graph.node(id: id) else { continue }   // removed mid-run (merge)
-            let verdict = SZRunNodeVerdict.classify(node: node, promoted: promotedThisRun.contains(id),
+            let verdict = SZRunNodeVerdict.classify(node: node, promoted: run.promoted.contains(id),
                                                     state: nodeAgentState[id])
             if verdict.isImplemented {
                 implemented += 1
@@ -1054,8 +1076,8 @@ extension SZHost {
     /// nothing else clears them once the run is gone — the node would wear a working pill forever. Return
     /// those work-set nodes to idle (back to Draft / Outdated); an agent that reported an error or a
     /// question keeps its say, exactly as at run end.
-    func clearInFlightPhasesAfterCancel() {
-        for id in runWorkSet {
+    func clearInFlightPhasesAfterCancel(_ run: SZRunState) {
+        for id in run.workSet {
             guard let phase = nodeAgentState[id]?.phase,
                   phase == .queued || phase == .planning || phase == .coding else { continue }
             nodeAgentState[id]?.phase = .idle
@@ -1064,8 +1086,8 @@ extension SZHost {
     }
 
     /// The work-set nodes a cancelled run left dirty — for the cancel narration only; touches nothing.
-    private func unfinishedRunNodeCount() -> Int {
-        runWorkSet.reduce(0) { n, id in
+    private func unfinishedRunNodeCount(_ run: SZRunState) -> Int {
+        run.workSet.reduce(0) { n, id in
             n + ((store.project?.graph.node(id: id)?.needsImplementation ?? false) ? 1 : 0)
         }
     }

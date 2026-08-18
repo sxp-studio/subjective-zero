@@ -49,9 +49,11 @@ struct SZHostMutationJournalTests {
     @Test func anAgentCallUnderTheRunClaimIsTheDirector() {
         let host = host()
         let run = SZClaimToken(label: "run")
-        #expect(host.ledger.tryAcquire([.run, .node(effectID), .transcript(.node(effectID))], as: run))
-        host.runClaim = run
-        defer { host.runClaim = nil }
+        #expect(host.ledger.tryAcquire([.node(effectID), .transcript(.node(effectID))], as: run))
+        let state = SZRunState(taskID: UUID(), claim: run, instruction: "",
+                               ownsGraphOp: false, workSet: [effectID])
+        host.activeRuns[state.taskID] = state
+        defer { host.activeRuns = [:] }
         let (from, to) = edge
         SZToolCaller.$claim.withValue(run) {
             SZToolCaller.$scope.withValue(.director) {
@@ -67,9 +69,11 @@ struct SZHostMutationJournalTests {
     @Test func aNodeScopedTurnUnderTheRunClaimIsThatNodesAgent() {
         let host = host()
         let run = SZClaimToken(label: "run")
-        #expect(host.ledger.tryAcquire([.run, .node(effectID), .transcript(.node(effectID))], as: run))
-        host.runClaim = run
-        defer { host.runClaim = nil }
+        #expect(host.ledger.tryAcquire([.node(effectID), .transcript(.node(effectID))], as: run))
+        let state = SZRunState(taskID: UUID(), claim: run, instruction: "",
+                               ownsGraphOp: false, workSet: [effectID])
+        host.activeRuns[state.taskID] = state
+        defer { host.activeRuns = [:] }
         let (from, to) = edge
         var id: SZConnectionID?
         SZToolCaller.$claim.withValue(run) {

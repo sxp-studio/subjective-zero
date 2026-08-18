@@ -71,14 +71,12 @@ final class SZHost {
     /// turns; consumed by the editor's status pill/lock and the reconcile loop. One map, SZNodeID-keyed.
     /// `internal(set)` like its siblings so the SZHost+Transcripts purge can drop a deleted node's entry.
     internal(set) var nodeAgentState: [SZNodeID: SZNodeAgentState] = [:]
-    /// The nodes this run is implementing — its captured in-flight WORK SET. Snapshotted at `startRun`
-    /// from the prompt nodes then present, and GROWN as the run's own tooling creates work (a Director
-    /// split/merge or `ui_add_prompt_node` mid-run, via `noteRunCreatedWork`). A node the USER adds on
-    /// the canvas mid-run shares `store.addPromptNode` but is deliberately NOT noted here, so it never
-    /// joins the fleet's work: dispatch (`plans`), the editor lock/pill, and the `ui_connect` guard all
-    /// consult this set. Single-writer (host/MCP writes; the UI only reads). Cleared at run end — a
-    /// node chat runs with this empty. This is the seed of the behavior-tree's per-step in-flight set.
-    internal(set) var runWorkSet: Set<SZNodeID> = []
+    /// THE LIVE RUNS, keyed by the task each is executing. Runs whose work sets are disjoint are
+    /// live together; overlapping ones wait in `pendingTasks` because the ledger refuses the claim.
+    internal(set) var activeRuns: [UUID: SZRunState] = [:]
+    /// Every node any live run is implementing — dispatch, the editor lock/pill and the
+    /// `ui_connect` guard all consult this. Empty when nothing is running.
+    var runWorkSet: Set<SZNodeID> { activeRuns.values.reduce(into: []) { $0.formUnion($1.workSet) } }
     // Mid-run Director↔fleet messages live as `.steer` envelopes in `mailbox` (recorded — never a
     // nested turn inside a synchronous MCP handler; the reconcile loop drains them). See
     // `recordDirectorMessage` / `recordDirectorInboxMessage` / `takeDirectorMessages`.
@@ -128,7 +126,7 @@ final class SZHost {
     /// (a cancelled run's zombie must not clear a newer run's set), and per node at each coding dispatch: a
     /// redispatch means the previous build didn't settle it, so its promote stops vouching. A promote outside
     /// a run is dropped at the next start, so it can never vouch for work it did not do.
-    internal(set) var promotedThisRun: Set<SZNodeID> = []
+    var promotedThisRun: Set<SZNodeID> { activeRuns.values.reduce(into: []) { $0.formUnion($1.promoted) } }
     /// The id of the assistant message currently STREAMING per scope (set/cleared by `deliver`).
     /// Transcript flushes exclude it, so a sidecar only ever contains completed turns — a crash
     /// mid-stream restores up to the last finished message, never a half-reply.
@@ -159,20 +157,6 @@ final class SZHost {
     /// process per queued scope at once). Pump-owned; mutated only on the MainActor.
     var activeDeliveries = 0
     // Turn-breakdown glue (SZHost+TurnBreakdown.swift) — collection itself is SZTrace fences.
-    /// The finished turns of the CURRENT run, folded into the run-complete narration's rollup.
-    /// Cleared with the rest of the per-run state (guarded — a zombie must not wipe a newer run's).
-    var runTurnLog: [SZTurnBreakdown.RunTurn] = []
-    /// When the current run claimed its work set — the rollup's wall-clock anchor, with its
-    /// monotonic twin for durations (an NTP step mid-run must not skew the rollup).
-    var runStartedAt: Date?
-    var runStartedMono: ContinuousClock.Instant?
-    /// The current run's trace identity — stamped into every run-owned turn's context so its
-    /// events can be found across scopes. Minted in `startRun`, cleared with the per-run state.
-    var runID: UUID?
-    /// The current run's agent-graph record id — the thread its build traversal leads, and what
-    /// the transcript's run strip and run narrations link to. Minted beside `runID` (a different
-    /// identity: that one is the trace's) and cleared with the rest of the per-run state.
-    var runThread: UUID?
     /// Runs recorded this session the user hasn't opened in the Profiler yet — its unread dots.
     /// Session-scoped on purpose (an old transcript's runs aren't news).
     var unreadRunIDs: Set<UUID> = []
@@ -451,22 +435,37 @@ final class SZHost {
     /// instance for the host's lifetime, so a re-scheduled step coalesces into the runtime's
     /// latest-source-wins compile instead of rebuilding a cold table every run.
     let stepRuntime = SZStepRuntime()
-    /// The in-flight `ui_run`, if any.
-    internal(set) var runTask: Task<Void, Never>?
     /// In-flight interactive chat turns by scope key (`sendChat`'s tasks) — retained so the
     /// transcript's per-turn stop control can cancel ONE scope's turn (`cancelChatTurn`) without
     /// touching the others; a run's coding turns ride `runTask` instead.
     internal(set) var chatTurnTasks: [String: Task<Void, Never>] = [:]
-    /// True for the whole duration of a Director run (drives the HUD Run↔Stop state; node locking is
-    /// per-node — while running, only the unimplemented `.prompt` nodes lock, see `isLocked` in
-    /// `SZNodeEditorPanel`). A VIEW over the ledger: the run's claim on `.run` IS the run state, so
-    /// this can never drift from what the run actually holds. `cancelRun` releases eagerly (the
-    /// zombie task's deferred release is idempotent), which is what flips this false at Stop.
-    var isRunning: Bool { ledger.isHeld(.run) }
-    /// The in-flight run's claim token — holds `.run`, the Director transcript, and the work set's
-    /// node+transcript pairs. Set by `startRun`, threaded into the run's `deliver` calls, released
-    /// (eagerly by `cancelRun`, deferredly by the run task) and cleared with the run.
-    internal(set) var runClaim: SZClaimToken?
+    /// Whether ANY run is live (drives the HUD Run↔Stop state). Node locking stays per-node: a
+    /// node no live run claims is editable while another run builds elsewhere.
+    var isRunning: Bool { !activeRuns.isEmpty }
+
+    /// Is this claim a live run's? The fence asks before it lets an agent mutate its own work.
+    func isRunClaim(_ token: SZClaimToken?) -> Bool {
+        guard let token else { return false }
+        return activeRuns.values.contains { $0.claim == token }
+    }
+
+    /// The run this claim belongs to, or nil if it was released (the caller is a zombie).
+    func activeRun(for claim: SZClaimToken?) -> SZRunState? {
+        guard let claim else { return nil }
+        return activeRuns.values.first { $0.claim == claim }
+    }
+
+    /// The run implementing this node, if any — how a per-node write finds its run's evidence.
+    func activeRun(holding node: SZNodeID) -> SZRunState? {
+        activeRuns.values.first { $0.workSet.contains(node) }
+    }
+
+    /// The longest-running live run — the anchor for surfaces that still speak of "the" run.
+    var oldestRun: SZRunState? { activeRuns.values.min { $0.startedAt < $1.startedAt } }
+
+    /// Is this object still THE registered run? A cancelled run's task unwinds later as a zombie;
+    /// every write it makes past that point must be dropped.
+    func isLive(_ run: SZRunState) -> Bool { activeRuns[run.taskID] === run }
 
     /// HUD playback state — whether the render timeline is paused (drives the Pause/Play toggle). The
     /// runtime owns the actual clock; this mirrors it for the observable UI. Reset to `false` on every
@@ -719,20 +718,22 @@ final class SZHost {
         runtime?.resetTimeline()
     }
 
-    /// Note nodes CREATED by the run's own tooling (Director split/merge, `ui_add_prompt_node` mid-run)
-    /// into its work set — the single place the "created via the run" rule lives. No-op outside a run
-    /// (including a cancelled run's zombie tooling — `isRunning` reads the released claim), so callers
-    /// invoke it unconditionally. The run's claim grows with the work set: the new nodes' resources
-    /// are free by construction (fresh uuids), so the acquire cannot contend.
+    /// Note nodes CREATED by a run's own tooling (Director split/merge, `ui_add_prompt_node` mid-run)
+    /// into ITS work set — the single place the "created via the run" rule lives. The run is the
+    /// CALLER's: the per-turn MCP listener binds `SZToolCaller.claim`, so work created by one run's
+    /// tooling can never join another's. No-op off-run (a cancelled run's zombie presents a released
+    /// claim), so callers invoke it unconditionally. The claim grows with the work set: fresh uuids
+    /// are free by construction, so the acquire cannot contend.
     func noteRunCreatedWork(_ ids: Set<SZNodeID>) {
-        guard isRunning, let runClaim else { return }
-        runWorkSet.formUnion(ids)
+        guard let run = activeRun(for: SZToolCaller.claim)
+                ?? (activeRuns.count == 1 ? activeRuns.values.first : nil) else { return }
+        run.workSet.formUnion(ids)
         var resources: Set<SZResourceID> = []
         for id in ids {
             resources.insert(.node(id))
             resources.insert(.transcript(.node(id)))
         }
-        let claimed = ledger.tryAcquire(resources, as: runClaim)
+        let claimed = ledger.tryAcquire(resources, as: run.claim)
         assert(claimed, "noteRunCreatedWork: fresh nodes unexpectedly contended — "
             + ledger.blockers(of: resources).map(\.label).joined(separator: ", "))
     }
@@ -746,7 +747,6 @@ final class SZHost {
         bindingLearn?.cancel()                 // an armed learn must not outlive its source's project
         bindingLearn = nil
         nodeAgentState = [:]
-        runWorkSet = []
         // IN-MEMORY reset only — never a disk write: this runs while `loadedProjectURL` still points
         // at the OLD project, and a flush-empty here would delete that project's queue file (the
         // envelopes that were supposed to survive the switch). Parked waiters resume `.removed`.
@@ -766,7 +766,8 @@ final class SZHost {
         hiddenPieces = []
         pendingGraphOp = nil
         dispatchPrompts = [:]
-        promotedThisRun = []
+        activeRuns = [:]        // nothing runs across a switch (the busy gate holds), but the
+        pendingTasks = []       // invariant stays local: a task scheduled for A never sees B
         agentSessions = [:]
         restoredSessions = [:]
         inFlightAssistantIDs = [:]
@@ -957,7 +958,7 @@ final class SZHost {
         if cardArrived { refreshPreviewStream() } // the card host mounts the body flipped above
         clearTransientAgentStateAfterPromote(id)  // a green compile outranks any earlier utterance
         classifyRebuild(node: id)                 // re-audit the promoted source: mismatch is derived, never latched
-        promotedThisRun.insert(id)                // the run's success evidence
+        activeRun(holding: id)?.promoted.insert(id)   // that run's success evidence
         // The staged folder has done its job — drop it so a later compile can't re-promote stale bytes
         // (it must re-stage). Failed promotes above keep it for inspection; the rest of `.staging/`
         // (instance.lock, message-queue.json) is not ours to touch.

@@ -155,18 +155,21 @@ extension SZHost {
         persistGraphEditAndReload(action: "merge complete")
     }
 
-    /// Ensure a run exists to implement the op we just staged. If one is already in flight (the Director
-    /// restructuring inside its own turn) we JOIN it — its tail drains our op — rather than starting a
-    /// nested run, which `startRun` would refuse anyway. Off-run we start one.
+    /// Ensure a run exists to implement the op we just staged. If the CALLER is already a run (the
+    /// Director restructuring inside its own turn) we JOIN it — its tail drains our op — rather than
+    /// starting a nested run. Off-run we start one.
     ///
     /// `startRun` early-returns when the provider isn't ready or the MCP port/project is missing. That would
     /// strand the op: staged pieces nobody implements, a "Splitting" pill that never clears, and — because
     /// `graphOpStatus` drives `activeScopeLocked` — a node chat composer locked forever with no recovery.
     /// Roll back instead. Returns false when the op was rolled back and the caller should report failure.
     private func startOrJoinRun(rollbackReason: String) -> Bool {
-        if isRunning { return true }        // join: the in-flight run's tail will drain `pendingGraphOp`
-        startRun()
-        guard isRunning else { rollbackGraphOp(reason: "\(rollbackReason) — the run could not start"); return false }
+        // Join the CALLER's run — the Director restructuring inside its own turn — whose tail
+        // drains `pendingGraphOp`. Another run being live says nothing about ours.
+        if activeRun(for: SZToolCaller.claim) != nil { return true }
+        guard startRun() == .started else {
+            rollbackGraphOp(reason: "\(rollbackReason) — the run could not start"); return false
+        }
         return true
     }
 

@@ -195,7 +195,7 @@ extension SZHost {
         // through instead.
         if origin == .agent, isRunning {
             // Director → a node the run owns: folded into that node's reconcile retry.
-            if let nodeID = scope.nodeID, ledger.holder(of: .node(nodeID)) == runClaim {
+            if let nodeID = scope.nodeID, isRunClaim(ledger.holder(of: .node(nodeID))) {
                 return .recordedForReconcile(recordDirectorMessage(node: nodeID, message: trimmed))
             }
             // Coding agent → the Director: rendered into the next reconcile turn's prompt

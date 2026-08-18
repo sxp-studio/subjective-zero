@@ -62,9 +62,11 @@ struct SZHostChatEffectTests {
 
     @Test func mintingDuringAnActiveRunQueuesBehindItWithOneNarratedLine() {
         let host = SZHost()
-        let claim = SZClaimToken(label: "test run")
-        #expect(host.ledger.tryAcquire([.run], as: claim))
-        defer { host.ledger.releaseAll(of: claim) }
+        let node = SZNodeID()
+        let run = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "test run"),
+                             instruction: "first", ownsGraphOp: false, workSet: [node])
+        host.activeRuns[run.taskID] = run
+        defer { host.activeRuns = [:] }
         host.mintRun(instruction: "again")
         // Queued, not dropped — and said so once.
         #expect(host.pendingTasks.map(\.instruction) == ["again"])

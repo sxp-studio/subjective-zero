@@ -336,17 +336,17 @@ private func pollUntil(
 
 @MainActor
 @Test func runShapedScenarioHoldsOnlyDeclaredResources() async throws {
-    // A run claims [.run, director transcript, work-set node pairs]; an unrelated node's
-    // transcript stays acquirable concurrently — "a run holds only the resources it touches".
+    // A run claims its work-set node pairs (and the director transcript for the turn it is
+    // taking); an unrelated node's transcript stays acquirable concurrently — "a run holds only
+    // the resources it touches", which is what lets two runs over disjoint nodes be live at once.
     let ledger = SZResourceLedger()
     let run = SZClaimToken(label: "run"), chat = SZClaimToken(label: "chat turn")
     let nodeA = SZNodeID(), nodeB = SZNodeID()
     let runSet: Set<SZResourceID> = [
-        .run, .transcript(.director), .node(nodeA), .transcript(.node(nodeA)),
+        .transcript(.director), .node(nodeA), .transcript(.node(nodeA)),
     ]
 
     #expect(ledger.tryAcquire(runSet, as: run))
-    #expect(ledger.isHeld(.run))
     #expect(ledger.holder(of: .transcript(.director)) == run)
     // Node B was never claimed — a chat turn takes it while the run is live.
     #expect(ledger.tryAcquire([.transcript(.node(nodeB)), .node(nodeB)], as: chat))

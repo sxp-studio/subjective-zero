@@ -184,16 +184,15 @@ import SZCore
     let host = SZHost()
     let thread = UUID()
 
-    // Off a run there is nothing to point at, and the line stays a plain narration.
+    // A line no run speaks for is never linked, so it stays a plain narration.
     let orphan = host.narrateDirector("Run not started — no agent packs.")
-    host.linkNarrationToRun(orphan)
     #expect(host.store.messages(for: .director).first { $0.id == orphan }?.graphRunID == nil)
 
-    // On a run, the narration carries the record the Agent Graph panel draws.
-    host.runThread = thread
+    // A run's own narration carries the record the Agent Graph panel draws. The thread is passed,
+    // never looked up: with several runs live there is no "the" run to ask for.
     host.beginAgentGraphRun(SZTraversalSighting(id: thread, agent: "director"), thread: thread)
     let started = host.narrateDirector("Run started (claude) — implementing 2 nodes…")
-    host.linkNarrationToRun(started)
+    host.linkNarrationToRun(started, thread: thread)
 
     let stamped = try #require(host.store.messages(for: .director).first { $0.id == started })
     #expect(stamped.graphRunID == thread)

@@ -267,7 +267,11 @@ public final class SZMessageQueue {
                     from: token, on: [.transcript(scope)], label: ackLabel)
             }
         case .steer:
-            if let consumer = ledger.holder(of: .run) {
+            // The consumer is whoever holds the recipient's transcript — the run that will read
+            // the steer in its next brief. No holder = no edge; this graph is a deadlock detector,
+            // not a delivery guarantee.
+            if let scope = SZChatScope(key: envelope.recipient),
+               let consumer = ledger.holder(of: .transcript(scope)) {
                 registration = try ledger.registerExternalWait(
                     from: token, onConsumer: consumer, label: ackLabel)
             }

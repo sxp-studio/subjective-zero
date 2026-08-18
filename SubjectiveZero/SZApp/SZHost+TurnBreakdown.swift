@@ -22,7 +22,7 @@ extension SZHost {
     /// coding agents calling library/doc tools) → nil, and the bridge's nil binding DROPS the
     /// span — those calls read as their turns' "model" share, never misfiled.
     func traceContext(for arguments: [String: Any]) -> SZTraceContext? {
-        let runID = runClaim != nil ? runID : nil
+        let runID = activeRuns.count == 1 ? activeRuns.values.first?.traceID : nil
         if let raw = arguments["node"] as? String, let id = SZNodeID(uuidString: raw),
            let assistantID = inFlightAssistantIDs[SZChatScope.node(id).key] {
             return SZTraceContext(turnID: assistantID, scopeKey: id.uuidString, runID: runID)
@@ -155,22 +155,24 @@ extension SZHost {
                 events[i].detail = generation
             }
         }
-        let runTurn = capturedRunID != nil && capturedRunID == runID
+        // The run the turn was DISPATCHED under, if it is still live — a zombie turn settling
+        // after cancel-and-restart finds nothing and logs itself nowhere.
+        let run = capturedRunID.flatMap { id in activeRuns.values.first { $0.traceID == id } }
         // Normalize the run stamp across the whole turn (explicit-turnID records like queue.wait
         // predate the context binding and derived rows have none) — the panel/MCP find a run's
         // turns by this.
-        if runTurn, let runID {
-            for i in events.indices { events[i].runID = runID }
+        if let run {
+            for i in events.indices { events[i].runID = run.traceID }
         }
         store.setChatBreakdown(events, assistantID, in: scope)
-        guard runTurn else { return }
+        guard let run else { return }
         let label: String
         if case .node(let id) = scope {
             label = store.project?.graph.node(id: id)?.title ?? String(id.uuidString.prefix(8))
         } else {
             label = "Director"
         }
-        runTurnLog.append(SZTurnBreakdown.RunTurn(
+        run.turnLog.append(SZTurnBreakdown.RunTurn(
             scopeKey: scope.key, label: label, isDirector: scope.key == SZChatScope.directorKey,
             start: started, duration: ended.timeIntervalSince(started),
             usage: store.messages(for: scope).first { $0.id == assistantID }?.usage,
@@ -256,17 +258,15 @@ extension SZHost {
 
     /// Fold the run's logged turns into the rollup and land it on the run-complete narration —
     /// the "report after a run", living in the Director transcript like everything else.
-    func attachRunRollup(to messageID: UUID) {
-        guard SZTrace.isEnabled, let runStart = runStartedAt, !runTurnLog.isEmpty else { return }
+    func attachRunRollup(to messageID: UUID, run: SZRunState) {
+        guard SZTrace.isEnabled, !run.turnLog.isEmpty else { return }
         // Monotonic end anchor, matching the turns' walls — an NTP step mid-run must not skew
         // the rollup against the rows it aggregates.
-        let runEnd = runStartedMono.map { runStart.addingTimeInterval((ContinuousClock.now - $0).szSeconds) }
-            ?? Date()
-        var rows = SZTurnBreakdown.aggregate(turns: runTurnLog, runStart: runStart, runEnd: runEnd)
-        if let runID {   // the narration's rows carry the run's identity — how a run is looked up
-            for i in rows.indices { rows[i].runID = runID }
-            unreadRunIDs.insert(runID)   // fresh record → the Profiler's unread dot
-        }
+        let runEnd = run.startedAt.addingTimeInterval((ContinuousClock.now - run.startedMono).szSeconds)
+        var rows = SZTurnBreakdown.aggregate(turns: run.turnLog, runStart: run.startedAt, runEnd: runEnd)
+        // The narration's rows carry the run's identity — how a run is looked up.
+        for i in rows.indices { rows[i].runID = run.traceID }
+        unreadRunIDs.insert(run.traceID)   // fresh record → the Profiler's unread dot
         store.setChatBreakdown(rows, messageID, in: .director)
     }
 }

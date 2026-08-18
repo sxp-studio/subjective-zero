@@ -32,7 +32,7 @@ extension SZHost {
     /// delivery. Steers are never pumped (their consumer drains them).
     func pumpMailboxes() {
         guard !pumpSuspended else { return }
-        admitPendingRunIfPossible()
+        admitPendingTasks()
         for key in mailbox.recipientsWithPending {
             guard activeDeliveries < Self.deliveryCap else { break }
             guard let scope = SZChatScope(key: key),
@@ -255,7 +255,7 @@ extension SZHost {
             mailbox.markFailed(envelopeID, reason: "\(error)")
         }
         // A run this turn minted (the door's `requestBuild`, or a mid-turn `ui_run`) fires
-        // from the pump: the defer's release triggers `admitPendingRunIfPossible` at the
+        // from the pump: the defer's release triggers `admitPendingTasks` at the
         // head of the very next pump pass — after our claim is gone, and BEFORE the next
         // queued Director message is considered.
     }

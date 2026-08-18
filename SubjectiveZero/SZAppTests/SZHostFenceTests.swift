@@ -58,9 +58,11 @@ struct SZHostFenceTests {
     @Test func theRunsAgentsMayMutateItsWorkSet() {
         let host = SZHost()
         let node = SZNodeID()
-        let run = hold(node, on: host, label: "run")
-        host.runClaim = run
-        defer { host.runClaim = nil }
+        let claim = hold(node, on: host, label: "run")
+        let run = SZRunState(taskID: UUID(), claim: claim, instruction: "",
+                             ownsGraphOp: false, workSet: [node])
+        host.activeRuns[run.taskID] = run
+        defer { host.activeRuns = [:] }
         // The fleet steering its own work set needs no per-caller identity.
         #expect(host.fenceDenial(nodes: [node], origin: .agent) == nil)
         #expect(host.fenceDenial(nodes: [node], origin: .user) != nil)
