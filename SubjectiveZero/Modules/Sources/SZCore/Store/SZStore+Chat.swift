@@ -44,6 +44,12 @@ extension SZStore {
         mutateMessage(messageID, in: scope) { $0.breakdown = events }
     }
 
+    /// Point a turn at the agent-graph run it belongs to — the transcript's jump into the Agent
+    /// Graph panel. Written by the host on the run's own narrations, well after they were appended.
+    public func setChatGraphRun(_ runID: UUID, _ messageID: UUID, in scope: SZChatScope) {
+        mutateMessage(messageID, in: scope) { $0.graphRunID = runID }
+    }
+
     /// Replace ALL transcripts at once — the project-open restore path (the host feeds it
     /// `SZChatTranscriptIO.loadAll` filtered to live scopes). One @Observable fire.
     public func restoreChat(_ transcripts: [String: [SZChatMessage]]) {

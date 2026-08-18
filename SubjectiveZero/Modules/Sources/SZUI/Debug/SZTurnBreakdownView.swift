@@ -198,7 +198,8 @@ struct SZTurnTimelineBar: View {
 }
 
 /// A breakdown caption action: icon at rest, icon + word on hover (and the system tooltip).
-private struct SZCaptionActionButton: View {
+/// `internal` (not private) — the transcript's run link is the same affordance one level up.
+struct SZCaptionActionButton: View {
     let label: String
     let icon: String
     let help: String

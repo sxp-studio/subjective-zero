@@ -178,11 +178,15 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
     /// from persistence AND the cold-start recap — it isn't conversation, and replaying it to a fresh
     /// agent session (or restoring it as history) would misrepresent what was said.
     public var transient: Bool
+    /// The agent-graph run this turn belongs to (`SZAgentGraphRun.id`) — the transcript's jump into
+    /// the Agent Graph panel. Stamped on the run's own narrations; nil on everything else. NOT the
+    /// Profiler's `SZTurnEvent.runID`: that is the trace identity, and the two are different ids.
+    public var graphRunID: UUID?
 
     public init(id: UUID = UUID(), role: SZChatRole, text: String, thinking: String = "",
                 timestamp: Date = Date(), duration: TimeInterval? = nil, usage: SZTokenUsage? = nil,
                 breakdown: [SZTurnEvent]? = nil, attachments: [SZChatAttachment] = [],
-                transient: Bool = false) {
+                transient: Bool = false, graphRunID: UUID? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -193,12 +197,14 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
         self.breakdown = breakdown
         self.attachments = attachments
         self.transient = transient
+        self.graphRunID = graphRunID
     }
 }
 
 extension SZChatMessage: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, role, text, thinking, timestamp, duration, usage, breakdown, attachments, transient
+        case graphRunID
     }
 
     // Hand-written for append tolerance (see header).
@@ -214,6 +220,7 @@ extension SZChatMessage: Codable {
         breakdown = try c.decodeIfPresent([SZTurnEvent].self, forKey: .breakdown)
         attachments = try c.decodeIfPresent([SZChatAttachment].self, forKey: .attachments) ?? []
         transient = try c.decodeIfPresent(Bool.self, forKey: .transient) ?? false
+        graphRunID = try c.decodeIfPresent(UUID.self, forKey: .graphRunID)
     }
 
     // Hand-written to keep the common case clean: `duration` and `transient` are omitted rather
@@ -231,5 +238,6 @@ extension SZChatMessage: Codable {
         try c.encodeIfPresent(breakdown, forKey: .breakdown)
         try c.encode(attachments, forKey: .attachments)
         if transient { try c.encode(true, forKey: .transient) }
+        try c.encodeIfPresent(graphRunID, forKey: .graphRunID)
     }
 }

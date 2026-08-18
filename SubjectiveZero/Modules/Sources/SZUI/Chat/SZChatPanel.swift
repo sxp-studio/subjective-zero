@@ -27,6 +27,9 @@ public struct SZChatPanel: View {
     private let showTurnBreakdown: Bool            // Debug ▸ Show Turn Breakdown — expandable phase rows under replies
     private let onStopRun: () -> Void              // the send slot's whole-run Stop (Project tab, while running)
     private let workingScopes: Set<String>         // scopes with a streaming turn → their tab dot pulses
+    private let runStartedAt: Date?                // the live run's start → the run strip's ticker
+    private let runGraphRunID: UUID?               // the live run's record → the run strip's link
+    private let agentGraphRuns: [SZAgentGraphRun]  // the RUNS records → the run strip's fleet lanes
     private let unreadScopes: Set<String>          // finished-unvisited scopes → static tab dot until visited
     private let needsInputScopes: Set<String>      // agents blocked on the USER → amber tab dot until resolved
     private let isQueued: (UUID) -> Bool           // message id → still waiting in the mailbox (queued chip)
@@ -63,6 +66,8 @@ public struct SZChatPanel: View {
     @State private var stopHover = false
     @State private var attachHover = false
     @State private var stopSince: Date?    // stamped when the composer locks → live "in flight" timer
+    /// The run strip's jump into the Agent Graph panel; nil where the surface isn't wired (previews).
+    @Environment(\.szRevealInAgentGraph) private var revealInAgentGraph
     // Drafts are PER-TAB (Slack-style): each scope keeps its own unsent text, so switching tabs
     // doesn't carry the composer over, and a tab with unsent text shows a dot. Empty drafts are
     // nil'd out so the dot check is a simple presence test.
@@ -120,6 +125,9 @@ public struct SZChatPanel: View {
                 showTurnBreakdown: Bool = false,
                 onStopRun: @escaping () -> Void = {},
                 workingScopes: Set<String> = [],
+                runStartedAt: Date? = nil,
+                runGraphRunID: UUID? = nil,
+                agentGraphRuns: [SZAgentGraphRun] = [],
                 unreadScopes: Set<String> = [],
                 needsInputScopes: Set<String> = [],
                 isQueued: @escaping (UUID) -> Bool = { _ in false },
@@ -151,6 +159,9 @@ public struct SZChatPanel: View {
         self.showTurnBreakdown = showTurnBreakdown
         self.onStopRun = onStopRun
         self.workingScopes = workingScopes
+        self.runStartedAt = runStartedAt
+        self.runGraphRunID = runGraphRunID
+        self.agentGraphRuns = agentGraphRuns
         self.unreadScopes = unreadScopes
         self.needsInputScopes = needsInputScopes
         self.isQueued = isQueued
@@ -198,6 +209,7 @@ public struct SZChatPanel: View {
             contextLine
             Divider().overlay(Color.white.opacity(0.08))
             transcript(messages)
+            if isRunning { runStrip }
             composer
         }
         .background(Color(white: 0.12))
@@ -459,6 +471,16 @@ public struct SZChatPanel: View {
             // new-message transitions only (above).
             .onChange(of: messages.last?.text.count) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
         }
+    }
+
+    /// The run's presence — see `SZRunStripView`. Shown on EVERY tab while a run is in flight,
+    /// matching the composer's Stop: the run is the window's state, not the Director tab's.
+    private var runStrip: some View {
+        SZRunStrip(lanes: SZAgentGraphRun.workChildren(thread: runGraphRunID, in: agentGraphRuns),
+                   title: { id in SZNodeID(uuidString: id).flatMap { project?.graph.node(id: $0)?.title } },
+                   since: runStartedAt,
+                   onOpen: revealInAgentGraph.map { reveal in { reveal($0) } },
+                   threadID: runGraphRunID)
     }
 
     private var emptyState: some View {
@@ -918,6 +940,13 @@ private struct SZChatTurnRow: View, Equatable {
                                         profilerTarget: breakdown.compactMap(\.runID).first ?? message.id,
                                         turnID: message.id)
                 }
+                // The run's own narrations carry their record — the way back into a build that has
+                // scrolled into history. Unlike the Profiler's sibling link this is not gated on
+                // tracing, so it is there in release too; on the "Run started…" line it is the only
+                // footer at all (that message has no duration and, untraced, no breakdown).
+                if let runID = message.graphRunID {
+                    SZRunLinkCaption(runID: runID)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -996,7 +1025,8 @@ private struct SZTypingIndicator: View {
 }
 
 /// Live elapsed time for an in-flight turn, ticking each second from the turn's start.
-private struct SZElapsedLabel: View {
+/// `internal` (not private) — the run strip ticks with the same clock.
+struct SZElapsedLabel: View {
     let since: Date
     var body: some View {
         TimelineView(.periodic(from: since, by: 1)) { context in

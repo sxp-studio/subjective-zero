@@ -64,6 +64,9 @@ public struct SZAgentGraphPanel: View {
     /// A work node's display title, resolved against the live project — the sub-agent
     /// lanes name the node, not its id. nil = the node is gone; the lane falls back.
     private let nodeTitle: (String) -> String?
+    /// A run the transcript asked to reveal (host-owned, consumed once shown).
+    private let focusRequest: UUID?
+    private let onConsumeFocus: () -> Void
 
     @State private var mode: SZAgentGraphPanelMode = .plan
     /// The run the user PICKED, if any. nil = follow the head of the list, which is how the
@@ -101,12 +104,15 @@ public struct SZAgentGraphPanel: View {
                 runs: [SZAgentGraphRun] = [],
                 resolveGraph: @escaping (SZAgentGraphRun) -> SZAgentGraph? = { _ in nil },
                 nodeTitle: @escaping (String) -> String? = { _ in nil },
-                openStepSource: ((String, SZAgentGraphFace.Source) -> Void)? = nil) {
+                openStepSource: ((String, SZAgentGraphFace.Source) -> Void)? = nil,
+                focusRequest: UUID? = nil, onConsumeFocus: @escaping () -> Void = {}) {
         self.planAgents = planAgents
         self.runs = runs
         self.resolveGraph = resolveGraph
         self.nodeTitle = nodeTitle
         self.openStepSource = openStepSource
+        self.focusRequest = focusRequest
+        self.onConsumeFocus = onConsumeFocus
     }
 
     /// No runs, nothing to list — force Plan rather than a Run view with no canvas.
@@ -142,13 +148,11 @@ public struct SZAgentGraphPanel: View {
     }
 
     /// The work children a shown record dispatched: the records sharing its thread. They
-    /// are already in `runs`, so showing the fleet on the canvas is a filter.
+    /// are already in `runs`, so showing the fleet on the canvas is a filter — the same one
+    /// the transcript's run strip applies.
     private func subagents(of record: SZAgentGraphRun?) -> [SZAgentGraphRun] {
-        guard let record, let thread = record.thread, record.work == nil else { return [] }
-        // Oldest first: the band should not reshuffle as items settle, and `runs` is
-        // ordered live-first for the sidebar's benefit, not this one's.
-        return runs.filter { $0.thread == thread && $0.work != nil }
-            .sorted { $0.startedAt < $1.startedAt }
+        guard let record, record.work == nil else { return [] }
+        return SZAgentGraphRun.workChildren(thread: record.thread, in: runs)
     }
 
     /// A dispatch card's link: jump the Plan view to the target seat's graph — the one the
@@ -228,6 +232,20 @@ public struct SZAgentGraphPanel: View {
             mode = .run
             following = true
         }
+        // On the common container, so a request landing before any record exists is still
+        // consumed (and honored the moment the run is recorded) instead of going stale.
+        .onAppear { consumeFocusRequest() }
+        .onChange(of: focusRequest) { consumeFocusRequest() }
+    }
+
+    /// The transcript's "open in the Agent Graph" landing — the sidebar's own pick, asked for
+    /// from outside: show the run, and chase it only while it is still live.
+    private func consumeFocusRequest() {
+        guard let focusRequest else { return }
+        selectedRunID = focusRequest
+        mode = .run
+        following = runs.first { $0.id == focusRequest }?.isLive ?? false
+        onConsumeFocus()
     }
 
     private var canvas: some View {
@@ -452,3 +470,19 @@ public struct SZAgentGraphPanel: View {
 /// the same traversal UNROLLED, one card per entry, so a node visited twice is two cards
 /// with two outcomes instead of the second overwriting the first.
 enum SZAgentGraphPanelMode: String, CaseIterable { case plan = "Plan", run = "Run" }
+
+
+/// The transcript's jump into the Agent Graph panel, set by the app layer. An Environment value
+/// on purpose, matching `\.szRevealInProfiler`: chat rows are VALUE-ONLY for their Equatable
+/// render skip, and environment reads don't participate in `==`. Unlike the Profiler's, this one
+/// is never nil in the app — the Agent Graph panel ships everywhere the packs do.
+public struct SZRevealInAgentGraphKey: EnvironmentKey {
+    public static let defaultValue: (@Sendable @MainActor (UUID) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    public var szRevealInAgentGraph: (@Sendable @MainActor (UUID) -> Void)? {
+        get { self[SZRevealInAgentGraphKey.self] }
+        set { self[SZRevealInAgentGraphKey.self] = newValue }
+    }
+}

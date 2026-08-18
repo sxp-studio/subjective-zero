@@ -264,6 +264,16 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         }
     }
 
+    /// The work children a thread dispatched. OLDEST FIRST on purpose: a band of lanes must not
+    /// reshuffle as items settle, and `ordered` sorts live-first for the sidebar's benefit, not
+    /// this one's. Read by both surfaces that draw the fleet — the run canvas's sub-agent band and
+    /// the transcript's run strip — so there is one notion of who a build sent out.
+    public static func workChildren(thread: UUID?, in runs: [SZAgentGraphRun]) -> [SZAgentGraphRun] {
+        guard let thread else { return [] }
+        return runs.filter { $0.thread == thread && $0.work != nil }
+            .sorted { $0.startedAt < $1.startedAt }
+    }
+
     /// Cap the history (~50) — never a live record. Two budgets: thread children outnumber
     /// their leaders many to one, so a shared cap would let one busy afternoon evict every
     /// recorded thread. Order-independent: the victim is the OLDEST ENDED record of its

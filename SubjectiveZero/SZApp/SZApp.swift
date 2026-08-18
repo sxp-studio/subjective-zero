@@ -670,6 +670,13 @@ struct SZApp: App {
         return { host.revealInProfiler($0) }
     }
 
+    /// The transcript's jump into the Agent Graph. Unconditional, unlike the Profiler's above: that
+    /// panel is debug-only, this one ships everywhere the packs do.
+    private var revealInAgentGraphAction: (@Sendable @MainActor (UUID) -> Void)? {
+        let host = host
+        return { host.revealInAgentGraph($0) }
+    }
+
     /// Prompt inspection, nil when tracing isn't recording prompts (the button then never renders).
     private var viewTurnPromptAction: (@Sendable @MainActor (UUID) -> Void)? {
         guard SZTrace.isEnabled else { return nil }
@@ -762,6 +769,9 @@ struct SZApp: App {
                         showTurnBreakdown: host.showTurnBreakdown,
                         onStopRun: { host.cancelRun() },
                         workingScopes: host.chatInFlight,
+                        runStartedAt: host.runStartedAt,
+                        runGraphRunID: host.runThread,
+                        agentGraphRuns: host.agentGraphRuns,
                         unreadScopes: host.unreadScopes,
                         needsInputScopes: host.needsInputScopes,
                         isQueued: { queuedIDs.contains($0) },   // envelope id == bubble id (sendChat)
@@ -785,6 +795,7 @@ struct SZApp: App {
                 // The transcript's "open in Profiler" link — set only where the surface exists,
                 // so the button simply doesn't render in builds without the panel.
                 .environment(\.szRevealInProfiler, revealInProfilerAction)
+                .environment(\.szRevealInAgentGraph, revealInAgentGraphAction)
                 .environment(\.szViewTurnPrompt, viewTurnPromptAction)
                 .environment(\.szHeldPromptTurnIDs, host.heldPromptIDs)
         case .profiler:
@@ -809,7 +820,9 @@ struct SZApp: App {
                                   guard let nodeID = SZNodeID(uuidString: id) else { return nil }
                                   return host?.store.project?.graph.node(id: nodeID)?.title
                               },
-                              openStepSource: { [weak host] in host?.openPackSource(agent: $0, source: $1) })
+                              openStepSource: { [weak host] in host?.openPackSource(agent: $0, source: $1) },
+                              focusRequest: host.agentGraphFocusRequest,
+                              onConsumeFocus: { host.agentGraphFocusRequest = nil })
         }
     }
 }

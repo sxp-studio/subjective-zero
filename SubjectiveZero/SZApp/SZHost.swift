@@ -169,6 +169,10 @@ final class SZHost {
     /// The current run's trace identity — stamped into every run-owned turn's context so its
     /// events can be found across scopes. Minted in `startRun`, cleared with the per-run state.
     var runID: UUID?
+    /// The current run's agent-graph record id — the thread its build traversal leads, and what
+    /// the transcript's run strip and run narrations link to. Minted beside `runID` (a different
+    /// identity: that one is the trace's) and cleared with the rest of the per-run state.
+    var runThread: UUID?
     /// Runs recorded this session the user hasn't opened in the Profiler yet — its unread dots.
     /// Session-scoped on purpose (an old transcript's runs aren't news).
     var unreadRunIDs: Set<UUID> = []
@@ -204,6 +208,8 @@ final class SZHost {
     var turnPromptOrder: [UUID] = []
     /// Turn ids with an inspectable prompt (ring or disk) — gates the view-prompt/tokens buttons.
     var heldPromptIDs: Set<UUID> = []
+    /// A transcript's "open in the Agent Graph" ask: the run to select once the panel shows.
+    var agentGraphFocusRequest: UUID?
     /// A transcript's "open in Profiler" ask: the record to select once the panel shows.
     var profilerFocusRequest: UUID?
     /// True for the duration of `switchProject` — the pump must not start a turn mid-swap.

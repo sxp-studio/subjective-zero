@@ -447,12 +447,16 @@ extension SZHost {
         runID = UUID()          // the run's trace identity (stamped into run-owned turns' events)
         status = "running \(providerID)…"
         showChat(.director)                                  // a run narrates into the Director Agent tab
+        // The RUNS thread id = the build traversal's own record id (its children share it). Minted
+        // BEFORE the narration so the opening line can carry it — that stamp is the transcript's
+        // durable way back into this run once it has scrolled into history.
+        let thread = UUID()
+        runThread = thread
         let dirtyCount = runWorkSet.count
-        narrateDirector(dirtyCount == 0
+        let startedID = narrateDirector(dirtyCount == 0
             ? "Run started (\(providerID)) — no nodes need implementing."
             : "Run started (\(providerID)) — implementing \(dirtyCount) node\(dirtyCount == 1 ? "" : "s")…")
-        // The RUNS thread id = the build traversal's own record id (its children share it).
-        let thread = UUID()
+        linkNarrationToRun(startedID)
         runTask = Task { @MainActor in
             defer {
                 // Release the CAPTURED claim, not `runClaim` — after an eager `cancelRun` this is
@@ -468,6 +472,7 @@ extension SZHost {
                     runStartedMono = nil
                     runTurnLog = []
                     runID = nil
+                    runThread = nil
                     dispatchPrompts = dispatchPrompts.filter { hiddenPieces.contains($0.key) }
                     promotedThisRun = []
                 }
@@ -494,6 +499,7 @@ extension SZHost {
                             failed == 0
                                 ? (done == 0 ? "Run complete." : "Run complete — \(done) node\(done == 1 ? "" : "s") implemented.")
                                 : "Run finished — \(done) implemented, \(failed) failed. See the flagged node\(failed == 1 ? "" : "s").")
+                        linkNarrationToRun(narrationID)
                         attachRunRollup(to: narrationID)
                     }
                 }
@@ -513,6 +519,7 @@ extension SZHost {
                     if !ownsGraphOp {
                         let (done, failed) = surfaceUnresolvedNodes()
                         let narrationID = narrateDirector("Run failed: \(error). \(done) implemented, \(failed) unfinished.")
+                        linkNarrationToRun(narrationID)
                         attachRunRollup(to: narrationID)
                     }
                 }
@@ -957,9 +964,10 @@ extension SZHost {
         // must die first), by which time `runWorkSet` can already be a newer run's — its narration
         // would land under that run's start line. Everything this needs is live right now.
         let unfinished = unfinishedRunNodeCount()
-        narrateDirector(unfinished == 0
+        let cancelledID = narrateDirector(unfinished == 0
             ? "Run cancelled."
             : "Run cancelled — \(unfinished) node\(unfinished == 1 ? "" : "s") unfinished.")
+        linkNarrationToRun(cancelledID)
         clearInFlightPhasesAfterCancel()
         // Settle a staged split/merge NOW rather than waiting on the cancelled task —
         // leaving the op staged strands the pieces. The drain is idempotent.

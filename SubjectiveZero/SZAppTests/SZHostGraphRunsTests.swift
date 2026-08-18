@@ -175,3 +175,37 @@ import SZCore
     #expect(SZHost.chatAgentID(for: .node(SZNodeID()),
                                seats: SZSeatAssignment(director: "director", coding: nil)) == nil)
 }
+
+
+/// The transcript's way into a run: the host stamps the live run's record id onto its own
+/// narrations, so a build stays reachable from the conversation long after it scrolled away.
+/// Exercised through the helper the run path calls rather than a whole run, which needs an engine.
+@Test @MainActor func runNarrationsCarryTheRunsRecord() throws {
+    let host = SZHost()
+    let thread = UUID()
+
+    // Off a run there is nothing to point at, and the line stays a plain narration.
+    let orphan = host.narrateDirector("Run not started — no agent packs.")
+    host.linkNarrationToRun(orphan)
+    #expect(host.store.messages(for: .director).first { $0.id == orphan }?.graphRunID == nil)
+
+    // On a run, the narration carries the record the Agent Graph panel draws.
+    host.runThread = thread
+    host.beginAgentGraphRun(SZTraversalSighting(id: thread, agent: "director"), thread: thread)
+    let started = host.narrateDirector("Run started (claude) — implementing 2 nodes…")
+    host.linkNarrationToRun(started)
+
+    let stamped = try #require(host.store.messages(for: .director).first { $0.id == started })
+    #expect(stamped.graphRunID == thread)
+    // And it RESOLVES — a link to a record that was never opened would be a dead end.
+    #expect(host.agentGraphRuns.contains { $0.id == stamped.graphRunID })
+}
+
+/// The panel's landing ask is host-owned and consumed once, exactly like the Profiler's.
+@Test @MainActor func revealInAgentGraphRecordsTheAsk() {
+    let host = SZHost()
+    let target = UUID()
+    #expect(host.agentGraphFocusRequest == nil)
+    host.revealInAgentGraph(target)
+    #expect(host.agentGraphFocusRequest == target)
+}

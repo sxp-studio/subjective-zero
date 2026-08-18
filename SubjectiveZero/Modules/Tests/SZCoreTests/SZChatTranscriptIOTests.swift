@@ -61,6 +61,39 @@ private func sampleMessages() -> [SZChatMessage] {
     #expect(loaded[0].text == "hi")
 }
 
+/// The run link survives the sidecar: reopening a project must not strand a build's narration with
+/// no way back into its record. The neighbouring message proves absence stays absence.
+@Test func transcriptRoundTripPreservesTheGraphRunLink() throws {
+    let projectURL = temporaryProjectURL()
+    defer { try? FileManager.default.removeItem(at: projectURL) }
+    let runID = UUID()
+    let messages = [
+        SZChatMessage(role: .assistant, text: "Run started (claude) — implementing 2 nodes…",
+                      graphRunID: runID),
+        SZChatMessage(role: .user, text: "more contrast"),
+    ]
+
+    try SZChatTranscriptIO.save(messages, scopeKey: SZChatScope.directorKey, projectURL: projectURL)
+    let loaded = try #require(SZChatTranscriptIO.load(scopeKey: SZChatScope.directorKey, projectURL: projectURL))
+
+    #expect(loaded[0].graphRunID == runID)
+    #expect(loaded[1].graphRunID == nil)
+}
+
+/// Append tolerance, the file's stated contract: a sidecar written before `graphRunID` existed
+/// still loads, with no link rather than a decode failure that would erase the whole transcript.
+@Test func transcriptWithoutGraphRunIDStillDecodes() throws {
+    let projectURL = temporaryProjectURL()
+    defer { try? FileManager.default.removeItem(at: projectURL) }
+    let url = SZChatTranscriptIO.fileURL(projectURL: projectURL, scopeKey: SZChatScope.directorKey)
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"transcript":{"messages":[{"role":"assistant","text":"Run complete."}]}}"#.utf8).write(to: url)
+
+    let loaded = try #require(SZChatTranscriptIO.load(scopeKey: SZChatScope.directorKey, projectURL: projectURL))
+    #expect(loaded.count == 1)
+    #expect(loaded[0].graphRunID == nil)
+}
+
 @Test func saveEmptyMessagesRemovesFile() throws {
     let projectURL = temporaryProjectURL()
     defer { try? FileManager.default.removeItem(at: projectURL) }
