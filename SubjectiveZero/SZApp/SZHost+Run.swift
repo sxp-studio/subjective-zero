@@ -323,17 +323,32 @@ extension SZHost {
 
     // MARK: - Minting and admitting a run
 
-    /// The door's `requestBuild` effect and the mid-turn `ui_run` land here: mint the run
-    /// (the pending slot — a newer mint supersedes a queued one) and knock. The pump admits
-    /// it the moment the director transcript frees — ahead of any queued prose, because
-    /// admission runs at the head of every pump pass.
-    func mintRun(instruction: String) {
-        guard !isRunning else {
-            narrateDirector("Build request skipped — a run is already active.")
-            return
+    /// The door's scheduling effect and the mid-turn `ui_run` land here: SCHEDULE a task and
+    /// knock. A task is never dropped for being second — it queues, and the pump admits it the
+    /// moment its work set is free, ahead of any queued prose. Returns the task's id so the
+    /// caller that minted it can withdraw it again (a stopped Director turn discards its own).
+    @discardableResult
+    func mintRun(instruction: String, title: String? = nil) -> UUID {
+        let task = SZTask(title: title ?? SZTask.title(fromInstruction: instruction, nodeCount: 0),
+                          instruction: instruction)
+        pendingTasks.append(task)
+        if isRunning {
+            let ahead = pendingTasks.count - 1
+            narrateDirector(ahead == 0
+                ? "Queued — it starts when the work it needs is free."
+                : "Queued behind \(ahead) other task\(ahead == 1 ? "" : "s").")
         }
-        pendingRun = instruction
-        pumpMailboxes()   // fires now if the transcript is free; else the next release re-fires
+        pumpMailboxes()   // fires now if the work is free; else the next release re-fires
+        return task.id
+    }
+
+    /// Withdraw a scheduled task that has not been admitted. Returns false if it already started
+    /// (or never existed) — a live task is stopped, not withdrawn.
+    @discardableResult
+    func withdrawTask(_ id: UUID) -> Bool {
+        guard let index = pendingTasks.firstIndex(where: { $0.id == id }) else { return false }
+        pendingTasks.remove(at: index)
+        return true
     }
 
     /// How a `startRun` attempt ended: `started` (the run is live), `waiting` (a transient
@@ -348,11 +363,19 @@ extension SZHost {
     /// every pump pass would replay the refusal ("nothing to implement" forever, the
     /// provider sheet re-presenting per pass).
     func admitPendingRunIfPossible() {
-        guard let instruction = pendingRun, !isRunning,
+        guard !pendingTasks.isEmpty, !isRunning,
               ledger.holder(of: .transcript(.director)) == nil else { return }
-        switch startRun(instruction: instruction, narrateContention: false) {
-        case .started, .refused: pendingRun = nil
-        case .waiting: break
+        // Walk the queue oldest-first and admit what can start. A task that must wait keeps its
+        // place quietly; a terminal refusal leaves the queue (retrying cannot help).
+        var index = 0
+        while index < pendingTasks.count {
+            let task = pendingTasks[index]
+            switch startRun(instruction: task.instruction, narrateContention: false) {
+            case .started, .refused: pendingTasks.remove(at: index)
+            case .waiting: index += 1
+            }
+            // One run at a time still, until the run state is per-task: stop at the first start.
+            if !isRunning { continue } else { break }
         }
     }
 

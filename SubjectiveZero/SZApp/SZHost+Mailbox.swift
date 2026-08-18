@@ -185,7 +185,7 @@ extension SZHost {
                     extras.nodeSource! += "\n\n// ===== Card.swift (this node's custom card) =====\n" + card
                 }
             }
-            let (result, ack) = try await runProseDelivery(
+            let (result, ack, mintedTaskIDs) = try await runProseDelivery(
                 scope: scope, message: expanded, existing: existing, providerID: providerID,
                 extras: extras) { order in
                     var prompt = order.brief
@@ -202,8 +202,9 @@ extension SZHost {
                 let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
                 reply(empty ? "(stopped)" : "\n(stopped)")
                 status = "chat turn stopped"
-                // Only the DIRECTOR turn's Stop discards its own minted run.
-                if scope == .director { pendingRun = nil }
+                // Only the DIRECTOR turn's Stop discards the tasks IT scheduled — never a task
+                // someone else queued while this turn was streaming.
+                for id in mintedTaskIDs { withdrawTask(id) }
                 mailbox.markProcessed(envelopeID)
                 return
             }
@@ -285,7 +286,7 @@ extension SZHost {
         scope: SZChatScope, message: String, existing: SZAgentSession?, providerID: String,
         extras: SZBriefExtras,
         turn: @escaping @MainActor (SZTurnOrder) async throws -> SZAgentRunResult
-    ) async throws -> (result: SZAgentRunResult, ack: String?) {
+    ) async throws -> (result: SZAgentRunResult, ack: String?, scheduled: [UUID]) {
         guard let packsRoot = Self.graphAgentPacksRoot() else {
             throw SZChatTraversalFailure(detail: "no agent packs — the bundled packs did not "
                 + "materialize and no valid SZ_AGENT_PACKS override is set")
@@ -330,7 +331,7 @@ extension SZHost {
             cacheDirectory: FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache"))
         // The turn's result crosses the seam in a box: the graph speaks SZTurnReport
         // (process truth only), while performChatTurn needs the full run result back.
-        final class Capture { var result: SZAgentRunResult?; var error: Error?; var minted = false }
+        final class Capture { var result: SZAgentRunResult?; var error: Error?; var mintedTasks: [UUID] = [] }
         let capture = Capture()
         // A prose reply is a traversal like any other: it gets its record, thread-less (a
         // conversation is never part of a build thread).
@@ -364,8 +365,7 @@ extension SZHost {
                     // The door ruled the prose a build: mint the run with the user's words
                     // as its standing instruction. The pump admits it the moment this
                     // delivery's claim frees.
-                    capture.minted = true
-                    self.mintRun(instruction: message)
+                    capture.mintedTasks.append(self.mintRun(instruction: message))
                 }
             },
             onNote: { [weak self] note in self?.noteAgentGraphRun(sighting.id, note) })
@@ -385,11 +385,11 @@ extension SZHost {
             case .ended(let node, let endOutcome):
                 // A turn-LESS ending is honest exactly when this delivery minted a run —
                 // the run is the reply. The delivery performed the effect, so it KNOWS.
-                if capture.minted {
+                if !capture.mintedTasks.isEmpty {
                     return (SZAgentRunResult(
                         process: SZProcessResult(exitCode: 0, output: ""),
                         outcome: SZAgentOutcome(sessionID: nil, failed: false)),
-                        ack: "(build requested — starting a run)")
+                        ack: "(build requested — starting a run)", scheduled: capture.mintedTasks)
                 }
                 throw SZChatTraversalFailure(detail:
                     "the graph ended at '\(node)' (\(endOutcome)) without running a turn")
@@ -408,7 +408,7 @@ extension SZHost {
                 to: scope)
             flushTranscript(scope)
         }
-        return (result, ack: nil)
+        return (result, ack: nil, scheduled: capture.mintedTasks)
     }
 }
 

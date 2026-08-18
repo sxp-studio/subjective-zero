@@ -367,11 +367,10 @@ final class SZHost {
     /// panel consumes it exactly once (`consumeComposerDraft`) so a re-render can't stomp edits.
     internal(set) var pendingComposerDraft: SZComposerDraftInjection?
 
-    /// THE MINTED RUN awaiting admission: `ui_run` mid-turn and the door's `requestBuild`
-    /// effect set it (a newer mint supersedes); the pump's head admits it the moment the
-    /// director transcript frees — ahead of any queued prose. The value is the run's
-    /// standing instruction ("" = none given).
-    var pendingRun: String?
+    /// THE SCHEDULED TASKS awaiting admission, oldest first. The Build press, `ui_run` and the
+    /// door's scheduling effect append here; the pump's head admits every task whose work set is
+    /// free — ahead of any queued prose, and a blocked task never blocks a later disjoint one.
+    internal(set) var pendingTasks: [SZTask] = []
 
     /// Scopes whose latest agent turn finished while the user was elsewhere — the tab's static
     /// unread dot, cleared when the tab is visited (`showChat`). During runs, node tabs finish at

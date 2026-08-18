@@ -82,7 +82,7 @@ extension SZHostBridge {
                     "reasoning_effort": ["type": "string", "description": "one of the provider's supported efforts (omit = keep/default; unsupported on claude)"],
                     "fast_mode": ["type": "boolean", "description": "toggle the provider's fast tier (omit = keep/default)"],
                  ], agentCallable: false),   // user-level setting; resets all sessions — not an agent action
-            tool("ui_run", "Start the implementation run over the current graph — a Coding Agent per pending node, with the active provider. `instruction` (optional) steers the run. Called from your own chat turn, the run is QUEUED and starts when your turn ends (finish your reply; do not wait for it). Refused while a run is already in flight.",
+            tool("ui_run", "Start the implementation run over the current graph — a Coding Agent per pending node, with the active provider. `instruction` (optional) steers the run. Called from your own chat turn, the task is QUEUED and starts when your turn ends (finish your reply; do not wait for it). A task asked for while another is running is queued too — never refused — and starts when the work it needs is free.",
                  properties: [
                     "instruction": ["type": "string", "description": "optional free-text steer for the run"],
                  ]),
@@ -574,10 +574,13 @@ extension SZHostBridge {
     }
 
     private func uiRun(_ arguments: [String: Any]) -> String {
-        guard !host.isRunning else {
-            return SZJSONRPC.encode(["status": "refused", "reason": "a run is already in flight"])
-        }
         let instruction = arguments.string("instruction") ?? ""
+        // A second ask is SCHEDULED, never dropped: it starts when the work it needs is free.
+        if host.isRunning {
+            host.mintRun(instruction: instruction)
+            return SZJSONRPC.encode(["status": "queued", "position": host.pendingTasks.count,
+                                     "detail": "a task is already running — this one starts when its work is free"])
+        }
         // Called from the Director Agent's OWN streaming chat turn: starting now would race that
         // turn on the same transcript (deliver's one-in-flight-marker-per-scope invariant), so the
         // run is MINTED — the door's `requestBuild` lane, one home for supersede + narration —
