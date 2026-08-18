@@ -10,7 +10,7 @@
 //   task ↔ one `SZAgentGraphRun` thread, linked by `thread` — that is the strip's deep link.
 import Foundation
 
-public struct SZTask: Identifiable, Sendable, Equatable {
+public struct SZTask: Identifiable, Sendable, Equatable, Codable {
     /// Scheduled but unclaimed → live → over. A task leaves the list once `done` has been shown.
     public enum State: String, Sendable, Codable { case pending, running, done }
 

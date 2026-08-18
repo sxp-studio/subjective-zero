@@ -201,6 +201,8 @@ final class SZHost {
     /// The persistable queue content of the last `flushMessageQueue` write (id:state lines) — the
     /// skip-if-unchanged signature. Reset on project switch so the new project always flushes.
     var lastFlushedQueueSignature: [String]?
+    /// The scheduled-task sidecar's last written shape — same skip-an-unchanged-write idiom.
+    var lastFlushedTaskSignature: [String]?
 
     // Panel layout — the window's split tree (SZPanelLayoutState, SZCore), host-owned like the chat
     // tab state below; mutated via SZHost+PanelLayout.swift (header drags, dividers, close/reopen),
@@ -738,6 +740,7 @@ final class SZHost {
         // envelopes that were supposed to survive the switch). Parked waiters resume `.removed`.
         mailbox.reset()
         lastFlushedQueueSignature = nil   // the new project's first flush must not be skipped
+        lastFlushedTaskSignature = nil
         assert(!ledger.anyWaiting && !mailbox.anyAwaiting,
                "project teardown with a parked wait — a continuation would leak")
         forcedFailNodes = [:]

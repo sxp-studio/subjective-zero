@@ -337,6 +337,7 @@ extension SZHost {
         let task = SZTask(title: title ?? SZTask.title(fromInstruction: instruction, nodeCount: 0),
                           instruction: instruction)
         pendingTasks.append(task)
+        flushTaskQueue()
         if isRunning {
             let ahead = pendingTasks.count - 1
             narrateDirector(ahead == 0
@@ -353,6 +354,7 @@ extension SZHost {
     func withdrawTask(_ id: UUID) -> Bool {
         guard let index = pendingTasks.firstIndex(where: { $0.id == id }) else { return false }
         pendingTasks.remove(at: index)
+        flushTaskQueue()
         return true
     }
 
@@ -370,6 +372,7 @@ extension SZHost {
         } else {
             pendingTasks[index].instruction += "\n\n" + trimmed
         }
+        flushTaskQueue()
         return true
     }
 
@@ -394,6 +397,7 @@ extension SZHost {
             case .waiting: index += 1
             }
         }
+        flushTaskQueue()
     }
 
     /// What a NEW run would take: the nodes dirty right now, minus the undescribed ones (an empty

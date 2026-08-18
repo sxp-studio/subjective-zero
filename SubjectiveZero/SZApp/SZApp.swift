@@ -97,6 +97,7 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         host?.flushAllTranscripts()
         host?.flushMessageQueue()   // a queued-not-delivered message redelivers next launch
+        host?.flushTaskQueue()      // and an ask that never started is still wanted next launch
         host?.persistAgentSessions()
         host?.persistAgentGraphRuns()   // a live record lands on disk; it restores as interrupted
         // Pop-out frame moves persist behind a debounce — a quit inside that window must not

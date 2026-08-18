@@ -53,6 +53,25 @@ extension SZHost {
         try? SZMessageQueueIO.save(mailbox.envelopes, projectURL: url)
     }
 
+    /// Persist the scheduled tasks (same trigger points as the message queue). Cheap and idempotent
+    /// — an unchanged queue rewrites nothing.
+    func flushTaskQueue() {
+        guard let url = loadedProjectURL else { return }
+        let signature = SZTaskQueueIO.persistable(pendingTasks).map { "\($0.id):\($0.instruction)" }
+        guard signature != lastFlushedTaskSignature else { return }
+        lastFlushedTaskSignature = signature
+        try? SZTaskQueueIO.save(pendingTasks, projectURL: url)
+    }
+
+    /// Bring back the asks that were still waiting when the app closed. A RUNNING task is not
+    /// restored — its claim, its fleet and its traversal died with the process, and re-admitting it
+    /// would redo work that may already have landed.
+    func restoreTaskQueue() {
+        guard let url = loadedProjectURL else { return }
+        pendingTasks = SZTaskQueueIO.load(projectURL: url)
+        lastFlushedTaskSignature = SZTaskQueueIO.persistable(pendingTasks).map { "\($0.id):\($0.instruction)" }
+    }
+
     /// Flush every scope with messages (run end, quit, project save).
     func flushAllTranscripts() {
         for key in store.chat.keys {
@@ -86,6 +105,7 @@ extension SZHost {
         // won't match the snapshot, so it can never be dropped as stale.
         restoredSessions = agentSessions
         restoreMessageQueue(live: live)
+        restoreTaskQueue()
     }
 
     /// Restore the undelivered message queue from `.staging/message-queue.json` — the redelivery
