@@ -357,7 +357,8 @@ extension SZHost {
                 return SZWorld(graph: self.store.project?.graph,
                                statuses: self.nodeStatusLines,
                                node: scope.nodeID,
-                               resuming: existing != nil)
+                               resuming: existing != nil,
+                               pendingTasks: self.pendingTasks)
             },
             turn: { order in
                 do {

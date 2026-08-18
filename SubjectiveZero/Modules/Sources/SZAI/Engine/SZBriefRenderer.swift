@@ -144,7 +144,7 @@ public struct SZBriefRenderer: Sendable {
     /// briefs against. Tied to the assembly: `add` asserts each computed token is listed.
     public static let knownTokens: Set<String> = [
         "graph", "message", "toolbelt", "cards", "node", "contract", "source",
-        "round", "cap", "blockers", "inbox", "mutations", "instruction",
+        "round", "cap", "blockers", "inbox", "mutations", "instruction", "tasks",
         "prompt", "title", "symbol", "inputs", "outputs", "boundary", "abi", "reference", "schema",
         "blocker", "director_message",
         "original", "intent", "stage", "count", "constituents",
@@ -202,6 +202,8 @@ public struct SZBriefRenderer: Sendable {
             SZDirectorPrompt.inboxLines(try need(world.run, "inbox", "a live run").steers)) }
         add("mutations") { SZPromptTemplate.defused(
             SZDirectorPrompt.mutationLines(world.mutations, graph: world.graph)) }
+        add("tasks") { SZPromptTemplate.defused(
+            SZDirectorPrompt.taskLines(world.pendingTasks)) }
 
         // — the sender's instruction: a staged op's steer, else the run's standing one —
         add("instruction") {

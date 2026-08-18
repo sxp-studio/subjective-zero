@@ -450,7 +450,7 @@ private let shippedPacksRoot = URL(filePath: #filePath)
 /// these claims, field for field — edit a shipped step and both sides move together.
 private let shippedPackSteps = StubSteps(infos: [
     "director/door": SZStepDeclarationInfo(
-        outcomes: ["build", "answer", "answer-resumed", "implement"]),
+        outcomes: ["build", "answer", "answer-resumed", "implement", "amend"]),
     "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"]),
     "coding/door": SZStepDeclarationInfo(
         outcomes: ["implement", "continue", "edit", "chat", "chat-resumed"]),

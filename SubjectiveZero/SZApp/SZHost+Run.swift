@@ -356,6 +356,23 @@ extension SZHost {
         return true
     }
 
+    /// Fold more words into a task that has not started — what "I meant blue, not red" does to an
+    /// ask still waiting its turn. The parts are kept whole and in order rather than replaced: the
+    /// later words usually REFINE the earlier ones, and only the reader can tell which won.
+    /// Refuses a task that is already running (that is a steer) or gone.
+    @discardableResult
+    func amendTask(_ id: UUID, with words: String) -> Bool {
+        guard let index = pendingTasks.firstIndex(where: { $0.id == id }) else { return false }
+        let trimmed = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if pendingTasks[index].instruction.isEmpty {
+            pendingTasks[index].instruction = trimmed
+        } else {
+            pendingTasks[index].instruction += "\n\n" + trimmed
+        }
+        return true
+    }
+
     /// How a `startRun` attempt ended: `started` (the run is live), `waiting` (a transient
     /// claim holds the resources — retry on the next release), or `refused` (terminal — the
     /// reason was narrated once; retrying cannot help).

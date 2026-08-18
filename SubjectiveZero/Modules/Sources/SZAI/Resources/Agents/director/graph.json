@@ -6,11 +6,13 @@
     { "id": "implement", "title": "Implement", "dispatch": { "to": "coding" } },
     { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
     { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume" } },
+    { "id": "amend", "title": "Amend scheduled work", "turn": { "brief": "amend" } },
     { "id": "chat", "title": "Cold turn", "turn": { "brief": "chat" } },
     { "id": "chat-resumed", "title": "Resumed turn", "turn": { "brief": "chat-resumed", "session": "resume" } }
   ],
   "edges": [
     { "from": "door", "outcome": "build", "to": "decompose" },
+    { "from": "door", "outcome": "amend", "to": "amend" },
     { "from": "door", "outcome": "answer", "to": "chat" },
     { "from": "door", "outcome": "answer-resumed", "to": "chat-resumed" },
     { "from": "decompose", "outcome": "ok", "to": "implement" },

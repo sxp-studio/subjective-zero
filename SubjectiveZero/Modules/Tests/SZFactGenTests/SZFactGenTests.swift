@@ -25,7 +25,7 @@ private func specSource() throws -> String {
     // The wire document and its typed groups, in file order.
     let owners = Dictionary(grouping: spec.fields, by: \.owner)
     #expect(Set(owners.keys) == ["SZFacts", "SZRun", "SZAssignment"])
-    #expect(owners["SZFacts"]?.map(\.name) == ["message", "node", "resuming", "run", "assignment"])
+    #expect(owners["SZFacts"]?.map(\.name) == ["message", "node", "resuming", "run", "assignment", "pendingTasks"])
     #expect(owners["SZRun"]?.map(\.name) == ["workSet", "round", "roundCap", "steers", "instruction"])
     #expect(owners["SZAssignment"]?.map(\.name) == ["attempt", "note"])
     // Typed-group references and the plain whitelist, spot-checked.

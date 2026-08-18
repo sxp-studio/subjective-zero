@@ -128,3 +128,56 @@ struct SZHostConcurrentRunsTests {
         #expect(SZTask.title(fromInstruction: String(repeating: "x", count: 80), nodeCount: 0).count == 60)
     }
 }
+
+/// Amending work that has not started — the scheduler's other half. A pending task can still be
+/// changed for free; a running one is a steer, and the refusal says which so the caller knows.
+@MainActor
+struct SZHostTaskAmendTests {
+
+    @Test func wordsFoldIntoAPendingTaskWithoutLosingWhatWasAsked() {
+        let host = SZHost()
+        let id = host.mintRun(instruction: "make the circle bigger")
+        #expect(host.amendTask(id, with: "actually blue, not red"))
+        // Appended, never replaced: a follow-up usually refines the ask, and only the reader can
+        // tell which half won.
+        #expect(host.pendingTasks.first?.instruction
+                == "make the circle bigger\n\nactually blue, not red")
+    }
+
+    @Test func anEmptyAmendChangesNothing() {
+        let host = SZHost()
+        let id = host.mintRun(instruction: "bigger")
+        #expect(!host.amendTask(id, with: "   \n "))
+        #expect(host.pendingTasks.first?.instruction == "bigger")
+    }
+
+    @Test func anInstructionlessTaskTakesTheAmendWhole() {
+        let host = SZHost()
+        let id = host.mintRun(instruction: "")     // the Build press schedules with no words
+        #expect(host.amendTask(id, with: "keep the blur soft"))
+        #expect(host.pendingTasks.first?.instruction == "keep the blur soft")
+    }
+
+    @Test func twoAsksBecomeOneByAmendingTheSurvivorAndCancellingTheOther() {
+        let host = SZHost()
+        let keep = host.mintRun(instruction: "add a glow")
+        let drop = host.mintRun(instruction: "and make it warm")
+        #expect(host.amendTask(keep, with: "and make it warm"))
+        #expect(host.withdrawTask(drop))
+        #expect(host.pendingTasks.map(\.id) == [keep])
+        #expect(host.pendingTasks.first?.instruction == "add a glow\n\nand make it warm")
+    }
+
+    @Test func aRunningTaskCannotBeAmendedOrCancelled() {
+        let host = SZHost()
+        let node = SZNodeID()
+        let claim = SZClaimToken(label: "run")
+        #expect(host.ledger.tryAcquire([.node(node)], as: claim))
+        let live = SZRunState(taskID: UUID(), claim: claim, instruction: "building",
+                              ownsGraphOp: false, workSet: [node])
+        host.activeRuns[live.taskID] = live
+        // Already spending: steering it is a message to its agents, not an edit to a plan.
+        #expect(!host.amendTask(live.taskID, with: "too late"))
+        #expect(!host.withdrawTask(live.taskID))
+    }
+}

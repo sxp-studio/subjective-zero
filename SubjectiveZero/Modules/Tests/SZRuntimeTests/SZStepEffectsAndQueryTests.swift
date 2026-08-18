@@ -28,7 +28,7 @@ private func loadStep(_ source: String) throws -> SZStepLoader {
     return loader
 }
 
-private let proseFacts = #"{"message": "hey", "resuming": false}"#
+private let proseFacts = #"{"message": "hey", "resuming": false, "pendingTasks": []}"#
 
 /// An effect-emitting step, still one line — the authoring bar the wire had to clear.
 private let effectStep = """
@@ -72,7 +72,7 @@ struct SZStepEffectsAndQueryTests {
             == .outcome(#"{"effects":["requestBuild"],"outcome":"build"}"#))
         // …resuming=true the bare-literal branch: the payload is the outcome string, no
         // envelope — the additive-wire guarantee, on the SAME compiled step.
-        let resumed = #"{"message": "hey", "resuming": true}"#
+        let resumed = #"{"message": "hey", "resuming": true, "pendingTasks": []}"#
         #expect(await loader.evaluate(factsJSON: resumed, ask: noAsk) == .outcome("answer"))
     }
 

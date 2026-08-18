@@ -20,7 +20,7 @@ private let shippedPacksRoot = URL(filePath: #filePath)
 /// agent/step → the declaration JSON the compiled module must export (`SZStepDeclare`
 /// encodes with sorted keys). Mirrors SZAITests' `shippedPackSteps` claims exactly.
 private let pinnedDeclarations: [String: String] = [
-    "director/door": #"{"outcomes":["build","answer","answer-resumed","implement"]}"#,
+    "director/door": #"{"outcomes":["build","answer","answer-resumed","implement","amend"]}"#,
     "director/work-left": #"{"outcomes":["yes","no"]}"#,
     "coding/door": #"{"outcomes":["implement","continue","edit","chat","chat-resumed"]}"#,
     "debug/door": #"{"outcomes":["answer"]}"#,

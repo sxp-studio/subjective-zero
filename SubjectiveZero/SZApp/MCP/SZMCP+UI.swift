@@ -86,6 +86,13 @@ extension SZHostBridge {
                  properties: [
                     "instruction": ["type": "string", "description": "optional free-text steer for the run"],
                  ]),
+            tool("ui_amend_task", "Fold more words into a SCHEDULED task that has not started yet — what a follow-up like \"actually blue, not red\" does to an ask still waiting its turn. `task_id` comes from the task list in your brief. The words are APPENDED (the task keeps what was already asked), because a later message usually refines an earlier one rather than replacing it. Returns {amended: true}, or {amended: false, reason} if the task already started (message its agents instead — that is a steer, not an amend) or no longer exists.",
+                 properties: [
+                    "task_id": ["type": "string", "description": "the scheduled task's id"],
+                    "instruction": ["type": "string", "description": "the words to fold in"],
+                 ]),
+            tool("ui_cancel_task", "Drop a SCHEDULED task that has not started yet — how two asks become one (amend the survivor, then cancel the other) and how a request the user withdrew stops before it spends anything. Returns {cancelled: true}, or {cancelled: false, reason} if it already started or no longer exists.",
+                 properties: ["task_id": ["type": "string", "description": "the scheduled task's id"]]),
             tool("ui_stop", "Stop the in-flight run (mirrors the HUD Stop button) — cancels the Director and every coding agent. Returns {status: \"stopped\"} if a run was cancelled, or {status: \"not_running\"} if nothing was in flight.",
                  properties: [:], agentCallable: false),   // a Director calling it would cancel its own run
             tool("ui_send_chat", "Send a chat message to an agent. `scope` is a node id (chat that node's Coding Agent) or \"director\" (the Director Agent). Every accepted message returns a `message_id`; `status` is \"queued\" (enqueued — delivers as a real turn when the recipient is free; poll ui_message_status if you need the outcome), \"recorded\" (a mid-run steer, folded into the recipient's next prompt), or \"rejected\" (pre-flight refusal — the message will NOT deliver; `detail` says why). A fresh Director Agent chat uses the active provider; resuming continues on the session's own CLI.",
@@ -181,6 +188,8 @@ extension SZHostBridge {
         case "ui_tidy_graph":      return try uiTidyGraph(arguments)
         case "ui_set_provider":    return try uiSetProvider(arguments)
         case "ui_run":             return uiRun(arguments)
+        case "ui_amend_task":      return try uiAmendTask(arguments)
+        case "ui_cancel_task":     return try uiCancelTask(arguments)
         case "ui_stop":            return uiStop(arguments)
         case "ui_send_chat":       return try uiSendChat(arguments)
         case "ui_message_status":  return try uiMessageStatus(arguments)
@@ -603,6 +612,38 @@ extension SZHostBridge {
             return SZJSONRPC.encode(["status": "refused", "reason": host.status])
         }
         return SZJSONRPC.encode(["status": "started", "provider": host.activeProviderID])
+    }
+
+    private func uiAmendTask(_ arguments: [String: Any]) throws -> String {
+        guard let id = arguments.string("task_id").flatMap(UUID.init(uuidString:)) else {
+            throw SZMCPError.message("ui_amend_task needs a `task_id` (a uuid)")
+        }
+        guard let instruction = arguments.string("instruction"),
+              !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SZMCPError.message("ui_amend_task needs a non-empty `instruction`")
+        }
+        guard host.amendTask(id, with: instruction) else {
+            return SZJSONRPC.encode(["amended": false, "reason": Self.taskGoneReason(id, host: host)])
+        }
+        return SZJSONRPC.encode(["amended": true])
+    }
+
+    private func uiCancelTask(_ arguments: [String: Any]) throws -> String {
+        guard let id = arguments.string("task_id").flatMap(UUID.init(uuidString:)) else {
+            throw SZMCPError.message("ui_cancel_task needs a `task_id` (a uuid)")
+        }
+        guard host.withdrawTask(id) else {
+            return SZJSONRPC.encode(["cancelled": false, "reason": Self.taskGoneReason(id, host: host)])
+        }
+        return SZJSONRPC.encode(["cancelled": true])
+    }
+
+    /// Why a task could not be amended or cancelled — a running task is a different situation from
+    /// one that never existed, and saying which is what tells the caller what to do instead.
+    private static func taskGoneReason(_ id: UUID, host: SZHost) -> String {
+        host.activeRuns[id] != nil
+            ? "that task is already running — message its agents to steer it"
+            : "no scheduled task with that id"
     }
 
     private func uiSendChat(_ arguments: [String: Any]) throws -> String {

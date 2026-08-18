@@ -31,14 +31,18 @@ public struct SZFacts: Codable, Sendable {
     public var run: SZRun?
     /// The standing work assigned to this scope, surviving the retry loop; nil when none. The coding door's `implement`-vs-`continue` fork.
     public var assignment: SZAssignment?
+    /// Tasks scheduled but not yet started, oldest first. The director door's `amend`-vs-`schedule` fork — with none, there is nothing to fold into and the ruling cannot be `amend`. Their titles are the `{{tasks}}` brief token.
+    public var pendingTasks: [UUID]
 
     public init(message: String, node: UUID? = nil, resuming: Bool = false,
-                run: SZRun? = nil, assignment: SZAssignment? = nil) {
+                run: SZRun? = nil, assignment: SZAssignment? = nil,
+                pendingTasks: [UUID] = []) {
         self.message = message
         self.node = node
         self.resuming = resuming
         self.run = run
         self.assignment = assignment
+        self.pendingTasks = pendingTasks
     }
 }
 

@@ -258,10 +258,25 @@ struct SZBriefPinTests {
             agent: "coding", categories: libraryIndexText)
 
         // — the doors' ask briefs (attempt-0 bytes; the repair wrapper appends only on retries) —
+        // Two scheduled tasks: enough to show the id line an amend names and the "asked" line.
+        let scheduled = [
+            SZTask(id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+                   title: "make it warmer", instruction: "make it warmer",
+                   workSet: [grayID], createdAt: Date(timeIntervalSinceReferenceDate: 0)),
+            SZTask(id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+                   title: "add a soft glow", instruction: "add a soft glow",
+                   createdAt: Date(timeIntervalSinceReferenceDate: 1)),
+        ]
         out["director-triage.md"] = try renderer.render(
             agent: "director", template: "triage",
             message: "make it warmer and add a soft glow",
-            world: SZWorld(graph: base))
+            world: SZWorld(graph: base, pendingTasks: scheduled))
+
+        // — the amend lane: what the user just said, against work still waiting to start —
+        out["director-amend.md"] = try renderer.render(
+            agent: "director", template: "amend",
+            message: "actually make it cooler, not warmer",
+            world: SZWorld(graph: base, pendingTasks: scheduled))
         out["coding-triage.md"] = try renderer.render(
             agent: "coding", template: "triage",
             message: "add a strength slider",

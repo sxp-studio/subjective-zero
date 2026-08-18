@@ -157,6 +157,17 @@ public enum SZDirectorPrompt {
         inbox.isEmpty ? "- (none)" : inbox.map { "- \($0)" }.joined(separator: "\n")
     }
 
+    /// The triage/amend briefs' `{{tasks}}` value — the scheduled work not yet started, oldest
+    /// first, each line led by the id an amend or cancel names.
+    static func taskLines(_ tasks: [SZTask]) -> String {
+        guard !tasks.isEmpty else { return "- (nothing scheduled)" }
+        return tasks.map { task in
+            let nodes = task.workSet.isEmpty ? "" : " — \(task.workSet.count) node"
+                + (task.workSet.count == 1 ? "" : "s")
+            return "- `\(task.id.uuidString)` \"\(task.title)\"\(nodes)\n  asked: \(task.instruction)"
+        }.joined(separator: "\n")
+    }
+
     /// How many mutation lines a brief prints — the rest are summarized as a count, so a long run's
     /// delta stays a readable list instead of a wall the model skims past.
     static let mutationLineCap = 40
