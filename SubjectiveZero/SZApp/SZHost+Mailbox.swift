@@ -28,24 +28,26 @@ import SZCore
 extension SZHost {
     static let deliveryCap = 3
 
-    /// Deliver every queued `.chat` head whose recipient is free — synchronous scan, spawn per
-    /// delivery. Steers are never pumped (their consumer drains them).
+    /// Deliver every free recipient's next fold — synchronous scan, spawn per delivery. Steers
+    /// are never pumped (their consumer drains them).
     func pumpMailboxes() {
         guard !pumpSuspended else { return }
         admitPendingTasks()
         for key in mailbox.recipientsWithPending {
             guard activeDeliveries < Self.deliveryCap else { break }
-            guard let scope = SZChatScope(key: key),
-                  let envelope = mailbox.pending(for: key).first(where: { $0.intent == .chat })
-            else { continue }
+            guard let scope = SZChatScope(key: key) else { continue }
+            let fold = mailbox.fold(for: key)
+            guard !fold.isEmpty else { continue }
             guard inFlightAssistantIDs[key] == nil else { continue }   // zombie still streaming
             let claim = SZClaimToken(label: "delivery to \(turnLabel(for: scope))")
             guard ledger.tryAcquire(Self.turnResources(for: scope), as: claim) else { continue }
-            mailbox.markDelivering(envelope.id)
+            // The whole fold moves together: one turn, one record, and every id reaches its
+            // terminal state at the same moment.
+            let envelopeIDs = fold.map(\.id)
+            for id in envelopeIDs { mailbox.markDelivering(id) }
             activeDeliveries += 1
-            let envelopeID = envelope.id
             chatTurnTasks[scope.key] = Task { @MainActor in
-                await performChatTurn(envelopeID, scope: scope, claim: claim)
+                await performChatTurn(envelopeIDs, scope: scope, claim: claim)
             }
         }
     }
@@ -54,7 +56,13 @@ extension SZHost {
     /// Prompt, recap, and mention expansion are built HERE, at delivery time, against the
     /// live graph. Never touches the active tab. Ends with `markProcessed` → release →
     /// the pump's next pass, whose head admits any minted run before queued prose.
-    func performChatTurn(_ envelopeID: UUID, scope: SZChatScope, claim: SZClaimToken) async {
+    func performChatTurn(_ envelopeIDs: [UUID], scope: SZChatScope, claim: SZClaimToken) async {
+        // The fold delivers as ONE turn, so every id in it reaches the same terminal state at the
+        // same moment. The head is the envelope the delivery is "about" (its bubble, its session).
+        guard let envelopeID = envelopeIDs.first else { return }
+        func markProcessed() { for id in envelopeIDs { mailbox.markProcessed(id) } }
+        func markFailed(_ reason: String) { for id in envelopeIDs { mailbox.markFailed(id, reason: reason) } }
+        func requeue() { for id in envelopeIDs { mailbox.requeue(id) } }
         var released = false
         func releaseClaim() {
             guard !released else { return }
@@ -71,18 +79,20 @@ extension SZHost {
         // The wait ends HERE — prompt building below (recap, mention expansion) is delivery work,
         // not queueing, and must not inflate the queue.wait row.
         let waitEnded = Date()
-        let text = envelope.message.text
+        // Every folded part, in order — the same "\n\n" join the steer lane uses.
+        let folded = envelopeIDs.compactMap { mailbox.envelope(for: $0) }
+        let text = folded.map(\.message.text).joined(separator: "\n\n")
 
         // A transient note under the already-shown bubble — the delivery-time counterpart of
         // sendChat's pre-flight rejects (the enqueue-time checks passed; the world moved since).
         func fail(_ note: String) {
             store.appendChatMessage(SZChatMessage(role: .assistant, text: note, transient: true), to: scope)
-            mailbox.markFailed(envelopeID, reason: note)
+            markFailed(note)
         }
 
         guard store.project != nil,
               scope.nodeID == nil || store.project?.graph.node(id: scope.nodeID!) != nil else {
-            mailbox.markFailed(envelopeID, reason: "the recipient no longer exists")
+            markFailed("the recipient no longer exists")
             return
         }
         guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {
@@ -100,16 +110,17 @@ extension SZHost {
 
         // Redelivery after a restart whose transcript lost the bubble (queue survived, sidecar
         // older): re-append it so the conversation shows what is being delivered.
-        if let bubbleID = envelope.transcriptMessageID,
-           !store.messages(for: scope).contains(where: { $0.id == bubbleID }) {
-            store.appendChatMessage(envelope.message, to: scope)
+        for part in folded {
+            guard let bubbleID = part.transcriptMessageID,
+                  !store.messages(for: scope).contains(where: { $0.id == bubbleID }) else { continue }
+            store.appendChatMessage(part.message, to: scope)
             flushTranscript(scope)
         }
 
         // Catch-up recap for a session-less delivery — computed now, excluding this envelope's own
         // bubble and every still-queued bubble behind it (they are NOT prior conversation).
         var recapExclusions = Set(mailbox.pending(for: scope.key).compactMap(\.transcriptMessageID))
-        if let own = envelope.transcriptMessageID { recapExclusions.insert(own) }
+        for part in folded { if let own = part.transcriptMessageID { recapExclusions.insert(own) } }
         let recap = existing == nil ? transcriptRecap(for: scope, excluding: recapExclusions) : nil
 
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
@@ -163,7 +174,8 @@ extension SZHost {
             // HERE — delivery context that never enters the pack render).
             let expanded = SZMentionExpansion.agentText(
                 text, nodes: (store.project?.graph.nodes ?? []).map { (id: $0.id, title: $0.title) })
-            let messageAttachments = envelope.message.attachments
+            // Every folded part's attachments ride along — one turn sees all of them.
+            let messageAttachments = folded.flatMap(\.message.attachments)
             // A node delivery carries the node's current files on EVERY message — the cold
             // chat seed needs them once, and the edit lane re-grounds on them each turn
             // (after an edit, a session's memory of the files is stale by construction).
@@ -205,7 +217,7 @@ extension SZHost {
                 // Only the DIRECTOR turn's Stop discards the tasks IT scheduled — never a task
                 // someone else queued while this turn was streaming.
                 for id in mintedTaskIDs { withdrawTask(id) }
-                mailbox.markProcessed(envelopeID)
+                markProcessed()
                 return
             }
             let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
@@ -221,14 +233,14 @@ extension SZHost {
                 // session is dead (the cold retry would only run down the same clock again).
                 reply((empty ? "" : "\n") + "⚠️ \(detail)")
                 status = "chat turn timed out"
-                mailbox.markFailed(envelopeID, reason: detail)
+                markFailed(detail)
                 return
             case .preempted:
                 // The probation self-heal just fired: ONE cold-start redelivery — bounded
                 // structurally: with the session gone, a second failure lands in markFailed.
                 reply("(session expired — retrying with a fresh session)")
                 status = "chat turn failed — retrying with a fresh session"
-                mailbox.requeue(envelopeID)
+                requeue()
                 return   // the defer's release re-fires the pump → redelivery
             case .provider(let detail):
                 reply((empty ? "" : "\n") + "⚠️ Provider error: \(detail)")
@@ -236,9 +248,9 @@ extension SZHost {
                 if empty { reply(result.outcome.failed ? "(agent run failed)" : "(no text response)") }
             }
             if result.outcome.failed {
-                mailbox.markFailed(envelopeID, reason: result.outcome.message ?? "the turn failed")
+                markFailed(result.outcome.message ?? "the turn failed")
             } else {
-                mailbox.markProcessed(envelopeID)
+                markProcessed()
             }
         } catch {
             // A deliver that bowed out before its turn-end path ran left the queue-wait row
@@ -247,12 +259,12 @@ extension SZHost {
             if dropSessionIfStale(scope) {
                 reply("(session expired — retrying with a fresh session)")
                 status = "chat turn failed — retrying with a fresh session"
-                mailbox.requeue(envelopeID)
+                requeue()
                 return
             }
             reply("(chat failed: \(error))")
             status = "chat failed"
-            mailbox.markFailed(envelopeID, reason: "\(error)")
+            markFailed("\(error)")
         }
         // A run this turn minted (the door's `requestBuild`, or a mid-turn `ui_run`) fires
         // from the pump: the defer's release triggers `admitPendingTasks` at the

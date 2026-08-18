@@ -290,3 +290,53 @@ private final class Box<T> {
     var value: T
     init(_ value: T) { self.value = value }
 }
+
+// MARK: - Folding consecutive sends
+
+@MainActor
+@Test func consecutiveSendsFromOneSenderFoldIntoOneDelivery() {
+    // Three clarifications typed in a row are ONE turn that answers all three, not three turns
+    // each blind to the next.
+    let queue = SZMessageQueue()
+    for text in ["bigger", "actually blue", "and slower"] {
+        queue.enqueue(chatEnvelope(to: "director", text: text))
+    }
+    #expect(queue.fold(for: "director").map(\.message.text) == ["bigger", "actually blue", "and slower"])
+}
+
+@MainActor
+@Test func aDifferentSenderEndsTheFold() {
+    let queue = SZMessageQueue()
+    queue.enqueue(chatEnvelope(to: "director", text: "mine"))
+    queue.enqueue(chatEnvelope(to: "director", text: "theirs", sender: "coding"))
+    queue.enqueue(chatEnvelope(to: "director", text: "mine again"))
+    // Someone else's message is not yours to fold into — the run stops at it, and it stays queued.
+    #expect(queue.fold(for: "director").map(\.message.text) == ["mine"])
+}
+
+@MainActor
+@Test func aSteerBetweenSendsIsSkippedNotFolded() {
+    let queue = SZMessageQueue()
+    queue.enqueue(chatEnvelope(to: "director", text: "one"))
+    queue.enqueue(chatEnvelope(to: "director", text: "steer", intent: .steer))
+    queue.enqueue(chatEnvelope(to: "director", text: "two"))
+    // Steers are never pumped — the fold passes over it and keeps collecting chat.
+    let folded = queue.fold(for: "director")
+    #expect(folded.map(\.message.text) == ["one", "two"])
+    #expect(folded.allSatisfy { $0.intent == .chat })
+}
+
+@MainActor
+@Test func onlyQueuedEnvelopesFoldAndOtherRecipientsAreUntouched() {
+    let queue = SZMessageQueue()
+    let head = chatEnvelope(to: "director", text: "delivering")
+    queue.enqueue(head)
+    queue.enqueue(chatEnvelope(to: "director", text: "queued"))
+    queue.enqueue(chatEnvelope(to: "node", text: "elsewhere"))
+    queue.markDelivering(head.id)
+    // A message that landed after `markDelivering` waits and becomes the NEXT delivery; nothing
+    // is ever injected into a turn already streaming.
+    #expect(queue.fold(for: "director").map(\.message.text) == ["queued"])
+    #expect(queue.fold(for: "node").map(\.message.text) == ["elsewhere"])
+    #expect(queue.fold(for: "nobody").isEmpty)
+}

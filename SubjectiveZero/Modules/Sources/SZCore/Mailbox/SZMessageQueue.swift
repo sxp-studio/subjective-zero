@@ -169,6 +169,24 @@ public final class SZMessageQueue {
         }
     }
 
+    /// The next DELIVERY for a recipient: its queued `.chat` head plus every consecutive queued
+    /// `.chat` sibling from the same sender. Three clarifications typed in a row are one turn that
+    /// answers all three, not three turns each blind to the next — the `.steer` lane has folded
+    /// this way from the start. The run stops at the first envelope from a different sender (their
+    /// message is not yours to fold into) and skips non-chat intents, which are never pumped.
+    /// Empty when the recipient has nothing queued.
+    public func fold(for recipient: String) -> [SZMessageEnvelope] {
+        let queued = envelopes.filter { $0.recipient == recipient && $0.state == .queued }
+        guard let head = queued.first(where: { $0.intent == .chat }) else { return [] }
+        var run = [head]
+        for envelope in queued.drop(while: { $0.id != head.id }).dropFirst() {
+            guard envelope.intent == .chat else { continue }
+            guard envelope.sender == head.sender else { break }
+            run.append(envelope)
+        }
+        return run
+    }
+
     // MARK: - Mutations
 
     public func enqueue(_ envelope: SZMessageEnvelope) {
