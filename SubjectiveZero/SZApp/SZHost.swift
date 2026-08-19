@@ -454,6 +454,12 @@ final class SZHost {
     /// The longest-running live run — the anchor for surfaces that still speak of "the" run.
     var oldestRun: SZRunState? { activeRuns.values.min { $0.startedAt < $1.startedAt } }
 
+    /// Every live build, oldest first — what the chat strip lists. One row per run, because with
+    /// concurrent runs "the" run is not a thing a surface can show.
+    var liveThreadIDs: [UUID] {
+        activeRuns.values.sorted { $0.startedAt < $1.startedAt }.map(\.thread)
+    }
+
     /// Is this object still THE registered run? A cancelled run's task unwinds later as a zombie;
     /// every write it makes past that point must be dropped.
     func isLive(_ run: SZRunState) -> Bool { activeRuns[run.taskID] === run }

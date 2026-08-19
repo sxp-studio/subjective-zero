@@ -58,7 +58,6 @@ public struct SZNodeEditorPanel: View {
     private let onFixNode: (SZNodeID) -> Void         // Outdated/Error pill → compose a rebuild request
     private let onToggleDirectorChat: () -> Void     // HUD message icon → Director Agent chat
     private let onBuild: () -> Void                  // HUD Build button → host.startRun() (headless whole-graph run)
-    private let onStopRun: () -> Void                // HUD Build button while running → cancel the run
     private let onTogglePause: () -> Void            // HUD Pause/Play → host.togglePlayback()
     private let onResetTime: () -> Void              // HUD Reset Time (rewind) → host.resetPlayback()
     private let onSetInputDefault: (SZNodeID, String, SZPortValue, Bool) -> Void  // node input control → host
@@ -144,7 +143,6 @@ public struct SZNodeEditorPanel: View {
                 onFixNode: @escaping (SZNodeID) -> Void = { _ in },
                 onToggleDirectorChat: @escaping () -> Void,
                 onBuild: @escaping () -> Void = {},
-                onStopRun: @escaping () -> Void = {},
                 onTogglePause: @escaping () -> Void = {},
                 onResetTime: @escaping () -> Void = {},
                 onSetInputDefault: @escaping (SZNodeID, String, SZPortValue, Bool) -> Void,
@@ -191,7 +189,6 @@ public struct SZNodeEditorPanel: View {
         self.onFixNode = onFixNode
         self.onToggleDirectorChat = onToggleDirectorChat
         self.onBuild = onBuild
-        self.onStopRun = onStopRun
         self.onTogglePause = onTogglePause
         self.onResetTime = onResetTime
         self.onSetInputDefault = onSetInputDefault
@@ -437,19 +434,15 @@ public struct SZNodeEditorPanel: View {
         .animation(.spring(response: 0.34, dampingFraction: 0.72), value: showBuildSegment)
     }
 
-    /// Build shows whenever there is work left to kick off — including while another run is going,
-    /// which is the case that had no control at all: a draft added mid-run could not be queued
-    /// because the only button had become Stop.
-    private var showBuildSegment: Bool { pendingNodeCount > 0 }
+    /// Build shows whenever there is work left to kick off OR something is building — it must not
+    /// vanish mid-run, or the button that dispatched the work looks like it turned into the Stop.
+    private var showBuildSegment: Bool { pendingNodeCount > 0 || isRunning }
 
-    /// The whole-graph run control, and — while anything is running — the Stop beside it. They
-    /// grow/collapse beside the chat toggle; the `.animation` on `hudBar` drives the transition.
+    /// The graph's run control, and the only one the HUD owns. Stopping is NOT here: builds are
+    /// concurrent, so a stop has to name which one, and the place that can name one is the chat
+    /// strip, where each build has its own lane and its own ■.
     @ViewBuilder
     private var buildButton: some View {
-        if isRunning {
-            SZHudStopButton(action: onStopRun)
-                .transition(.scale(scale: 0.55, anchor: .trailing).combined(with: .opacity))
-        }
         if showBuildSegment {
             SZHudBuildButton(pendingCount: pendingNodeCount,
                              pulse: pendingWorkHint, onBuild: onBuild)
@@ -1305,38 +1298,20 @@ public struct SZNodeEditorPanel: View {
 /// The HUD's whole-graph run button: filled-accent **Build** with a pending-node count badge. A
 /// gentle white ring pulses while work is pending.
 ///
-/// It no longer FLIPS to Stop while a run is live. Runs are scoped to their work set now, so
-/// "something is building" says nothing about whether you may build something else — and a button
-/// that turned into Stop meant a draft added mid-run had no control that would queue it. Stop is
-/// its own control beside it (`SZHudStopButton`), shown while anything is running.
-/// Stop, as its own control rather than a state the Build button borrows. Shown while anything is
-/// running; it ends every live run and leaves the scheduled queue standing.
-private struct SZHudStopButton: View {
-    let action: () -> Void
-    @State private var hover = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold))
-                Text("Stop").font(.system(size: 12.5, weight: .semibold))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 13)
-            .frame(height: 32)
-            .background(Capsule().fill(Color.orange).brightness(hover ? 0.06 : 0))
-        }
-        .buttonStyle(.plain)
-        .trackingHover($hover)
-        .help("Stop what is running — nodes already implemented stay, and queued work waits")
-    }
-}
-
+/// It never FLIPS to Stop. Runs are scoped to their work set now, so "something is building" says
+/// nothing about whether you may build something else — and a button that turned into Stop meant a
+/// draft added mid-run had no control that would queue it. With nothing left to kick off it stays
+/// in place and goes quiet; stopping a build is done from that build's lane in the chat strip.
 private struct SZHudBuildButton: View {
     let pendingCount: Int
     let pulse: Bool              // pending work → breathe to draw the eye
     let onBuild: () -> Void
     @State private var hover = false
+
+    /// Nothing to kick off — every node is up to date or already claimed by a build. The button
+    /// stays put and goes quiet rather than disappearing, so Stop never looks like Build changed
+    /// into it.
+    private var hasWork: Bool { pendingCount > 0 }
 
     var body: some View {
         Button(action: onBuild) {
@@ -1346,11 +1321,11 @@ private struct SZHudBuildButton: View {
                 Text("Build")
                     .font(.system(size: 12.5, weight: .semibold))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(.white.opacity(hasWork ? 1 : 0.45))
             .padding(.horizontal, 13)
             .frame(height: 32)
-            .background(Capsule().fill(Color.accentColor)
-                .brightness(hover ? 0.06 : 0))
+            .background(Capsule().fill(hasWork ? Color.accentColor : Color.white.opacity(0.07))
+                .brightness(hover && hasWork ? 0.06 : 0))
             .overlay {
                 // Render-server pulse (see chatToggleDot): the TimelineView this replaces was THE
                 // standing per-frame SwiftUI invalidation — any project with pending work paid a
@@ -1367,8 +1342,11 @@ private struct SZHudBuildButton: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(!hasWork)
         .trackingHover($hover)
-        .help("Build \(pendingCount) pending node\(pendingCount == 1 ? "" : "s")")
+        .help(hasWork
+              ? "Build \(pendingCount) pending node\(pendingCount == 1 ? "" : "s")"
+              : "Nothing to build — every node is up to date or already building")
     }
 
     /// Notification-style count pill poking the top-right corner (white on the accent capsule).

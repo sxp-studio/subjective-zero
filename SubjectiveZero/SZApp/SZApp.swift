@@ -451,6 +451,12 @@ struct SZApp: App {
                     .keyboardShortcut("l", modifiers: [.command, .option])
                     .disabled(host.store.project?.graph.nodes.isEmpty ?? true)
                 Divider()
+                // Stopping ONE build is done from its lane in the chat strip; this is the
+                // everything-at-once escape hatch, reachable with the panel closed.
+                Button("Stop All Builds") { host.cancelRun() }
+                    .keyboardShortcut(".", modifiers: [.command])
+                    .disabled(!host.isRunning)
+                Divider()
                 Toggle("Snap to Grid", isOn: Binding(get: { host.snapToGrid },
                                                      set: { host.setSnapToGrid($0) }))
                 Toggle("Grid Cursor Trail", isOn: Binding(get: { host.gridCursorTrail },
@@ -733,7 +739,6 @@ struct SZApp: App {
                               onFixNode: { host.stageRebuildFix(node: $0) },
                               onToggleDirectorChat: { host.toggleDirectorChat() },
                               onBuild: { host.buildPressed() },
-                              onStopRun: { host.cancelRun() },
                               onTogglePause: { host.togglePlayback() },
                               onResetTime: { host.resetPlayback() },
                               onSetInputDefault: { host.setInputDefault(node: $0, port: $1, value: $2, persist: $3) },
@@ -767,10 +772,8 @@ struct SZApp: App {
                         streamingIDs: Set(host.inFlightAssistantIDs.values),
                         isRunning: host.isRunning, showTokenCounts: host.showTokenCounts,
                         showTurnBreakdown: host.showTurnBreakdown,
-                        onStopRun: { host.cancelRun() },
                         workingScopes: host.chatInFlight,
-                        runStartedAt: host.oldestRun?.startedAt,
-                        runGraphRunID: host.oldestRun?.thread,
+                        runThreadIDs: host.liveThreadIDs,
                         agentGraphRuns: host.agentGraphRuns,
                         scheduledTasks: host.scheduledTaskRows,
                         onCancelScheduledTask: { host.withdrawTask($0) },

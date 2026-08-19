@@ -26,10 +26,8 @@ public struct SZChatPanel: View {
     private let isRunning: Bool                    // a whole run is in flight → Project-tab Stop slot, sends disabled
     private let showTokenCounts: Bool              // View ▸ Show Token Counts — the usage caption under replies
     private let showTurnBreakdown: Bool            // Debug ▸ Show Turn Breakdown — expandable phase rows under replies
-    private let onStopRun: () -> Void              // the send slot's whole-run Stop (Project tab, while running)
     private let workingScopes: Set<String>         // scopes with a streaming turn → their tab dot pulses
-    private let runStartedAt: Date?                // the live run's start → the run strip's ticker
-    private let runGraphRunID: UUID?               // the live run's record → the run strip's link
+    private let runThreadIDs: [UUID]               // every live thread, oldest first → the run strip
     private let agentGraphRuns: [SZAgentGraphRun]  // the RUNS records → the run strip's fleet lanes
     private let scheduledTasks: [SZScheduledRow]   // work queued and not yet started → the strip
     private let onCancelScheduledTask: ((UUID) -> Void)?   // a scheduled row's ✕
@@ -117,10 +115,8 @@ public struct SZChatPanel: View {
                 isRunning: Bool = false,
                 showTokenCounts: Bool = false,
                 showTurnBreakdown: Bool = false,
-                onStopRun: @escaping () -> Void = {},
                 workingScopes: Set<String> = [],
-                runStartedAt: Date? = nil,
-                runGraphRunID: UUID? = nil,
+                runThreadIDs: [UUID] = [],
                 agentGraphRuns: [SZAgentGraphRun] = [],
                 scheduledTasks: [SZScheduledRow] = [],
                 onCancelScheduledTask: ((UUID) -> Void)? = nil,
@@ -151,10 +147,8 @@ public struct SZChatPanel: View {
         self.isRunning = isRunning
         self.showTokenCounts = showTokenCounts
         self.showTurnBreakdown = showTurnBreakdown
-        self.onStopRun = onStopRun
         self.workingScopes = workingScopes
-        self.runStartedAt = runStartedAt
-        self.runGraphRunID = runGraphRunID
+        self.runThreadIDs = runThreadIDs
         self.agentGraphRuns = agentGraphRuns
         self.scheduledTasks = scheduledTasks
         self.onCancelScheduledTask = onCancelScheduledTask
@@ -185,11 +179,6 @@ public struct SZChatPanel: View {
 
     private var isDebug: Bool { scope == .debug }
 
-    // For a node the title IS the node (e.g. "Make Grayscale"); the agent acting on it is its Coding Agent.
-    private var headerSubtitle: String {
-        if isDebug { return "Debug chat agent · \(provider)" }
-        return (node == nil ? "Coordinates the graph" : "Coding Agent") + " · \(provider)"
-    }
     private var scopeName: String {
         if isDebug { return "the Debug Agent" }
         return node?.title.isEmpty == false ? node!.title : (node == nil ? "the Director Agent" : "this node")
@@ -271,11 +260,11 @@ public struct SZChatPanel: View {
         injectedDraft != nil && injectedDraft == draft && !draft.isEmpty
     }
 
+    /// A header with no title in it: there is ONE conversation now, so naming the agent it belongs
+    /// to said nothing (and the model it runs on is already in the composer's picker). What is left
+    /// is the reset.
     private var contextLine: some View {
         HStack {
-            Text(headerSubtitle)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
             Spacer(minLength: 0)
             // Clear = a FULL reset (transcript + the agent's session — the host side documents why
             // they go together). Hidden on an empty tab; disabled while a turn streams.
@@ -291,9 +280,9 @@ public struct SZChatPanel: View {
                 .help("Clear transcript & reset agent")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 9)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .frame(minHeight: 22)
     }
 
     private func nodeFor(_ s: SZChatScope) -> SZNode? {
@@ -332,12 +321,10 @@ public struct SZChatPanel: View {
     /// The run's presence — see `SZRunStripView`. Shown on EVERY tab while a run is in flight,
     /// matching the composer's Stop: the run is the window's state, not the Director tab's.
     private var runStrip: some View {
-        SZRunStrip(lanes: SZAgentGraphRun.workChildren(thread: runGraphRunID, in: agentGraphRuns),
+        SZRunStrip(threads: runThreadIDs,
+                   runs: agentGraphRuns,
                    title: { id in SZNodeID(uuidString: id).flatMap { project?.graph.node(id: $0)?.title } },
-                   since: runStartedAt,
                    onOpen: revealInAgentGraph.map { reveal in { reveal($0) } },
-                   threadID: runGraphRunID,
-                   leader: agentGraphRuns.first { $0.id == runGraphRunID },
                    scheduled: scheduledTasks,
                    onCancelScheduled: onCancelScheduledTask,
                    onStopRun: onStopOneRun)
@@ -581,10 +568,10 @@ public struct SZChatPanel: View {
         return stopSince
     }
 
-    /// The current stoppable action + its tooltip: the whole run (any tab, while running) or this
-    /// scope's own streaming turn. nil when the lock has no stoppable control.
+    /// The current stoppable action + its tooltip: THIS conversation's streaming turn, and nothing
+    /// wider. A build is stopped from its own lane in the strip right above — one build, one ■ —
+    /// because a composer button cannot say which of several builds it means.
     private var activeStop: (action: () -> Void, help: String)? {
-        if isRunning { return (onStopRun, "Stop the run — nodes already implemented stay") }
         if canStopTurn, streaming {
             return ({ onCancelChatTurn(scope) }, "Stop this turn — the agent keeps its session; partial reply stays")
         }

@@ -487,3 +487,38 @@ struct SZHostInterruptOneRunTests {
         #expect(host.pendingTasks.count == 1)
     }
 }
+
+/// The chat strip lists every build, so the host has to hand it every live thread — showing only
+/// the oldest was a window onto one run in a world where three can be going.
+@Suite("A surface asking what is running is told about all of it")
+@MainActor
+struct SZHostLiveThreadsTests {
+
+    private func start(_ host: SZHost, _ label: String) -> SZRunState {
+        let node = SZNodeID()
+        let claim = SZClaimToken(label: label)
+        #expect(host.ledger.tryAcquire([.node(node), .transcript(.node(node))], as: claim))
+        let state = SZRunState(taskID: UUID(), claim: claim, instruction: label,
+                               ownsGraphOp: false, workSet: [node])
+        host.activeRuns[state.taskID] = state
+        return state
+    }
+
+    @Test func everyLiveBuildIsListedOldestFirst() {
+        let host = SZHost()
+        let first = start(host, "first")
+        let second = start(host, "second")
+        let third = start(host, "third")
+
+        #expect(host.liveThreadIDs == [first.thread, second.thread, third.thread])
+    }
+
+    @Test func aFinishedBuildLeavesTheList() {
+        let host = SZHost()
+        let kept = start(host, "kept")
+        let gone = start(host, "gone")
+        host.activeRuns[gone.taskID] = nil
+
+        #expect(host.liveThreadIDs == [kept.thread])
+    }
+}
