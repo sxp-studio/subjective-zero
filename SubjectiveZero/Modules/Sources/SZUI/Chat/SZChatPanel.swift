@@ -21,7 +21,8 @@ public struct SZChatPanel: View {
     private let feed: [SZChatFeedItem]             // THE conversation: every agent's words to you
     private let project: SZProject?
     private let provider: String
-    private let streaming: Bool                    // the active scope has a turn in flight → show the dots
+    private let streaming: Bool                    // any turn is in flight → the composer's Stop slot
+    private let streamingIDs: Set<UUID>            // the messages actually being written right now
     private let isRunning: Bool                    // a whole run is in flight → Project-tab Stop slot, sends disabled
     private let showTokenCounts: Bool              // View ▸ Show Token Counts — the usage caption under replies
     private let showTurnBreakdown: Bool            // Debug ▸ Show Turn Breakdown — expandable phase rows under replies
@@ -111,7 +112,7 @@ public struct SZChatPanel: View {
     private static let debugColor = Color(red: 0.70, green: 0.62, blue: 0.85)       // the debug chat agent — a muted "this is a tool" lilac
 
     public init(store: SZStore, scope: SZChatScope = .director, feed: [SZChatFeedItem], project: SZProject?,
-                provider: String, streaming: Bool,
+                provider: String, streaming: Bool, streamingIDs: Set<UUID> = [],
                 isRunning: Bool = false,
                 showTokenCounts: Bool = false,
                 showTurnBreakdown: Bool = false,
@@ -144,6 +145,7 @@ public struct SZChatPanel: View {
         self.project = project
         self.provider = provider
         self.streaming = streaming
+        self.streamingIDs = streamingIDs
         self.isRunning = isRunning
         self.showTokenCounts = showTokenCounts
         self.showTurnBreakdown = showTurnBreakdown
@@ -274,7 +276,7 @@ public struct SZChatPanel: View {
             Spacer(minLength: 0)
             // Clear = a FULL reset (transcript + the agent's session — the host side documents why
             // they go together). Hidden on an empty tab; disabled while a turn streams.
-            if !feed.isEmpty {
+            if !store.messages(for: scope).isEmpty {
                 Button { onClearTranscript(scope) } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 9))
@@ -376,7 +378,9 @@ public struct SZChatPanel: View {
             message: message,
             // Dots = this turn is still in flight (works for codex's preamble-then-tools order, not
             // just "text empty"): the in-flight assistant turn is always the last message.
-            working: streaming && isLast && message.role == .assistant,
+            // THIS row, not "something somewhere": with several scopes feeding one transcript,
+            // "the last row is in flight" left finished turns wearing the dots.
+            working: streamingIDs.contains(message.id),
             // Queued rides in as a VALUE (not the closure) so the row's `.equatable()` skip keeps
             // working: the chip flips exactly when the prop flips.
             queued: isUser && isQueued(message.id),
@@ -566,9 +570,8 @@ public struct SZChatPanel: View {
     /// source the transcript's working row uses); a whole run / split-merge (no in-flight message on
     /// this tab) falls back to `stopSince`, stamped when the lock began.
     private var runningSince: Date? {
-        if streaming, let last = feed.last?.message,
-           last.role == .assistant, last.duration == nil {
-            return last.timestamp
+        if let live = feed.last(where: { streamingIDs.contains($0.message.id) })?.message {
+            return live.timestamp
         }
         return stopSince
     }

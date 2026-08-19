@@ -85,7 +85,7 @@ extension SZHost {
         let draft = scope == .director ? draft.strippingLeadingProjectMention() : draft
         pendingComposerDraft = SZComposerDraftInjection(scope: scope, draft: draft,
                                                         replacesNonEmpty: replacesNonEmpty)
-        showChat(scope)
+        showChat()
     }
 
     /// The panel applied an injection — id-checked so a stale consume can't drop a newer draft.
@@ -93,9 +93,10 @@ extension SZHost {
         if pendingComposerDraft?.id == id { pendingComposerDraft = nil }
     }
 
-    /// Show the one chat panel. There is a single conversation, so nothing is selected or opened
-    /// — the scope argument survives only because callers name who they are speaking about.
-    func showChat(_ scope: SZChatScope = .director) {
+    /// Show the one chat panel. There is a single conversation, so there is nothing to select —
+    /// and no scope argument, because accepting one and dropping it made every call site read as
+    /// addressing something it could not address.
+    func showChat() {
         showPanel(.chat)
     }
 
@@ -275,6 +276,13 @@ extension SZHost {
     /// a scope with nothing in flight. Run-driven coding turns are `cancelRun`'s job, not this.
     func cancelChatTurn(_ scope: SZChatScope) {
         chatTurnTasks[scope.key]?.cancel()
+    }
+
+    /// The one composer's per-turn Stop. With a single feed there is no shown scope to key on, and
+    /// keying it to the Director left a streaming node turn — visible in that same feed — with no
+    /// Stop anywhere. Interactive turns are few and the user means "stop what is being written".
+    func cancelStreamingChatTurns() {
+        for task in chatTurnTasks.values { task.cancel() }
     }
 
     /// Self-heal for expired sessions: a DISK-restored session (on probation — `restoredSessions`,

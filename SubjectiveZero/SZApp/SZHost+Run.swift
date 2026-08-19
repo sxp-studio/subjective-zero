@@ -486,7 +486,7 @@ extension SZHost {
         // through — the Director may CREATE work mid-run — and a staged split/merge always
         // runs: its pieces are the work.
         if implementable.isEmpty, instruction.isEmpty, !ownsGraphOp {
-            showChat(.director)
+            showChat()
             if !candidates.taken.isEmpty {
                 // Every dirty node belongs to a run already — say THAT, not "nothing to implement".
                 status = "already building"
@@ -547,7 +547,7 @@ extension SZHost {
         activeRuns[taskID] = run
         let thread = run.thread
         status = "running \(providerID)…"
-        showChat(.director)                                  // a run narrates into the Director Agent tab
+        showChat()                                           // a run narrates into the conversation
         let dirtyCount = run.workSet.count
         let startedID = narrateDirector(dirtyCount == 0
             ? "Run started (\(providerID)) — no nodes need implementing."
@@ -1041,13 +1041,13 @@ extension SZHost {
     /// Cancel EVERY live run (the `Stop` HUD action, and `ui_stop`). Pending tasks stand: Stop
     /// ends what is running, it does not empty the queue.
     func cancelRun() {
-        // SNAPSHOT first: `cancelRun(_:)` deregisters, and mutating the table while iterating its
-        // own values leaves runs alive. Live-caught — Stop stopped one of two.
-        for run in Array(activeRuns.values) { cancelRun(run) }
-        // A Stop must not be answered by the queue immediately starting the next ask: the user
-        // just said stop, and spending tokens on the next thing reads as ignoring them. The
-        // queue STANDS — the next thing the user does releases it.
+        // Suspend FIRST. Each `cancelRun(_:)` releases its claim synchronously, and the ledger's
+        // availability hook re-enters the pump — so a flag set afterwards arrives after the queue
+        // has already started the next ask. A Stop must not be answered by more work.
         admissionSuspended = true
+        // SNAPSHOT: `cancelRun(_:)` deregisters, and mutating the table while iterating its own
+        // values leaves runs alive. Live-caught — Stop stopped one of two.
+        for run in Array(activeRuns.values) { cancelRun(run) }
     }
 
     /// Cancel ONE run. Task cancellation propagates into the fleet's task group; nodes already

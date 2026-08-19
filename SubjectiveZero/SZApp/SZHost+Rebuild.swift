@@ -118,7 +118,10 @@ extension SZHost {
             ask = " was re-briefed after it was built — re-implement Node.swift against the node's current "
                 + "prompt, keeping its declared ports and everything the new intent doesn't change."
         }
-        injectComposerDraft(SZComposerDraft(segments: [mention, .text(ask)]), scope: .node(id))
+        // The one composer addresses the Director; the node rides in the mention, which is how
+        // the triage is told what the ask is about. Scoping this to the node would mean the
+        // injection never matched the panel and the draft silently never appeared.
+        injectComposerDraft(SZComposerDraft(segments: [mention, .text(ask)]), scope: .director)
     }
 
     /// One line, bounded, with no trailing terminator (the caller's template supplies the sentence's own) —

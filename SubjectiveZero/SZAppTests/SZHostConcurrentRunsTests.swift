@@ -253,6 +253,23 @@ struct SZHostStopTests {
         #expect(!host.isRunning)
     }
 
+    @Test func stopSuspendsAdmissionBeforeItReleasesAnything() {
+        let host = SZHost()
+        let node = SZNodeID()
+        let claim = SZClaimToken(label: "run a")
+        #expect(host.ledger.tryAcquire([.node(node), .transcript(.node(node))], as: claim))
+        let live = SZRunState(taskID: UUID(), claim: claim, instruction: "a",
+                              ownsGraphOp: false, workSet: [node])
+        host.activeRuns[live.taskID] = live
+        host.mintRun(instruction: "the next thing")
+        // Releasing a claim re-enters the pump synchronously, so a flag set AFTER the cancels
+        // arrives too late to stop anything — the queue has already started.
+        host.ledger.onAvailabilityChanged = { host.admitPendingTasks() }
+        host.cancelRun()
+        #expect(host.admissionSuspended)
+        #expect(host.pendingTasks.map(\.instruction) == ["the next thing"])
+    }
+
     @Test func theNextAskReleasesTheQueueAgain() {
         let host = SZHost()
         live(host, SZNodeID(), "run a")

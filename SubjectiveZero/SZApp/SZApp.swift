@@ -474,8 +474,6 @@ struct SZApp: App {
         // the Graph and View menus respectively; they ship in Release.)
         .commands {
             CommandMenu("Debug") {
-                Button("Open Debug Chat") { host.showChat(.debug) }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
                 // Per-turn phase breakdown under chat replies (collection rides the host's trace
                 // flag; this only shows/hides what was recorded).
                 Toggle("Show Turn Breakdown", isOn: Binding(get: { host.showTurnBreakdown },
@@ -766,6 +764,7 @@ struct SZApp: App {
             SZChatPanel(store: host.store, feed: host.chatFeed,
                         project: host.store.project, provider: host.activeProviderID,
                         streaming: !host.chatInFlight.isEmpty,
+                        streamingIDs: Set(host.inFlightAssistantIDs.values),
                         isRunning: host.isRunning, showTokenCounts: host.showTokenCounts,
                         showTurnBreakdown: host.showTurnBreakdown,
                         onStopRun: { host.cancelRun() },
@@ -778,8 +777,8 @@ struct SZApp: App {
                         isQueued: { queuedIDs.contains($0) },   // envelope id == bubble id (sendChat)
                         onSend: { host.sendChat(scope: .director, message: $0, attachments: $1) },
                         onClearTranscript: { host.clearChatTranscript($0) },
-                        canStopTurn: host.chatTurnTasks[SZChatScope.directorKey] != nil,
-                        onCancelChatTurn: { host.cancelChatTurn($0) },
+                        canStopTurn: !host.chatTurnTasks.isEmpty,
+                        onCancelChatTurn: { _ in host.cancelStreamingChatTurns() },
                         mentionCandidates: host.mentionCandidates,
                         pendingDraft: host.pendingComposerDraft,
                         onConsumePendingDraft: { host.consumeComposerDraft($0) },

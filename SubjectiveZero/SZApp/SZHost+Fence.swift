@@ -49,12 +49,15 @@ extension SZHost {
             }
             guard let holder = ledger.holder(of: .node(id)) else { continue }
             if origin == .agent {
-                if isRunClaim(holder) { continue }                 // a run's own fleet work
-                // The caller's own turn holds this node: mutating it mid-turn IS the turn's work.
-                // Only a match against the CALLER's token passes — a different agent (a Director
-                // turn, another node's agent, an outside drive) presents no claim or someone
-                // else's, and is refused like anyone.
-                if let caller = SZToolCaller.claim, holder == caller { continue }
+                // THE CALLER's run, never "any live run": with runs concurrent, a holder-side
+                // check let one run's Director delete, rewire and re-port nodes another run was
+                // mid-implementing. A turn may touch what ITS OWN run holds, and nothing else.
+                if let caller = SZToolCaller.claim {
+                    if holder == caller { continue }               // the caller's own turn
+                    if holder == activeRun(for: caller)?.claim { continue }   // its own run's work
+                }
+                // A run's own fleet work, when the caller IS the run (no per-turn token bound).
+                if SZToolCaller.claim == nil, isRunClaim(holder) { continue }
             }
             if origin == .user, !userLockDenies(holder: holder, node: id) { continue }
             return "node '\(title)' is held by \(holder.label) — wait for it to finish or stop it"

@@ -82,3 +82,38 @@ struct SZHostFenceTests {
         }
     }
 }
+
+/// With runs concurrent, the agent exemption must be the CALLER's run — a holder-side check let
+/// one run's Director delete and rewire nodes another run was mid-implementing.
+@MainActor
+struct SZHostCrossRunFenceTests {
+
+    private func run(_ host: SZHost, _ node: SZNodeID, _ label: String) -> SZRunState {
+        let claim = SZClaimToken(label: label)
+        #expect(host.ledger.tryAcquire([.node(node), .transcript(.node(node))], as: claim))
+        let state = SZRunState(taskID: UUID(), claim: claim, instruction: label,
+                               ownsGraphOp: false, workSet: [node])
+        host.activeRuns[state.taskID] = state
+        return state
+    }
+
+    @Test func aRunsAgentMayTouchItsOwnWorkSet() {
+        let host = SZHost()
+        let mine = SZNodeID()
+        let a = run(host, mine, "run a")
+        SZToolCaller.$claim.withValue(a.claim) {
+            #expect(host.fenceDenial(nodes: [mine], origin: .agent) == nil)
+        }
+    }
+
+    @Test func aRunsAgentMayNotTouchAnotherRunsWorkSet() {
+        let host = SZHost()
+        let mine = SZNodeID(), theirs = SZNodeID()
+        let a = run(host, mine, "run a")
+        run(host, theirs, "run b")
+        // Both are live runs, so a holder-side "is this ANY run's claim?" would wave this through.
+        SZToolCaller.$claim.withValue(a.claim) {
+            #expect(host.fenceDenial(nodes: [theirs], origin: .agent) != nil)
+        }
+    }
+}
