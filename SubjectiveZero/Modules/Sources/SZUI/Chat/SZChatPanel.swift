@@ -277,14 +277,19 @@ public struct SZChatPanel: View {
                 }
                 .disabled(streaming)
             } label: {
+                // Same size, same weight, same hover as the + beside it: they are two buttons on
+                // one row, and the menu's own chrome (a bezel, its own metrics) made them read as
+                // controls from different apps.
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 20))
                     .foregroundStyle(menuHover ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                     .scaleEffect(menuHover ? 1.1 : 1)
+                    .contentShape(Circle())
             }
-            .menuStyle(.borderlessButton)
+            .buttonStyle(.plain)
+            .menuStyle(.button)
             .menuIndicator(.hidden)
-            .frame(width: 22)
+            .fixedSize()
             .trackingHover($menuHover)
             .help("Conversation actions")
         }
