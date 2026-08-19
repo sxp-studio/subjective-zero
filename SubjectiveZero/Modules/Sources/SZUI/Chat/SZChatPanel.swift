@@ -77,6 +77,7 @@ public struct SZChatPanel: View {
     @State private var importing = false                // the + button's file picker is open
     @State private var dropTargeted = false             // a file drag is hovering the panel → show the drop hint
     @State private var menuHover = false                // the composer's ⋯ (conversation actions)
+    @State private var transcriptHasMoreBelow = false   // scrolled up → fade the transcript's last inch
 
     // Mention autocomplete: the live `@query` (nil = no session), the highlighted row, and whether
     // the user Esc-dismissed the list for this query. The relay lands a pick back in the buffer.
@@ -110,6 +111,9 @@ public struct SZChatPanel: View {
     static let agentColor = Color(red: 0.96, green: 0.60, blue: 0.30)   // coding agent — warm orange, kin to the node's "coding" state; internal: the breakdown+profiler timelines color-code with it
     static let directorColor = SZEdgeStyle.intentViolet                 // Director = its own flow-edge violet; internal: same
     private static let debugColor = Color(red: 0.70, green: 0.62, blue: 0.85)       // the debug chat agent — a muted "this is a tool" lilac
+    /// The panel's own ground. Named because the transcript's bottom fade has to dissolve into
+    /// EXACTLY this colour, and a fade to a near-miss reads as a smudge.
+    static let panelFill = Color(white: 0.12)
 
     public init(store: SZStore, scope: SZChatScope = .director, feed: [SZChatFeedItem], project: SZProject?,
                 provider: String, streaming: Bool, streamingIDs: Set<UUID> = [],
@@ -191,7 +195,7 @@ public struct SZChatPanel: View {
             if isRunning || !scheduledTasks.isEmpty { runStrip }
             composer
         }
-        .background(Color(white: 0.12))
+        .background(Self.panelFill)
         // Drop a file ANYWHERE on this panel → attach it to the active transcript (AppKit catcher behind
         // the content; SwiftUI's .dropDestination on a parent only caught the transcript).
         .background(SZFileDropCatcher(onDrop: { urls, _ in appendAttachments(urls); return true },
@@ -316,6 +320,25 @@ public struct SZChatPanel: View {
             // an interruptible 0.15s animation restarted per flush. The animated scroll stays for
             // new-message transitions only (above).
             .onChange(of: items.last?.message.text.count) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            // How much transcript is still below the fold. Quantized to a Bool on purpose: the raw
+            // distance changes every scroll tick, and writing that to state would re-evaluate the
+            // panel (and its lazy rows) at scroll cadence.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentSize.height - geometry.contentOffset.y
+                    - geometry.containerSize.height > 12
+            } action: { _, hasMore in
+                withAnimation(.easeOut(duration: 0.15)) { transcriptHasMoreBelow = hasMore }
+            }
+            // Scrolled up, the last inch dissolves into the panel instead of being guillotined by
+            // the viewport's edge. AT THE BOTTOM THERE IS NO FADE — the final message is the thing
+            // you came to read, and fading it would be the same defect wearing a gradient.
+            .overlay(alignment: .bottom) {
+                LinearGradient(colors: [Self.panelFill.opacity(0), Self.panelFill],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 22)
+                    .opacity(transcriptHasMoreBelow ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
         }
     }
 

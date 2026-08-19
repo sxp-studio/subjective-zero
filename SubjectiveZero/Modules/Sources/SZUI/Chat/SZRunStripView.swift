@@ -194,7 +194,10 @@ enum SZLaneMetrics {
     static let connectorWidth: CGFloat = 15
     /// Every small control in the strip — a lane's ■, a scheduled row's ✕ — is this size.
     static let controlSize: CGFloat = 16
-    static let groupGap: CGFloat = 5
+    /// Zero: a row already carries its own gap (rowHeight − pillHeight), so anything here made
+    /// the step BETWEEN builds bigger than the step from a Director to its own agents — which
+    /// reads as the child belonging to the group below it.
+    static let groupGap: CGFloat = 0
 }
 
 /// What a lane says, gathered so the row and the view agree on it.
