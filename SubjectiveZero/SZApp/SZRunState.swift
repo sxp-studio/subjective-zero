@@ -22,9 +22,11 @@ import SZCore
     let thread = UUID()
     /// The standing instruction every brief carries ("" = none given).
     let instruction: String
-    /// Was this run STARTED FOR a staged split/merge? Then it narrates at commit and owns the
-    /// hidden-piece UX.
-    let ownsGraphOp: Bool
+    /// Does this run own the staged split/merge? Then it narrates at commit, owns the
+    /// hidden-piece UX, and is the ONLY run whose ending may settle it. Set at admission when the
+    /// run was started FOR an op, and by `startOrJoinRun` when a run's own turn stages one —
+    /// never read off a host-wide flag, which would let a sibling run adopt someone else's op.
+    var ownsGraphOp: Bool
     let startedAt = Date()
     /// The monotonic twin of `startedAt` — durations survive an NTP step mid-run.
     let startedMono = ContinuousClock.now
@@ -40,6 +42,10 @@ import SZCore
     var turnLog: [SZTurnBreakdown.RunTurn] = []
     /// The traversal task, so Stop can cancel exactly this run.
     var task: Task<Void, Never>?
+    /// This run's OWN Director session. The host's `agentSessions` slot is keyed by scope, so two
+    /// concurrent runs resuming it would interleave in one CLI conversation — a reconcile turn
+    /// would resume whatever the other run last said.
+    var directorSession: SZAgentSession?
 
     init(taskID: UUID, claim: SZClaimToken, instruction: String,
          ownsGraphOp: Bool, workSet: Set<SZNodeID>) {

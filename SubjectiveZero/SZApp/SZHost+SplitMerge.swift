@@ -165,8 +165,13 @@ extension SZHost {
     /// Roll back instead. Returns false when the op was rolled back and the caller should report failure.
     private func startOrJoinRun(rollbackReason: String) -> Bool {
         // Join the CALLER's run — the Director restructuring inside its own turn — whose tail
-        // drains `pendingGraphOp`. Another run being live says nothing about ours.
-        if activeRun(for: SZToolCaller.claim) != nil { return true }
+        // drains `pendingGraphOp`. Another run being live says nothing about ours, and the run
+        // that JOINS is the one that owns the op: without this the ownership flag stays with
+        // whichever run happened to be admitted while the op was staged.
+        if let caller = activeRun(for: SZToolCaller.claim) {
+            caller.ownsGraphOp = true
+            return true
+        }
         guard startRun() == .started else {
             rollbackGraphOp(reason: "\(rollbackReason) — the run could not start"); return false
         }
@@ -208,7 +213,9 @@ extension SZHost {
         }
         graphOpStatus = [:]
         hiddenPieces = []
-        dispatchPrompts = [:]
+        // Only the op's OWN pieces — `dispatchPrompts` is host-wide and node-keyed, so clearing it
+        // wholesale discarded the brief-vs-prompt evidence of every other live run's nodes.
+        for piece in pieces { dispatchPrompts[piece] = nil }
         purgeChatArtifacts(for: pieces)   // the staged pieces' coding-agent transcripts are orphans now
         narrateDirector(reason.prefix(1).capitalized + reason.dropFirst() + ".")
         persistGraphEditAndReload(action: reason)

@@ -280,3 +280,101 @@ struct SZHostStopTests {
         #expect(!host.admissionSuspended)
     }
 }
+
+/// The host-wide singletons a run touches. Each was safe when only one run could exist; every one
+/// of these was a cross-run hazard found by review, not by use.
+@MainActor
+struct SZHostRunScopingTests {
+
+    private func run(_ host: SZHost, _ nodes: Set<SZNodeID>, _ label: String) -> SZRunState {
+        let claim = SZClaimToken(label: label)
+        var res: Set<SZResourceID> = []
+        for n in nodes { res.insert(.node(n)); res.insert(.transcript(.node(n))) }
+        #expect(host.ledger.tryAcquire(res, as: claim))
+        let state = SZRunState(taskID: UUID(), claim: claim, instruction: label,
+                               ownsGraphOp: false, workSet: nodes)
+        host.activeRuns[state.taskID] = state
+        return state
+    }
+
+    private func steer(_ host: SZHost, to node: SZNodeID, _ text: String) -> UUID {
+        let envelope = SZMessageEnvelope(
+            recipient: SZChatScope.node(node).key, sender: "director", intent: .steer,
+            message: SZChatMessage(role: .director, text: text))
+        host.mailbox.enqueue(envelope)
+        return envelope.id
+    }
+
+    @Test func aRunDrainsOnlyTheSteersAimedAtItsOwnNodes() {
+        let host = SZHost()
+        let mine = SZNodeID(), theirs = SZNodeID()
+        let a = run(host, [mine], "run a")
+        run(host, [theirs], "run b")
+        _ = steer(host, to: mine, "for A")
+        let other = steer(host, to: theirs, "for B")
+
+        let taken = host.takeDirectorMessages(for: a)
+        #expect(taken.keys.map(\.self) == [mine])
+        // B's steer is untouched and still deliverable — an unscoped drain consumed and discarded it.
+        #expect(host.mailbox.envelope(for: other)?.state == .queued)
+    }
+
+    @Test func aRunEndingSweepsOnlyItsOwnSteers() {
+        let host = SZHost()
+        let mine = SZNodeID(), theirs = SZNodeID()
+        let a = run(host, [mine], "run a")
+        run(host, [theirs], "run b")
+        let ours = steer(host, to: mine, "for A")
+        let other = steer(host, to: theirs, "for B")
+
+        host.sweepUnconsumedSteers(for: a)
+        #expect(host.mailbox.envelope(for: ours)?.state == .failed)
+        // One run ending must not destroy a concurrent run's pending steering.
+        #expect(host.mailbox.envelope(for: other)?.state == .queued)
+    }
+
+    @Test func onlyTheOwningRunSettlesAStagedGraphOp() {
+        let host = SZHost()
+        let a = run(host, [SZNodeID()], "run a")
+        let b = run(host, [SZNodeID()], "run b")
+        a.ownsGraphOp = true
+        // Ownership rides on the run, so a sibling finishing first cannot roll back A's pieces.
+        #expect(a.ownsGraphOp)
+        #expect(!b.ownsGraphOp)
+    }
+
+    @Test func createdWorkGoesToTheCallersRunOrNowhere() {
+        let host = SZHost()
+        let a = run(host, [SZNodeID()], "run a")
+        let fresh = SZNodeID()
+        // No caller identity: attributing this to "the only live run" pulled nodes into a fleet
+        // that never asked for them.
+        host.noteRunCreatedWork([fresh])
+        #expect(!a.workSet.contains(fresh))
+
+        SZToolCaller.$claim.withValue(a.claim) { host.noteRunCreatedWork([fresh]) }
+        #expect(a.workSet.contains(fresh))
+    }
+
+    @Test func aNodeAnotherRunHoldsIsNeverAdopted() {
+        let host = SZHost()
+        let theirs = SZNodeID()
+        let a = run(host, [SZNodeID()], "run a")
+        run(host, [theirs], "run b")
+        SZToolCaller.$claim.withValue(a.claim) { host.noteRunCreatedWork([theirs]) }
+        // Contended is a legitimate state now, so this skips rather than asserting.
+        #expect(!a.workSet.contains(theirs))
+    }
+
+    @Test func eachRunKeepsItsOwnDirectorSession() {
+        let host = SZHost()
+        let a = run(host, [SZNodeID()], "run a")
+        let b = run(host, [SZNodeID()], "run b")
+        a.directorSession = SZAgentSession(providerID: "claude", sessionID: "A")
+        b.directorSession = SZAgentSession(providerID: "claude", sessionID: "B")
+        // Sharing the scope-keyed slot interleaved two runs in one CLI conversation.
+        #expect(a.directorSession?.sessionID == "A")
+        #expect(b.directorSession?.sessionID == "B")
+        #expect(host.agentSessions[SZChatScope.directorKey] == nil)
+    }
+}

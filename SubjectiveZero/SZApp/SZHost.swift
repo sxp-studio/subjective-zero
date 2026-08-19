@@ -716,16 +716,26 @@ final class SZHost {
     /// claim), so callers invoke it unconditionally. The claim grows with the work set: fresh uuids
     /// are free by construction, so the acquire cannot contend.
     func noteRunCreatedWork(_ ids: Set<SZNodeID>) {
-        guard let run = activeRun(for: SZToolCaller.claim)
-                ?? (activeRuns.count == 1 ? activeRuns.values.first : nil) else { return }
-        run.workSet.formUnion(ids)
+        // The CALLER's run and nothing else. A "the only live run" fallback attributed work
+        // created by a Director chat turn, the standing agent bus or a drive to a run that never
+        // asked for it — which then implemented, accounted for and painted pills on those nodes.
+        guard let run = activeRun(for: SZToolCaller.claim) else { return }
+        // A node ANOTHER run already holds is not ours to adopt. The fence refuses such an edit
+        // upstream, so this is the belt: skip it rather than assert, because with runs concurrent
+        // "contended" is a legitimate state rather than the impossibility it used to be.
+        let mine = ids.filter { id in
+            let holder = ledger.holder(of: .node(id))
+            return holder == nil || holder == run.claim
+        }
+        guard !mine.isEmpty else { return }
+        run.workSet.formUnion(mine)
         var resources: Set<SZResourceID> = []
-        for id in ids {
+        for id in mine {
             resources.insert(.node(id))
             resources.insert(.transcript(.node(id)))
         }
         let claimed = ledger.tryAcquire(resources, as: run.claim)
-        assert(claimed, "noteRunCreatedWork: fresh nodes unexpectedly contended — "
+        assert(claimed, "noteRunCreatedWork: uncontended nodes failed to claim — "
             + ledger.blockers(of: resources).map(\.label).joined(separator: ", "))
     }
 
