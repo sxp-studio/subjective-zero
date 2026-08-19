@@ -282,7 +282,7 @@ struct SZHostStopTests {
 }
 
 /// The host-wide singletons a run touches. Each was safe when only one run could exist; every one
-/// of these was a cross-run hazard found by review, not by use.
+/// of these is a cross-run hazard: safe while only one run could exist, wrong once two can.
 @MainActor
 struct SZHostRunScopingTests {
 
@@ -379,7 +379,7 @@ struct SZHostRunScopingTests {
     }
 }
 
-/// The remaining review findings, each a state that only exists now that runs are concurrent.
+/// Lifecycle gates that only became reachable once runs could overlap.
 @MainActor
 struct SZHostLifecycleScopingTests {
 

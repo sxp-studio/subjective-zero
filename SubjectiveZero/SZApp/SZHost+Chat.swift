@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Chat-panel state + messaging — the host-owned tab bookkeeping (open / select / close / reorder
-// the Director + per-node chat tabs, driven by both the SwiftUI panel and the `ui_*` MCP surface) and
-// `sendChat`, the interactive `ui_send_chat` entry point that cold-starts or resumes an agent session
-// and streams the reply through the shared `deliver` substrate.
+// Chat-panel state + messaging: `chatFeed` (the one conversation, derived from the per-scope
+// transcripts), the composer's staged draft/mention, and `sendChat` — the entry point shared by the
+// panel and `ui_send_chat`, which cold-starts or resumes an agent session and streams the reply
+// through `deliver`.
 import Foundation
 import SZAI
 import SZCore
@@ -78,13 +78,13 @@ extension SZHost {
         if pendingComposerMention?.id == id { pendingComposerMention = nil }
     }
 
-    /// Land a host-drafted message in the composer (a context-menu suggestion click): stage the
-    /// draft and reveal the recipient's tab. The panel applies it and emphasizes send until acted
-    /// on — V1 ruling: suggestions COMPOSE, they never auto-send.
+    /// Land a host-drafted message in the composer and show the chat. The panel applies it and
+    /// emphasizes send until acted on. Canned suggestion rows do not come through here — those are
+    /// whole sentences and send themselves (`pickContextSuggestion`); this is for drafts you finish.
     func injectComposerDraft(_ draft: SZComposerDraft, scope: SZChatScope,
                              replacesNonEmpty: Bool = true) {
-        // Inside the Project tab you already address the Director — a leading @project mention is
-        // redundant there (and reads oddly). Route stays correct: no leading mention → the Project tab.
+        // Every message already addresses the Director, so a leading @project mention is
+        // redundant here (and reads oddly). Routing is unaffected: the door reads mentions as hints.
         let draft = scope == .director ? draft.strippingLeadingProjectMention() : draft
         pendingComposerDraft = SZComposerDraftInjection(scope: scope, draft: draft,
                                                         replacesNonEmpty: replacesNonEmpty)
@@ -123,18 +123,11 @@ extension SZHost {
         if chatVisible { closePanel(.chat) } else { showPanel(.chat) }
     }
 
-    /// Clear a chat tab (the header trash) — a FULL reset via the shared scope teardown
-    /// (`resetScopeChat`): transcript (store + sidecar), durable attachment copies, the resumable
-    /// session, and any queued Director message — so the next turn cold-starts a fresh agent with
-    /// no history (no recap either; the history is gone by choice). Clearing only the visible
-    /// transcript while the CLI session still "remembers" would be misleading. Refused while the
-    /// scope is streaming; the tab (and a node's status pill) stays — those aren't chat state.
-    /// Clear THE CONVERSATION — every scope the one feed is made of, not just the Director's.
-    /// The panel shows a merge of the Director's transcript and each node's chat messages, so
-    /// resetting one scope left the other half of the visible conversation on screen with no
-    /// control able to reach it (the trash then hid itself, since it reads the Director's scope).
-    /// A scope with a turn in flight keeps its transcript — resetting it under a streaming agent
-    /// would strand the reply.
+    /// Clear THE CONVERSATION (the composer's ⋯ menu): every scope the one feed is made of, not
+    /// just the Director's — resetting one left the visible half nothing could reach. Each is a
+    /// FULL reset via `resetScopeChat`: transcript, attachment copies, resumable session, queued
+    /// messages, so the next turn cold-starts. A scope mid-turn keeps its transcript; resetting it
+    /// under a streaming agent would strand the reply.
     func clearChatTranscript(_ scope: SZChatScope) {
         var scopes: [SZChatScope] = [scope]
         if scope == .director {
@@ -166,7 +159,7 @@ extension SZHost {
     }
 
     /// Send a chat message to an agent — THE single entry point for both the chat panel's composer and
-    /// the `ui_send_chat` MCP tool, so the two paths can't drift. Reveals the scope's tab,
+    /// the `ui_send_chat` MCP tool, so the two paths can't drift. Reveals the chat,
     /// records the user message, opens an empty assistant message, and streams the reply into it.
     /// A node-scoped chat resumes that node's coding-agent session (built by a run, so it carries
     /// the node's context); a Director chat resumes its session or, on the first turn, starts a fresh

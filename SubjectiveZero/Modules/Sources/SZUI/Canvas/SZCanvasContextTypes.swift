@@ -15,9 +15,8 @@ public enum SZCanvasContextTarget: Equatable, Sendable {
     case canvas
 }
 
-/// One suggestion row — a complete draft message (mention tokens included). Clicking it lands the
-/// draft in the composer (V1 ruling: compose, never auto-send). `label` is the row's one-line
-/// preview (usually the draft's plainText).
+/// One suggestion row — a complete draft message (mention tokens included), which clicking SENDS.
+/// `label` is the row's one-line preview (usually the draft's plainText).
 public struct SZContextSuggestion: Identifiable, Equatable, Sendable {
     public let id: UUID
     public let label: String

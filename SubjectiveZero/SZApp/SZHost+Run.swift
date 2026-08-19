@@ -356,10 +356,8 @@ extension SZHost {
         admissionSuspended = false   // a new ask is the user acting again
         flushTaskQueue()
         pumpMailboxes()   // fires now if the work is free; else the next release re-fires
-        // Narrate AFTER the pump, and only if the task is actually still waiting. Announcing
-        // "queued" because something ELSE was running said the opposite of what this whole layer
-        // does: with disjoint work sets the pump admits it in the same breath, and the "Run
-        // started" line right below then contradicted it.
+        // After the pump, and only if the task is still waiting: "queued" because something ELSE
+        // was running contradicted the "Run started" line the same pump had just produced.
         if let ahead = pendingTasks.firstIndex(where: { $0.id == task.id }) {
             narrateDirector(ahead == 0
                 ? "Queued — it starts when the work it needs is free."
@@ -474,13 +472,9 @@ extension SZHost {
         let instruction = task.instruction
         // Land any prompt the user is mid-typing before we read the graph or claim a node.
         flushPendingPromptEdit()
-        // Ownership of a staged op is ASKED FOR, never inferred. A run admitted from the queue
-        // while someone else's op is staged must not adopt it (it would then suppress all of its
-        // own run-end accounting) — so only `startOrJoinRun`, which stages, passes true. The old
-        // test for this was `!isRunning`, host-wide: with concurrent builds ANY live run denied
-        // ownership to the run actually implementing the pieces, and since nothing else drains,
-        // the split stayed staged forever — pieces hidden, node pill stuck, every later
-        // split/merge refused by the ghost.
+        // Ownership of a staged op is ASKED FOR by the caller that staged it, never inferred:
+        // inferring it from "nothing else is running" denied ownership to the very run
+        // implementing the pieces, and nothing else drains an op.
         let startedForGraphOp = adoptStagedGraphOp && hasStagedGraphOp && graphOpClaim != nil
         guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {
             // NOT-READY, not refused: print-only, and the slot survives — a mint that
@@ -1110,17 +1104,11 @@ extension SZHost {
         // an idempotent no-op; its still-streaming turns stay safe because the pump's
         // delivery precondition also checks the scope's in-flight marker.
         sweepUnconsumedSteers(for: run)
-        // DEREGISTER FIRST. Releasing a claim re-enters the pump synchronously
-        // (`onAvailabilityChanged` → `pumpMailboxes` → `admitPendingTasks`), and `startRun` asks
-        // `runWorkSet` — the union over `activeRuns` — what is taken. With the dying run still in
-        // that map, the one pump a single-run Stop generates answers `.waiting` for the very task
-        // that was waiting on THESE nodes, and nothing pumps again afterwards. Deregistering also
-        // stops anything else mistaking the zombie task for a live run.
+        // DEREGISTER FIRST: releasing a claim re-enters the pump synchronously, and a run still
+        // in `activeRuns` makes its own freed nodes read as taken to the task waiting on them.
         activeRuns[run.taskID] = nil
-        // Settle a staged split/merge BEFORE the release too — leaving the op staged strands the
-        // pieces, and settling it after the release would let a task admitted by that very release
-        // claim pieces this rollback is about to delete. ONLY this run's: stopping one run must
-        // not roll back the op a different, still-building run owns.
+        // Settle a staged split/merge before the release too: a task the release admits could
+        // otherwise claim pieces this rollback deletes. Only THIS run's op, never a sibling's.
         if run.ownsGraphOp { drainPendingGraphOp() }
         ledger.releaseAll(of: run.claim)
         status = "run cancelled"

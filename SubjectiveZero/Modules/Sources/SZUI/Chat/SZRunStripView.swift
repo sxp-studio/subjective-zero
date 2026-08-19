@@ -1,21 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The builds' presence in the transcript, pinned between the messages and the composer while
-// anything is in flight. It exists because a run outlives the Director's own turn: the graph's
-// dispatch node waits on the fleet, so the Director's turn finishes ("Worked for 24s") while the
-// build is very much running.
+// The builds' presence in the transcript, pinned between the messages and the composer.
 //
-// It draws a small process tree — one group per live build, the Director's own traversal with the
-// coding agents it dispatched hanging off it on a drawn connector. Each lane is a door into that
-// agent's run, and a live Director lane carries the ■ that stops THAT build (the only per-build
-// stop there is; the HUD has none, and ⌘. stops them all).
-//
-// The lanes are the strip's own, not the Agent Graph's `SZAgentSubagentLane`: inside a dispatch
-// card a lane fills the card's width, and out here that read as a stack of full-width buttons.
-// What the two surfaces share is the vocabulary — `SZRunBadge` and its one word per state.
-//
-// Presence, not a lock: the composer stays live throughout and a send simply queues. Deliberately
-// OUTSIDE the transcript's ScrollView — a run is a state, not a message, so it must not enter the
-// LazyVStack (where it would perturb the bottom-pin anchor) nor scroll away when reading history.
+// - A run outlives the Director's turn (dispatch waits on the fleet), so without this the only
+//   surviving cue that anything was happening was the Stop.
+// - One group per live build: the Director's lane, its coding agents under it on a drawn
+//   connector. Live children first — the cap must never hide the agents actually working.
+// - The ■ on a live Director lane stops THAT build; it is the only per-build stop.
+// - Lanes are the strip's own, not the canvas's `SZAgentSubagentLane` (which fills its card's
+//   width by design). Shared instead: `SZRunBadge`, one word per state.
+// - Deliberately OUTSIDE the transcript's ScrollView — a run is state, not a message, so it must
+//   not enter the LazyVStack the bottom-pin anchor drives.
+// - Presence, not a lock: the composer stays live and a send simply queues.
 import SwiftUI
 import SZCore
 
@@ -71,17 +66,14 @@ struct SZRunStrip: View {
         }
     }
 
-    /// One build: the Director's own traversal, then the fleet hanging off it on a connector. The
-    /// rows are flush (spacing 0, the gap lives inside each row) so the connector's vertical is
-    /// CONTINUOUS down the group instead of dashing between lanes.
+    /// One build: the Director's traversal, then its fleet on a connector. Rows are flush (the gap
+    /// lives inside each row) so the connector's vertical runs unbroken down the group.
     @ViewBuilder
     private func threadGroup(_ thread: UUID) -> some View {
         let leader = runs.first { $0.id == thread }
         let children = SZAgentGraphRun.workChildren(thread: thread, in: runs)
-        // The cap keeps the LIVE children first. `workChildren` is oldest-first and keeps sealed
-        // records, so a plain prefix showed the first three agents the build ever dispatched —
-        // grey, finished — and hid every agent actually working behind "+N more", which is the one
-        // thing this strip exists to show. Within each group the dispatch order is kept.
+        // LIVE children first: `workChildren` is oldest-first and keeps sealed records, so a plain
+        // prefix showed three finished agents and hid the working ones behind "+N more".
         let lanes = Array((children.filter(\.isLive) + children.filter { !$0.isLive })
                             .prefix(Self.laneCap))
         let overflow = max(0, children.count - lanes.count)
@@ -216,9 +208,8 @@ struct SZLaneModel {
     var phase: String? { run.trace.last { $0.phase == .running }?.node ?? run.trace.last?.node }
 }
 
-/// The elbow joining a coding agent to the Director that dispatched it — drawn, not typed, so the
-/// vertical actually meets the row above it. `.middle` continues past this lane to the next child;
-/// `.last` stops at the elbow.
+/// The elbow joining a coding agent to its Director — drawn, not typed, so the vertical actually
+/// meets the row above. `.middle` continues to the next child; `.last` stops at the elbow.
 struct SZLaneConnector: View {
     enum Kind { case middle, last }
     let kind: Kind
@@ -237,9 +228,9 @@ struct SZLaneConnector: View {
     }
 }
 
-/// One agent, as a pill that hugs its own text: who, where they are, how long, what state — and, on
-/// a live Director, the ■ that stops that build. The pill carries the agent's colour as a wash
-/// rather than an outline; at four lanes an outline each was the loudest thing in the panel.
+/// One agent, as a pill that hugs its text: who, where they are, what state, how long — and, on a
+/// live Director, the ■ that stops that build. Colour rides as a wash, not an outline: at four
+/// lanes an outline each was the loudest thing in the panel.
 struct SZStripLane: View {
     let model: SZLaneModel
     var onOpen: (() -> Void)?
@@ -294,8 +285,7 @@ struct SZStripLane: View {
                              : Color.white.opacity(hover ? 0.075 : 0.04)))
         }
         .frame(height: SZLaneMetrics.rowHeight)
-        // The pill opens the run; the ■ inside it is its own button, so the two must not nest — a
-        // tap gesture on the row leaves the control clickable where a Button label would not.
+        // Tap gesture, not a Button: the ■ inside is its own button and the two must not nest.
         .contentShape(Rectangle())
         .onTapGesture { onOpen?() }
         .trackingHover($hover)
@@ -303,8 +293,8 @@ struct SZStripLane: View {
     }
 }
 
-/// The strip's small trailing control — a lane's ■, a scheduled row's ✕. ONE size for both, and a
-/// real hit target with a hover state rather than a bare tinted glyph floating beside the row.
+/// The strip's small trailing control — a lane's ■, a scheduled row's ✕. One size for both, with a
+/// real hit target and hover state.
 struct SZLaneActionButton: View {
     let symbol: String
     let help: String

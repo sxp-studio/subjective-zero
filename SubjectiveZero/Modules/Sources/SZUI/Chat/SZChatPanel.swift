@@ -23,10 +23,10 @@ public struct SZChatPanel: View {
     private let provider: String
     private let streaming: Bool                    // any turn is in flight → the composer's Stop slot
     private let streamingIDs: Set<UUID>            // the messages actually being written right now
-    private let isRunning: Bool                    // a whole run is in flight → Project-tab Stop slot, sends disabled
+    private let isRunning: Bool                    // a build is in flight → the strip shows it
     private let showTokenCounts: Bool              // View ▸ Show Token Counts — the usage caption under replies
     private let showTurnBreakdown: Bool            // Debug ▸ Show Turn Breakdown — expandable phase rows under replies
-    private let workingScopes: Set<String>         // scopes with a streaming turn → their tab dot pulses
+    private let workingScopes: Set<String>         // scopes with a streaming turn → the typing dots
     private let runThreadIDs: [UUID]               // every live thread, oldest first → the run strip
     private let agentGraphRuns: [SZAgentGraphRun]  // the RUNS records → the run strip's fleet lanes
     private let scheduledTasks: [SZScheduledRow]   // work queued and not yet started → the strip
@@ -68,8 +68,8 @@ public struct SZChatPanel: View {
     @State private var stopSince: Date?    // stamped when the composer locks → live "in flight" timer
     /// The run strip's jump into the Agent Graph panel; nil where the surface isn't wired (previews).
     @Environment(\.szRevealInAgentGraph) private var revealInAgentGraph
-    // Drafts are PER-TAB (Slack-style): each scope keeps its own unsent text, so switching tabs
-    // doesn't carry the composer over, and a tab with unsent text shows a dot. Empty drafts are
+    // One conversation, one draft. (It was per-scope while tabs existed; nothing switches now.)
+    // Empty drafts are
     // nil'd out so the dot check is a simple presence test.
     @State private var composerDraft = SZComposerDraft()
     @State private var composerHeight: CGFloat = 22     // grows 1…6 lines, driven by the AppKit input
@@ -104,7 +104,7 @@ public struct SZChatPanel: View {
         Binding(get: { draft }, set: { draft = $0 })
     }
     // User = the app's action blue; the coding agent = a warm orange echoing the node card's "coding"
-    // state (`SZNodeStatusPill`) and the pulsing-orange streaming tab dot; the Director = the violet of
+    // state (`SZNodeStatusPill`) and the pulsing-orange working dot; the Director = the violet of
     // the flow/"then" edges it owns (`SZEdgeStyle.intentViolet`). Deliberate reuse of the app's semantic
     // palette so the panel reads as part of the same tool, not a bolt-on.
     static let userColor = Color(red: 0.50, green: 0.64, blue: 1.0)   // internal: SZChatTurnRow styles mention tokens with it
@@ -217,9 +217,8 @@ public struct SZChatPanel: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: dropTargeted)
-        // Injection handshake: apply a pending host draft when it matches the shown scope —
-        // on appear (the injection usually opens the panel), on a new injection, and on a tab
-        // switch landing on the target scope.
+        // Injection handshake: apply a pending host draft on appear (the injection usually opens
+        // the panel) and whenever a new one arrives.
         .onAppear(perform: applyPendingDraft)
         .onChange(of: pendingDraft?.id) { applyPendingDraft() }
         .onAppear(perform: applyPendingMention)
@@ -257,8 +256,8 @@ public struct SZChatPanel: View {
         }
     }
 
-    /// The injected draft still sits verbatim in the composer → the send button pulses "act on me"
-    /// (V1 ruling). Any user edit or the send itself ends it.
+    /// The injected draft still sits verbatim in the composer → the send button pulses "act on me".
+    /// Any user edit or the send itself ends it.
     private var sendEmphasized: Bool {
         injectedDraft != nil && injectedDraft == draft && !draft.isEmpty
     }
@@ -350,8 +349,8 @@ public struct SZChatPanel: View {
         }
     }
 
-    /// The run's presence — see `SZRunStripView`. Shown on EVERY tab while a run is in flight,
-    /// matching the composer's Stop: the run is the window's state, not the Director tab's.
+    /// The builds' presence — see `SZRunStripView`. A build is the window's state, so it shows
+    /// whenever anything is running or scheduled.
     private var runStrip: some View {
         SZRunStrip(threads: runThreadIDs,
                    runs: agentGraphRuns,
@@ -390,7 +389,7 @@ public struct SZChatPanel: View {
                       from origin: SZChatScope) -> some View {
         let isUser = message.role == .user
         // One feed, several speakers: a line from a node's own conversation is labelled with that
-        // node, so "who said this" never depends on which tab you were looking at.
+        // node, so "who said this" is carried by the message, not by where you were looking.
         let originNode = origin.nodeID.flatMap { id in project?.graph.node(id: id) }
         // The Director's identity reads the same everywhere: its own replies in the Director tab AND
         // the messages it posts into a node's tab → one accent + symbol, so the violet "director agent" never
@@ -437,7 +436,7 @@ public struct SZChatPanel: View {
             // Locked (a run/turn in flight, or the node is agent-owned): the whole input is REPLACED
             // by a centered Stop + live timer — unambiguous that you can't type, and the Stop reads
             // as the one live control. (Text can't merely be .disabled(): AppKit's NSTextView ignores
-            // it.) The per-tab draft is preserved for when the lock lifts.
+            // it.) The draft is preserved for when the lock lifts.
             if inputLocked {
                 lockedComposer
             } else {
@@ -729,9 +728,6 @@ public struct SZChatPanel: View {
 
     private static let bottomID = "sz-chat-bottom"
 }
-
-/// Collects each chat tab's frame (in the tab-strip coordinate space) so the drag-reorder can
-/// hit-test the cursor against tab midpoints and place the insertion bar.
 
 /// One transcript turn, `.equatable()`-gated by the panel. VALUE-ONLY stored props — adding a
 /// closure or reference prop here silently breaks the `==` skip (every row would re-render per

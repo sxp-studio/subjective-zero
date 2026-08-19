@@ -135,8 +135,10 @@ are REAL messages to real agents; determinism stays in the agents' `ui_*` tools)
 - Every menu has a **free-text row** seeded with the target's mention - the recipient is always
   explicit in the message itself.
 
-Clicking a row lands the draft in the composer (the panel opens, send pulses until acted on -
-V1 ruling: compose, never auto-send). The node card has NO buttons
+Clicking a canned row SENDS it — those rows are whole instructions ("merge A and B into one
+node"), so staging one only asked you to press send on a sentence you had already chosen. The
+free-text row still lands in the composer, because that one you are still writing. The node card
+has NO buttons
 anymore (speech bubble and file button both removed): the card renders state, acting on a node is
 the right-click menu's job. Suggestion derivation is host-side
 (`SZHost+CanvasSuggestions.swift`); the menu renders dumb values only.

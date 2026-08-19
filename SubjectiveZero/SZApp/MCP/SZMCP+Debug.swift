@@ -195,7 +195,7 @@ extension SZHostBridge {
             ] },
             "runningTasks": host.activeRuns.count,
             "sessions": Array(host.agentSessions.keys).sorted(),
-            "chatting": host.nodeAgentState.filter(\.value.isChatting).keys.map(\.uuidString).sorted(),       // chat tab order (left→right), Director first
+            "chatting": host.nodeAgentState.filter(\.value.isChatting).keys.map(\.uuidString).sorted(),       // node scopes with a live chat turn
             // node uuid → last reported status line (the reconcile signal).
             "statuses": Dictionary(uniqueKeysWithValues: host.nodeStatusLines.map { ($0.key.uuidString, $0.value) }),
         ])

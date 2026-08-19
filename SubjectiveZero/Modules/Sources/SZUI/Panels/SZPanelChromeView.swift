@@ -45,9 +45,8 @@ struct SZPanelChromeView<Content: View>: View {
 
     static var headerHeight: CGFloat { 26 }
     /// The auto-hide summon band (from the tile's top). Generous by default — taller than the
-    /// header so the trigger is forgiving. Chat's is a thin sliver instead: its tab strip sits at
-    /// the very top when auto-hide is on, and a tall band would pop the header over the tabs on
-    /// every tab hover — so there, summoning means pushing to the top edge.
+    /// header so the trigger is forgiving. Chat's is a thin sliver: its transcript starts at the
+    /// very top, and a tall band would pop the header over what you are reading.
     private var triggerBand: CGFloat { id.kind == .chat ? 8 : SZHeaderRevealModel.defaultTriggerBand }
 
     /// Reveal/hide state + timing (shared with the pop-out shell). A header rearrange-drag pins
@@ -66,7 +65,7 @@ struct SZPanelChromeView<Content: View>: View {
         // The header is a translucent HUD-material overlay (the node-editor HUD's .ultraThinMaterial):
         // the viewport render / node canvas shows through behind it. Content deliberately extends
         // UNDER the header — except chat with permanent headers, whose top-anchored tab strip must
-        // stay visible, so it lays out below instead. With auto-hide on, chat's tabs take the top
+        // stay visible, so it lays out below instead. With auto-hide on, chat's transcript takes the top
         // and the summoned header slides in over them (its thin trigger band keeps that rare).
         ZStack(alignment: .top) {
             content()

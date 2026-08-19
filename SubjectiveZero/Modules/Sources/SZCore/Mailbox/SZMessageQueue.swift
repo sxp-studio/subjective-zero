@@ -56,10 +56,9 @@ public struct SZMessageEnvelope: Identifiable, Sendable {
     /// `markProcessed`. Unused today; tombstone-only (never persisted).
     public var response: String?
     public let enqueuedAt: Date
-    /// When a turn first STARTED for this envelope, persisted. `state` cannot answer that after a
-    /// crash — it is deliberately downgraded to `.queued` for at-least-once redelivery — and
-    /// transcript order cannot either: a message typed while an earlier one was streaming sits
-    /// before that earlier one's reply, and so looks answered.
+    /// When a turn first STARTED for this envelope. `state` cannot say after a crash (it downgrades
+    /// to `.queued` for redelivery), and transcript order lies: a message typed while an earlier
+    /// one streamed sits before that one's reply, so it looks answered.
     public var deliveryStartedAt: Date?
 
     public init(id: UUID = UUID(), recipient: String, sender: String? = nil,
@@ -102,10 +101,8 @@ extension SZMessageEnvelope: Codable {
         failureReason = try c.decodeIfPresent(String.self, forKey: .failureReason)
         response = try c.decodeIfPresent(String.self, forKey: .response)
         enqueuedAt = try c.decodeIfPresent(Date.self, forKey: .enqueuedAt) ?? Date()
-        // SURVIVES the delivering→queued downgrade above, and that is its whole job: after a
-        // crash the state says "redeliver me", while this says whether a turn ever started for
-        // this envelope — which is the only way restore can tell an answered message from one
-        // that merely sits behind an answered one in the transcript.
+        // Survives the delivering→queued downgrade above, which is its whole job: the state says
+        // "redeliver me", this says whether a turn ever started.
         deliveryStartedAt = try c.decodeIfPresent(Date.self, forKey: .deliveryStartedAt)
     }
 

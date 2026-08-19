@@ -115,15 +115,9 @@ extension SZHost {
         restoreTaskQueue()
     }
 
-    /// When this project first opened under the one-feed build, stamped by an empty marker in
-    /// `.staging/` (created once, then read back by its creation date).
-    ///
-    /// It exists because the feed merges the node transcripts in, and a node transcript written by
-    /// an older build holds that node's IMPLEMENTATION turns with nothing marking them as such —
-    /// the stamp that separates fleet work from conversation only started being written here. So
-    /// opening a project with build history would fill the one conversation with every coding turn
-    /// it ever ran. Older messages stay on disk and stay in their agent's context; they just are
-    /// not conversation. `.staging/` because this is local bookkeeping: a copied bundle re-stamps.
+    /// When this project first opened under the one-feed build — an empty `.staging/` marker, read
+    /// back by its creation date. Older builds wrote fleet turns into node transcripts unstamped,
+    /// so without an epoch the one feed would show every coding turn the project ever ran.
     static func feedEpoch(projectURL: URL) -> Date {
         let fm = FileManager.default
         let marker = projectURL.appending(path: ".staging").appending(path: "feed-since")
@@ -148,12 +142,9 @@ extension SZHost {
     private func restoreMessageQueue(live: Set<String>) {
         guard let url = loadedProjectURL else { return }
         var restoredIDs = Set<UUID>()
-        // The answered-check applies to the envelopes a turn actually STARTED for — the fold that
-        // was in flight, which each envelope records for itself (`deliveryStartedAt`). Inferring
-        // the fold from the file's leading same-sender run instead was wrong in a case that costs
-        // a message: send A, type B while A streams, A's reply lands, crash before the queue
-        // flush. B never had a turn, but replies append at the END, so B's bubble is followed by
-        // A's reply and B was dropped as "already answered".
+        // Answered-check applies only to envelopes a turn actually STARTED for (`deliveryStartedAt`).
+        // Inferring the fold from the file's leading same-sender run dropped a message: type B while
+        // A streams and B's bubble is followed by A's reply, which looks like an answer to B.
         let persisted = SZMessageQueueIO.load(projectURL: url)
         let deliveredTogether = Set(persisted.filter { $0.deliveryStartedAt != nil }.map(\.id))
         for envelope in persisted {
