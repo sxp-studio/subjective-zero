@@ -38,7 +38,7 @@ public struct SZNodeEditorPanel: View {
     private let hiddenPieces: Set<SZNodeID>          // staged split/merge pieces hidden until commit
     private let chatShown: Bool                   // for the HUD icon state; chat/tab state is owned by SZApp
     private let agentsWorking: Bool               // any run/turn in flight → the closed-panel chat-toggle dot
-    private let pendingWorkHint: Bool             // pending nodes, no run, Director not mid-decompose → the Build button shows + pulses
+    private let pendingWorkHint: Bool             // pending nodes worth kicking off → the Build button pulses
     private let pendingNodeCount: Int             // pending prompt nodes → the Build button's count badge
     private let snapToGrid: Bool                  // host-owned pref (Graph menu); grid dots draw regardless
     private let gridCursorTrail: Bool             // host-owned pref (Graph menu); dots morph to glyphs near the cursor
@@ -437,17 +437,22 @@ public struct SZNodeEditorPanel: View {
         .animation(.spring(response: 0.34, dampingFraction: 0.72), value: showBuildSegment)
     }
 
-    /// Show the run button when there's kickable work (pending nodes, no run, Director not
-    /// mid-decompose — that's `pendingWorkHint`) or a run is already in flight (then it's the Stop).
-    private var showBuildSegment: Bool { pendingWorkHint || isRunning }
+    /// Build shows whenever there is work left to kick off — including while another run is going,
+    /// which is the case that had no control at all: a draft added mid-run could not be queued
+    /// because the only button had become Stop.
+    private var showBuildSegment: Bool { pendingNodeCount > 0 }
 
-    /// The whole-graph run control, present only while `showBuildSegment`. It grows/collapses beside the
-    /// chat toggle — the `.animation` on `hudBar` drives the scale-from-the-chat-side + fade transition.
+    /// The whole-graph run control, and — while anything is running — the Stop beside it. They
+    /// grow/collapse beside the chat toggle; the `.animation` on `hudBar` drives the transition.
     @ViewBuilder
     private var buildButton: some View {
+        if isRunning {
+            SZHudStopButton(action: onStopRun)
+                .transition(.scale(scale: 0.55, anchor: .trailing).combined(with: .opacity))
+        }
         if showBuildSegment {
-            SZHudBuildButton(isRunning: isRunning, pendingCount: pendingNodeCount,
-                             pulse: pendingWorkHint, onBuild: onBuild, onStop: onStopRun)
+            SZHudBuildButton(pendingCount: pendingNodeCount,
+                             pulse: pendingWorkHint, onBuild: onBuild)
                 .transition(.scale(scale: 0.55, anchor: .trailing).combined(with: .opacity))
         }
     }
@@ -1297,35 +1302,60 @@ public struct SZNodeEditorPanel: View {
     }
 }
 
-/// The HUD's whole-graph run button: filled-accent **Build** with a pending-node count badge, flipping
-/// to orange **Stop** while a run is in flight (the same run the composer's Stop halts). A gentle white
-/// ring pulses while work is pending — the successor to the old chat-toggle beacon.
-private struct SZHudBuildButton: View {
-    let isRunning: Bool
-    let pendingCount: Int
-    let pulse: Bool              // pending work, no run → breathe to draw the eye
-    let onBuild: () -> Void
-    let onStop: () -> Void
+/// The HUD's whole-graph run button: filled-accent **Build** with a pending-node count badge. A
+/// gentle white ring pulses while work is pending.
+///
+/// It no longer FLIPS to Stop while a run is live. Runs are scoped to their work set now, so
+/// "something is building" says nothing about whether you may build something else — and a button
+/// that turned into Stop meant a draft added mid-run had no control that would queue it. Stop is
+/// its own control beside it (`SZHudStopButton`), shown while anything is running.
+/// Stop, as its own control rather than a state the Build button borrows. Shown while anything is
+/// running; it ends every live run and leaves the scheduled queue standing.
+private struct SZHudStopButton: View {
+    let action: () -> Void
     @State private var hover = false
 
     var body: some View {
-        Button(action: isRunning ? onStop : onBuild) {
+        Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: isRunning ? "stop.fill" : "play.fill")
+                Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold))
+                Text("Stop").font(.system(size: 12.5, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 13)
+            .frame(height: 32)
+            .background(Capsule().fill(Color.orange).brightness(hover ? 0.06 : 0))
+        }
+        .buttonStyle(.plain)
+        .trackingHover($hover)
+        .help("Stop what is running — nodes already implemented stay, and queued work waits")
+    }
+}
+
+private struct SZHudBuildButton: View {
+    let pendingCount: Int
+    let pulse: Bool              // pending work → breathe to draw the eye
+    let onBuild: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: onBuild) {
+            HStack(spacing: 6) {
+                Image(systemName: "play.fill")
                     .font(.system(size: 11, weight: .bold))
-                Text(isRunning ? "Stop" : "Build")
+                Text("Build")
                     .font(.system(size: 12.5, weight: .semibold))
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 13)
             .frame(height: 32)
-            .background(Capsule().fill(isRunning ? Color.orange : Color.accentColor)
+            .background(Capsule().fill(Color.accentColor)
                 .brightness(hover ? 0.06 : 0))
             .overlay {
                 // Render-server pulse (see chatToggleDot): the TimelineView this replaces was THE
                 // standing per-frame SwiftUI invalidation — any project with pending work paid a
                 // full-window layout flush every display frame while the editor sat idle.
-                if pulse, !isRunning {
+                if pulse {
                     SZPulsingOpacity(range: 0.27...1.0, halfPeriod: 1.05) {
                         Capsule().stroke(Color.white.opacity(0.55), lineWidth: 1.5)
                     }
@@ -1333,13 +1363,12 @@ private struct SZHudBuildButton: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                if !isRunning, pendingCount > 0 { countBadge }
+                if pendingCount > 0 { countBadge }
             }
         }
         .buttonStyle(.plain)
         .trackingHover($hover)
-        .help(isRunning ? "Stop the run — nodes already implemented stay"
-                        : "Build \(pendingCount) pending node\(pendingCount == 1 ? "" : "s")")
+        .help("Build \(pendingCount) pending node\(pendingCount == 1 ? "" : "s")")
     }
 
     /// Notification-style count pill poking the top-right corner (white on the accent capsule).

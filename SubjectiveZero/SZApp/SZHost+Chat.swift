@@ -102,15 +102,18 @@ extension SZHost {
 
     /// How many nodes await the fleet — never built, or built against a contract that has since moved. The HUD
     /// Build button's count badge.
+    /// Nodes still waiting to be kicked off — the HUD Build badge. Nodes a run ALREADY holds are
+    /// not pending: they are being built, and counting them made Build offer work it could not take.
     var pendingNodeCount: Int {
-        store.project?.graph.nodes.filter(\.needsImplementation).count ?? 0
+        let claimed = runWorkSet
+        return store.project?.graph.nodes
+            .filter { $0.needsImplementation && !claimed.contains($0.id) }.count ?? 0
     }
 
-    /// Pending prompt nodes with no run in flight = work waiting to be kicked off — gates the HUD
-    /// Build button's appearance + pulse (see also `pendingNodeCount` for the badge).
-    var pendingWorkAvailable: Bool {
-        !isRunning && pendingNodeCount > 0
-    }
+    /// Work waiting to be kicked off. NOT gated on "nothing is running" any more: a run is scoped
+    /// to its own nodes, so a draft added while another build is going is perfectly buildable —
+    /// and gating it here was half of why that draft had no control at all.
+    var pendingWorkAvailable: Bool { pendingNodeCount > 0 }
 
     /// HUD message icon — show the chat, or hide it if it is already showing.
     func toggleDirectorChat() {

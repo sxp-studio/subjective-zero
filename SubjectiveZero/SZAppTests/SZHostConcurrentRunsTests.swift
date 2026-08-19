@@ -404,3 +404,40 @@ struct SZHostLifecycleScopingTests {
         #expect(!host.admissionSuspended)
     }
 }
+
+/// What the HUD may offer while something is already building. The Build control used to BECOME
+/// Stop during a run, so a draft added mid-run had no control that would queue it.
+@MainActor
+struct SZHostPendingWorkTests {
+
+    private func draft(_ title: String) -> SZNode {
+        SZNode(kind: .prompt, title: title, prompt: "do \(title)", position: SZPoint(x: 0, y: 0))
+    }
+
+    @Test func aNodeAnotherRunIsBuildingIsNotPendingWork() {
+        let host = SZHost()
+        let building = draft("Grayscale"), fresh = draft("Distortion")
+        host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [building, fresh])))
+
+        let claim = SZClaimToken(label: "run")
+        #expect(host.ledger.tryAcquire([.node(building.id)], as: claim))
+        let run = SZRunState(taskID: UUID(), claim: claim, instruction: "",
+                             ownsGraphOp: false, workSet: [building.id])
+        host.activeRuns[run.taskID] = run
+
+        // Only the draft nobody holds — counting the one being built made Build offer work it
+        // could not take.
+        #expect(host.pendingNodeCount == 1)
+        // And it is still offered AT ALL while a run is live, which is the whole point.
+        #expect(host.pendingWorkAvailable)
+    }
+
+    @Test func aBuildPressIsScheduledSoItSurvivesContention() {
+        let host = SZHost()
+        host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [draft("A")])))
+        host.buildPressed()
+        // Bare host: the start cannot succeed, and a press that went straight to `startRun` would
+        // simply vanish. It stands as an ask instead.
+        #expect(host.pendingTasks.count == 1)
+    }
+}

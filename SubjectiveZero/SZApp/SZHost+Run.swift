@@ -454,8 +454,10 @@ extension SZHost {
     /// press is the user asking again, which releases a Stop's hold on the queue — otherwise a
     /// Build after a Stop leaves every standing task frozen for the rest of the session.
     func buildPressed() {
-        admissionSuspended = false
-        startRun()
+        admissionSuspended = false   // a press is the user asking again
+        // SCHEDULED, not started directly: the pump admits it at once when the work is free, and
+        // keeps it when it is not — a press whose nodes are momentarily held used to vanish.
+        mintRun(instruction: "", title: SZTask.title(fromInstruction: "", nodeCount: pendingNodeCount))
     }
 
     /// Admit a SCHEDULED task: claim its work set and run it. The task carries the identity every
