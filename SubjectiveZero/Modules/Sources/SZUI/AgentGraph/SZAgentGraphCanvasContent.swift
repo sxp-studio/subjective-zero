@@ -447,7 +447,7 @@ struct SZAgentSubagentLane: View {
                     .contentTransition(.identity)
                 if run.isLive {
                     SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
-                        SZRunBadge.running(colour: tint ?? SZAgentGraphStyle.live)
+                        SZRunBadge.running()
                     }
                 } else {
                     SZRunBadge.forConclusion(run.conclusion)

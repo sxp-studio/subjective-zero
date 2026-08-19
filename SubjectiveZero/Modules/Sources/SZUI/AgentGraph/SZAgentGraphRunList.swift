@@ -237,9 +237,11 @@ struct SZRunBadge: View {
     }
 
     /// In flight. One word, in the same plain tense as every ending below it — "live" was the odd
-    /// one out, a broadcast word among build words.
-    static func running(colour: Color = SZAgentGraphStyle.live) -> SZRunBadge {
-        SZRunBadge(label: "running", colour: colour)
+    /// one out, a broadcast word among build words — and ONE colour, because the badge says what
+    /// state a run is in, never which agent is in it. Whose run it is, the lane says in its own
+    /// tint; if the badge borrowed that tint too, the same state wore two colours across surfaces.
+    static func running() -> SZRunBadge {
+        SZRunBadge(label: "running", colour: SZAgentGraphStyle.live)
     }
 
     static func forConclusion(_ conclusion: SZAgentGraphRun.Conclusion?) -> SZRunBadge {

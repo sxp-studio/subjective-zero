@@ -355,13 +355,16 @@ extension SZHost {
         pendingTasks.append(task)
         admissionSuspended = false   // a new ask is the user acting again
         flushTaskQueue()
-        if isRunning {
-            let ahead = pendingTasks.count - 1
+        pumpMailboxes()   // fires now if the work is free; else the next release re-fires
+        // Narrate AFTER the pump, and only if the task is actually still waiting. Announcing
+        // "queued" because something ELSE was running said the opposite of what this whole layer
+        // does: with disjoint work sets the pump admits it in the same breath, and the "Run
+        // started" line right below then contradicted it.
+        if let ahead = pendingTasks.firstIndex(where: { $0.id == task.id }) {
             narrateDirector(ahead == 0
                 ? "Queued — it starts when the work it needs is free."
                 : "Queued behind \(ahead) other task\(ahead == 1 ? "" : "s").")
         }
-        pumpMailboxes()   // fires now if the work is free; else the next release re-fires
         return task.id
     }
 

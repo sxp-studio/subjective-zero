@@ -522,3 +522,39 @@ struct SZHostLiveThreadsTests {
         #expect(host.liveThreadIDs == [kept.thread])
     }
 }
+
+/// What the transcript says a task DID. "Queued" was narrated whenever anything else happened to
+/// be running, which under concurrency is most of the time and usually false — the pump admits a
+/// disjoint task in the same breath, and the "Run started" line right after contradicted it.
+@Suite("A task is only called queued when it is actually waiting")
+@MainActor
+struct SZHostQueueNarrationTests {
+
+    @Test func aTaskAdmittedImmediatelyIsNotAnnouncedAsQueued() {
+        let host = SZHost()
+        // No project, no MCP port: `startRun` cannot start anything, so the task stays pending
+        // and the line IS earned. What this pins is that the wording is decided by the queue's
+        // state after the pump, never by "something else is running".
+        let id = host.mintRun(instruction: "make it snow")
+        let narrated = host.store.messages(for: .director).map(\.text)
+
+        if host.pendingTasks.contains(where: { $0.id == id }) {
+            #expect(narrated.contains { $0.hasPrefix("Queued") })
+        } else {
+            #expect(!narrated.contains { $0.hasPrefix("Queued") })
+        }
+    }
+
+    @Test func aTaskBehindOthersCountsThemInsteadOfGuessing() {
+        let host = SZHost()
+        host.mintRun(instruction: "first")
+        host.mintRun(instruction: "second")
+        let narrated = host.store.messages(for: .director).map(\.text)
+
+        // The second one's line names its position; the first cannot claim to be behind anything.
+        #expect(!narrated.contains { $0.contains("Queued behind 0") })
+        if host.pendingTasks.count == 2 {
+            #expect(narrated.contains { $0.contains("Queued behind 1 other task") })
+        }
+    }
+}

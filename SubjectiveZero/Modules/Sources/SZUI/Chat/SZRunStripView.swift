@@ -51,7 +51,10 @@ struct SZRunStrip: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Divider().overlay(Color.white.opacity(0.08))
+            // No rule above it. A hairline said "another section starts here", but the strip is
+            // not a section — it is the same conversation's state, and the pills already read as
+            // objects rather than prose. What separates it is the same 10pt the composer keeps
+            // below it, so the three bands of the panel breathe evenly.
             VStack(alignment: .leading, spacing: SZLaneMetrics.groupGap) {
                 ForEach(shownThreads, id: \.self) { thread in threadGroup(thread) }
                 if hiddenThreads > 0 { overflowLine("+\(hiddenThreads) more running") }
@@ -64,7 +67,7 @@ struct SZRunStrip: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.top, 10)
         }
     }
 
@@ -253,20 +256,22 @@ struct SZStripLane: View {
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
-                Text(model.run.endedAt
-                        .map { SZTurnBreakdown.format($0.timeIntervalSince(model.run.startedAt)) }
-                     ?? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(model.run.startedAt)))
-                    .font(.system(size: 8.5, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    // Beside a pulsing badge: swap the string, never cross-fade it.
-                    .contentTransition(.identity)
+                // State, then how long it has been in it, then the control: the badge is what you
+                // read first, and the clock qualifies it.
                 if isLive {
                     SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
-                        SZRunBadge.running(colour: model.tint)
+                        SZRunBadge.running()
                     }
                 } else {
                     SZRunBadge.forConclusion(model.run.conclusion)
                 }
+                Text(model.run.endedAt
+                        .map { SZTurnBreakdown.format($0.timeIntervalSince(model.run.startedAt)) }
+                     ?? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(model.run.startedAt)))
+                    .font(.system(size: 8.5, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    // Beside a pulsing badge: swap the string, never cross-fade it.
+                    .contentTransition(.identity)
                 if let onStop {
                     SZLaneActionButton(symbol: "stop.fill",
                                        help: "Stop this build — the others keep going",
@@ -300,11 +305,13 @@ struct SZLaneActionButton: View {
 
     var body: some View {
         Button(action: action) {
+            // Sits ON a tinted wash, so it needs its own contrast: a light glyph on a dark disc,
+            // not a grey glyph on a barely-there one.
             Image(systemName: symbol)
-                .font(.system(size: 7, weight: .bold))
-                .foregroundStyle(hover ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                .font(.system(size: 7.5, weight: .bold))
+                .foregroundStyle(Color.white.opacity(hover ? 1 : 0.8))
                 .frame(width: SZLaneMetrics.controlSize, height: SZLaneMetrics.controlSize)
-                .background(Circle().fill(.white.opacity(hover ? 0.16 : 0.07)))
+                .background(Circle().fill(Color.black.opacity(hover ? 0.45 : 0.28)))
         }
         .buttonStyle(.plain)
         .trackingHover($hover)
