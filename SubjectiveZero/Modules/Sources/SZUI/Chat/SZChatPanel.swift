@@ -76,6 +76,7 @@ public struct SZChatPanel: View {
     @State private var pendingAttachments: [URL] = []   // staged-on-send: source URLs picked/dropped/pasted
     @State private var importing = false                // the + button's file picker is open
     @State private var dropTargeted = false             // a file drag is hovering the panel → show the drop hint
+    @State private var menuHover = false                // the composer's ⋯ (conversation actions)
 
     // Mention autocomplete: the live `@query` (nil = no session), the highlighted row, and whether
     // the user Esc-dismissed the list for this query. The relay lands a pick back in the buffer.
@@ -186,8 +187,6 @@ public struct SZChatPanel: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            contextLine
-            Divider().overlay(Color.white.opacity(0.08))
             transcript(feed)
             if isRunning || !scheduledTasks.isEmpty { runStrip }
             composer
@@ -260,29 +259,31 @@ public struct SZChatPanel: View {
         injectedDraft != nil && injectedDraft == draft && !draft.isEmpty
     }
 
-    /// A header with no title in it: there is ONE conversation now, so naming the agent it belongs
-    /// to said nothing (and the model it runs on is already in the composer's picker). What is left
-    /// is the reset.
-    private var contextLine: some View {
-        HStack {
-            Spacer(minLength: 0)
-            // Clear = a FULL reset (transcript + the agent's session — the host side documents why
-            // they go together). Hidden on an empty tab; disabled while a turn streams.
-            if !store.messages(for: scope).isEmpty {
-                Button { onClearTranscript(scope) } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
+    /// The conversation's own actions, in the composer rather than in a strip above the
+    /// transcript. There is one conversation now, so a header row existed to hold a single button
+    /// — and a band of chrome across the top of the panel is a lot of furniture for one item.
+    @ViewBuilder
+    private var composerMenu: some View {
+        if !store.messages(for: scope).isEmpty {
+            Menu {
+                // Clear = a FULL reset (transcript + the agent's session — the host side documents
+                // why they go together). Disabled while a turn streams.
+                Button(role: .destructive) { onClearTranscript(scope) } label: {
+                    Label("Clear Transcript & Reset Agent", systemImage: "trash")
                 }
-                .buttonStyle(.plain)
                 .disabled(streaming)
-                .opacity(streaming ? 0.35 : 1)
-                .help("Clear transcript & reset agent")
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(menuHover ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .scaleEffect(menuHover ? 1.1 : 1)
             }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22)
+            .trackingHover($menuHover)
+            .help("Conversation actions")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .frame(minHeight: 22)
     }
 
     private func nodeFor(_ s: SZChatScope) -> SZNode? {
@@ -486,6 +487,7 @@ public struct SZChatPanel: View {
             .buttonStyle(.plain)
             .trackingHover($attachHover)
             .help("Attach files")
+            composerMenu
             // The recipient line appears ONLY when a leading @mention reroutes the draft OFF this tab
             // (typing in a tab addresses that tab's agent — showing that is just noise).
             if let rerouted = reroutedRecipientLabel {
