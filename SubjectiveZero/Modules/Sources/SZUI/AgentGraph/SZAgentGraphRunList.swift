@@ -246,10 +246,16 @@ struct SZRunBadge: View {
     static func style(for conclusion: SZAgentGraphRun.Conclusion?) -> (label: String, colour: Color) {
         switch conclusion {
         case .failed, .defect: ("failed", SZAgentGraphStyle.failed)
-        case .cancelled:       ("stopped", SZAgentGraphStyle.neutral)
-        // Truncated, not decided: it must not read as a user Stop.
-        case .interrupted:     ("interrupted", SZAgentGraphStyle.neutral)
-        case .declined:        ("declined", SZAgentGraphStyle.neutral)
+        // Stopped and interrupted are ONE badge: both mean unfinished with nothing broken, and
+        // they cannot co-occur — `.interrupted` is only ever stamped when a record is restored
+        // from a session that died, so it is never something you watch happen. Which of the two
+        // it was stays in the row's tooltip and on the flipped entries' detail, because "the app
+        // closed under this run" is a fact nothing else in the record can tell you.
+        case .cancelled, .interrupted: ("stopped", SZAgentGraphStyle.neutral)
+        // A DECISION, not an accident — the agents' own violet, the colour a step's ruling wears
+        // on the canvas. Grey said the same thing here as "the app crashed", which it is not:
+        // a refusal is never a failure, and it is never nobody's doing either.
+        case .declined:        ("declined", SZEdgeStyle.intentViolet)
         // A record sealed without a conclusion cannot happen through the host's seal; drawn
         // as a plain ending rather than left blank. The SAME blue the canvas gives a clean
         // exit — a list badge and the terminal capsule are two views of one fact.
@@ -339,7 +345,10 @@ struct SZAgentGraphRunRow: View {
         // row itself stays relative; the raw pack id stays reachable here.
         .help(run.agent
               + (run.work.map { " · \($0.prefix(8))" } ?? "")
-              + " · \(run.startedAt.formatted(date: .abbreviated, time: .standard))")
+              + " · \(run.startedAt.formatted(date: .abbreviated, time: .standard))"
+              // The badge folds `.interrupted` into "stopped"; the distinction lives here, so a
+              // run the app died under is still tellable from one you ended yourself.
+              + (run.conclusion == .interrupted ? " · \(SZAgentGraphRun.interruptedDetail)" : ""))
     }
 
     /// How it ended, in the canvas terminal's own words and colours — or a pulse while it
