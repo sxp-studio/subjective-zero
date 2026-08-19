@@ -447,10 +447,12 @@ extension SZHost {
     /// has nothing to do.
     @discardableResult
     func startRun(instruction: String = "", nodes: Set<SZNodeID> = [],
-                  narrateContention: Bool = true) -> RunStart {
+                  narrateContention: Bool = true,
+                  adoptStagedGraphOp: Bool = false) -> RunStart {
         startRun(task: SZTask(title: SZTask.title(fromInstruction: instruction, nodeCount: 0),
                               instruction: instruction, workSet: nodes),
-                 narrateContention: narrateContention)
+                 narrateContention: narrateContention,
+                 adoptStagedGraphOp: adoptStagedGraphOp)
     }
 
     /// The HUD Build press. It goes through here rather than straight to `startRun` because a
@@ -466,16 +468,20 @@ extension SZHost {
     /// Admit a SCHEDULED task: claim its work set and run it. The task carries the identity every
     /// per-run write is keyed by.
     @discardableResult
-    func startRun(task: SZTask, narrateContention: Bool = true) -> RunStart {
+    func startRun(task: SZTask, narrateContention: Bool = true,
+                  adoptStagedGraphOp: Bool = false) -> RunStart {
         let taskID = task.id
         let instruction = task.instruction
         // Land any prompt the user is mid-typing before we read the graph or claim a node.
         flushPendingPromptEdit()
-        // Ownership of a staged op is NOT read off the host-wide flag: a run admitted while
-        // another run's op is staged would adopt it and then suppress all of its own run-end
-        // accounting. Only `startOrJoinRun` grants ownership, to the run that staged it —
-        // including the run it starts here, claimed right after the state object exists.
-        let startedForGraphOp = hasStagedGraphOp && graphOpClaim != nil && !isRunning
+        // Ownership of a staged op is ASKED FOR, never inferred. A run admitted from the queue
+        // while someone else's op is staged must not adopt it (it would then suppress all of its
+        // own run-end accounting) — so only `startOrJoinRun`, which stages, passes true. The old
+        // test for this was `!isRunning`, host-wide: with concurrent builds ANY live run denied
+        // ownership to the run actually implementing the pieces, and since nothing else drains,
+        // the split stayed staged forever — pieces hidden, node pill stuck, every later
+        // split/merge refused by the ghost.
+        let startedForGraphOp = adoptStagedGraphOp && hasStagedGraphOp && graphOpClaim != nil
         guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {
             // NOT-READY, not refused: print-only, and the slot survives — a mint that
             // raced project load fires when the pump next wakes with a project there.
@@ -1104,10 +1110,19 @@ extension SZHost {
         // an idempotent no-op; its still-streaming turns stay safe because the pump's
         // delivery precondition also checks the scope's in-flight marker.
         sweepUnconsumedSteers(for: run)
-        ledger.releaseAll(of: run.claim)
-        // Deregistered BEFORE the narration: everything below reads this run's own captured
-        // state, and nothing else may now mistake the zombie task for a live run.
+        // DEREGISTER FIRST. Releasing a claim re-enters the pump synchronously
+        // (`onAvailabilityChanged` → `pumpMailboxes` → `admitPendingTasks`), and `startRun` asks
+        // `runWorkSet` — the union over `activeRuns` — what is taken. With the dying run still in
+        // that map, the one pump a single-run Stop generates answers `.waiting` for the very task
+        // that was waiting on THESE nodes, and nothing pumps again afterwards. Deregistering also
+        // stops anything else mistaking the zombie task for a live run.
         activeRuns[run.taskID] = nil
+        // Settle a staged split/merge BEFORE the release too — leaving the op staged strands the
+        // pieces, and settling it after the release would let a task admitted by that very release
+        // claim pieces this rollback is about to delete. ONLY this run's: stopping one run must
+        // not roll back the op a different, still-building run owns.
+        if run.ownsGraphOp { drainPendingGraphOp() }
+        ledger.releaseAll(of: run.claim)
         status = "run cancelled"
         // Count and narrate HERE, once: the cancelled task's own catch fires seconds later (the
         // CLIs must die first), and by then this run is gone. Everything this needs is live now.
@@ -1117,10 +1132,6 @@ extension SZHost {
             : "Run cancelled — \(unfinished) node\(unfinished == 1 ? "" : "s") unfinished.")
         linkNarrationToRun(cancelledID, thread: run.thread)
         clearInFlightPhasesAfterCancel(run)
-        // Settle a staged split/merge NOW rather than waiting on the cancelled task — leaving the
-        // op staged strands the pieces. ONLY this run's: stopping one run must not roll back the
-        // op a different, still-building run owns.
-        if run.ownsGraphOp { drainPendingGraphOp() }
         flushAllTranscripts()
         persistAgentSessions()
     }

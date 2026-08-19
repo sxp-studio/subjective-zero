@@ -58,9 +58,10 @@ extension SZHost {
     func flushTaskQueue() {
         guard let url = loadedProjectURL else { return }
         let signature = SZTaskQueueIO.persistable(pendingTasks).map { "\($0.id):\($0.instruction)" }
+            + [admissionSuspended ? "held" : "open"]
         guard signature != lastFlushedTaskSignature else { return }
         lastFlushedTaskSignature = signature
-        try? SZTaskQueueIO.save(pendingTasks, projectURL: url)
+        try? SZTaskQueueIO.save(pendingTasks, suspended: admissionSuspended, projectURL: url)
     }
 
     /// Bring back the asks that were still waiting when the app closed. A RUNNING task is not
@@ -68,8 +69,13 @@ extension SZHost {
     /// would redo work that may already have landed.
     func restoreTaskQueue() {
         guard let url = loadedProjectURL else { return }
-        pendingTasks = SZTaskQueueIO.load(projectURL: url)
+        let restored = SZTaskQueueIO.load(projectURL: url)
+        pendingTasks = restored.tasks
+        // A Stop's hold travels with the queue it froze: relaunching used to admit every task the
+        // Stop had just stopped. The next ask lifts it, exactly as it does in a live session.
+        admissionSuspended = restored.suspended
         lastFlushedTaskSignature = SZTaskQueueIO.persistable(pendingTasks).map { "\($0.id):\($0.instruction)" }
+            + [admissionSuspended ? "held" : "open"]
     }
 
     /// Flush every scope with messages (run end, quit, project save).
@@ -92,6 +98,7 @@ extension SZHost {
     /// sidecar for a since-deleted node is ignored, not an error).
     func restoreTranscripts() {
         guard let url = loadedProjectURL else { return }
+        feedEpoch = Self.feedEpoch(projectURL: url)
         let live = Set((store.project?.graph.nodes.map(\.id.uuidString) ?? []) + [SZChatScope.directorKey])
         let restored = SZChatTranscriptIO.loadAll(projectURL: url)
             .filter { live.contains($0.key) }
@@ -108,6 +115,26 @@ extension SZHost {
         restoreTaskQueue()
     }
 
+    /// When this project first opened under the one-feed build, stamped by an empty marker in
+    /// `.staging/` (created once, then read back by its creation date).
+    ///
+    /// It exists because the feed merges the node transcripts in, and a node transcript written by
+    /// an older build holds that node's IMPLEMENTATION turns with nothing marking them as such —
+    /// the stamp that separates fleet work from conversation only started being written here. So
+    /// opening a project with build history would fill the one conversation with every coding turn
+    /// it ever ran. Older messages stay on disk and stay in their agent's context; they just are
+    /// not conversation. `.staging/` because this is local bookkeeping: a copied bundle re-stamps.
+    static func feedEpoch(projectURL: URL) -> Date {
+        let fm = FileManager.default
+        let marker = projectURL.appending(path: ".staging").appending(path: "feed-since")
+        if let created = (try? fm.attributesOfItem(atPath: marker.path))?[.creationDate] as? Date {
+            return created
+        }
+        try? fm.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+        fm.createFile(atPath: marker.path, contents: nil)
+        return ((try? fm.attributesOfItem(atPath: marker.path))?[.creationDate] as? Date) ?? Date()
+    }
+
     /// Restore the undelivered message queue from `.staging/message-queue.json` — the redelivery
     /// half of restore. Guards, in order: live scopes only; `.chat` only (a stray persisted steer
     /// must never leak into a fresh run); attachment urls re-derived from bundle paths; and the
@@ -121,19 +148,14 @@ extension SZHost {
     private func restoreMessageQueue(live: Set<String>) {
         guard let url = loadedProjectURL else { return }
         var restoredIDs = Set<UUID>()
-        // The answered-check applies to each scope's leading FOLD — the same run `fold` would have
-        // delivered together. Head-only was right when one envelope delivered at a time; folding
-        // makes N share one reply, so the tail of a fold that DID complete would be redelivered.
+        // The answered-check applies to the envelopes a turn actually STARTED for — the fold that
+        // was in flight, which each envelope records for itself (`deliveryStartedAt`). Inferring
+        // the fold from the file's leading same-sender run instead was wrong in a case that costs
+        // a message: send A, type B while A streams, A's reply lands, crash before the queue
+        // flush. B never had a turn, but replies append at the END, so B's bubble is followed by
+        // A's reply and B was dropped as "already answered".
         let persisted = SZMessageQueueIO.load(projectURL: url)
-        var deliveredTogether = Set<UUID>()
-        for scopeKey in Set(persisted.map(\.recipient)) {
-            let queue = persisted.filter { $0.recipient == scopeKey && $0.intent == .chat }
-            guard let head = queue.first else { continue }
-            for envelope in queue {
-                guard envelope.sender == head.sender else { break }
-                deliveredTogether.insert(envelope.id)
-            }
-        }
+        let deliveredTogether = Set(persisted.filter { $0.deliveryStartedAt != nil }.map(\.id))
         for envelope in persisted {
             guard envelope.intent == .chat, live.contains(envelope.recipient),
                   let scope = SZChatScope(key: envelope.recipient) else { continue }

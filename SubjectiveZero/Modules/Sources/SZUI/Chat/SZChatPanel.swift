@@ -34,7 +34,7 @@ public struct SZChatPanel: View {
     private let onStopOneRun: ((UUID) -> Void)?            // a live lane's ■ — that traversal only
     private let isQueued: (UUID) -> Bool           // message id → still waiting in the mailbox (queued chip)
     private let onSend: (String, [URL]) -> Void    // (message, attachment source URLs)
-    private let onClearTranscript: (SZChatScope) -> Void   // header trash — full reset (transcript + agent)
+    private let onClearTranscript: (SZChatScope) -> Void   // ⋯ menu — full reset (transcript + agent)
     private let canStopTurn: Bool                  // the active scope's turn is an interactive chat turn (stoppable)
     private let onCancelChatTurn: (SZChatScope) -> Void   // the working row's stop control
 
@@ -268,7 +268,10 @@ public struct SZChatPanel: View {
     /// — and a band of chrome across the top of the panel is a lot of furniture for one item.
     @ViewBuilder
     private var composerMenu: some View {
-        if !store.messages(for: scope).isEmpty {
+        // Offered whenever the FEED has anything in it — the panel's own contents, not one scope's.
+        // Keyed to the Director's scope it hid itself on a conversation whose visible half lived in
+        // node transcripts.
+        if !feed.isEmpty {
             Menu {
                 // Clear = a FULL reset (transcript + the agent's session — the host side documents
                 // why they go together). Disabled while a turn streams.

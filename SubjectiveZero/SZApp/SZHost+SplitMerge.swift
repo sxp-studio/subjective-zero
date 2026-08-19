@@ -172,7 +172,7 @@ extension SZHost {
             caller.ownsGraphOp = true
             return true
         }
-        guard startRun() == .started else {
+        guard startRun(adoptStagedGraphOp: true) == .started else {
             rollbackGraphOp(reason: "\(rollbackReason) — the run could not start"); return false
         }
         return true

@@ -26,10 +26,15 @@ public enum SZTaskQueueIO {
     private struct Queue: Codable {
         var formatVersion: Int
         var tasks: [SZTask]
+        /// The queue was HELD when the app closed — a Stop's hold, which is a decision about these
+        /// tasks and therefore belongs with them. Without it a Stop then a relaunch admitted
+        /// everything the Stop had just frozen, spending tokens on asks the user had killed.
+        var suspended: Bool
 
-        init(formatVersion: Int, tasks: [SZTask]) {
+        init(formatVersion: Int, tasks: [SZTask], suspended: Bool) {
             self.formatVersion = formatVersion
             self.tasks = tasks
+            self.suspended = suspended
         }
 
         /// Tolerant: a version-less document still decodes; an undecodable task drops alone
@@ -48,6 +53,7 @@ public enum SZTaskQueueIO {
                 }
             }
             tasks = tolerant
+            suspended = (try? c.decodeIfPresent(Bool.self, forKey: .suspended)) as? Bool ?? false
         }
     }
 
@@ -64,7 +70,7 @@ public enum SZTaskQueueIO {
     }
 
     /// Write the scheduled tasks. Saving an empty set REMOVES the file (no husk).
-    public static func save(_ tasks: [SZTask], projectURL: URL) throws {
+    public static func save(_ tasks: [SZTask], suspended: Bool = false, projectURL: URL) throws {
         let keep = persistable(tasks)
         let url = fileURL(projectURL: projectURL)
         guard !keep.isEmpty else {
@@ -73,16 +79,20 @@ public enum SZTaskQueueIO {
         }
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try SZJSON.encoder().encode(Document(tasks: Queue(formatVersion: formatVersion, tasks: keep)))
+        try SZJSON.encoder()
+            .encode(Document(tasks: Queue(formatVersion: formatVersion, tasks: keep,
+                                          suspended: suspended)))
             .write(to: url, options: .atomic)
     }
 
     /// Empty on a missing or undecodable file — never throws into project open. Applies the same
     /// filter as save, so a hand-edited file cannot restore something already running.
-    public static func load(projectURL: URL) -> [SZTask] {
+    public static func load(projectURL: URL) -> (tasks: [SZTask], suspended: Bool) {
         guard let data = try? Data(contentsOf: fileURL(projectURL: projectURL)),
-              let document = try? JSONDecoder().decode(Document.self, from: data) else { return [] }
-        return persistable(document.tasks.tasks)
+              let document = try? JSONDecoder().decode(Document.self, from: data) else {
+            return ([], false)
+        }
+        return (persistable(document.tasks.tasks), document.tasks.suspended)
     }
 
     /// Delete the sidecar (project reset / user-intent purge). Best effort.

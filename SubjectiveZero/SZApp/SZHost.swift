@@ -361,6 +361,11 @@ final class SZHost {
     /// answered by the queue starting the next one — which reads as the app ignoring the Stop.
     internal(set) var admissionSuspended = false
 
+    /// When this project first opened under the one-feed build — everything in a node's transcript
+    /// older than this is that node's build history, not part of the conversation. See
+    /// `SZHost.feedEpoch(projectURL:)`.
+    internal(set) var feedEpoch: Date = .distantPast
+
 
     /// The provider new agent sessions use — Director Agent runs and a first-turn Director Agent chat.
     /// Resuming a node's Coding Agent ignores this (a resume must continue on the CLI that owns it). Set

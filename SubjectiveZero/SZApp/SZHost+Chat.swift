@@ -22,7 +22,10 @@ extension SZHost {
         for node in store.project?.graph.nodes ?? [] {
             let scope = SZChatScope.node(node.id)
             items += store.messages(for: scope)
-                .filter { $0.graphRunID == nil }   // a fleet turn belongs to its task, not to us
+                // A fleet turn belongs to its task, not to us — and anything from before this
+                // project's `feedEpoch` predates that stamp, so it is fleet work until proven
+                // otherwise rather than conversation until proven otherwise.
+                .filter { $0.graphRunID == nil && $0.timestamp >= feedEpoch }
                 .map { SZChatFeedItem(scope: scope, message: $0) }
         }
         return items.sorted { $0.message.timestamp < $1.message.timestamp }
@@ -126,9 +129,21 @@ extension SZHost {
     /// no history (no recap either; the history is gone by choice). Clearing only the visible
     /// transcript while the CLI session still "remembers" would be misleading. Refused while the
     /// scope is streaming; the tab (and a node's status pill) stays — those aren't chat state.
+    /// Clear THE CONVERSATION — every scope the one feed is made of, not just the Director's.
+    /// The panel shows a merge of the Director's transcript and each node's chat messages, so
+    /// resetting one scope left the other half of the visible conversation on screen with no
+    /// control able to reach it (the trash then hid itself, since it reads the Director's scope).
+    /// A scope with a turn in flight keeps its transcript — resetting it under a streaming agent
+    /// would strand the reply.
     func clearChatTranscript(_ scope: SZChatScope) {
-        guard !chatInFlight.contains(scope.key) else { return }
-        resetScopeChat(scope)
+        var scopes: [SZChatScope] = [scope]
+        if scope == .director {
+            scopes += (store.project?.graph.nodes ?? []).map { SZChatScope.node($0.id) }
+        }
+        for target in scopes where !chatInFlight.contains(target.key) {
+            guard !store.messages(for: target).isEmpty else { continue }
+            resetScopeChat(target)
+        }
         persistAgentSessions()
     }
 

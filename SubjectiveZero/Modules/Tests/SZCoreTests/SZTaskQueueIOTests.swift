@@ -14,7 +14,7 @@ import Testing
     let second = SZTask(title: "add a glow", instruction: "add a glow", workSet: [SZNodeID()])
     try SZTaskQueueIO.save([first, second], projectURL: dir)
 
-    let restored = SZTaskQueueIO.load(projectURL: dir)
+    let restored = SZTaskQueueIO.load(projectURL: dir).tasks
     #expect(restored.map(\.id) == [first.id, second.id])
     #expect(restored.map(\.instruction) == ["make it warmer", "add a glow"])
     #expect(restored.last?.workSet == second.workSet)
@@ -27,7 +27,7 @@ import Testing
     let running = SZTask(title: "already building", instruction: "x", state: .running)
     let waiting = SZTask(title: "still waiting", instruction: "y")
     try SZTaskQueueIO.save([running, waiting], projectURL: dir)
-    #expect(SZTaskQueueIO.load(projectURL: dir).map(\.title) == ["still waiting"])
+    #expect(SZTaskQueueIO.load(projectURL: dir).tasks.map(\.title) == ["still waiting"])
 
     // And the filter applies on the way IN too, so a hand-edited file cannot resurrect one.
     #expect(SZTaskQueueIO.persistable([running, waiting]).map(\.title) == ["still waiting"])
@@ -37,7 +37,7 @@ import Testing
     let dir = FileManager.default.temporaryDirectory.appending(path: "sz-tasks-\(UUID()).subz")
     defer { try? FileManager.default.removeItem(at: dir) }
 
-    #expect(SZTaskQueueIO.load(projectURL: dir).isEmpty)   // never opened: no file, no throw
+    #expect(SZTaskQueueIO.load(projectURL: dir).tasks.isEmpty)   // never opened: no file, no throw
     try SZTaskQueueIO.save([SZTask(title: "t", instruction: "t")], projectURL: dir)
     #expect(FileManager.default.fileExists(atPath: SZTaskQueueIO.fileURL(projectURL: dir).path))
     try SZTaskQueueIO.save([], projectURL: dir)
@@ -65,5 +65,20 @@ import Testing
     ] } }
     """
     try Data(json.utf8).write(to: SZTaskQueueIO.fileURL(projectURL: dir))
-    #expect(SZTaskQueueIO.load(projectURL: dir).map(\.title) == ["kept"])
+    #expect(SZTaskQueueIO.load(projectURL: dir).tasks.map(\.title) == ["kept"])
+}
+
+@Test func aStopsHoldTravelsWithTheQueueItFroze() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appending(path: "sz-tasks-\(UUID().uuidString).subz")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let task = SZTask(title: "frozen", instruction: "make it snow")
+
+    try SZTaskQueueIO.save([task], suspended: true, projectURL: dir)
+
+    // Without this the app relaunched and immediately admitted every task the Stop had frozen —
+    // token spend on asks the user had just killed.
+    #expect(SZTaskQueueIO.load(projectURL: dir).suspended)
+    try SZTaskQueueIO.save([task], suspended: false, projectURL: dir)
+    #expect(!SZTaskQueueIO.load(projectURL: dir).suspended)
 }

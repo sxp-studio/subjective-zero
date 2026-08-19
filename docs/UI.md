@@ -126,8 +126,8 @@ are REAL messages to real agents; determinism stays in the agents' `ui_*` tools)
 
 - **A node** → "@\<node\> fix this: \<blocker\>" (when its agent reported error/needsInput),
   "@project implement @\<node\>" (prompt node) or "@project split @\<node\> into two stages"
-  (generated), plus **Open Transcript** (`text.quote` - read) and **Open Node.swift** (`doc.text`)
-  action rows. A generated node with a `Card.swift` adds **Show Custom Card / Show Rows** and
+  (generated), plus **Mention in Chat** (`text.bubble` — puts the node in the composer, since one
+  conversation has no tab to open) and **Open Node.swift** (`doc.text`) action rows. A generated node with a `Card.swift` adds **Show Custom Card / Show Rows** and
   **Open Card.swift**; one without adds **New Custom Card…** (scaffolds a starter and opens it).
   Right-click also selects the node (a multi-selection member keeps the set).
 - **A multi-selection** → "@project merge @A, @B and @C into one node".
@@ -150,7 +150,15 @@ implementation turns are not in it: they carry the run they belong to and are re
 Graph panel.
 
 - The feed is DERIVED (`SZHost.chatFeed`) from the per-scope transcripts, which remain the
-  storage — sessions and cold-start recaps are per scope and stay that way.
+  storage — sessions and cold-start recaps are per scope and stay that way. A node's messages join
+  the feed only if they are unstamped AND newer than the project's `feedEpoch` (a `.staging`
+  marker written the first time the project opens under this build): older builds wrote their
+  implementation turns into node transcripts with nothing marking them as fleet work, so without
+  the epoch an old project's first open would fill the conversation with every coding turn it ever
+  ran.
+- The panel has NO header row. One conversation had nothing to name, so its single action —
+  **Clear Transcript & Reset Agent**, which clears every scope the feed is made of — moved into a
+  ⋯ menu beside the composer's +.
 - **@mentions** are the addressing substrate turned into a targeting HINT: `@project`, `@all`,
   `@<node title>` — typed via an autocomplete (`@` at a word boundary), inserted as atomic accent
   tokens, stored as canonical markup (`@[Blur](node:UUID)`, SZCore `SZMentionMarkup`), expanded
@@ -161,13 +169,19 @@ Graph panel.
   field. The context-menu row is "Mention in Chat".
 - **The run strip** sits between the transcript and the composer, outside the ScrollView (a run
   is a state, not a message — it must not enter the LazyVStack the bottom-pin anchor drives). It
-  shows one lane per work child — the same `SZAgentSubagentLane` the Agent Graph draws under a
-  dispatch card, so the two surfaces are one picture at two zoom levels — and under them the
-  SCHEDULED tasks: what was asked, what it is behind, and a ✕ to drop it. Every row is a door
-  into the Agent Graph panel. Presence, not a lock.
-- **The send slot is THE action slot** (one place, three states): whole-run **Stop** while a run
-  is in flight; per-turn **Stop** while an interactive turn streams (session + partial reply
-  survive); else send. Click only — Return never stops anything. The composer is never disabled:
+  draws a small process tree: one group per LIVE BUILD — the Director's own lane, then the coding
+  agents it dispatched, indented on a drawn connector (`├─`/`└─`), live children first so the
+  cap never hides the agents actually working. A live Director lane carries the ■ that stops THAT
+  build; it is the only per-build stop (the HUD has none, and Graph ▸ Stop All Builds / ⌘. stops
+  everything). Under the groups sit the SCHEDULED tasks: what was asked, what it is behind, and a
+  ✕ to drop it. Every row is a door into the Agent Graph panel. Presence, not a lock. The lanes are
+  the strip's own, not `SZAgentSubagentLane`: inside a dispatch card a lane fills the card's width,
+  which out here read as a stack of full-width buttons. The shared thing is the vocabulary
+  (`SZRunBadge`: running / end / stopped / declined / failed).
+- **The send slot is THE action slot** (one place, two states): per-turn **Stop** while an
+  interactive turn streams (session + partial reply survive); else send. It never stops a BUILD —
+  with several in flight a composer button cannot say which one it means, so that lives on the
+  build's own lane in the strip. Click only — Return never stops anything. The composer is never disabled:
   a send while something streams simply queues, with a chip on its bubble.
 - The **composer** is a Codex-style rounded two-row card floating on the panel background: the
   growing text field on top; a bottom bar with `+` attach (left) and the **provider generation

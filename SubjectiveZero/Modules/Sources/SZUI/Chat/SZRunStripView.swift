@@ -78,8 +78,13 @@ struct SZRunStrip: View {
     private func threadGroup(_ thread: UUID) -> some View {
         let leader = runs.first { $0.id == thread }
         let children = SZAgentGraphRun.workChildren(thread: thread, in: runs)
-        let lanes = Array(children.prefix(Self.laneCap))
-        let overflow = max(0, children.count - Self.laneCap)
+        // The cap keeps the LIVE children first. `workChildren` is oldest-first and keeps sealed
+        // records, so a plain prefix showed the first three agents the build ever dispatched —
+        // grey, finished — and hid every agent actually working behind "+N more", which is the one
+        // thing this strip exists to show. Within each group the dispatch order is kept.
+        let lanes = Array((children.filter(\.isLive) + children.filter { !$0.isLive })
+                            .prefix(Self.laneCap))
+        let overflow = max(0, children.count - lanes.count)
         VStack(alignment: .leading, spacing: 0) {
             if let leader {
                 laneRow(SZLaneModel(run: leader, name: "Director", symbol: "eyeglasses",

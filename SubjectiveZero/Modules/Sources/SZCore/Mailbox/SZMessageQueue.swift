@@ -56,11 +56,17 @@ public struct SZMessageEnvelope: Identifiable, Sendable {
     /// `markProcessed`. Unused today; tombstone-only (never persisted).
     public var response: String?
     public let enqueuedAt: Date
+    /// When a turn first STARTED for this envelope, persisted. `state` cannot answer that after a
+    /// crash — it is deliberately downgraded to `.queued` for at-least-once redelivery — and
+    /// transcript order cannot either: a message typed while an earlier one was streaming sits
+    /// before that earlier one's reply, and so looks answered.
+    public var deliveryStartedAt: Date?
 
     public init(id: UUID = UUID(), recipient: String, sender: String? = nil,
                 intent: SZMessageIntent, message: SZChatMessage,
                 transcriptMessageID: UUID? = nil, state: SZMessageDeliveryState = .queued,
-                failureReason: String? = nil, enqueuedAt: Date = Date()) {
+                failureReason: String? = nil, enqueuedAt: Date = Date(),
+                deliveryStartedAt: Date? = nil) {
         self.id = id
         self.recipient = recipient
         self.sender = sender
@@ -70,13 +76,14 @@ public struct SZMessageEnvelope: Identifiable, Sendable {
         self.state = state
         self.failureReason = failureReason
         self.enqueuedAt = enqueuedAt
+        self.deliveryStartedAt = deliveryStartedAt
     }
 }
 
 extension SZMessageEnvelope: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, recipient, sender, intent, message, transcriptMessageID, state, failureReason,
-             response, enqueuedAt
+             response, enqueuedAt, deliveryStartedAt
     }
 
     // Append-tolerant like SZChatMessage: only `recipient` and `message` are hard-required — an
@@ -95,6 +102,11 @@ extension SZMessageEnvelope: Codable {
         failureReason = try c.decodeIfPresent(String.self, forKey: .failureReason)
         response = try c.decodeIfPresent(String.self, forKey: .response)
         enqueuedAt = try c.decodeIfPresent(Date.self, forKey: .enqueuedAt) ?? Date()
+        // SURVIVES the delivering→queued downgrade above, and that is its whole job: after a
+        // crash the state says "redeliver me", while this says whether a turn ever started for
+        // this envelope — which is the only way restore can tell an answered message from one
+        // that merely sits behind an answered one in the transcript.
+        deliveryStartedAt = try c.decodeIfPresent(Date.self, forKey: .deliveryStartedAt)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -197,6 +209,7 @@ public final class SZMessageQueue {
     public func markDelivering(_ id: UUID) {
         guard let i = envelopes.firstIndex(where: { $0.id == id }) else { return }
         envelopes[i].state = .delivering
+        if envelopes[i].deliveryStartedAt == nil { envelopes[i].deliveryStartedAt = Date() }
         onChange?()
     }
 

@@ -184,7 +184,7 @@ extension SZHostBridge {
         case "ui_run":             return uiRun(arguments)
         case "ui_amend_task":      return try uiAmendTask(arguments)
         case "ui_cancel_task":     return try uiCancelTask(arguments)
-        case "ui_stop":            return uiStop(arguments)
+        case "ui_stop":            return try uiStop(arguments)
         case "ui_send_chat":       return try uiSendChat(arguments)
         case "ui_message_status":  return try uiMessageStatus(arguments)
         case "ui_set_input_default": return try uiSetInputDefault(arguments)
@@ -357,9 +357,15 @@ extension SZHostBridge {
         return SZJSONRPC.encode(["id": connection.uuidString])
     }
 
-    private func uiStop(_ arguments: [String: Any]) -> String {
+    private func uiStop(_ arguments: [String: Any]) throws -> String {
         // ONE graph, addressed by the thread the RUNS list shows — the others keep building.
-        if let thread = arguments.string("run").flatMap(UUID.init(uuidString:)) {
+        // An id that does not PARSE is an error, never "no id": treating a truncated or misspelled
+        // thread as an absent one turns "stop this build" into "stop every build", which is the
+        // one mistake this tool must not make silently.
+        if let raw = arguments.string("run") {
+            guard let thread = UUID(uuidString: raw) else {
+                throw SZMCPError.message("ui_stop: `run` must be a full thread uuid (got \(raw))")
+            }
             return SZJSONRPC.encode(host.cancelRun(thread: thread)
                 ? ["status": "stopped", "run": thread.uuidString]
                 : ["status": "not_running", "reason": "no live run leads that thread"])
@@ -598,7 +604,11 @@ extension SZHostBridge {
         }
         // The START's own answer, not `isRunning`: with several runs live, another one being in
         // flight says nothing about whether THIS ask started.
-        switch host.startRun(instruction: instruction, nodes: nodes) {   // returns immediately
+        // `narrateContention: false` — the `.waiting` branch below mints the ask, so the transient
+        // "wait for it to finish, then build again" line would be advice to do what just happened
+        // automatically, immediately contradicted by the queue's own line.
+        switch host.startRun(instruction: instruction, nodes: nodes,
+                             narrateContention: false) {   // returns immediately
         case .started: break
         case .waiting:
             // A transient claim holds what it needs — schedule it rather than lose it.

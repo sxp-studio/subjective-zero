@@ -476,6 +476,22 @@ struct SZHostInterruptOneRunTests {
         #expect(host.isLive(a))
     }
 
+    /// The pump that a Stop fires must see the world the Stop just made. Releasing the claim
+    /// re-enters `pumpMailboxes` synchronously, so a run still registered in `activeRuns` at that
+    /// moment makes its own freed nodes read as taken — and no pump follows.
+    @Test func theNodesAStopFreesAreFreeToTheVeryPumpItFires() {
+        let host = SZHost()
+        let node = SZNodeID()
+        let a = run(host, node, "run a")
+        var takenDuringRelease: Set<SZNodeID>?
+        host.ledger.onAvailabilityChanged = { takenDuringRelease = host.runWorkSet }
+
+        host.cancelRun(thread: a.thread)
+
+        #expect(takenDuringRelease == [])          // not [node] — the run was gone before the release
+        #expect(host.runWorkSet.isEmpty)
+    }
+
     @Test func interruptingOneRunDoesNotFreezeTheQueue() {
         let host = SZHost()
         let a = run(host, SZNodeID(), "run a")
@@ -530,31 +546,88 @@ struct SZHostLiveThreadsTests {
 @MainActor
 struct SZHostQueueNarrationTests {
 
-    @Test func aTaskAdmittedImmediatelyIsNotAnnouncedAsQueued() {
+    /// Both tests assert unconditionally. An earlier pair branched on `pendingTasks` and asserted
+    /// something in each branch, which passes whatever the code does — the exact failure the
+    /// change was supposed to make impossible.
+    @Test func aTaskThatIsStillWaitingSaysSoExactlyOnce() {
         let host = SZHost()
-        // No project, no MCP port: `startRun` cannot start anything, so the task stays pending
-        // and the line IS earned. What this pins is that the wording is decided by the queue's
-        // state after the pump, never by "something else is running".
-        let id = host.mintRun(instruction: "make it snow")
-        let narrated = host.store.messages(for: .director).map(\.text)
+        // Nothing can start here (no project, no MCP port), so every minted task genuinely waits.
+        host.mintRun(instruction: "make it snow")
 
-        if host.pendingTasks.contains(where: { $0.id == id }) {
-            #expect(narrated.contains { $0.hasPrefix("Queued") })
-        } else {
-            #expect(!narrated.contains { $0.hasPrefix("Queued") })
-        }
+        let queued = host.store.messages(for: .director).map(\.text).filter { $0.hasPrefix("Queued") }
+        #expect(host.pendingTasks.count == 1)
+        #expect(queued == ["Queued — it starts when the work it needs is free."])
     }
 
-    @Test func aTaskBehindOthersCountsThemInsteadOfGuessing() {
+    @Test func theSecondTaskCountsWhatIsAheadOfIt() {
         let host = SZHost()
         host.mintRun(instruction: "first")
         host.mintRun(instruction: "second")
-        let narrated = host.store.messages(for: .director).map(\.text)
 
-        // The second one's line names its position; the first cannot claim to be behind anything.
-        #expect(!narrated.contains { $0.contains("Queued behind 0") })
-        if host.pendingTasks.count == 2 {
-            #expect(narrated.contains { $0.contains("Queued behind 1 other task") })
-        }
+        let queued = host.store.messages(for: .director).map(\.text).filter { $0.hasPrefix("Queued") }
+        #expect(host.pendingTasks.count == 2)
+        #expect(queued == ["Queued — it starts when the work it needs is free.",
+                           "Queued behind 1 other task."])
+    }
+
+    /// The narration reads the QUEUE, not the world. A task that never entered the queue must not
+    /// be described by a line about queueing, no matter how busy the app is.
+    @Test func aLiveBuildElsewhereDoesNotMakeAnAskQueued() {
+        let host = SZHost()
+        let claim = SZClaimToken(label: "someone else")
+        let node = SZNodeID()
+        #expect(host.ledger.tryAcquire([.node(node), .transcript(.node(node))], as: claim))
+        host.activeRuns[UUID()] = SZRunState(taskID: UUID(), claim: claim, instruction: "other",
+                                             ownsGraphOp: false, workSet: [node])
+
+        host.pendingTasks.removeAll()
+        let narratedBefore = host.store.messages(for: .director).count
+        // Withdraw it the moment it is minted: what is pinned is that the LINE follows the queue's
+        // state, so a task that leaves the queue leaves no queue narration behind either.
+        let id = host.mintRun(instruction: "unrelated")
+        host.withdrawTask(id)
+
+        let lines = host.store.messages(for: .director).dropFirst(narratedBefore).map(\.text)
+        #expect(lines.allSatisfy { !$0.contains("behind 0") })
+    }
+}
+
+/// Who owns a staged split/merge. Nothing else drains one, so an op whose implementing run was
+/// denied ownership is stranded for the rest of the session: pieces hidden, the node's pill stuck
+/// on "Splitting", and every later split refused by the ghost.
+@Suite("A staged graph op belongs to the run that staged it")
+@MainActor
+struct SZHostGraphOpOwnershipTests {
+
+    private func liveRun(_ host: SZHost, _ label: String) -> SZRunState {
+        let node = SZNodeID()
+        let claim = SZClaimToken(label: label)
+        #expect(host.ledger.tryAcquire([.node(node), .transcript(.node(node))], as: claim))
+        let state = SZRunState(taskID: UUID(), claim: claim, instruction: label,
+                               ownsGraphOp: false, workSet: [node])
+        host.activeRuns[state.taskID] = state
+        return state
+    }
+
+    @Test func aRunTakesOwnershipOnlyWhenItAsks() {
+        let host = SZHost()
+        // No project / MCP port here, so nothing starts; what this pins is the DEFAULT — a run
+        // admitted from the queue while an op is staged never adopts it.
+        let started = host.startRun(instruction: "unrelated")
+        #expect(started == .waiting)
+        #expect(host.activeRuns.values.allSatisfy { !$0.ownsGraphOp })
+    }
+
+    @Test func anotherLiveBuildDoesNotVetoOwnership() {
+        let host = SZHost()
+        _ = liveRun(host, "someone else's build")
+        // The gate used to be the host-wide `!isRunning`, so this second run — the one actually
+        // implementing the staged pieces — silently lost ownership whenever anything else was up.
+        // The state object records what was asked for, independent of who else is running.
+        let state = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "op run"),
+                               instruction: "split", ownsGraphOp: true, workSet: [])
+        host.activeRuns[state.taskID] = state
+        #expect(host.activeRuns.values.filter(\.ownsGraphOp).count == 1)
+        #expect(host.isRunning)
     }
 }
