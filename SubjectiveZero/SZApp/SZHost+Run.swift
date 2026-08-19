@@ -286,6 +286,12 @@ extension SZHost {
         // run's claim, pass deliver's holder guard, and stream into a transcript someone owns.
         if let claim {
             try await ledger.acquire([.transcript(scope)], as: claim)
+            // The wait can outlive the run: a cancelled run's parked waiter is still in the grant
+            // queue, and taking the transcript now would stream into one it no longer owns.
+            if let run, !isLive(run) {
+                ledger.release([.transcript(scope)], by: claim)
+                throw CancellationError()
+            }
         }
         defer { if let claim { ledger.release([.transcript(scope)], by: claim) } }
         let result = try await deliver(scope: scope, request: request, provider: provider,
@@ -442,6 +448,14 @@ extension SZHost {
         startRun(task: SZTask(title: SZTask.title(fromInstruction: instruction, nodeCount: 0),
                               instruction: instruction, workSet: nodes),
                  narrateContention: narrateContention)
+    }
+
+    /// The HUD Build press. It goes through here rather than straight to `startRun` because a
+    /// press is the user asking again, which releases a Stop's hold on the queue — otherwise a
+    /// Build after a Stop leaves every standing task frozen for the rest of the session.
+    func buildPressed() {
+        admissionSuspended = false
+        startRun()
     }
 
     /// Admit a SCHEDULED task: claim its work set and run it. The task carries the identity every

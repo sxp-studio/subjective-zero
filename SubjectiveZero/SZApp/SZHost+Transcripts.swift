@@ -121,8 +121,20 @@ extension SZHost {
     private func restoreMessageQueue(live: Set<String>) {
         guard let url = loadedProjectURL else { return }
         var restoredIDs = Set<UUID>()
-        var checkedScopes = Set<String>()   // the answered-check applies to each scope's FIFO head only
-        for envelope in SZMessageQueueIO.load(projectURL: url) {
+        // The answered-check applies to each scope's leading FOLD — the same run `fold` would have
+        // delivered together. Head-only was right when one envelope delivered at a time; folding
+        // makes N share one reply, so the tail of a fold that DID complete would be redelivered.
+        let persisted = SZMessageQueueIO.load(projectURL: url)
+        var deliveredTogether = Set<UUID>()
+        for scopeKey in Set(persisted.map(\.recipient)) {
+            let queue = persisted.filter { $0.recipient == scopeKey && $0.intent == .chat }
+            guard let head = queue.first else { continue }
+            for envelope in queue {
+                guard envelope.sender == head.sender else { break }
+                deliveredTogether.insert(envelope.id)
+            }
+        }
+        for envelope in persisted {
             guard envelope.intent == .chat, live.contains(envelope.recipient),
                   let scope = SZChatScope(key: envelope.recipient) else { continue }
             var restored = envelope
@@ -137,7 +149,7 @@ extension SZHost {
                 // messages' replies (replies append at the end, after every queued bubble), and
                 // treating those as "answered" silently dropped the later messages.
                 let messages = store.messages(for: scope)
-                if checkedScopes.insert(scope.key).inserted,
+                if deliveredTogether.contains(envelope.id),
                    let i = messages.firstIndex(where: { $0.id == bubbleID }),
                    messages[(i + 1)...].contains(where: { $0.role == .assistant && !$0.transient && !$0.text.isEmpty }) {
                     continue   // already answered — the queue flush just never caught up

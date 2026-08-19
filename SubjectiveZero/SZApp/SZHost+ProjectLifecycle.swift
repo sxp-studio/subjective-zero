@@ -19,7 +19,7 @@ extension SZHost {
     /// it would land its output in the NEXT project's store. Queued-but-undelivered messages
     /// deliberately do NOT block (they persist and redeliver on reopen).
     /// Menu items disable on this; the methods guard on it too (the MCP surface can race a click).
-    var isBusyForProjectOps: Bool { ledger.anyHeld || !chatInFlight.isEmpty }
+    var isBusyForProjectOps: Bool { isRunning || ledger.anyHeld || !chatInFlight.isEmpty }
 
     /// The `.subz` package content type for the save/open panels. Prefers the app's exported UTI
     /// (`studio.sxp.subz`, declared in Info.plist as a `com.apple.package`); falls back to a plain

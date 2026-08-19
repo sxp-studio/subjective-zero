@@ -732,7 +732,7 @@ struct SZApp: App {
                               onOpenNodeSource: { host.openNodeSource($0) },
                               onFixNode: { host.stageRebuildFix(node: $0) },
                               onToggleDirectorChat: { host.toggleDirectorChat() },
-                              onBuild: { host.startRun() },
+                              onBuild: { host.buildPressed() },
                               onStopRun: { host.cancelRun() },
                               onTogglePause: { host.togglePlayback() },
                               onResetTime: { host.resetPlayback() },

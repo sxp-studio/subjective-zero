@@ -536,6 +536,10 @@ final class SZHost {
         // App-level services — deliberately outside the project chain: a project that failed to
         // load must not take the MCP bus down with it.
         startMCPServer()
+        // Only now can a task start (startRun needs the bus): the restore above pumped into a
+        // host with no MCP server, so every restored ask answered `.waiting` and nothing was
+        // left to wake it.
+        pumpMailboxes()
         #if DEBUG
         verifyGrayscale()
         #endif
@@ -768,8 +772,9 @@ final class SZHost {
         hiddenPieces = []
         pendingGraphOp = nil
         dispatchPrompts = [:]
-        activeRuns = [:]        // nothing runs across a switch (the busy gate holds), but the
-        pendingTasks = []       // invariant stays local: a task scheduled for A never sees B
+        activeRuns = [:]           // nothing runs across a switch (the busy gate holds), but the
+        pendingTasks = []          // invariant stays local: a task scheduled for A never sees B
+        admissionSuspended = false // a Stop in A must not freeze B's queue, where nothing stopped
         agentSessions = [:]
         restoredSessions = [:]
         inFlightAssistantIDs = [:]

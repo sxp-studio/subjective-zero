@@ -378,3 +378,29 @@ struct SZHostRunScopingTests {
         #expect(host.agentSessions[SZChatScope.directorKey] == nil)
     }
 }
+
+/// The remaining review findings, each a state that only exists now that runs are concurrent.
+@MainActor
+struct SZHostLifecycleScopingTests {
+
+    @Test func aRunWithNoWorkSetStillCountsAsBusy() {
+        let host = SZHost()
+        // An ask that creates its own work claims NOTHING (the `.run` slot is gone), so a gate
+        // built on `ledger.anyHeld` stopped seeing it and let a project switch tear the graph out
+        // from under a live traversal.
+        let run = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "run"),
+                             instruction: "make me something new", ownsGraphOp: false, workSet: [])
+        host.activeRuns[run.taskID] = run
+        #expect(!host.ledger.anyHeld)
+        #expect(host.isBusyForProjectOps)
+    }
+
+    @Test func aBuildPressReleasesAStopsHoldOnTheQueue() {
+        let host = SZHost()
+        host.mintRun(instruction: "queued")
+        host.cancelRun()
+        #expect(host.admissionSuspended)
+        host.buildPressed()   // the user asking again
+        #expect(!host.admissionSuspended)
+    }
+}
