@@ -441,3 +441,49 @@ struct SZHostPendingWorkTests {
         #expect(host.pendingTasks.count == 1)
     }
 }
+
+/// Interrupting ONE agent graph. Stop used to be all-or-nothing, which stopped making sense the
+/// moment two builds could be in flight for different reasons.
+@MainActor
+struct SZHostInterruptOneRunTests {
+
+    private func run(_ host: SZHost, _ node: SZNodeID, _ label: String) -> SZRunState {
+        let claim = SZClaimToken(label: label)
+        #expect(host.ledger.tryAcquire([.node(node), .transcript(.node(node))], as: claim))
+        let state = SZRunState(taskID: UUID(), claim: claim, instruction: label,
+                               ownsGraphOp: false, workSet: [node])
+        host.activeRuns[state.taskID] = state
+        return state
+    }
+
+    @Test func stoppingOneThreadLeavesTheOthersBuilding() {
+        let host = SZHost()
+        let a = run(host, SZNodeID(), "run a")
+        let b = run(host, SZNodeID(), "run b")
+
+        #expect(host.cancelRun(thread: a.thread))
+        #expect(!host.isLive(a))
+        #expect(host.isLive(b))
+        #expect(host.isRunning)
+        // And the interrupted run gave its nodes back, so the work is claimable again.
+        #expect(host.ledger.holder(of: .node(a.workSet.first!)) == nil)
+    }
+
+    @Test func anUnknownThreadStopsNothing() {
+        let host = SZHost()
+        let a = run(host, SZNodeID(), "run a")
+        #expect(!host.cancelRun(thread: UUID()))
+        #expect(host.isLive(a))
+    }
+
+    @Test func interruptingOneRunDoesNotFreezeTheQueue() {
+        let host = SZHost()
+        let a = run(host, SZNodeID(), "run a")
+        host.mintRun(instruction: "next")
+        host.cancelRun(thread: a.thread)
+        // Suspending admission is what the ALL-stop means ("I want this to stop"). Interrupting one
+        // graph is narrower: the rest of the plan still stands.
+        #expect(!host.admissionSuspended)
+        #expect(host.pendingTasks.count == 1)
+    }
+}

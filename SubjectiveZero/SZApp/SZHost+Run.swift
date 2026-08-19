@@ -1082,6 +1082,15 @@ extension SZHost {
         for run in Array(activeRuns.values) { cancelRun(run) }
     }
 
+    /// Cancel the run leading `thread` — how a single agent graph is interrupted from the strip or
+    /// the bus, without touching the others. Returns false if it already ended.
+    @discardableResult
+    func cancelRun(thread: UUID) -> Bool {
+        guard let run = activeRuns.values.first(where: { $0.thread == thread }) else { return false }
+        cancelRun(run)
+        return true
+    }
+
     /// Cancel ONE run. Task cancellation propagates into the fleet's task group; nodes already
     /// promoted stay promoted.
     func cancelRun(_ run: SZRunState) {

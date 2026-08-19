@@ -95,8 +95,9 @@ extension SZHostBridge {
                  ]),
             tool("ui_cancel_task", "Drop a SCHEDULED task that has not started yet — how two asks become one (amend the survivor, then cancel the other) and how a request the user withdrew stops before it spends anything. Returns {cancelled: true}, or {cancelled: false, reason} if it already started or no longer exists.",
                  properties: ["task_id": ["type": "string", "description": "the scheduled task's id"]]),
-            tool("ui_stop", "Stop the in-flight run (mirrors the HUD Stop button) — cancels the Director and every coding agent. Returns {status: \"stopped\"} if a run was cancelled, or {status: \"not_running\"} if nothing was in flight.",
-                 properties: [:], agentCallable: false),   // a Director calling it would cancel its own run
+            tool("ui_stop", "Stop in-flight work (mirrors the HUD Stop button). Without arguments it stops EVERY live run and leaves the scheduled queue standing. Pass `run` — a thread id from the RUNS list — to interrupt just that agent graph, leaving the others building. Returns {status: \"stopped\"} , or {status: \"not_running\"} if nothing matched.",
+                 properties: ["run": ["type": "string", "description": "thread id of ONE run to interrupt; omit to stop all"]],
+                 agentCallable: false),   // a Director calling it would cancel its own run
             tool("ui_send_chat", "Send a chat message to an agent. `scope` is a node id (chat that node's Coding Agent) or \"director\" (the Director Agent). Every accepted message returns a `message_id`; `status` is \"queued\" (enqueued — delivers as a real turn when the recipient is free; poll ui_message_status if you need the outcome), \"recorded\" (a mid-run steer, folded into the recipient's next prompt), or \"rejected\" (pre-flight refusal — the message will NOT deliver; `detail` says why). A fresh Director Agent chat uses the active provider; resuming continues on the session's own CLI.",
                  properties: [
                     "scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"],
@@ -357,8 +358,14 @@ extension SZHostBridge {
     }
 
     private func uiStop(_ arguments: [String: Any]) -> String {
+        // ONE graph, addressed by the thread the RUNS list shows — the others keep building.
+        if let thread = arguments.string("run").flatMap(UUID.init(uuidString:)) {
+            return SZJSONRPC.encode(host.cancelRun(thread: thread)
+                ? ["status": "stopped", "run": thread.uuidString]
+                : ["status": "not_running", "reason": "no live run leads that thread"])
+        }
         guard host.isRunning else { return SZJSONRPC.encode(["status": "not_running"]) }
-        host.cancelRun()   // cancels the run Task + every coding agent; force-clears isRunning even if wedged
+        host.cancelRun()   // every live run + its coding agents; the scheduled queue stands
         return SZJSONRPC.encode(["status": "stopped"])
     }
 

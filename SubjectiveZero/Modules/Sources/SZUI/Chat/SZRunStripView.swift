@@ -35,6 +35,8 @@ struct SZRunStrip: View {
     var scheduled: [SZScheduledRow] = []
     /// Drop a scheduled task (its ✕). nil = the surface isn't wired; the rows are a readout.
     var onCancelScheduled: ((UUID) -> Void)?
+    /// Interrupt ONE live traversal by its thread — the running counterpart of a scheduled row's ✕.
+    var onStopRun: ((UUID) -> Void)?
 
     /// Past this many lanes the strip would own more of the panel than the conversation does; the
     /// rest are one honest line rather than a silent truncation.
@@ -51,10 +53,23 @@ struct SZRunStrip: View {
             VStack(spacing: SZAgentGraphLayout.laneGap) {
                 if let leader {
                     // First, and above its fleet: the Director is what the fleet hangs off.
-                    SZAgentSubagentLane(run: leader, title: "Director",
-                                        symbol: "eyeglasses", tint: SZEdgeStyle.intentViolet,
-                                        action: { onOpen?(leader.id) })
-                        .frame(height: SZAgentGraphLayout.laneHeight)
+                    HStack(spacing: 5) {
+                        SZAgentSubagentLane(run: leader, title: "Director",
+                                            symbol: "eyeglasses", tint: SZEdgeStyle.intentViolet,
+                                            action: { onOpen?(leader.id) })
+                        if leader.isLive, let onStopRun {
+                            // This traversal only. Stopping one build must not end the others,
+                            // which is the whole reason runs are scoped.
+                            Button { onStopRun(leader.thread ?? leader.id) } label: {
+                                Image(systemName: "stop.fill")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(SZAgentGraphStyle.live)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Stop this build — the others keep going")
+                        }
+                    }
+                    .frame(height: SZAgentGraphLayout.laneHeight)
                 }
                 if lanes.isEmpty, !scheduled.isEmpty {
                     // Nothing running, but work is waiting — the strip is the queue's only home.

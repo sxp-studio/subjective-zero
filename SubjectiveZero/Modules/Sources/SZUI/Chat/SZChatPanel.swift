@@ -33,6 +33,7 @@ public struct SZChatPanel: View {
     private let agentGraphRuns: [SZAgentGraphRun]  // the RUNS records → the run strip's fleet lanes
     private let scheduledTasks: [SZScheduledRow]   // work queued and not yet started → the strip
     private let onCancelScheduledTask: ((UUID) -> Void)?   // a scheduled row's ✕
+    private let onStopOneRun: ((UUID) -> Void)?            // a live lane's ■ — that traversal only
     private let isQueued: (UUID) -> Bool           // message id → still waiting in the mailbox (queued chip)
     private let onSend: (String, [URL]) -> Void    // (message, attachment source URLs)
     private let onClearTranscript: (SZChatScope) -> Void   // header trash — full reset (transcript + agent)
@@ -123,6 +124,7 @@ public struct SZChatPanel: View {
                 agentGraphRuns: [SZAgentGraphRun] = [],
                 scheduledTasks: [SZScheduledRow] = [],
                 onCancelScheduledTask: ((UUID) -> Void)? = nil,
+                onStopOneRun: ((UUID) -> Void)? = nil,
                 isQueued: @escaping (UUID) -> Bool = { _ in false },
                 onSend: @escaping (String, [URL]) -> Void,
                 onClearTranscript: @escaping (SZChatScope) -> Void = { _ in },
@@ -156,6 +158,7 @@ public struct SZChatPanel: View {
         self.agentGraphRuns = agentGraphRuns
         self.scheduledTasks = scheduledTasks
         self.onCancelScheduledTask = onCancelScheduledTask
+        self.onStopOneRun = onStopOneRun
         self.isQueued = isQueued
         self.onSend = onSend
         self.onClearTranscript = onClearTranscript
@@ -336,7 +339,8 @@ public struct SZChatPanel: View {
                    threadID: runGraphRunID,
                    leader: agentGraphRuns.first { $0.id == runGraphRunID },
                    scheduled: scheduledTasks,
-                   onCancelScheduled: onCancelScheduledTask)
+                   onCancelScheduled: onCancelScheduledTask,
+                   onStopRun: onStopOneRun)
     }
 
     private var emptyState: some View {
