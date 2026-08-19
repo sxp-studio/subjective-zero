@@ -53,7 +53,7 @@ public enum SZTaskQueueIO {
                 }
             }
             tasks = tolerant
-            suspended = (try? c.decodeIfPresent(Bool.self, forKey: .suspended)) as? Bool ?? false
+            suspended = (try? c.decodeIfPresent(Bool.self, forKey: .suspended) ?? false) ?? false
         }
     }
 
