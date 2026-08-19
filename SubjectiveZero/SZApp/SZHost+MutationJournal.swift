@@ -22,9 +22,14 @@ extension SZHost {
     }
 
     /// The canvas's node add — the panel writes the store directly (there is no host funnel for it),
-    /// so it journals here, at the panel's host callback.
+    /// so it journals here, at the panel's host callback. It also PERSISTS: a new node reached disk
+    /// only when something later happened to save (a prompt commit, a connect, a build), so a node
+    /// added and left alone — the empty card you drop before deciding what it is, or one the bus
+    /// adds — vanished on quit. `persistProject`, not the reload flavour: an empty card compiles
+    /// nothing.
     func noteNodeAdded(_ id: SZNodeID, origin: SZMutationOrigin = .user) {
         noteMutation("added node", [mutationTitle(id)], origin: origin)
+        persistProject()
     }
 
     /// The journal actor behind a mutation: see the file header for the rule.
