@@ -187,7 +187,7 @@ struct SZAgentGraphRunList: View {
                                     .contentTransition(.identity)
                                 if live {
                                     SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
-                                        SZRunBadge(label: "live", colour: SZAgentGraphStyle.live)
+                                        SZRunBadge.running()
                                     }
                                 } else {
                                     // The thread's ending is its deciding traversal's —
@@ -234,6 +234,12 @@ struct SZRunBadge: View {
             .padding(.horizontal, 3)
             .padding(.vertical, 0.5)
             .background(Capsule().fill(colour))
+    }
+
+    /// In flight. One word, in the same plain tense as every ending below it — "live" was the odd
+    /// one out, a broadcast word among build words.
+    static func running(colour: Color = SZAgentGraphStyle.live) -> SZRunBadge {
+        SZRunBadge(label: "running", colour: colour)
     }
 
     static func forConclusion(_ conclusion: SZAgentGraphRun.Conclusion?) -> SZRunBadge {
@@ -356,7 +362,7 @@ struct SZAgentGraphRunRow: View {
     @ViewBuilder private var badge: some View {
         if run.isLive {
             SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
-                SZRunBadge(label: "live", colour: SZAgentGraphStyle.live)
+                SZRunBadge.running()
             }
         } else {
             SZRunBadge.forConclusion(run.conclusion)

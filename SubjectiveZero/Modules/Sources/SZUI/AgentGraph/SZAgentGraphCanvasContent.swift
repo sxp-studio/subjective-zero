@@ -409,10 +409,9 @@ struct SZAgentSubagentLane: View {
     let run: SZAgentGraphRun
     /// The work node's display title; nil (node gone / no resolver) falls back to its id.
     var title: String? = nil
-    /// The lane's glyph. Defaults to the coding agent's hammer; the Director gets its own.
+    /// The lane's glyph. The canvas only ever draws coding agents under a dispatch card.
     var symbol: String = "hammer"
-    /// Tints the glyph and the live outline, so one lane can say "this is a different agent"
-    /// without becoming a different component. nil = the shared in-flight orange.
+    /// Tints the glyph and the running outline. nil = the shared in-flight orange.
     var tint: Color? = nil
     /// Show this record — the lane is a door into its own run.
     var action: () -> Void = {}
@@ -448,7 +447,7 @@ struct SZAgentSubagentLane: View {
                     .contentTransition(.identity)
                 if run.isLive {
                     SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
-                        SZRunBadge(label: "live", colour: tint ?? SZAgentGraphStyle.live)
+                        SZRunBadge.running(colour: tint ?? SZAgentGraphStyle.live)
                     }
                 } else {
                     SZRunBadge.forConclusion(run.conclusion)

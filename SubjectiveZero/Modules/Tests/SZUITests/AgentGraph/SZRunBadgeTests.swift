@@ -18,6 +18,12 @@ import SZCore
     #expect(SZRunBadge.style(for: nil).label == "end")
 }
 
+@Test func inFlightIsSpokenInTheSameTenseAsTheEndings() {
+    // "live" was a broadcast word among build words; every other badge is a plain outcome.
+    #expect(SZRunBadge.running().label == "running")
+    #expect(!SZRunBadge.style(for: .ended).label.contains("live"))
+}
+
 @Test func anInterruptedRunSharesTheUserStopsBadge() {
     // Folded deliberately: both mean unfinished with nothing to fix, and `.interrupted` is only
     // ever stamped restoring a session that died — so it is never something you watch happen.

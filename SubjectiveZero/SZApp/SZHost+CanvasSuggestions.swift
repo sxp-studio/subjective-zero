@@ -34,12 +34,12 @@ extension SZHost {
                 // card that still renders — "implement" would read as a lie.
                 let rebuild = node.kind == .generated
                 rows.append(SZContextSuggestion(
-                    label: rebuild ? "Rebuild this node…" : "Implement this node…",
+                    label: rebuild ? "Rebuild this node" : "Implement this node",
                     draft: SZComposerDraft(segments: [
                         Self.projectMention, .text(rebuild ? " rebuild " : " implement "), mention])))
             } else {
                 rows.append(SZContextSuggestion(
-                    label: "Split into two stages…",
+                    label: "Split into two stages",
                     draft: SZComposerDraft(segments: [
                         Self.projectMention, .text(" split "), mention, .text(" into two stages")])))
             }
@@ -53,22 +53,27 @@ extension SZHost {
                 segments.append(.mention(.node(node.id), display: Self.mentionTitle(node)))
             }
             segments.append(.text(" into one node"))
-            return [SZContextSuggestion(label: "Merge these \(members.count) nodes…",
+            return [SZContextSuggestion(label: "Merge these \(members.count) nodes",
                                         draft: SZComposerDraft(segments: segments))]
         case .canvas:
             let pending = graph.nodes.filter(\.needsImplementation).count
             guard pending > 0 else { return [] }   // free-text "@project …" still covers the canvas
             return [SZContextSuggestion(
-                label: "Implement the \(pending) pending node\(pending == 1 ? "" : "s")…",
+                label: "Implement the \(pending) pending node\(pending == 1 ? "" : "s")",
                 draft: SZComposerDraft(segments: [
                     Self.projectMention,
                     .text(" implement the \(pending) pending node\(pending == 1 ? "" : "s")")]))]
         }
     }
 
-    /// A picked suggestion → the composer, on the tab the draft's own routing resolves to.
+    /// A picked suggestion SENDS. These rows are whole instructions — "merge A and B into one
+    /// node" needs nothing added — so landing one in the composer only asked you to press send on
+    /// a sentence you had already chosen. (The free-text row below still composes: you are the one
+    /// writing it, and a half-typed thought deserves the field.)
     func pickContextSuggestion(_ suggestion: SZContextSuggestion) {
-        stageComposerDraft(suggestion.draft)
+        showChat()
+        _ = sendChat(scope: SZChatRouting.resolveRecipient(message: suggestion.draft.canonicalText),
+                     message: suggestion.draft.canonicalText)
     }
 
     /// The menu's free-text row → the composer, behind the target's seeded mention (so the recipient

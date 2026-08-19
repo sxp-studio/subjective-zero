@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The run's presence in the transcript, pinned between the messages and the composer while a run is
-// in flight. It exists because a run outlives the Director's own turn: the graph's dispatch node
-// waits on the fleet, so the Director's turn finishes ("Worked for 24s") and its tab dot goes out
-// while the build is still very much running. Until this, the only surviving cue was the Stop.
+// The builds' presence in the transcript, pinned between the messages and the composer while
+// anything is in flight. It exists because a run outlives the Director's own turn: the graph's
+// dispatch node waits on the fleet, so the Director's turn finishes ("Worked for 24s") while the
+// build is very much running.
 //
-// It shows the SAME sub-agent lanes the Agent Graph draws under a dispatch card
-// (`SZAgentSubagentLane`, reused verbatim) — who is working, the node they are on right now, their
-// clock, and the pulsing live badge — so the two surfaces are one picture at two zoom levels.
-// Every lane is a door into that agent's own run.
+// It draws a small process tree — one group per live build, the Director's own traversal with the
+// coding agents it dispatched hanging off it on a drawn connector. Each lane is a door into that
+// agent's run, and a live Director lane carries the ■ that stops THAT build (the only per-build
+// stop there is; the HUD has none, and ⌘. stops them all).
+//
+// The lanes are the strip's own, not the Agent Graph's `SZAgentSubagentLane`: inside a dispatch
+// card a lane fills the card's width, and out here that read as a stack of full-width buttons.
+// What the two surfaces share is the vocabulary — `SZRunBadge` and its one word per state.
 //
 // Presence, not a lock: the composer stays live throughout and a send simply queues. Deliberately
 // OUTSIDE the transcript's ScrollView — a run is a state, not a message, so it must not enter the
@@ -27,13 +31,12 @@ struct SZRunStrip: View {
     /// Open a run in the Agent Graph panel. nil = the surface isn't wired; the strip is a readout.
     let onOpen: ((UUID) -> Void)?
     /// Work SCHEDULED and not yet started, oldest first — the asks that survived being second.
-    /// They sit under the live lanes because that is the order they will happen in.
+    /// They sit under the live groups because that is the order they will happen in.
     var scheduled: [SZScheduledRow] = []
     /// Drop a scheduled task (its ✕). nil = the surface isn't wired; the rows are a readout.
     var onCancelScheduled: ((UUID) -> Void)?
     /// Interrupt ONE live traversal by its thread — the running counterpart of a scheduled row's ✕,
-    /// and the only control that stops a single build. The HUD's Stop is deliberately the other
-    /// scope: everything in flight.
+    /// and the only control that stops a single build.
     var onStopRun: ((UUID) -> Void)?
 
     /// Past these the strip would own more of the panel than the conversation does; the rest are
@@ -49,56 +52,68 @@ struct SZRunStrip: View {
     var body: some View {
         VStack(spacing: 0) {
             Divider().overlay(Color.white.opacity(0.08))
-            VStack(spacing: SZAgentGraphLayout.laneGap) {
+            VStack(alignment: .leading, spacing: SZLaneMetrics.groupGap) {
                 ForEach(shownThreads, id: \.self) { thread in threadGroup(thread) }
                 if hiddenThreads > 0 { overflowLine("+\(hiddenThreads) more running") }
-                ForEach(shownScheduled) { row in scheduledRow(row) }
+                if !shownScheduled.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(shownScheduled) { row in scheduledRow(row) }
+                    }
+                }
                 if hiddenScheduled > 0 { overflowLine("+\(hiddenScheduled) more queued") }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
         }
     }
 
-    /// One build: the Director's own traversal, then the fleet hanging off it. The children are
-    /// indented because with several builds in flight the grouping is the whole point — which
-    /// agents belong to which ask.
+    /// One build: the Director's own traversal, then the fleet hanging off it on a connector. The
+    /// rows are flush (spacing 0, the gap lives inside each row) so the connector's vertical is
+    /// CONTINUOUS down the group instead of dashing between lanes.
     @ViewBuilder
     private func threadGroup(_ thread: UUID) -> some View {
         let leader = runs.first { $0.id == thread }
-        let lanes = SZAgentGraphRun.workChildren(thread: thread, in: runs)
-        VStack(spacing: SZAgentGraphLayout.laneGap) {
+        let children = SZAgentGraphRun.workChildren(thread: thread, in: runs)
+        let lanes = Array(children.prefix(Self.laneCap))
+        let overflow = max(0, children.count - Self.laneCap)
+        VStack(alignment: .leading, spacing: 0) {
             if let leader {
-                HStack(spacing: 5) {
-                    SZAgentSubagentLane(run: leader, title: "Director",
-                                        symbol: "eyeglasses", tint: SZEdgeStyle.intentViolet,
-                                        action: { onOpen?(leader.id) })
-                    if leader.isLive, let onStopRun {
-                        // This traversal only. Stopping one build must not end the others,
-                        // which is the whole reason runs are scoped.
-                        SZLaneActionButton(symbol: "stop.fill",
-                                           help: "Stop this build — the others keep going") {
-                            onStopRun(leader.thread ?? leader.id)
-                        }
-                    }
-                }
-                .frame(height: SZAgentGraphLayout.laneHeight)
+                laneRow(SZLaneModel(run: leader, name: "Director", symbol: "eyeglasses",
+                                    tint: SZEdgeStyle.intentViolet),
+                        stop: leader.isLive
+                            ? onStopRun.map { stop in { stop(leader.thread ?? leader.id) } }
+                            : nil)
             }
             if lanes.isEmpty {
                 if leader == nil { waitingLine(thread: thread) }
             } else {
-                ForEach(lanes.prefix(Self.laneCap)) { run in
-                    SZAgentSubagentLane(run: run,
-                                        title: run.work.flatMap(title),
-                                        action: { onOpen?(run.id) })
-                        .frame(height: SZAgentGraphLayout.laneHeight)
-                        .padding(.leading, leader == nil ? 0 : 12)
+                ForEach(Array(lanes.enumerated()), id: \.element.id) { index, run in
+                    laneRow(SZLaneModel(run: run, name: run.work.flatMap(title) ?? "work",
+                                        symbol: "hammer", tint: SZAgentGraphStyle.live),
+                            connector: (index == lanes.count - 1 && overflow == 0) ? .last : .middle)
                 }
-                if lanes.count > Self.laneCap {
-                    overflowLine("+\(lanes.count - Self.laneCap) more")
-                        .padding(.leading, leader == nil ? 0 : 12)
+                if overflow > 0 {
+                    HStack(spacing: 0) {
+                        SZLaneConnector(kind: .last)
+                        overflowLine("+\(overflow) more")
+                    }
                 }
             }
+        }
+    }
+
+    /// One lane: the pill, and the connector column to its left when it hangs off a Director. The
+    /// pill hugs its content — a build's width is its own name's width, not the panel's.
+    private func laneRow(_ model: SZLaneModel,
+                         connector: SZLaneConnector.Kind? = nil,
+                         stop: (() -> Void)? = nil) -> some View {
+        HStack(spacing: 0) {
+            if let connector { SZLaneConnector(kind: connector) }
+            SZStripLane(model: model,
+                        onOpen: onOpen.map { open in { open(model.run.id) } },
+                        onStop: stop)
+            Spacer(minLength: 0)
         }
     }
 
@@ -106,44 +121,51 @@ struct SZRunStrip: View {
         Text(text)
             .font(.system(size: 8, design: .monospaced))
             .foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: SZLaneMetrics.rowHeight, alignment: .leading)
     }
 
-    /// One scheduled task: what was asked, and why it has not started. Deliberately quieter than
-    /// a live lane — it is waiting, not working — with a ✕ because an ask you changed your mind
+    /// One scheduled task: what was asked, and why it has not started. Deliberately quieter than a
+    /// running lane — it is waiting, not working — with a ✕ because an ask you changed your mind
     /// about should cost nothing to drop.
     private func scheduledRow(_ row: SZScheduledRow) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "clock")
-                .font(.system(size: 8))
-                .foregroundStyle(.quaternary)
-            Text(row.title)
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-            if let waiting = row.waitingOn {
-                Text("· behind \(waiting)")
-                    .font(.system(size: 9, design: .monospaced))
+        HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "clock")
+                    .font(.system(size: 8))
                     .foregroundStyle(.quaternary)
+                Text(row.title)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            if let onCancelScheduled {
-                SZLaneActionButton(symbol: "xmark", help: "Drop this scheduled task") {
-                    onCancelScheduled(row.id)
+                if let waiting = row.waitingOn {
+                    Text("· behind \(waiting)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.quaternary)
+                        .lineLimit(1)
+                }
+                if let onCancelScheduled {
+                    SZLaneActionButton(symbol: "xmark", help: "Drop this scheduled task") {
+                        onCancelScheduled(row.id)
+                    }
                 }
             }
+            .padding(.leading, SZLaneMetrics.padH)
+            .padding(.trailing, onCancelScheduled == nil ? SZLaneMetrics.padH : 3)
+            .frame(height: SZLaneMetrics.pillHeight)
+            .background(RoundedRectangle(cornerRadius: SZLaneMetrics.radius)
+                .fill(Color.white.opacity(0.035)))
+            Spacer(minLength: 0)
         }
-        .frame(height: SZAgentGraphLayout.laneHeight)
+        .frame(height: SZLaneMetrics.rowHeight)
     }
 
-    /// Before the fleet goes out — the Director is deciding, and the run is still the thing in
+    /// Before the fleet goes out — the Director is deciding, and the build is still the thing in
     /// flight. Quiet by design: the Director's own turn is already streaming in the transcript
     /// right above, and this must not shout over it.
     private func waitingLine(thread: UUID) -> some View {
         HStack(spacing: 6) {
-            // The same dot as a working tab (SZChatPanel.tabActivityDot), cadence included, so the
-            // strip and the tab strip read as one state rather than two opinions.
+            // The same dot as a working scope, cadence included, so the strip and the transcript
+            // read as one state rather than two opinions.
             SZPulsingOpacity(range: 0.35...0.95, halfPeriod: 0.79) {
                 Circle().fill(SZNodeStatus.building.color).frame(width: 4.5, height: 4.5)
             }
@@ -152,10 +174,141 @@ struct SZRunStrip: View {
                 .foregroundStyle(.tertiary)
             Spacer(minLength: 0)
         }
-        .frame(height: SZAgentGraphLayout.laneHeight)
+        .frame(height: SZLaneMetrics.rowHeight)
         .contentShape(Rectangle())
         .onTapGesture { onOpen?(thread) }
         .help("Open this run in the Agent Graph")
+    }
+}
+
+/// The strip's one set of numbers. A row is taller than its pill: the difference is the gap between
+/// pills, and it belongs to the ROW so the connector can draw through it.
+enum SZLaneMetrics {
+    static let pillHeight: CGFloat = 21
+    static let rowHeight: CGFloat = 24
+    static let radius: CGFloat = 6
+    static let padH: CGFloat = 7
+    static let connectorWidth: CGFloat = 15
+    /// Every small control in the strip — a lane's ■, a scheduled row's ✕ — is this size.
+    static let controlSize: CGFloat = 16
+    static let groupGap: CGFloat = 5
+}
+
+/// What a lane says, gathered so the row and the view agree on it.
+struct SZLaneModel {
+    let run: SZAgentGraphRun
+    let name: String
+    let symbol: String
+    let tint: Color
+
+    /// Where this agent is: the last entry still running, else the last one it finished.
+    var phase: String? { run.trace.last { $0.phase == .running }?.node ?? run.trace.last?.node }
+}
+
+/// The elbow joining a coding agent to the Director that dispatched it — drawn, not typed, so the
+/// vertical actually meets the row above it. `.middle` continues past this lane to the next child;
+/// `.last` stops at the elbow.
+struct SZLaneConnector: View {
+    enum Kind { case middle, last }
+    let kind: Kind
+
+    var body: some View {
+        Path { path in
+            let x: CGFloat = 6
+            let midY = SZLaneMetrics.rowHeight / 2
+            path.move(to: CGPoint(x: x, y: 0))
+            path.addLine(to: CGPoint(x: x, y: kind == .last ? midY : SZLaneMetrics.rowHeight))
+            path.move(to: CGPoint(x: x, y: midY))
+            path.addLine(to: CGPoint(x: SZLaneMetrics.connectorWidth - 3, y: midY))
+        }
+        .stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, lineCap: .round))
+        .frame(width: SZLaneMetrics.connectorWidth, height: SZLaneMetrics.rowHeight)
+    }
+}
+
+/// One agent, as a pill that hugs its own text: who, where they are, how long, what state — and, on
+/// a live Director, the ■ that stops that build. The pill carries the agent's colour as a wash
+/// rather than an outline; at four lanes an outline each was the loudest thing in the panel.
+struct SZStripLane: View {
+    let model: SZLaneModel
+    var onOpen: (() -> Void)?
+    var onStop: (() -> Void)?
+    @State private var hover = false
+
+    private var isLive: Bool { model.run.isLive }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 6) {
+                Image(systemName: model.symbol)
+                    .font(.system(size: 8))
+                    .foregroundStyle(isLive ? model.tint : Color.secondary)
+                Text(model.name)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if let phase = model.phase {
+                    Text(phase)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                Text(model.run.endedAt
+                        .map { SZTurnBreakdown.format($0.timeIntervalSince(model.run.startedAt)) }
+                     ?? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(model.run.startedAt)))
+                    .font(.system(size: 8.5, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    // Beside a pulsing badge: swap the string, never cross-fade it.
+                    .contentTransition(.identity)
+                if isLive {
+                    SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
+                        SZRunBadge.running(colour: model.tint)
+                    }
+                } else {
+                    SZRunBadge.forConclusion(model.run.conclusion)
+                }
+                if let onStop {
+                    SZLaneActionButton(symbol: "stop.fill",
+                                       help: "Stop this build — the others keep going",
+                                       action: onStop)
+                }
+            }
+            .padding(.leading, SZLaneMetrics.padH)
+            .padding(.trailing, onStop == nil ? SZLaneMetrics.padH : 3)
+            .frame(height: SZLaneMetrics.pillHeight)
+            .background(RoundedRectangle(cornerRadius: SZLaneMetrics.radius)
+                .fill(isLive ? model.tint.opacity(hover ? 0.20 : 0.14)
+                             : Color.white.opacity(hover ? 0.075 : 0.04)))
+        }
+        .frame(height: SZLaneMetrics.rowHeight)
+        // The pill opens the run; the ■ inside it is its own button, so the two must not nest — a
+        // tap gesture on the row leaves the control clickable where a Button label would not.
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen?() }
+        .trackingHover($hover)
+        .help(onOpen == nil ? "" : "Open this run in the Agent Graph")
+    }
+}
+
+/// The strip's small trailing control — a lane's ■, a scheduled row's ✕. ONE size for both, and a
+/// real hit target with a hover state rather than a bare tinted glyph floating beside the row.
+struct SZLaneActionButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(hover ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                .frame(width: SZLaneMetrics.controlSize, height: SZLaneMetrics.controlSize)
+                .background(Circle().fill(.white.opacity(hover ? 0.16 : 0.07)))
+        }
+        .buttonStyle(.plain)
+        .trackingHover($hover)
+        .help(help)
     }
 }
 
@@ -171,29 +324,5 @@ public struct SZScheduledRow: Identifiable, Equatable, Sendable {
         self.id = id
         self.title = title
         self.waitingOn = waitingOn
-    }
-}
-
-
-/// The strip's small trailing control — a lane's ■, a scheduled row's ✕. It reads as a button: a
-/// hit target you can land on, and a hover state, rather than a bare tinted glyph floating beside
-/// the row (which read as an orange rectangle nobody could name).
-private struct SZLaneActionButton: View {
-    let symbol: String
-    let help: String
-    let action: () -> Void
-    @State private var hover = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(hover ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-                .frame(width: 18, height: 18)
-                .background(Circle().fill(.white.opacity(hover ? 0.14 : 0.06)))
-        }
-        .buttonStyle(.plain)
-        .trackingHover($hover)
-        .help(help)
     }
 }
