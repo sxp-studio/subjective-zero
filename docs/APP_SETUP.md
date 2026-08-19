@@ -22,11 +22,21 @@ Operate as **guided automation**, not autonomous installation:
 
 ## Install or update the app
 
-> **Pending the 0.2.1 release pipeline.** The release manifest (`latest-release.json`), DMG
-> URL + SHA-256, and code-signing identity land with the auto-update work (roadmap Task 4).
-> Until then, testers receive builds directly. When the manifest exists, the flow is: fetch
-> manifest → download only its `dmgURL` → verify `dmgSHA256` → `codesign --verify --deep
-> --strict` + `spctl -a -t exec` → ask → copy to /Applications → launch.
+Releases are published as a signed + notarized DMG on GitHub. There is no separate manifest:
+the latest release *is* the source of truth.
+
+1. Fetch the latest release and download only its DMG asset:
+   `gh release download --repo sxp-studio/subjective-zero --pattern '*.dmg'`
+   (or take `SubjectiveZero-<version>.dmg` from
+   <https://github.com/sxp-studio/subjective-zero/releases/latest>).
+2. Verify before opening — stop and report if either check fails:
+   `codesign --verify --deep --strict --verbose=2 /Volumes/SubjectiveZero/SubjectiveZero.app`
+   and `spctl -a -t exec -vv /Volumes/SubjectiveZero/SubjectiveZero.app`. Expect the signer
+   `Developer ID Application: SXP Studio` and `source=Notarized Developer ID`.
+3. Ask the user, then copy the app to `/Applications` and launch it.
+
+After the first install the app updates itself — **SubjectiveZero ▸ Check for Updates…** reads a
+signed Sparkle appcast, so later versions do not need this procedure.
 
 ## Provider CLI setup
 
