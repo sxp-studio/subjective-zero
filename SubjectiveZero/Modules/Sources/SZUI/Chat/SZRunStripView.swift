@@ -27,6 +27,9 @@ struct SZRunStrip: View {
     let onOpen: ((UUID) -> Void)?
     /// The leader record, for the fallback line's link. nil = nothing to land on yet.
     let threadID: UUID?
+    /// The DIRECTOR's own traversal — the run that dispatched these lanes. It reads as a lane like
+    /// its fleet does, in its own colour, rather than as a link buried under a message.
+    var leader: SZAgentGraphRun? = nil
     /// Work SCHEDULED and not yet started, oldest first — the asks that survived being second.
     /// They sit under the live lanes because that is the order they will happen in.
     var scheduled: [SZScheduledRow] = []
@@ -46,9 +49,16 @@ struct SZRunStrip: View {
         VStack(spacing: 0) {
             Divider().overlay(Color.white.opacity(0.08))
             VStack(spacing: SZAgentGraphLayout.laneGap) {
+                if let leader {
+                    // First, and above its fleet: the Director is what the fleet hangs off.
+                    SZAgentSubagentLane(run: leader, title: "Director",
+                                        symbol: "eyeglasses", tint: SZEdgeStyle.intentViolet,
+                                        action: { onOpen?(leader.id) })
+                        .frame(height: SZAgentGraphLayout.laneHeight)
+                }
                 if lanes.isEmpty, !scheduled.isEmpty {
                     // Nothing running, but work is waiting — the strip is the queue's only home.
-                } else if lanes.isEmpty {
+                } else if lanes.isEmpty, leader == nil {
                     waitingLine
                 } else {
                     ForEach(shown) { run in
@@ -152,20 +162,3 @@ public struct SZScheduledRow: Identifiable, Equatable, Sendable {
     }
 }
 
-/// A run narration's way back into its record. Its OWN view because `SZChatTurnRow` is value-only
-/// for the synthesized `==` behind its `.equatable()` render skip — an `@Environment` stored
-/// property there would break the conformance. Same split the Profiler's link already uses.
-struct SZRunLinkCaption: View {
-    let runID: UUID
-    @Environment(\.szRevealInAgentGraph) private var revealInAgentGraph
-
-    var body: some View {
-        if let revealInAgentGraph {
-            SZCaptionActionButton(label: "agent graph",
-                                  icon: "point.3.filled.connected.trianglepath.dotted",
-                                  help: "Open this run in the Agent Graph") {
-                revealInAgentGraph(runID)
-            }
-        }
-    }
-}

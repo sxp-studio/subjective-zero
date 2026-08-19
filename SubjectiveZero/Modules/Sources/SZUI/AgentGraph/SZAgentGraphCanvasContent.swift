@@ -409,6 +409,11 @@ struct SZAgentSubagentLane: View {
     let run: SZAgentGraphRun
     /// The work node's display title; nil (node gone / no resolver) falls back to its id.
     var title: String? = nil
+    /// The lane's glyph. Defaults to the coding agent's hammer; the Director gets its own.
+    var symbol: String = "hammer"
+    /// Tints the glyph and the live outline, so one lane can say "this is a different agent"
+    /// without becoming a different component. nil = the shared in-flight orange.
+    var tint: Color? = nil
     /// Show this record — the lane is a door into its own run.
     var action: () -> Void = {}
 
@@ -421,9 +426,9 @@ struct SZAgentSubagentLane: View {
         Button(action: action) {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 5) {
-                Image(systemName: "hammer")
+                Image(systemName: symbol)
                     .font(.system(size: 8))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(tint ?? .secondary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title ?? run.work.map { String($0.prefix(8)) } ?? "work")
                         .font(.system(size: 9, weight: .medium))
@@ -443,7 +448,7 @@ struct SZAgentSubagentLane: View {
                     .contentTransition(.identity)
                 if run.isLive {
                     SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
-                        SZRunBadge(label: "live", colour: SZAgentGraphStyle.live)
+                        SZRunBadge(label: "live", colour: tint ?? SZAgentGraphStyle.live)
                     }
                 } else {
                     SZRunBadge.forConclusion(run.conclusion)
@@ -454,7 +459,7 @@ struct SZAgentSubagentLane: View {
             .background(RoundedRectangle(cornerRadius: 5)
                 .fill(Color.white.opacity(run.isLive ? 0.05 : 0.025)))
             .overlay(RoundedRectangle(cornerRadius: 5)
-                .stroke(run.isLive ? SZAgentGraphStyle.live.opacity(0.45)
+                .stroke(run.isLive ? (tint ?? SZAgentGraphStyle.live).opacity(0.45)
                                    : Color.white.opacity(0.08), lineWidth: 1))
             .contentShape(Rectangle())
         }

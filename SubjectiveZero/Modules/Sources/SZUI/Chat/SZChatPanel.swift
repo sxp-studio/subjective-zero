@@ -334,6 +334,7 @@ public struct SZChatPanel: View {
                    since: runStartedAt,
                    onOpen: revealInAgentGraph.map { reveal in { reveal($0) } },
                    threadID: runGraphRunID,
+                   leader: agentGraphRuns.first { $0.id == runGraphRunID },
                    scheduled: scheduledTasks,
                    onCancelScheduled: onCancelScheduledTask)
     }
@@ -797,13 +798,6 @@ private struct SZChatTurnRow: View, Equatable {
                     SZTurnBreakdownView(turnCaption: nil, events: breakdown,
                                         profilerTarget: breakdown.compactMap(\.runID).first ?? message.id,
                                         turnID: message.id)
-                }
-                // The run's own narrations carry their record — the way back into a build that has
-                // scrolled into history. Unlike the Profiler's sibling link this is not gated on
-                // tracing, so it is there in release too; on the "Run started…" line it is the only
-                // footer at all (that message has no duration and, untraced, no breakdown).
-                if let runID = message.graphRunID {
-                    SZRunLinkCaption(runID: runID)
                 }
             }
         }
