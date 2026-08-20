@@ -352,7 +352,10 @@ struct SZApp: App {
                                      onSkip: { host.skipProviderSetup() },
                                      onOpenSetupGuide: { host.openProviderSetupGuide() },
                                      onJoinDiscord: { host.joinDiscord() },
-                                     onSectionChange: { setupSection = $0 })
+                                     onSectionChange: { setupSection = $0 },
+                                     // First run = the default provider is still unconfirmed;
+                                     // afterwards the Providers pane closes with a plain Done.
+                                     isFirstRun: host.defaultProviderID == nil)
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)

@@ -405,12 +405,12 @@ public struct SZRoutingSettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.label)
                     .font(.system(size: 13, weight: .medium))
+                // The pack author's words, shown WHOLE — the row grows rather than cutting
+                // a description short.
                 Text(row.caption)
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(row.caption)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             if row.isSet {
@@ -491,26 +491,41 @@ public struct SZRoutingSettingsView: View {
     }
 
     /// Only where the ROUTED model honours it — an inert toggle is a lie. A bordered chip
-    /// (accent-filled when on), so it reads as a pressable control, not a status glyph.
+    /// (accent-filled when on, brightening under the cursor), so it reads as a pressable
+    /// control, not a status glyph.
     @ViewBuilder
     private func fastToggle(_ row: SZRoutingPositionRow) -> some View {
         if row.supportsFastMode {
-            Button {
+            SZFastToggleChip(isOn: row.fastModeEnabled) {
                 onSetPositionFastMode(row.position, !row.fastModeEnabled)
-            } label: {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(row.fastModeEnabled ? Color.white : Color.secondary)
-                    .frame(width: 26, height: 19)
-                    .background(RoundedRectangle(cornerRadius: 5)
-                        .fill(row.fastModeEnabled ? Color.accentColor : Color.clear))
-                    .overlay(RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(.quaternary,
-                                      lineWidth: row.fastModeEnabled ? 0 : 1))
-                    .contentShape(RoundedRectangle(cornerRadius: 5))
             }
-            .buttonStyle(.plain)
-            .help(row.fastModeEnabled ? "Fast mode is on" : "Turn on fast mode")
         }
+    }
+}
+
+/// The fast-mode chip: accent-filled when on, quaternary-bordered when off, and visibly
+/// alive under the cursor (its own view — hover is per-chip state).
+private struct SZFastToggleChip: View {
+    let isOn: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isOn ? Color.white : (hovered ? Color.primary : Color.secondary))
+                .frame(width: 26, height: 19)
+                .background(RoundedRectangle(cornerRadius: 5)
+                    .fill(isOn ? Color.accentColor.opacity(hovered ? 0.85 : 1)
+                               : Color.white.opacity(hovered ? 0.08 : 0)))
+                .overlay(RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(hovered ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.quaternary),
+                                  lineWidth: isOn ? 0 : 1))
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(isOn ? "Fast mode is on" : "Turn on fast mode")
     }
 }

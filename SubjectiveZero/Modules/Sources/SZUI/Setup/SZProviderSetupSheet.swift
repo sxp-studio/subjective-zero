@@ -109,6 +109,9 @@ public struct SZProviderSetupSheet: View {
     private let onSetEnabled: (String, Bool) -> Void
     private let onConfirm: () -> Void
     private let onSkip: () -> Void
+    /// First run = the default provider is still unconfirmed; flips the Providers footer
+    /// between Skip/Confirm (the one-time decision) and a plain Done.
+    private let isFirstRun: Bool
     private let onOpenSetupGuide: () -> Void
     private let onJoinDiscord: () -> Void
     /// The presenter remembers the last-viewed section, so reopening returns there.
@@ -129,10 +132,12 @@ public struct SZProviderSetupSheet: View {
                 onConfirm: @escaping () -> Void, onSkip: @escaping () -> Void,
                 onOpenSetupGuide: @escaping () -> Void,
                 onJoinDiscord: @escaping () -> Void,
-                onSectionChange: @escaping (SZProviderSetupSection) -> Void = { _ in }) {
+                onSectionChange: @escaping (SZProviderSetupSection) -> Void = { _ in },
+                isFirstRun: Bool = true) {
         self.cards = cards
         self.selectedID = selectedID
         self.routing = routing
+        self.isFirstRun = isFirstRun
         _section = State(initialValue: initialSection)
         self.onSelect = onSelect
         self.onRefresh = onRefresh
@@ -243,10 +248,16 @@ public struct SZProviderSetupSheet: View {
                 Button { onJoinDiscord() } label: { Label("Ask on Discord", systemImage: "questionmark.bubble") }
                     .help("Stuck? The community Discord can help you get set up.")
                 Spacer()
-                Button("Skip for Now") { onSkip() }
-                Button("Confirm") { onConfirm() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!(selectedCard?.isConfirmable ?? false))
+                // Skip/Confirm is FIRST-RUN vocabulary — the one-time default-provider
+                // decision. A settled install just closes, like every settings pane.
+                if isFirstRun {
+                    Button("Skip for Now") { onSkip() }
+                    Button("Confirm") { onConfirm() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!(selectedCard?.isConfirmable ?? false))
+                } else {
+                    Button("Done") { onSkip() }
+                }
             }
         }
     }
