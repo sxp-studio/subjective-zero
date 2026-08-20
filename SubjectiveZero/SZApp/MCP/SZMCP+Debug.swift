@@ -16,7 +16,7 @@ extension SZHostBridge {
             tool("debug_snapshot_state", "Return the live project graph as JSON."),
             tool("debug_card_mount", "A node's custom-card mount as JSON: {state: unmounted|loading|ready|failed, generation, warning, error, hasSource, backdrop}.",
                  properties: ["node": ["type": "string", "description": "node id (UUID)"]]),
-            tool("debug_chat_transcript", "Return a chat transcript as JSON — role/text/thinking plus, where present, timestamp/duration/usage/breakdown per message (the same numbers the in-app turn breakdown shows).",
+            tool("debug_chat_transcript", "Return a chat transcript as JSON — role/text/thinking plus, where present, timestamp/duration/usage/breakdown/generation per message (the same numbers the in-app turn breakdown shows; `generation` is the turn's receipt — provider/model/effort/fast and which routing rule picked it).",
                  properties: ["scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"]]),
             tool("debug_turn_timings", "Per-turn timing data for profiling, as JSON: completed agent turns per scope — {turnID, start, duration, usage, events} where events are the turn's recorded phases (queue wait, first output, tool spans, compile/promote, the CLI's own report) with id/parent (span hierarchy) and runID (run grouping). The latest run's rollup rides the Director run-complete narration (run.* stages). `tracing` reports whether collection is on (SZ_TRACE / DEBUG).",
                  properties: ["scope": ["type": "string", "description": "a node uuid or \"director\" to filter; omit for every scope"]]),
@@ -388,6 +388,14 @@ extension SZHostBridge {
         if let duration = message.duration { m["duration"] = duration }
         if let usage = message.usage { m["usage"] = usageJSON(usage) }
         if let events = message.breakdown, !events.isEmpty { m["breakdown"] = events.map { eventJSON($0) } }
+        if let generation = message.generation {
+            var g: [String: Any] = ["providerID": generation.providerID,
+                                    "fastMode": generation.fastMode]
+            if let model = generation.model { g["model"] = model }
+            if let effort = generation.reasoningEffort { g["reasoningEffort"] = effort }
+            if let via = generation.via { g["via"] = via }
+            m["generation"] = g
+        }
         return m
     }
 
