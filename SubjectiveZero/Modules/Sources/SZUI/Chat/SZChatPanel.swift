@@ -385,8 +385,27 @@ public struct SZChatPanel: View {
     /// `message`, so every older row fails fast on `==` and never re-runs its body — including its
     /// markdown parse. A graph edit changes `liveNodeIDs`, correctly re-rendering all rows' mention
     /// tombstones.
+    @ViewBuilder
     private func turn(for message: SZChatMessage, isLast: Bool, liveNodeIDs: Set<SZNodeID>,
                       from origin: SZChatScope) -> some View {
+        if let receipt = message.receipt {
+            // A finished build is not a speaker: no rail, no DIRECTOR AGENT header, no markdown
+            // body. It is the strip's lane, settled here at the moment it finished.
+            SZChatReceiptRow(
+                receipt: receipt,
+                seconds: message.duration ?? 0,
+                breakdown: showTurnBreakdown ? message.breakdown : nil,
+                turnID: message.id,
+                runID: message.graphRunID)
+                .equatable()
+        } else {
+            speakerTurn(for: message, liveNodeIDs: liveNodeIDs, from: origin)
+        }
+    }
+
+    /// Someone's turn — you, the Director, a node's Coding Agent.
+    private func speakerTurn(for message: SZChatMessage, liveNodeIDs: Set<SZNodeID>,
+                             from origin: SZChatScope) -> some View {
         let isUser = message.role == .user
         // One feed, several speakers: a line from a node's own conversation is labelled with that
         // node, so "who said this" is carried by the message, not by where you were looking.
@@ -727,6 +746,113 @@ public struct SZChatPanel: View {
     }
 
     private static let bottomID = "sz-chat-bottom"
+}
+
+/// A finished build, in the conversation.
+///
+/// The run strip is a run's presence — it appears the moment a build starts, on every tab, and it
+/// is gone the moment the build ends. This is the other half: the same lane, settled into the
+/// transcript at the point in time where it finished, so scrolling back through history still
+/// shows what was built and when. Deliberately NOT a turn — the host is not the Director, and for
+/// a long time it wore its violet anyway.
+///
+/// Reuses `SZLanePill` verbatim rather than resembling it: one badge vocabulary, one set of
+/// metrics, one hover, and the same tap into the Agent Graph the live lane already had.
+private struct SZChatReceiptRow: View, Equatable {
+    let receipt: SZChatReceipt
+    let seconds: TimeInterval
+    /// The run rollup, when Debug ▸ Show Turn Breakdown is on — it lands on this message.
+    let breakdown: [SZTurnEvent]?
+    let turnID: UUID
+    /// The run to open, as a VALUE — `SZTurnBreakdownView`'s `profilerTarget` idiom. The row reads
+    /// the action out of the environment itself rather than storing a closure, because a stored
+    /// closure has a fresh identity every render and would defeat the `.equatable()` skip that
+    /// `SZChatTurnRow`'s type comment exists to protect: receipts accumulate one per build, and at
+    /// streaming-flush cadence every visible one would rebuild its breakdown disclosure.
+    let runID: UUID?
+
+    @Environment(\.szRevealInAgentGraph) private var revealInAgentGraph
+
+    private var onOpen: (() -> Void)? {
+        guard let runID, let revealInAgentGraph else { return nil }
+        return { revealInAgentGraph(runID) }
+    }
+
+    /// Hand-written because `@Environment` is not synthesizable — and correct on purpose: what the
+    /// row RENDERS is these five values, while the reveal action is ambient and stable for the
+    /// panel's lifetime. Comparing only the values is what makes the skip real.
+    nonisolated static func == (a: SZChatReceiptRow, b: SZChatReceiptRow) -> Bool {
+        a.receipt == b.receipt && a.seconds == b.seconds && a.breakdown == b.breakdown
+            && a.turnID == b.turnID && a.runID == b.runID
+    }
+
+    /// The elbow's geometry, named so the two halves cannot drift: the stem sits on the message
+    /// rail's centre, the pill starts where the elbow reaches, and the stem climbs the gap the
+    /// transcript's rhythm leaves above this row (its 16pt spacing, less the 6pt this row pulls up).
+    private static let stemX: CGFloat = 1
+    private static let elbowWidth: CGFloat = 12
+    private static let pullUp: CGFloat = 6
+    private static let stemRise: CGFloat = 16 - pullUp
+
+    var body: some View {
+        // Hung off the turn above it on a drawn elbow — the same connector the strip uses for a
+        // coding agent under its Director, because it is the same relationship: this build came
+        // out of that turn. The indent is what the connector BUYS. A child lane is indented
+        // everywhere else in the app; here the elbow is what explains why — which is exactly what
+        // a bare pill, aligned to the message column and hanging off nothing, could not.
+        HStack(alignment: .top, spacing: 0) {
+            SZLaneConnector(kind: .last, stemX: Self.stemX, width: Self.elbowWidth,
+                            height: SZLaneMetrics.pillHeight, stemRise: Self.stemRise)
+            receiptStack
+        }
+        // Pulled up out of the transcript's 16pt rhythm. A receipt is a CODA — to the turn that
+        // preceded it, or to the receipts it lands beside when several builds finish together —
+        // and at a full 16pt above a 21pt pill it read as adrift rather than as belonging.
+        .padding(.top, -Self.pullUp)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var receiptStack: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // `hammer`, not the Director's `eyeglasses`. The strip's two glyphs mean two things —
+            // eyeglasses is the DIRECTOR's lane, named "Director"; hammer is a WORK lane, named by
+            // what it built. A receipt names the work, so under eyeglasses it read as a Director
+            // lane that had lost its name. The hammer also agrees with the verb it sits beside.
+            SZLanePill(symbol: "hammer", name: receipt.label, phase: nil,
+                       // A settled lane takes the neutral wash and never spends its tint — passing
+                       // the Director's violet here would have been a value that says the opposite
+                       // of what this row is for, and that nothing reads.
+                       tint: .secondary, isLive: false,
+                       clock: SZTurnBreakdown.format(seconds),
+                       onOpen: onOpen) {
+                // A clean ending wears NO chip. "built Scrolling Gradient" has already said it went
+                // well, and a saturated `end` badge on every build in the history is the loudest
+                // thing in a row with nothing to report. Keeping the badge for the endings that are
+                // not the expected one is what makes a `failed` or a `stopped` findable when you
+                // scroll back — the same vocabulary, spent only where it carries information.
+                if receipt.conclusion != .ended {
+                    SZRunBadge.forConclusion(receipt.conclusion)
+                }
+            }
+            // The one thing the pill cannot say: why a build died. Everything a NODE can explain
+            // for itself already arrived as its own turn. Hung under the pill's TEXT, not its
+            // edge — it belongs to the label, the way a turn's reply belongs to its header.
+            if let detail = receipt.detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, SZLaneMetrics.padH)
+            }
+            if let breakdown, !breakdown.isEmpty {
+                SZTurnBreakdownView(turnCaption: nil, events: breakdown,
+                                    profilerTarget: breakdown.compactMap(\.runID).first ?? turnID,
+                                    turnID: turnID)
+                    .padding(.leading, SZLaneMetrics.padH)
+            }
+        }
+    }
 }
 
 /// One transcript turn, `.equatable()`-gated by the panel. VALUE-ONLY stored props — adding a

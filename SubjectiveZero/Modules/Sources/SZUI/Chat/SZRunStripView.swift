@@ -208,55 +208,62 @@ struct SZLaneModel {
     var phase: String? { run.trace.last { $0.phase == .running }?.node ?? run.trace.last?.node }
 }
 
-/// The elbow joining a coding agent to its Director — drawn, not typed, so the vertical actually
+/// The elbow joining a lane to what it belongs to — drawn, not typed, so the vertical actually
 /// meets the row above. `.middle` continues to the next child; `.last` stops at the elbow.
+///
+/// Two callers, one shape: a coding agent hanging off its Director in the strip, and a build's
+/// RECEIPT hanging off the turn that produced it in the transcript. The defaults are the strip's;
+/// the transcript re-points the stem at the turn's own rail and rises to meet it.
 struct SZLaneConnector: View {
     enum Kind { case middle, last }
     let kind: Kind
+    /// Where the vertical runs. The strip's children hang off their group's column (6); a receipt
+    /// hangs off the message rail above it, a 2pt capsule whose centre is 1.
+    var stemX: CGFloat = 6
+    /// How far the elbow reaches. The pill it points at starts 3pt past this, so the line stops
+    /// just short of the box rather than butting into it.
+    var width: CGFloat = SZLaneMetrics.connectorWidth
+    /// The box the elbow centres itself on — a strip ROW, or a bare pill in the transcript.
+    var height: CGFloat = SZLaneMetrics.rowHeight
+    /// How far the stem climbs ABOVE its own frame to reach what it hangs from. Zero in the strip,
+    /// where lanes tile flush; in the transcript it spans the gap the message rhythm leaves, so
+    /// the receipt reads as continuing the turn's rail rather than floating under it. Drawn
+    /// outside the frame on purpose — a Path is not clipped by `.frame`.
+    var stemRise: CGFloat = 0
 
     var body: some View {
         Path { path in
-            let x: CGFloat = 6
-            let midY = SZLaneMetrics.rowHeight / 2
-            path.move(to: CGPoint(x: x, y: 0))
-            path.addLine(to: CGPoint(x: x, y: kind == .last ? midY : SZLaneMetrics.rowHeight))
-            path.move(to: CGPoint(x: x, y: midY))
-            path.addLine(to: CGPoint(x: SZLaneMetrics.connectorWidth - 3, y: midY))
+            let midY = height / 2
+            path.move(to: CGPoint(x: stemX, y: -stemRise))
+            path.addLine(to: CGPoint(x: stemX, y: kind == .last ? midY : height))
+            path.move(to: CGPoint(x: stemX, y: midY))
+            path.addLine(to: CGPoint(x: width - 3, y: midY))
         }
         .stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, lineCap: .round))
-        .frame(width: SZLaneMetrics.connectorWidth, height: SZLaneMetrics.rowHeight)
+        .frame(width: width, height: height)
     }
 }
 
 /// One agent, as a pill that hugs its text: who, where they are, what state, how long — and, on a
-/// live Director, the ■ that stops that build. Colour rides as a wash, not an outline: at four
-/// lanes an outline each was the loudest thing in the panel.
+/// live Director, the ■ that stops that build. A record's worth of `SZLanePill`: the ticking clock
+/// and the pulsing badge are the only parts that need the run itself.
 struct SZStripLane: View {
     let model: SZLaneModel
     var onOpen: (() -> Void)?
     var onStop: (() -> Void)?
-    @State private var hover = false
 
     private var isLive: Bool { model.run.isLive }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 6) {
-                Image(systemName: model.symbol)
-                    .font(.system(size: 8))
-                    .foregroundStyle(isLive ? model.tint : Color.secondary)
-                Text(model.name)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                if let phase = model.phase {
-                    Text(phase)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                // State, then how long it has been in it, then the control: the badge is what you
-                // read first, and the clock qualifies it.
+            SZLanePill(
+                symbol: model.symbol, name: model.name, phase: model.phase,
+                tint: model.tint, isLive: isLive,
+                clock: model.run.endedAt
+                    .map { SZTurnBreakdown.format($0.timeIntervalSince(model.run.startedAt)) }
+                    ?? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(model.run.startedAt)),
+                onOpen: onOpen, onStop: onStop, rowHeight: SZLaneMetrics.rowHeight
+            ) {
                 if isLive {
                     SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
                         SZRunBadge.running()
@@ -264,32 +271,87 @@ struct SZStripLane: View {
                 } else {
                     SZRunBadge.forConclusion(model.run.conclusion)
                 }
-                Text(model.run.endedAt
-                        .map { SZTurnBreakdown.format($0.timeIntervalSince(model.run.startedAt)) }
-                     ?? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(model.run.startedAt)))
-                    .font(.system(size: 8.5, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    // Beside a pulsing badge: swap the string, never cross-fade it.
-                    .contentTransition(.identity)
-                if let onStop {
-                    SZLaneActionButton(symbol: "stop.fill",
-                                       help: "Stop this build — the others keep going",
-                                       action: onStop)
-                }
             }
-            .padding(.leading, SZLaneMetrics.padH)
-            .padding(.trailing, onStop == nil ? SZLaneMetrics.padH : 3)
-            .frame(height: SZLaneMetrics.pillHeight)
-            .background(RoundedRectangle(cornerRadius: SZLaneMetrics.radius)
-                .fill(isLive ? model.tint.opacity(hover ? 0.20 : 0.14)
-                             : Color.white.opacity(hover ? 0.075 : 0.04)))
         }
-        .frame(height: SZLaneMetrics.rowHeight)
+    }
+}
+
+/// THE lane, driven by plain values instead of a record.
+///
+/// A build is a state while it runs and a receipt once it is over, and this is what makes those
+/// one object rather than two look-alikes: the strip wraps it in a clock (`SZStripLane`), and a
+/// finished build's turn in the transcript renders the same pill with a fixed one
+/// (`SZChatReceiptRow`). Colour rides as a wash, not an outline: at four lanes an outline each was
+/// the loudest thing in the panel.
+struct SZLanePill<Badge: View>: View {
+    let symbol: String
+    let name: String
+    var phase: String?
+    let tint: Color
+    /// Live lanes wear their agent's tint; a settled one goes to the neutral wash. Also what the
+    /// hover states are scaled against.
+    let isLive: Bool
+    let clock: String
+    var onOpen: (() -> Void)?
+    var onStop: (() -> Void)?
+    /// The height the lane OCCUPIES, when that is more than the pill it draws. A strip row is
+    /// taller than its pill and the difference is the gap `SZLaneConnector` draws through — and
+    /// that band is part of the lane: at `groupGap == 0` the rows tile the strip contiguously, so
+    /// the hover wash hands straight from one lane to the next and a click between two pills still
+    /// opens a run. It has to be applied HERE, before `contentShape`, or the interaction area is
+    /// the bare pill and the band becomes a 3pt dead zone that makes the wash flicker as you drag
+    /// down a group. nil = take the pill flush, which is what a receipt in the transcript wants:
+    /// no connector, no neighbours, nothing to tile with.
+    var rowHeight: CGFloat?
+    @ViewBuilder let badge: () -> Badge
+    @State private var hover = false
+
+    /// No `onOpen` means the pill is a readout. It must not light up under the cursor either —
+    /// hover feedback on something that does nothing is a promise the row cannot keep.
+    private var interactive: Bool { onOpen != nil }
+    private var lit: Bool { hover && interactive }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.system(size: 8))
+                .foregroundStyle(isLive ? tint : Color.secondary)
+            Text(name)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            if let phase {
+                Text(phase)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            // State, then how long it has been in it, then the control: the badge is what you
+            // read first, and the clock qualifies it.
+            badge()
+            Text(clock)
+                .font(.system(size: 8.5, design: .monospaced))
+                .foregroundStyle(.secondary)
+                // Beside a pulsing badge: swap the string, never cross-fade it.
+                .contentTransition(.identity)
+            if let onStop {
+                SZLaneActionButton(symbol: "stop.fill",
+                                   help: "Stop this build — the others keep going",
+                                   action: onStop)
+            }
+        }
+        .padding(.leading, SZLaneMetrics.padH)
+        .padding(.trailing, onStop == nil ? SZLaneMetrics.padH : 3)
+        .frame(height: SZLaneMetrics.pillHeight)
+        .background(RoundedRectangle(cornerRadius: SZLaneMetrics.radius)
+            .fill(isLive ? tint.opacity(lit ? 0.20 : 0.14)
+                         : Color.white.opacity(lit ? 0.075 : 0.04)))
+        .frame(height: rowHeight ?? SZLaneMetrics.pillHeight)
         // Tap gesture, not a Button: the ■ inside is its own button and the two must not nest.
         .contentShape(Rectangle())
         .onTapGesture { onOpen?() }
         .trackingHover($hover)
-        .help(onOpen == nil ? "" : "Open this run in the Agent Graph")
+        .help(interactive ? "Open this run in the Agent Graph" : "")
     }
 }
 
