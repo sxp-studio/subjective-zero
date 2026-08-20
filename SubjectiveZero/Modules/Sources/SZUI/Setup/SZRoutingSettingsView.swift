@@ -398,6 +398,14 @@ public struct SZRoutingSettingsView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        // A soft wash of the agent's hue behind its name — the card's header band.
+        // Untinted packs get a plain lift so every card still reads a header.
+        .background(UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10)
+            .fill(headerWash(SZAgentTint.color(agent.tint))))
+    }
+
+    private func headerWash(_ tint: Color?) -> Color {
+        tint.map { $0.opacity(0.13) } ?? Color.white.opacity(0.04)
     }
 
     private func slotRow(_ row: SZRoutingPositionRow) -> some View {
