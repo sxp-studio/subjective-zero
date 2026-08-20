@@ -400,9 +400,10 @@ public struct SZRoutingSettingsView: View {
 
     private func headerWash(_ tint: Color?) -> AnyShapeStyle {
         guard let tint else { return AnyShapeStyle(Color.white.opacity(0.04)) }
+        // Vertical: the color sits along the card's top edge and dissolves fully away.
         return AnyShapeStyle(LinearGradient(
             colors: [tint.opacity(0.24), tint.opacity(0)],
-            startPoint: .leading, endPoint: .trailing))
+            startPoint: .top, endPoint: .bottom))
     }
 
     private func slotRow(_ row: SZRoutingPositionRow) -> some View {
@@ -531,7 +532,6 @@ private struct SZViewGraphButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .frame(maxHeight: .infinity, alignment: .center)
         .help("Close settings and show \(title)'s graph")
     }
 }

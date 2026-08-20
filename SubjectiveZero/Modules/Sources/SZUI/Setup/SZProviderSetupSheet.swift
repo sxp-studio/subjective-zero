@@ -194,29 +194,43 @@ public struct SZProviderSetupSheet: View {
 
     private func sidebarItem(_ target: SZProviderSetupSection, label: String,
                              systemImage: String) -> some View {
-        let selected = section == target
-        return Button {
-            section = target
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 18)
-                Text(label)
-                    .font(.system(size: 13))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            // The Xcode selection pill: a full accent fill with white content, not a tint.
-            .background(RoundedRectangle(cornerRadius: 7)
-                .fill(selected ? Color.accentColor : .clear))
-            .foregroundStyle(selected ? Color.white : Color.primary)
-        }
-        .buttonStyle(.plain)
+        SZSidebarItem(label: label, systemImage: systemImage,
+                      selected: section == target) { section = target }
     }
 
     // MARK: - Providers pane (the original sheet, unchanged in substance)
+
+    /// One sidebar row: the Xcode selection pill (full accent fill, white content) when
+    /// selected, a quiet lift under the cursor otherwise. Its own view — hover is per-row state.
+    private struct SZSidebarItem: View {
+        let label: String
+        let systemImage: String
+        let selected: Bool
+        let action: () -> Void
+        @State private var hovered = false
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(width: 18)
+                    Text(label)
+                        .font(.system(size: 13))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 7)
+                    .fill(selected ? Color.accentColor
+                                   : Color.white.opacity(hovered ? 0.07 : 0)))
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .contentShape(RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .onHover { hovered = $0 }
+        }
+    }
 
     private var providersPane: some View {
         VStack(alignment: .leading, spacing: 14) {
