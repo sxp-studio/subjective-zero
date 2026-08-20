@@ -595,6 +595,11 @@ extension SZHost {
                              ownsGraphOp: startedForGraphOp, workSet: workSet)
         activeRuns[taskID] = run
         let thread = run.thread
+        // A grade is one briefing's read: this run's nodes start ungraded (its own Director
+        // turn grades them), and strays from off-run briefings die here — only grades
+        // belonging to sibling live runs' work survive.
+        let siblingWork = Set(activeRuns.filter { $0.key != taskID }.values.flatMap(\.workSet))
+        nodeGrades = nodeGrades.filter { siblingWork.contains($0.key) }
         status = "running \(providerID)…"
         showChat()                                     // a run settles into the conversation
         // No opening line. The run strip appears in the same breath, on every tab, for the whole

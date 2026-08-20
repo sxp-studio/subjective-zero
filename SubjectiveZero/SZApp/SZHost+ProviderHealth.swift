@@ -98,11 +98,19 @@ extension SZHost {
         stopProviderHealthPolling()
     }
 
-    /// Select a card (radio). Reserved statuses aside, every card is selectable — Confirm, not
-    /// selection, is where readiness gates.
+    /// Select a card. First-run this is a radio (Confirm commits); on a settled install the
+    /// sheet is a settings pane, so picking a READY card switches the active provider right
+    /// there — the only GUI path since the composer pill retired. A not-ready card just
+    /// selects, showing its remedies.
     func selectSetupProvider(_ id: String) {
         guard SZProviderRegistry.shared.provider(id: id) != nil else { return }
         selectedSetupProviderID = id
+        if defaultProviderID != nil, displayedProviderHealth(id)?.status == .ready,
+           setActiveProvider(id) {
+            defaultProviderID = id
+            persistAppState()
+            status = "active provider: \(id)"
+        }
     }
 
     /// The escape hatch a failing card offers: the first enabled, displayed-ready provider that

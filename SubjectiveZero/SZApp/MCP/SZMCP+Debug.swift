@@ -122,6 +122,9 @@ extension SZHostBridge {
             guard !profile.name.isEmpty else {
                 throw SZMCPError.message("debug_set_routing: `profile.name` must be non-empty")
             }
+            guard !SZHost.routingStarterNames.contains(profile.name) else {
+                throw SZMCPError.message("debug_set_routing: \"\(profile.name)\" ships with the app and is read-only — duplicate it in AI Settings instead")
+            }
             host.upsertRoutingProfile(profile)
             response["upserted"] = profile.name
         }

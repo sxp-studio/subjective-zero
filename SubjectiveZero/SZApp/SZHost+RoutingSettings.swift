@@ -290,7 +290,8 @@ extension SZHost {
     @discardableResult
     func renameRoutingProfile(from old: String, to newRaw: String) -> Bool {
         let new = newRaw.trimmingCharacters(in: .whitespaces)
-        guard !Self.routingStarterNames.contains(old) else { return false }
+        guard !Self.routingStarterNames.contains(old),
+              !Self.routingStarterNames.contains(new) else { return false }
         guard !new.isEmpty, new != old,
               let index = routingProfiles.firstIndex(where: { $0.name == old }),
               !routingProfiles.contains(where: { $0.name == new }) else { return false }

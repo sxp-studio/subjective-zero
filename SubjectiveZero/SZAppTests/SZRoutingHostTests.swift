@@ -7,19 +7,32 @@ import Foundation
 import Testing
 import SZAI
 import SZCore
+import SZUI
 @testable import SubjectiveZero
 
 @MainActor
 struct SZRoutingHostTests {
 
     /// A host whose routing state is exactly what the test says — nothing inherited from
-    /// this machine's real app-state.json.
+    /// this machine's real app-state.json, and a FIXTURE plan-agent cache so the card
+    /// tests never read the machine-shared materialized packs tree (the observed flake).
     private func bareHost(profiles: [SZRoutingProfile] = [], active: String? = nil) -> SZHost {
         let host = SZHost()
         host.routingProfiles = profiles
         host.activeRoutingProfileName = active
         host.disabledProviderIDs = []
         host.narratedRoutingNotes = []
+        host.agentGraphPlanCache = [
+            SZAgentGraphPlanAgent(
+                id: "director", title: "Director", symbol: "eyeglasses",
+                graph: SZAgentGraph(slots: [.init(id: "planner", description: "Plans")],
+                                    nodes: [], edges: [])),
+            SZAgentGraphPlanAgent(
+                id: "coding", title: "Coding", symbol: "hammer",
+                graph: SZAgentGraph(slots: [.init(id: "builder-default", description: "Builds"),
+                                            .init(id: "sorter", description: "Sorts")],
+                                    nodes: [], edges: [])),
+        ]
         return host
     }
 
@@ -99,9 +112,9 @@ struct SZRoutingHostTests {
         // The slot is gone — its turns fall to the default — and the drop is a sentence.
         #expect(router.resolve(SZModelCall(class: .turn, agent: "coding", slot: "builder-default"))
                     .providerID == "claude")
-        #expect(notes.count == 1)
-        #expect(notes[0].contains("no-such-cli"))
-        #expect(notes[0].contains("AI Settings"))
+        let note = try #require(notes.first)
+        #expect(note.contains("no-such-cli"))
+        #expect(note.contains("AI Settings"))
     }
 
     @Test func anOffCatalogModelRunsTheClampWithASentence() throws {
@@ -113,8 +126,8 @@ struct SZRoutingHostTests {
         let coding = router.resolve(SZModelCall(class: .turn, agent: "coding", slot: "builder-default"))
         #expect(coding.providerID == "codex")
         #expect(coding.model != "gpt-imaginary")
-        #expect(notes.count == 1)
-        #expect(notes[0].contains("gpt-imaginary"))
+        let note = try #require(notes.first)
+        #expect(note.contains("gpt-imaginary"))
     }
 
     @Test func aSentenceIsSaidOncePerProfileState() throws {

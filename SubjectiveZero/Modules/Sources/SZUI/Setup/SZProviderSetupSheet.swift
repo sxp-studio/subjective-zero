@@ -93,6 +93,9 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
 public struct SZProviderSetupSheet: View {
     private let cards: [SZProviderSetupCard]
     private let selectedID: String?
+    /// The provider actually ACTIVE (runs, chat, routing's Default) — what the capsule marks.
+    /// Distinct from `selectedID`: a first-run selection is a radio Confirm has not committed.
+    private let activeID: String?
     /// The Routing pane's content, built by the presenter (the gearMenu AnyView pattern).
     /// nil = no Routing section (previews/tests); the sidebar hides it.
     private let routing: SZRoutingSettingsView?
@@ -117,6 +120,7 @@ public struct SZProviderSetupSheet: View {
     @State private var section: SZProviderSetupSection
 
     public init(cards: [SZProviderSetupCard], selectedID: String?,
+                activeID: String? = nil,
                 routing: SZRoutingSettingsView? = nil,
                 initialSection: SZProviderSetupSection = .providers,
                 onSelect: @escaping (String) -> Void, onRefresh: @escaping () -> Void,
@@ -132,6 +136,7 @@ public struct SZProviderSetupSheet: View {
                 isFirstRun: Bool = true) {
         self.cards = cards
         self.selectedID = selectedID
+        self.activeID = activeID
         self.routing = routing
         self.isFirstRun = isFirstRun
         _section = State(initialValue: initialSection)
@@ -305,8 +310,8 @@ public struct SZProviderSetupSheet: View {
                     Text(card.displayName).font(.system(size: 13, weight: .semibold))
                     statusBadge(card)
                     // The provider the Routing pane's helper and "Default (…)" rows resolve
-                    // to, anchored to the card itself.
-                    if selected {
+                    // to — the ACTIVE truth, never the radio selection.
+                    if card.id == activeID {
                         Text("Active")
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 8)

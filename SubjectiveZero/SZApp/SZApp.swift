@@ -336,6 +336,7 @@ struct SZApp: App {
                                         set: { if !$0 { host.skipProviderSetup() } })) {
                 SZProviderSetupSheet(cards: host.providerSetupCards,
                                      selectedID: host.selectedSetupProviderID,
+                                     activeID: host.activeProviderID,
                                      routing: routingSettingsView,
                                      initialSection: setupSection,
                                      onSelect: { host.selectSetupProvider($0) },
@@ -538,7 +539,9 @@ struct SZApp: App {
     /// No presentation state: the selected row IS the active profile, so the host's
     /// `activeRoutingProfileName` is the whole story — the gearMenu pattern, typed.
     private var routingSettingsView: SZRoutingSettingsView {
-        let selection = host.activeRoutingProfileName
+        // A launch pin owns the session: the pane renders the PINNED profile, locked, not
+        // whatever app-state happens to persist underneath it.
+        let selection = host.routingEnvPinnedProfileName ?? host.activeRoutingProfileName
         return SZRoutingSettingsView(
             profiles: host.routingProfileRows,
             selectedProfileName: selection,
