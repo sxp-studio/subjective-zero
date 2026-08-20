@@ -80,8 +80,8 @@ public enum SZAgentGraphLayout {
     static let nodeGap: CGFloat = SZGraphLayout.nodeGap
 
     // Wide enough for a real title BESIDE a slot chip — the chip must never cost the
-    // title its words.
-    public static let cardWidth: CGFloat = 232
+    // title its words. Sized against the longest shipped turn title with its chip on.
+    public static let cardWidth: CGFloat = 256
 
     /// The Run view's second header line — `visit N` and the dispatch tally, on their own
     /// line under the title (in the title row they cropped it to "Imple…").
