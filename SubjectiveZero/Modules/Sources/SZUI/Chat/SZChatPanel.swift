@@ -25,6 +25,7 @@ public struct SZChatPanel: View {
     private let isRunning: Bool                    // a build is in flight → the strip shows it
     private let showTokenCounts: Bool              // View ▸ Show Token Counts — the usage caption under replies
     private let showTurnBreakdown: Bool            // Debug ▸ Show Turn Breakdown — expandable phase rows under replies
+    private let agentAccents: SZChatAgentAccents   // pack-declared speaker symbols/tints; empty = the built-in palette
     private let workingScopes: Set<String>         // scopes with a streaming turn → the typing dots
     private let runThreadIDs: [UUID]               // every live thread, oldest first → the run strip
     private let agentGraphRuns: [SZAgentGraphRun]  // the RUNS records → the run strip's fleet lanes
@@ -104,6 +105,25 @@ public struct SZChatPanel: View {
     static let agentColor = Color(red: 0.96, green: 0.60, blue: 0.30)   // coding agent — warm orange, kin to the node's "coding" state; internal: the breakdown+profiler timelines color-code with it
     static let directorColor = SZEdgeStyle.intentViolet                 // Director = its own flow-edge violet; internal: same
     private static let debugColor = Color(red: 0.70, green: 0.62, blue: 0.85)       // the debug chat agent — a muted "this is a tool" lilac
+
+    /// The speakers' identities as the PACKS declare them (symbol + tint per agent graph),
+    /// host-injected; the constants above are the fallbacks for packs declaring none.
+    public struct SZChatAgentAccents: Equatable, Sendable {
+        public var directorColor: Color?
+        public var directorSymbol: String?
+        public var codingColor: Color?
+        public var debugColor: Color?
+        public var debugSymbol: String?
+        public init(directorColor: Color? = nil, directorSymbol: String? = nil,
+                    codingColor: Color? = nil, debugColor: Color? = nil,
+                    debugSymbol: String? = nil) {
+            self.directorColor = directorColor
+            self.directorSymbol = directorSymbol
+            self.codingColor = codingColor
+            self.debugColor = debugColor
+            self.debugSymbol = debugSymbol
+        }
+    }
     /// The panel's own ground. Named because the transcript's bottom fade has to dissolve into
     /// EXACTLY this colour, and a fade to a near-miss reads as a smudge.
     static let panelFill = Color(white: 0.12)
@@ -113,6 +133,7 @@ public struct SZChatPanel: View {
                 isRunning: Bool = false,
                 showTokenCounts: Bool = false,
                 showTurnBreakdown: Bool = false,
+                agentAccents: SZChatAgentAccents = SZChatAgentAccents(),
                 workingScopes: Set<String> = [],
                 runThreadIDs: [UUID] = [],
                 agentGraphRuns: [SZAgentGraphRun] = [],
@@ -139,6 +160,7 @@ public struct SZChatPanel: View {
         self.isRunning = isRunning
         self.showTokenCounts = showTokenCounts
         self.showTurnBreakdown = showTurnBreakdown
+        self.agentAccents = agentAccents
         self.workingScopes = workingScopes
         self.runThreadIDs = runThreadIDs
         self.agentGraphRuns = agentGraphRuns
@@ -392,16 +414,20 @@ public struct SZChatPanel: View {
             showTokenCounts: showTokenCounts,
             showTurnBreakdown: showTurnBreakdown,
             accent: isUser ? Self.userColor
-                : (isDebugReply ? Self.debugColor : (isDirector ? Self.directorColor : Self.agentColor)),
+                : (isDebugReply ? (agentAccents.debugColor ?? Self.debugColor)
+                   : (isDirector ? (agentAccents.directorColor ?? Self.directorColor)
+                      : (agentAccents.codingColor ?? Self.agentColor))),
             label: isUser ? "you"
                 : (isDebugReply ? "debug agent"
                    : (isDirector ? "director agent"
                       : (originNode.map { "\($0.title) · coding agent" } ?? "coding agent"))),
-            // Symbol next to the label (accessibility — not color-only): the Director's `eyeglasses`
-            // (matching its tab), the node's own sfSymbol for its Coding Agent, a person for the user.
+            // Symbol next to the label (accessibility — not color-only): the Director's own
+            // pack glyph (matching its tab), the node's own sfSymbol for its Coding Agent,
+            // a person for the user.
             symbol: isUser ? "person.fill"
-                : (isDebugReply ? "ladybug.fill"
-                   : (isDirector ? "eyeglasses" : (originNode?.sfSymbol ?? "sparkles"))),
+                : (isDebugReply ? (agentAccents.debugSymbol ?? "ladybug.fill")
+                   : (isDirector ? (agentAccents.directorSymbol ?? "eyeglasses")
+                      : (originNode?.sfSymbol ?? "sparkles"))),
             liveNodeIDs: liveNodeIDs)
             .equatable()
     }

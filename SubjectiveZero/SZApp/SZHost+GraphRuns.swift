@@ -157,8 +157,11 @@ extension SZHost {
                 guard let graph = pack.graph else { return nil }
                 return SZAgentGraphPlanAgent(
                     id: pack.id,
-                    title: pack.id.isEmpty ? pack.id : pack.id.prefix(1).uppercased() + pack.id.dropFirst(),
-                    symbol: Self.agentGraphSymbol(for: pack),
+                    title: graph.label
+                        ?? (pack.id.isEmpty ? pack.id : pack.id.prefix(1).uppercased() + pack.id.dropFirst()),
+                    // The pack's own declared glyph wins; the seat default catches packs
+                    // that declare none.
+                    symbol: graph.symbol ?? Self.agentGraphSymbol(for: pack),
                     graph: graph,
                     seat: pack.seat?.rawValue)
             }

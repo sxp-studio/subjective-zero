@@ -828,6 +828,7 @@ struct SZApp: App {
                         streamingIDs: Set(host.inFlightAssistantIDs.values),
                         isRunning: host.isRunning, showTokenCounts: host.showTokenCounts,
                         showTurnBreakdown: host.showTurnBreakdown,
+                        agentAccents: host.chatAgentAccents,
                         workingScopes: host.chatInFlight,
                         runThreadIDs: host.liveThreadIDs,
                         agentGraphRuns: host.agentGraphRuns,

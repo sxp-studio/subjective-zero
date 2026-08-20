@@ -1,5 +1,7 @@
 {
   "label": "Debug",
+  "symbol": "ladybug.fill",
+  "tint": "lilac",
   "slots": [
     { "id": "assistant", "label": "Assistant",
       "description": "Answers in the debug console" }

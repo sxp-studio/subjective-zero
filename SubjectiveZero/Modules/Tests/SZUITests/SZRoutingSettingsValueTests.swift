@@ -19,7 +19,7 @@ import Testing
     let row = SZRoutingPositionRow(position: SZRoutingPosition(agent: "director", slot: "planner"),
                                    label: "Planner", caption: "Plans the graph",
                                    selectionLabel: "Default",
-                                   clearLabel: "App Default — Claude · Opus 5", isSet: false)
+                                   clearLabel: "Default — Claude · Opus 5", isSet: false)
     #expect(row.id == SZRoutingPosition(agent: "director", slot: "planner"))
     // Same slot word under different agents is a different position — the key is the pair.
     #expect(SZRoutingPosition(agent: "director", slot: "sorter")
@@ -36,7 +36,7 @@ import Testing
     #expect(SZRoutingInheritance.standardSlot(for: "builder-default", grades: grades) == nil)
     #expect(SZRoutingInheritance.standardSlot(for: "sorter", grades: grades) == nil)
     #expect(SZRoutingInheritance.standardSlot(for: "builder-light", grades: nil) == nil)
-    // A grade table with no standard names nothing to fall to — no "Uses …" label invented.
+    // A grade table with no standard names nothing to fall to — the app default catches it.
     #expect(SZRoutingInheritance.standardSlot(for: "builder-light",
                                               grades: ["light": "builder-light"]) == nil)
 }

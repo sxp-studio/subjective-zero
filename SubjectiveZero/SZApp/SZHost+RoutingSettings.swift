@@ -38,6 +38,7 @@ extension SZHost {
         guard let profile = routingEditedProfile(named: requested) else { return [] }
         return agentGraphPlanAgents().map { agent in
             SZRoutingAgentCard(id: agent.id, title: agent.title, symbol: agent.symbol,
+                               tint: agent.graph.tint,
                                rows: agent.graph.slots.map {
                                    routingRow(agent: agent.id, slot: $0, graph: agent.graph,
                                               profile: profile)
@@ -55,23 +56,16 @@ extension SZHost {
         let position = SZRoutingPosition(agent: agentID, slot: slot.id)
         let envelope = profile.envelope(agent: agentID, slot: slot.id)
         let options = routingEnvelopeOptions(selected: envelope)
-        // Where the work goes when the row is left alone: the standard slot's route for a
-        // grade variant (its own envelope when filled, else the app default), the app
-        // default for everything else. Rendered both closed ("Uses Builder"/"Default") and
-        // as the menu's clear row ("Uses Builder — Claude · Sonnet 5").
+        // Every unfilled row reads "Default" — one word, everywhere. The menu's clear row
+        // carries the LIVE resolution, which is where the rows honestly differ: a grade
+        // variant resolves through its standard slot's route (when filled), everything
+        // else through the app default.
         let standardID = SZRoutingInheritance.standardSlot(for: slot.id, grades: graph.grades)
-        let unsetLabel: String
-        let clearLabel: String
-        if let standardID {
-            let standardLabel = graph.slot(standardID).map { $0.label ?? $0.id } ?? standardID
-            let resolution = profile.envelope(agent: agentID, slot: standardID)
-                .map(routingEnvelopeDisplay) ?? routingAppDefaultDisplay
-            unsetLabel = "Uses \(standardLabel)"
-            clearLabel = "\(unsetLabel) — \(resolution)"
-        } else {
-            unsetLabel = "Default"
-            clearLabel = "App Default — \(routingAppDefaultDisplay)"
-        }
+        let resolution = standardID
+            .flatMap { profile.envelope(agent: agentID, slot: $0) }
+            .map(routingEnvelopeDisplay) ?? routingAppDefaultDisplay
+        let unsetLabel = "Default"
+        let clearLabel = "Default — \(resolution)"
         guard let envelope else {
             return SZRoutingPositionRow(position: position, label: slot.label ?? slot.id,
                                         caption: slot.description,
@@ -131,6 +125,22 @@ extension SZHost {
             guard !provider.models.isEmpty else { return [option(nil, nil)] }
             return provider.models.map { option($0.id, $0.displayName) }
         }
+    }
+
+    /// The chat feed's speaker identities, as the packs declare them — symbol + tint per
+    /// agent graph, resolved through the seats. Packs declaring none fall to the panel's
+    /// built-in palette (nil fields).
+    var chatAgentAccents: SZChatPanel.SZChatAgentAccents {
+        let agents = agentGraphPlanAgents()
+        let director = agents.first { $0.seat == SZAgentSeat.director.rawValue }
+        let debug = agents.first { $0.id == SZChatScope.debugKey }
+        let coding = agents.first { $0.seat == SZAgentSeat.coding.rawValue }
+        return SZChatPanel.SZChatAgentAccents(
+            directorColor: SZAgentTint.color(director?.graph.tint),
+            directorSymbol: director?.graph.symbol,
+            codingColor: SZAgentTint.color(coding?.graph.tint),
+            debugColor: SZAgentTint.color(debug?.graph.tint),
+            debugSymbol: debug?.graph.symbol)
     }
 
     /// The pane's health rule, shared by the option menus and the preset gate: enabled and
@@ -201,7 +211,7 @@ extension SZHost {
 
     /// The Claude Ladder starter: Haiku sorts, Sonnet builds and answers, Opus takes the
     /// planning and the heavy work. Fills only the built-in agents; builder-light stays
-    /// unfilled on purpose (it reads "Uses Builder"). Saved, not activated — the caller
+    /// unfilled on purpose (its Default follows the Builder row). Saved, not activated — the caller
     /// selects it for edit.
     @discardableResult
     func createClaudeLadderRoutingProfile() -> String {

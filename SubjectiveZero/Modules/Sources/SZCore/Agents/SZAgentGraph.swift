@@ -12,6 +12,12 @@ import Foundation
 public struct SZAgentGraph: Sendable, Equatable {
     /// Optional display name (drawn by the panel; never routing input).
     public var label: String?
+    /// The agent's SF Symbol — its glyph in the chat feed, the panel sidebar, and the
+    /// settings cards. nil = the seat's built-in default.
+    public var symbol: String?
+    /// The agent's tint, as a named color token ("purple", "orange", "lilac", …) — its
+    /// accent across the same surfaces. Unknown names degrade to no tint, never a guess.
+    public var tint: String?
     /// The MODEL SLOTS this graph declares — the kinds of model work it needs, each with
     /// the author's own description (the settings pane's caption). Turn nodes reference a
     /// slot; a routing profile fills them with models. Declaration order is display order.
@@ -129,9 +135,12 @@ public struct SZAgentGraph: Sendable, Equatable {
         }
     }
 
-    public init(label: String? = nil, slots: [Slot] = [], grades: [String: String]? = nil,
+    public init(label: String? = nil, symbol: String? = nil, tint: String? = nil,
+                slots: [Slot] = [], grades: [String: String]? = nil,
                 asks: String? = nil, nodes: [Node], edges: [Edge]) {
         self.label = label
+        self.symbol = symbol
+        self.tint = tint
         self.slots = slots
         self.grades = grades
         self.asks = asks
@@ -178,12 +187,14 @@ public struct SZAgentGraph: Sendable, Equatable {
 
 extension SZAgentGraph: Codable {
     enum CodingKeys: String, CodingKey {
-        case label, slots, grades, asks, nodes, edges
+        case label, symbol, tint, slots, grades, asks, nodes, edges
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         label = try container.decodeIfPresent(String.self, forKey: .label)
+        symbol = try container.decodeIfPresent(String.self, forKey: .symbol)
+        tint = try container.decodeIfPresent(String.self, forKey: .tint)
         slots = try container.decodeIfPresent([Slot].self, forKey: .slots) ?? []
         grades = try container.decodeIfPresent([String: String].self, forKey: .grades)
         asks = try container.decodeIfPresent(String.self, forKey: .asks)
@@ -194,6 +205,8 @@ extension SZAgentGraph: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(label, forKey: .label)
+        try container.encodeIfPresent(symbol, forKey: .symbol)
+        try container.encodeIfPresent(tint, forKey: .tint)
         if !slots.isEmpty { try container.encode(slots, forKey: .slots) }
         try container.encodeIfPresent(grades, forKey: .grades)
         try container.encodeIfPresent(asks, forKey: .asks)

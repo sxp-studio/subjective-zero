@@ -1,5 +1,7 @@
 {
   "label": "Director",
+  "symbol": "eyeglasses",
+  "tint": "purple",
   "slots": [
     { "id": "planner", "label": "Planner",
       "description": "Plans the graph, briefs each node, and checks the results" },

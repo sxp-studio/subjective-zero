@@ -68,8 +68,8 @@ public struct SZRoutingPosition: Hashable, Sendable {
     }
 }
 
-/// Where an UNFILLED slot's work goes — the derivation behind the "Uses …" labels. Pure so
-/// the rule is pinnable in tests; the host renders the labels from it.
+/// Where an UNFILLED slot's work goes — the derivation behind a grade variant's live
+/// "Default — …" resolution. Pure so the rule is pinnable in tests; the host renders from it.
 public enum SZRoutingInheritance {
     /// The standard slot a grade-variant slot falls back to: `slot` appears as a
     /// light/heavy value in the graph's grade table, and the table names a DIFFERENT
@@ -89,9 +89,9 @@ public struct SZRoutingPositionRow: Identifiable, Equatable, Sendable {
     public var id: SZRoutingPosition { position }
     public var label: String           // the slot's authored label (or its id, verbatim)
     public var caption: String         // the pack's description, rendered verbatim
-    public var selectionLabel: String  // "Default" / "Uses Builder" (unset) or "Codex · GPT-5.6 Terra"
+    public var selectionLabel: String  // "Default" (unset) or "Codex · GPT-5.6 Terra"
     /// The envelope menu's first row — the clear action, spelled as where the work then
-    /// goes: "App Default — Claude · Opus 5" or "Uses Builder — Claude · Sonnet 5".
+    /// goes: "Default — Claude · Opus 5" (grade variants resolve through their standard slot).
     public var clearLabel: String
     public var isSet: Bool
     public var options: [SZRoutingEnvelopeOption]
@@ -124,12 +124,16 @@ public struct SZRoutingAgentCard: Identifiable, Equatable, Sendable {
     public var id: String       // the agent id — what View Graph reveals
     public var title: String
     public var symbol: String
+    /// The pack's declared tint name (SZAgentTint vocabulary); nil = untinted.
+    public var tint: String?
     public var rows: [SZRoutingPositionRow]
 
-    public init(id: String, title: String, symbol: String, rows: [SZRoutingPositionRow] = []) {
+    public init(id: String, title: String, symbol: String, tint: String? = nil,
+                rows: [SZRoutingPositionRow] = []) {
         self.id = id
         self.title = title
         self.symbol = symbol
+        self.tint = tint
         self.rows = rows
     }
 }
@@ -367,6 +371,10 @@ public struct SZRoutingSettingsView: View {
         }
         .background(RoundedRectangle(cornerRadius: 10)
             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82)))
+        // The agent's own tint outlines its card — the same accent its chat lines and
+        // graph wear, so the three surfaces read as one identity.
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .strokeBorder((SZAgentTint.color(agent.tint) ?? .clear).opacity(0.38), lineWidth: 1))
     }
 
     private func cardHeader(_ agent: SZRoutingAgentCard) -> some View {
@@ -374,6 +382,7 @@ public struct SZRoutingSettingsView: View {
             Image(systemName: agent.symbol)
                 .font(.system(size: 12, weight: .medium))
                 .frame(width: 18)
+                .foregroundStyle(SZAgentTint.color(agent.tint) ?? .primary)
             Text(agent.title)
                 .font(.system(size: 13, weight: .semibold))
             Spacer()
@@ -416,8 +425,8 @@ public struct SZRoutingSettingsView: View {
 
     private func envelopeMenu(_ row: SZRoutingPositionRow) -> some View {
         Menu {
-            // The clear action, spelled as its destination — "App Default — …" or the grade
-            // variant's "Uses {standard} — …" — so the menu itself explains the inherit.
+            // The clear action, spelled as its destination ("Default — …", live-resolved;
+            // grade variants resolve through their standard slot) — the menu explains the inherit.
             Button {
                 onAssignEnvelope(row.position, nil, nil)
             } label: {

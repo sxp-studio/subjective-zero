@@ -433,12 +433,17 @@ public struct SZAgentGraphPanel: View {
                     mode = .plan
                 } label: {
                     HStack(spacing: 5) {
+                        // The selection capsule and glyph wear the agent's own tint (its
+                        // chat accent) — the violet default catches untinted packs.
                         Capsule()
-                            .fill(selected ? SZChatPanel.directorColor.opacity(0.8) : .clear)
+                            .fill(selected
+                                ? (SZAgentTint.color(agent.graph.tint) ?? SZChatPanel.directorColor).opacity(0.8)
+                                : .clear)
                             .frame(width: 2)
                         Image(systemName: agent.symbol)
                             .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(SZAgentTint.color(agent.graph.tint).map(AnyShapeStyle.init)
+                                ?? AnyShapeStyle(.secondary))
                         Text(agent.title)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(selected ? .primary : .secondary)

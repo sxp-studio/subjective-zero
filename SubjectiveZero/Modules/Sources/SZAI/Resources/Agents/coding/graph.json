@@ -1,16 +1,18 @@
 {
   "label": "Coding",
+  "symbol": "hammer",
+  "tint": "orange",
   "slots": [
-    { "id": "builder-default", "label": "Builder",
+    { "id": "builder-default", "label": "Builder - Normal",
       "description": "Implements a node and sees the build through" },
-    { "id": "builder-light", "label": "Builder – Light",
-      "description": "Tasks the Director sizes as light — a fast model fits" },
-    { "id": "builder-heavy", "label": "Builder – Heavy",
-      "description": "Tasks the Director sizes as heavy — stateful, multi-pass, or simulation work" },
+    { "id": "builder-light", "label": "Builder - Light",
+      "description": "Tasks the Director sizes as light. A fast model fits" },
+    { "id": "builder-heavy", "label": "Builder - Heavy",
+      "description": "Tasks the Director sizes as heavy: stateful, multi-pass, or simulation work" },
     { "id": "assistant", "label": "Assistant",
       "description": "Answers in a node's chat" },
     { "id": "sorter", "label": "Sorter",
-      "description": "Sorts each message sent to a node — a fast model fits" }
+      "description": "Sorts each message sent to a node. A fast model fits" }
   ],
   "grades": { "light": "builder-light", "standard": "builder-default", "heavy": "builder-heavy" },
   "asks": "sorter",

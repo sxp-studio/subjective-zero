@@ -104,10 +104,28 @@ struct SZAgentGraphCardView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer(minLength: 0)
+            slotChip
             finishedGlyph
         }
         .padding(.horizontal, 12)
         .frame(height: SZNodeLayout.headerHeight)
+    }
+
+    /// The turn's model slot, worn as a quiet chip at the header's trailing edge — which
+    /// row in Routing feeds this turn. Inside the fixed-height header on purpose, so a
+    /// slotted card measures exactly like a plain one.
+    @ViewBuilder private var slotChip: some View {
+        if let slot = face.slot {
+            Text(slot)
+                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.55))
+                .lineLimit(1)
+                // The chip shows whole and the TITLE ellipsizes, never a half-truncated chip.
+                .fixedSize()
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(Color.white.opacity(0.08)))
+        }
     }
 
     /// The implementation door, tucked just BELOW the card like the node editor's action

@@ -78,6 +78,21 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     #expect(turnFace.source == .brief(path: "prompts/implement.md.mustache"))
 }
 
+@Test func aTurnFaceWearsItsSlotLabelInsideTheFixedHeader() {
+    // The slot chip resolves the declared label (id fallback) and never changes measured
+    // size — it lives in the fixed-height header, so no sizing predicate exists to drift.
+    var slotted = graph
+    slotted.slots = [.init(id: "planner", label: "Planner", description: "Plans the work")]
+    let turn = SZAgentGraph.Node(id: "plan2", form: .turn(.init(brief: "plan", slot: "planner")))
+    let face = SZAgentGraphLayout.face(of: turn, in: slotted)
+    #expect(face.slot == "Planner")
+    #expect(turnFace.slot == nil)   // a slotless turn shows nothing
+    #expect(stepFace.slot == nil)
+    #expect(SZAgentGraphLayout.size(of: face) == SZAgentGraphLayout.size(of: turnFace))
+    #expect(SZAgentGraphLayout.size(of: face, subheader: true, stats: true)
+        == SZAgentGraphLayout.size(of: turnFace, subheader: true, stats: true))
+}
+
 @Test func aDispatchFaceWaitsForItsSettlement() {
     #expect(dispatchFace.form == .dispatch)
     #expect(dispatchFace.outcomes == ["settled"])
