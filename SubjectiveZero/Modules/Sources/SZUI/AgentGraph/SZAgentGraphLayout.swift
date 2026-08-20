@@ -79,9 +79,25 @@ public enum SZAgentGraphLayout {
     static let layerGap: CGFloat = SZGraphLayout.layerGap
     static let nodeGap: CGFloat = SZGraphLayout.nodeGap
 
-    // Wide enough for a real title BESIDE a slot chip — the chip must never cost the
-    // title its words. Sized against the longest shipped turn title with its chip on.
-    public static let cardWidth: CGFloat = 256
+    // Width is content-driven: a card starts compact and grows only until its own header
+    // (glyph · title · slot chip · finished badge's reserve) fits whole — the chip must
+    // never cost the title its words. Char-count heuristics like the node editor's numeric
+    // fields, so sizing stays pure, testable, and can never lag the render.
+    public static let minCardWidth: CGFloat = 200
+    public static let maxCardWidth: CGFloat = 320
+    static let titleCharWidth: CGFloat = 6.8   // 12pt semibold, average glyph
+    static let chipCharWidth: CGFloat = 5.2    // the slot chip's 8pt monospaced
+
+    /// The header-fit width, clamped: paddings 12+12, glyph 22 + 7, the title's estimate,
+    /// the slot chip (7 gap + 8 pad) when worn, and a standing 21pt reserve so the Run
+    /// view's finished badge never squeezes a title that fit in the Plan view.
+    public static func width(of face: SZAgentGraphFace) -> CGFloat {
+        var width: CGFloat = 12 + 22 + 7 + CGFloat(face.title.count) * titleCharWidth + 21 + 12
+        if let slot = face.slot {
+            width += 7 + 8 + CGFloat(slot.count) * chipCharWidth
+        }
+        return min(maxCardWidth, max(minCardWidth, width))
+    }
 
     /// The Run view's second header line — `visit N` and the dispatch tally, on their own
     /// line under the title (in the title row they cropped it to "Imple…").
@@ -165,7 +181,7 @@ public enum SZAgentGraphLayout {
     public static func size(of face: SZAgentGraphFace, subheader: Bool = false,
                             stats: Bool = false) -> CGSize {
         let rows = max(1, face.outcomes.count)
-        return CGSize(width: cardWidth,
+        return CGSize(width: width(of: face),
                       height: SZNodeLayout.headerHeight + (subheader ? subheaderHeight : 0)
                             + SZNodeLayout.bodyTopPadding
                             + CGFloat(rows) * SZNodeLayout.rowHeight + SZNodeLayout.bodyBottomPadding
@@ -242,19 +258,34 @@ public enum SZAgentGraphLayout {
         }
 
         let bypassed = bypassedRanks(of: graph, ranks: ranks)
+        // SIZED WITH THE SAME FACE THE RENDERER DRAWS — an enriched card (declared
+        // outcomes attached) must grow its frame, or its sockets slide off the rows.
+        let sizesByRank = byRank.mapValues { nodes in
+            nodes.map { size(of: face(of: $0, in: graph, stepOutcomes: stepOutcomes)) }
+        }
+        // Columns are as wide as their widest card, and each starts where the previous
+        // ends — a long-titled card widens its own layer, not the whole graph.
+        var xByRank: [Int: CGFloat] = [:]
+        var columnWidth: [Int: CGFloat] = [:]
+        var running: CGFloat = 0
+        for rank in byRank.keys.sorted() {
+            let width = sizesByRank[rank]?.map(\.width).max() ?? minCardWidth
+            xByRank[rank] = running
+            columnWidth[rank] = width
+            running += width + layerGap
+        }
+
         var frames: [String: CGRect] = [:]
         for (rank, nodes) in byRank {
-            // SIZED WITH THE SAME FACE THE RENDERER DRAWS — an enriched card (declared
-            // outcomes attached) must grow its frame, or its sockets slide off the rows.
-            let sizes = nodes.map { size(of: face(of: $0, in: graph, stepOutcomes: stepOutcomes)) }
+            let sizes = sizesByRank[rank] ?? []
             let total = sizes.reduce(0) { $0 + $1.height } + nodeGap * CGFloat(max(0, nodes.count - 1))
             // A rank something SKIPS over lifts off the main line, so the bypassing wire has
             // clear air instead of being drawn straight through the card it is bypassing.
             var y = -total / 2 - (bypassed.contains(rank) ? bypassLift : 0)
-            let x = CGFloat(rank) * (cardWidth + layerGap)
+            let x = xByRank[rank] ?? 0
             for (node, size) in zip(nodes, sizes) {
-                frames[node.id] = CGRect(x: x + (cardWidth - size.width) / 2, y: y,
-                                         width: size.width, height: size.height)
+                frames[node.id] = CGRect(x: x + ((columnWidth[rank] ?? size.width) - size.width) / 2,
+                                         y: y, width: size.width, height: size.height)
                 y += size.height + nodeGap
             }
         }

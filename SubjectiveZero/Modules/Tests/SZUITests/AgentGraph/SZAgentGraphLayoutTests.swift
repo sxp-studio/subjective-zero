@@ -268,7 +268,7 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
 // MARK: - The projected future (the ghost wires)
 
 @Test func anEdgeLeavingTheLiveNodeStartsAtItsRealPort() {
-    let liveFrame = CGRect(x: 400, y: -60, width: SZAgentGraphLayout.cardWidth, height: 120)
+    let liveFrame = CGRect(x: 400, y: -60, width: SZAgentGraphLayout.minCardWidth, height: 120)
     let edge = SZAgentGraph.Edge(from: "implement", outcome: "error", to: "check")
     let start = SZAgentGraphLayout.futureWireOrigin(
         edge: edge, liveNode: "implement", liveFrame: liveFrame, liveFace: turnFace,
@@ -301,7 +301,7 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     let edge = SZAgentGraph.Edge(from: "check", outcome: "yes", to: "implement")
     let start = SZAgentGraphLayout.futureWireOrigin(
         edge: edge, liveNode: "implement",
-        liveFrame: CGRect(x: 0, y: -60, width: SZAgentGraphLayout.cardWidth, height: 120),
+        liveFrame: CGRect(x: 0, y: -60, width: SZAgentGraphLayout.minCardWidth, height: 120),
         liveFace: turnFace, liveSubheader: true,
         projected: CGPoint(x: 10, y: 20), offset: CGSize(width: 400, height: -5))
     #expect(start == CGPoint(x: 410, y: 15))
