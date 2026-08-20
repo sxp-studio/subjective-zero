@@ -88,10 +88,15 @@ public struct SZChatFeedItem: Identifiable, Equatable, Sendable {
 public struct SZAgentSession: Codable, Equatable, Sendable {
     public let providerID: String
     public let sessionID: String
+    /// The generation envelope the session OPENED with — what a resume re-runs when routing
+    /// has since moved this position (session affinity). nil on pre-routing session files;
+    /// inert while routing is off.
+    public var envelope: SZRouteEnvelope?
 
-    public init(providerID: String, sessionID: String) {
+    public init(providerID: String, sessionID: String, envelope: SZRouteEnvelope? = nil) {
         self.providerID = providerID
         self.sessionID = sessionID
+        self.envelope = envelope
     }
 }
 

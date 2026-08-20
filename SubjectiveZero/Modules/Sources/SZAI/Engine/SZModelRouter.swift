@@ -42,13 +42,18 @@ public struct SZModelChoice: Sendable {
     public var model: String?
     public var reasoningEffort: String?
     public var fastMode: Bool
+    /// Which routing rule produced this choice — "‹profile› · ‹position›", "session", nil =
+    /// the default (no profile spoke). Display + receipt text, never parsed; nil is also
+    /// what gates session affinity off, keeping unrouted behavior byte-identical.
+    public var via: String?
 
     public init(providerID: String, model: String? = nil, reasoningEffort: String? = nil,
-                fastMode: Bool = false) {
+                fastMode: Bool = false, via: String? = nil) {
         self.providerID = providerID
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.fastMode = fastMode
+        self.via = via
     }
 }
 

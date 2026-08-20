@@ -509,6 +509,12 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// relaunch as part of the workspace arrangement. Optional for the same decode-compatibility
     /// reason; nil means none popped out.
     public var poppedOutPanels: [SZPoppedOutPanel]?
+    /// Saved routing profiles (AI Settings ▸ Routing). Stored raw, validated at resolution like
+    /// every preference. Optional for the same decode-compatibility reason; nil means none saved.
+    public var routingProfiles: [SZRoutingProfile]?
+    /// The active profile's name; nil = routing off (every request byte-identical to no
+    /// routing). A name no saved profile carries degrades to off at resolution, never at decode.
+    public var activeRoutingProfileName: String?
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
 
@@ -531,7 +537,9 @@ public struct SZAppState: Codable, Equatable, Sendable {
         showTokenCounts: Bool? = nil,
         telemetryEnabled: Bool? = nil,
         showTurnBreakdown: Bool? = nil,
-        poppedOutPanels: [SZPoppedOutPanel]? = nil
+        poppedOutPanels: [SZPoppedOutPanel]? = nil,
+        routingProfiles: [SZRoutingProfile]? = nil,
+        activeRoutingProfileName: String? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -552,6 +560,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.telemetryEnabled = telemetryEnabled
         self.showTurnBreakdown = showTurnBreakdown
         self.poppedOutPanels = poppedOutPanels
+        self.routingProfiles = routingProfiles
+        self.activeRoutingProfileName = activeRoutingProfileName
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

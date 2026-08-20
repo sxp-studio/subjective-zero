@@ -1,0 +1,146 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The host's routing resolution on a bare host: profile selection (app-state vs the launch
+// pin), envelope → concrete-choice resolution with its narrated drops, the once-per-state
+// note dedupe, and the byte-identity of the no-profile router. State is assigned directly —
+// the persisting mutators write the real app-state.json and belong to the live QA pass.
+import Foundation
+import Testing
+import SZAI
+import SZCore
+@testable import SubjectiveZero
+
+@MainActor
+struct SZRoutingHostTests {
+
+    /// A host whose routing state is exactly what the test says — nothing inherited from
+    /// this machine's real app-state.json.
+    private func bareHost(profiles: [SZRoutingProfile] = [], active: String? = nil) -> SZHost {
+        let host = SZHost()
+        host.routingProfiles = profiles
+        host.activeRoutingProfileName = active
+        host.disabledProviderIDs = []
+        host.narratedRoutingNotes = []
+        return host
+    }
+
+    private var fastFleet: SZRoutingProfile {
+        SZRoutingProfile(
+            name: "fast-fleet",
+            agents: ["director": .init(all: SZRouteEnvelope(providerID: "claude")),
+                     "coding": .init(all: SZRouteEnvelope(providerID: "codex"))])
+    }
+
+    // MARK: - Selection
+
+    @Test func noActiveProfileMeansRoutingOff() throws {
+        let host = bareHost(profiles: [fastFleet], active: nil)
+        #expect(try host.activeRoutingProfile(env: nil) == nil)
+    }
+
+    @Test func aStalePersistedNameDegradesToOff() throws {
+        // The stored-raw rule: a name whose profile was deleted elsewhere is a stale
+        // preference, not an error.
+        let host = bareHost(profiles: [], active: "gone")
+        #expect(try host.activeRoutingProfile(env: nil) == nil)
+    }
+
+    @Test func theKillSwitchBeatsThePersistedActiveName() throws {
+        let host = bareHost(profiles: [fastFleet], active: "fast-fleet")
+        #expect(try host.activeRoutingProfile(env: "0") == nil)
+        #expect(try host.activeRoutingProfile(env: nil)?.name == "fast-fleet")
+        #expect(try host.activeRoutingProfile(env: "1")?.name == "fast-fleet")
+    }
+
+    @Test func anEnvPinNamesItsProfileOrRefuses() {
+        let host = bareHost(profiles: [fastFleet], active: nil)
+        #expect((try? host.activeRoutingProfile(env: "fast-fleet"))?.name == "fast-fleet")
+        // An unknown env name REFUSES rather than guessing (the SZ_AGENT_PACKS rule).
+        #expect(throws: SZRoutingRefusal.self) {
+            try host.activeRoutingProfile(env: "no-such-profile")
+        }
+    }
+
+    // MARK: - The no-profile router is the identity tuple
+
+    @Test func withNoProfileTheRouterIsTheIdentityTuple() throws {
+        let host = bareHost()
+        let (router, notes) = try host.makeRouter(providerID: "claude")
+        #expect(notes.isEmpty)
+        let choice = router.resolve(SZModelCall(class: .turn, agent: "director"))
+        // Exactly the tuple the lanes used to derive: the provider's clamped stored row.
+        let generation = host.resolvedGenerationSettings(for: "claude")
+        #expect(choice.providerID == "claude")
+        #expect(choice.model == generation.model)
+        #expect(choice.reasoningEffort == generation.reasoningEffort)
+        #expect(choice.fastMode == (generation.fastMode ?? false))
+        #expect(choice.via == nil)
+    }
+
+    // MARK: - Table resolution
+
+    @Test func aProfileRoutesItsAgentsAndStampsProvenance() throws {
+        let host = bareHost(profiles: [fastFleet], active: "fast-fleet")
+        let (router, notes) = try host.makeRouter(providerID: "claude")
+        #expect(notes.isEmpty)
+        let coding = router.resolve(SZModelCall(class: .turn, agent: "coding"))
+        #expect(coding.providerID == "codex")
+        #expect(coding.via == "fast-fleet · coding")
+        // An agent the profile doesn't map rides the fallback.
+        let debug = router.resolve(SZModelCall(class: .turn, agent: "debug"))
+        #expect(debug.providerID == "claude")
+        #expect(debug.via == nil)
+    }
+
+    @Test func anUnknownProviderDropsItsRungWithASentence() throws {
+        var profile = fastFleet
+        profile.agents["coding"] = .init(all: SZRouteEnvelope(providerID: "no-such-cli"))
+        let host = bareHost(profiles: [profile], active: "fast-fleet")
+        let (router, notes) = try host.makeRouter(providerID: "claude")
+        // The rung is gone — coding falls to the default — and the drop is a sentence.
+        #expect(router.resolve(SZModelCall(class: .turn, agent: "coding")).providerID == "claude")
+        #expect(notes.count == 1)
+        #expect(notes[0].contains("no-such-cli"))
+        #expect(notes[0].contains("AI Settings"))
+    }
+
+    @Test func anOffCatalogModelRunsTheClampWithASentence() throws {
+        var profile = fastFleet
+        profile.agents["coding"] = .init(all: SZRouteEnvelope(providerID: "codex", model: "gpt-imaginary"))
+        let host = bareHost(profiles: [profile], active: "fast-fleet")
+        let (router, notes) = try host.makeRouter(providerID: "claude")
+        // The provider still serves the turn — on a model it actually lists.
+        let coding = router.resolve(SZModelCall(class: .turn, agent: "coding"))
+        #expect(coding.providerID == "codex")
+        #expect(coding.model != "gpt-imaginary")
+        #expect(notes.count == 1)
+        #expect(notes[0].contains("gpt-imaginary"))
+    }
+
+    @Test func aSentenceIsSaidOncePerProfileState() throws {
+        var profile = fastFleet
+        profile.agents["coding"] = .init(all: SZRouteEnvelope(providerID: "no-such-cli"))
+        let host = bareHost(profiles: [profile], active: "fast-fleet")
+        #expect(try host.makeRouter(providerID: "claude").notes.count == 1)
+        // The next delivery resolves the same drop silently — the user already read it.
+        #expect(try host.makeRouter(providerID: "claude").notes.isEmpty)
+        // A profile-state change says it again.
+        host.narratedRoutingNotes = []
+        #expect(try host.makeRouter(providerID: "claude").notes.count == 1)
+    }
+
+    @Test func gradesAndQueriesResolveIntoTheTable() throws {
+        var profile = fastFleet
+        profile.queries = SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5")
+        profile.heavy = SZRouteEnvelope(providerID: "claude", model: "claude-opus-5")
+        let host = bareHost(profiles: [profile], active: "fast-fleet")
+        let (router, notes) = try host.makeRouter(providerID: "claude")
+        #expect(notes.isEmpty)
+        #expect(router.resolve(SZModelCall(class: .query, agent: "coding")).model == "claude-haiku-4-5")
+        guard let table = router as? SZProfileRouter else {
+            Issue.record("expected the profile router"); return
+        }
+        #expect(table.grades["heavy"]?.model == "claude-opus-5")
+        #expect(table.primed(grade: "heavy")
+                    .resolve(SZModelCall(class: .turn, agent: "coding")).model == "claude-opus-5")
+    }
+}

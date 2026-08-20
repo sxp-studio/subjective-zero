@@ -190,6 +190,48 @@ private func temporaryURL() -> URL {
             == SZPanelRestorePosition(neighbor: .viewport, zone: .bottom, share: 0.4))
 }
 
+@Test func roundTripPreservesRoutingProfiles() throws {
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    let fastFleet = SZRoutingProfile(
+        name: "fast-fleet",
+        queries: SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5"),
+        heavy: SZRouteEnvelope(providerID: "claude", model: "claude-opus-5", fastMode: true),
+        agents: [
+            "director": SZRoutingProfile.AgentRoutes(
+                all: SZRouteEnvelope(providerID: "claude"),
+                duties: ["plan": SZRouteEnvelope(providerID: "claude", reasoningEffort: "max")]),
+            "coding": SZRoutingProfile.AgentRoutes(all: SZRouteEnvelope(providerID: "codex")),
+        ])
+    try SZAppStateIO.save(SZAppState(routingProfiles: [fastFleet],
+                                     activeRoutingProfileName: "fast-fleet"), to: url)
+    let loaded = SZAppStateIO.load(from: url)
+    #expect(loaded?.routingProfiles == [fastFleet])
+    #expect(loaded?.activeRoutingProfileName == "fast-fleet")
+}
+
+@Test func fileWithoutRoutingProfilesStillDecodes() throws {
+    // An app-state.json predating routing (no routingProfiles key) → nil, routing off.
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"windowSize":{"width":1440,"height":900},"theme":"system","defaultProviderID":"claude"}"#.utf8)
+        .write(to: url)
+    let loaded = SZAppStateIO.load(from: url)
+    #expect(loaded != nil)
+    #expect(loaded?.routingProfiles == nil)
+    #expect(loaded?.activeRoutingProfileName == nil)
+}
+
+@Test func anEnvelopeWithUnknownKeysDecodesItsKnownFields() throws {
+    // A profile written by a future build (an extra envelope knob) still reads back —
+    // tolerant decode is the schema's versioning story.
+    let json = #"{"providerID":"codex","model":"gpt-6","speedTier":"turbo"}"#
+    let envelope = try JSONDecoder().decode(SZRouteEnvelope.self, from: Data(json.utf8))
+    #expect(envelope.providerID == "codex")
+    #expect(envelope.model == "gpt-6")
+}
+
 @Test func noteRecentProjectDedupesToFront() {
     var state = SZAppState(recentProjectPaths: ["/tmp/A.subz", "/tmp/B.subz", "/tmp/C.subz"])
     state.noteRecentProject(path: "/tmp/B.subz")

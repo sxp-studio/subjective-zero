@@ -388,6 +388,20 @@ final class SZHost {
     internal(set) var providerGenerationSettings: [String: SZProviderGenerationSettings] =
         SZAppStateIO.load()?.providerGenerationSettings ?? [:]
 
+    /// Saved routing profiles + the active one's name — model routing's data (docs/
+    /// AI_PROVIDERS.md). Same app-state.json home + restore story as the generation rows:
+    /// stored raw, resolved against the live registry/catalogs per delivery
+    /// (SZHost+Routing.swift). nil active name = routing off, byte-identical to before
+    /// profiles existed. SZ_MODEL_ROUTING overrides at launch without rewriting either.
+    internal(set) var routingProfiles: [SZRoutingProfile] =
+        SZAppStateIO.load()?.routingProfiles ?? []
+    internal(set) var activeRoutingProfileName: String? =
+        SZAppStateIO.load()?.activeRoutingProfileName
+    /// Fallback sentences already narrated for the current profile state — chat deliveries
+    /// resolve per message, and a broken route should say its sentence once, not per send.
+    /// Cleared by every profile mutation (SZHost+Routing.swift).
+    var narratedRoutingNotes: Set<String> = []
+
     // Provider health + the Agent Providers setup sheet (docs/AI_PROVIDERS.md) — host-owned so the
     // sheet, the HUD health dot, and the run/chat pre-flights read ONE truth; mutated via
     // SZHost+ProviderHealth.swift.

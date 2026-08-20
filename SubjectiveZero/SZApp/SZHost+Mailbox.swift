@@ -150,8 +150,12 @@ extension SZHost {
         // the turn node declares (so tool-free-ness is the debug pack's `"tools": []`
         // rather than a scope branch here), and `choice` is the router's verdict.
         func runDeliveredTurn(_ order: SZTurnOrder, prompt: String) async throws -> SZAgentRunResult {
-            guard let turnProvider = SZProviderRegistry.shared.provider(id: order.choice.providerID) else {
-                throw SZMCPError.message("unknown provider: \(order.choice.providerID)")
+            // Session affinity: a resumed conversation keeps the envelope that opened it.
+            // Inert while routing is off.
+            let effective = order.session == .resume
+                ? order.choice.honoringSession(existing) : order.choice
+            guard let turnProvider = SZProviderRegistry.shared.provider(id: effective.providerID) else {
+                throw SZMCPError.message("unknown provider: \(effective.providerID)")
             }
             let request = SZAgentRunRequest(
                 prompt: prompt,
@@ -161,9 +165,9 @@ extension SZHost {
                 mcpServerPort: order.tools?.isEmpty == true ? nil : mcpPort,
                 allowedMCPTools: order.tools ?? SZHostBridge.agentCallableToolNames,
                 resumeSessionID: order.session == .resume ? existing?.sessionID : nil,
-                model: order.choice.model,
-                reasoningEffort: order.choice.reasoningEffort,
-                fastMode: order.choice.fastMode,
+                model: effective.model,
+                reasoningEffort: effective.reasoningEffort,
+                fastMode: effective.fastMode,
                 timeout: SZAgentTurnBudgets.codingTimeout,
                 inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
             return try await deliver(scope: scope, request: request, provider: turnProvider,
@@ -335,7 +339,21 @@ extension SZHost {
             }
         }
         let renderer = SZBriefRenderer(packRoot: packsRoot)
-        let router = makeRouter(providerID: providerID)
+        // This delivery's routing table. Dropped routes narrate on the delivering scope
+        // (once per profile state, not per message); a launch pin naming no saved profile
+        // refuses the delivery outright.
+        let routing: (router: any SZModelRouting, notes: [String])
+        do {
+            routing = try makeRouter(providerID: providerID)
+        } catch let refusal as SZRoutingRefusal {
+            throw SZChatTraversalFailure(detail: refusal.detail)
+        }
+        let router = routing.router
+        for note in routing.notes {
+            store.appendChatMessage(
+                SZChatMessage(role: .assistant, text: "⚠️ \(note)", transient: true), to: scope)
+            flushTranscript(scope)
+        }
         // One query service per delivery (the door's triage ask); production executor.
         let queries = SZQueryService(
             renderer: renderer, router: router,
