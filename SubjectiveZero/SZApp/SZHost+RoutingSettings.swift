@@ -15,7 +15,7 @@ extension SZHost {
     var routingProfileRows: [SZRoutingProfileRow] {
         routingProfiles.map {
             SZRoutingProfileRow(name: $0.name, isActive: $0.name == activeRoutingProfileName,
-                                isProtected: $0.name == Self.routingStarterName)
+                                isProtected: Self.routingStarterNames.contains($0.name))
         }
     }
 
@@ -65,7 +65,7 @@ extension SZHost {
     func applyRecommendedRouting(agent agentID: String, profileNamed requested: String?,
                                  replacingExisting: Bool) {
         guard let profile = routingEditedProfile(named: requested),
-              profile.name != Self.routingStarterName,
+              !Self.routingStarterNames.contains(profile.name),
               let agent = agentGraphPlanAgents().first(where: { $0.id == agentID }) else { return }
         let declared = Set(agent.graph.slots.map(\.id))
         let fragment = agent.recommendedRouting.filter { declared.contains($0.key) }
@@ -203,7 +203,7 @@ extension SZHost {
     func assignRoutingEnvelope(profileNamed requested: String?, position: SZRoutingPosition,
                                providerID: String?, modelID: String?) {
         guard var profile = routingEditedProfile(named: requested),
-              profile.name != Self.routingStarterName else { return }
+              !Self.routingStarterNames.contains(profile.name) else { return }
         let envelope = providerID.map { SZRouteEnvelope(providerID: $0, model: modelID) }
         profile.setEnvelope(envelope, agent: position.agent, slot: position.slot)
         upsertRoutingProfile(profile)
@@ -212,7 +212,7 @@ extension SZHost {
     /// Retune a SET position's reasoning effort (nil = the provider's own selection decides).
     func setRoutingPositionEffort(profileNamed requested: String?, position: SZRoutingPosition, effort: String?) {
         guard var profile = routingEditedProfile(named: requested),
-              profile.name != Self.routingStarterName,
+              !Self.routingStarterNames.contains(profile.name),
               var envelope = profile.envelope(agent: position.agent, slot: position.slot) else { return }
         envelope.reasoningEffort = effort
         profile.setEnvelope(envelope, agent: position.agent, slot: position.slot)
@@ -223,7 +223,7 @@ extension SZHost {
     /// honours it.
     func setRoutingPositionFastMode(profileNamed requested: String?, position: SZRoutingPosition, enabled: Bool) {
         guard var profile = routingEditedProfile(named: requested),
-              profile.name != Self.routingStarterName,
+              !Self.routingStarterNames.contains(profile.name),
               var envelope = profile.envelope(agent: position.agent, slot: position.slot) else { return }
         envelope.fastMode = enabled
         profile.setEnvelope(envelope, agent: position.agent, slot: position.slot)
@@ -266,9 +266,11 @@ extension SZHost {
     /// the pane's toggle renders (and locks on) this truth.
     var routingEnvKilled: Bool { Self.modelRoutingEnv == "0" }
 
-    /// The shipped starter's name — the row wearing it can't be deleted (renaming it makes
-    /// it the user's own, protection and all).
-    nonisolated static let routingStarterName = "Claude Routing (sxp.studio)"
+    /// Shipped starter rows are read-only. Duplicates become the user's own profiles.
+    nonisolated static let routingStarterNames = [
+        "Claude Routing (sxp.studio)",
+        "Codex Routing (sxp.studio)",
+    ]
 
     /// The Claude Routing starter: Haiku sorts, Sonnet builds and answers, Opus takes the
     /// planning and the heavy work. Fills only the built-in agents; builder-light stays
@@ -277,7 +279,7 @@ extension SZHost {
         let opus = SZRouteEnvelope(providerID: "claude", model: "claude-opus-5")
         let sonnet = SZRouteEnvelope(providerID: "claude", model: "claude-sonnet-5")
         let haiku = SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5")
-        return SZRoutingProfile(name: routingStarterName, agents: [
+        return SZRoutingProfile(name: routingStarterNames[0], agents: [
             "director": ["planner": opus, "assistant": sonnet, "sorter": haiku],
             "coding": ["builder-default": sonnet, "builder-heavy": opus,
                        "assistant": sonnet, "sorter": haiku],
@@ -285,16 +287,36 @@ extension SZHost {
         ])
     }
 
-    /// Seed the Claude Routing starter as a real row in the profiles list — once, when the
-    /// pane can first show it with a usable claude provider. NEVER activated: seeding must
-    /// not flip routing on behind the user's back.
+    /// Codex routes quick sorting to Luna, everyday work to Terra, and demanding work to Sol.
+    /// Builder Light stays unfilled so it follows Builder.
+    static func codexLadderProfile() -> SZRoutingProfile {
+        let sol = SZRouteEnvelope(providerID: "codex", model: "gpt-5.6-sol")
+        let terra = SZRouteEnvelope(providerID: "codex", model: "gpt-5.6-terra")
+        let luna = SZRouteEnvelope(providerID: "codex", model: "gpt-5.6-luna")
+        return SZRoutingProfile(name: routingStarterNames[1], agents: [
+            "director": ["planner": sol, "assistant": terra, "sorter": luna],
+            "coding": ["builder-default": terra, "builder-heavy": sol,
+                       "assistant": terra, "sorter": luna],
+            "debug": ["assistant": terra],
+        ])
+    }
+
+    /// Seed each shipped starter once its provider is ready. Seeding never activates a profile.
     func seedRoutingStarterIfNeeded() {
-        guard !routingStarterSeeded,
-              SZProviderRegistry.shared.provider(id: "claude") != nil,
-              routingProviderUsable("claude"),
-              !routingProfiles.contains(where: { $0.name == Self.routingStarterName }) else { return }
-        routingStarterSeeded = true
-        upsertRoutingProfile(Self.claudeLadderProfile())
+        seedRoutingStarter(Self.claudeLadderProfile(), providerID: "claude")
+        seedRoutingStarter(Self.codexLadderProfile(), providerID: "codex")
+    }
+
+    private func seedRoutingStarter(_ profile: SZRoutingProfile, providerID: String) {
+        guard !routingSeededStarterNames.contains(profile.name),
+              SZProviderRegistry.shared.provider(id: providerID) != nil,
+              routingProviderUsable(providerID) else { return }
+        routingSeededStarterNames.append(profile.name)
+        if routingProfiles.contains(where: { $0.name == profile.name }) {
+            persistAppState()
+        } else {
+            upsertRoutingProfile(profile)
+        }
     }
 
     /// Copy a profile's whole table under a fresh name; nil when the source vanished.
@@ -302,8 +324,10 @@ extension SZHost {
     @discardableResult
     func duplicateRoutingProfile(named source: String) -> String? {
         guard var copy = routingProfiles.first(where: { $0.name == source }) else { return nil }
-        copy.name = routingUniqueName(source == Self.routingStarterName
-                                        ? "Claude Routing" : "\(source) Copy")
+        let suffix = " (sxp.studio)"
+        let base = Self.routingStarterNames.contains(source) && source.hasSuffix(suffix)
+            ? String(source.dropLast(suffix.count)) : "\(source) Copy"
+        copy.name = routingUniqueName(base)
         upsertRoutingProfile(copy)
         return copy.name
     }
@@ -314,7 +338,7 @@ extension SZHost {
     @discardableResult
     func renameRoutingProfile(from old: String, to newRaw: String) -> Bool {
         let new = newRaw.trimmingCharacters(in: .whitespaces)
-        guard old != Self.routingStarterName else { return false }
+        guard !Self.routingStarterNames.contains(old) else { return false }
         guard !new.isEmpty, new != old,
               let index = routingProfiles.firstIndex(where: { $0.name == old }),
               !routingProfiles.contains(where: { $0.name == new }) else { return false }

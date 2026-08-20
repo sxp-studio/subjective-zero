@@ -211,4 +211,23 @@ struct SZRoutingHostTests {
             #expect(!row.options.isEmpty)
         }
     }
+
+    @Test func codexStarterUsesOnlyItsShippedCatalogLadder() {
+        let profile = SZHost.codexLadderProfile()
+        let catalog = Set(SZCodexProvider().models.map(\.id))
+        #expect(profile.name == "Codex Routing (sxp.studio)")
+        #expect(profile.agents.values.flatMap(\.values).allSatisfy {
+            $0.providerID == "codex" && $0.model.map(catalog.contains) == true
+        })
+        #expect(profile.envelope(agent: "director", slot: "planner")?.model == "gpt-5.6-sol")
+        #expect(profile.envelope(agent: "coding", slot: "builder-heavy")?.model == "gpt-5.6-sol")
+        #expect(profile.envelope(agent: "director", slot: "assistant")?.model == "gpt-5.6-terra")
+        #expect(profile.envelope(agent: "coding", slot: "builder-default")?.model == "gpt-5.6-terra")
+        #expect(profile.envelope(agent: "director", slot: "sorter")?.model == "gpt-5.6-luna")
+        #expect(profile.envelope(agent: "coding", slot: "sorter")?.model == "gpt-5.6-luna")
+        #expect(profile.envelope(agent: "coding", slot: "builder-light") == nil)
+
+        let host = bareHost(profiles: SZHost.routingStarterNames.map { SZRoutingProfile(name: $0) })
+        #expect(host.routingProfileRows.allSatisfy { $0.isProtected })
+    }
 }

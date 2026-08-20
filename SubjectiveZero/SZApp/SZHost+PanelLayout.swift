@@ -147,7 +147,8 @@ extension SZHost {
                                              routingProfiles: routingProfiles.isEmpty
                                                 ? nil : routingProfiles,
                                              activeRoutingProfileName: activeRoutingProfileName,
-                                             routingStarterSeeded: routingStarterSeeded ? true : nil,
+                                             routingSeededStarterNames: routingSeededStarterNames.isEmpty
+                                                ? nil : routingSeededStarterNames,
                                              routingLastProfileName: routingLastProfileName))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on

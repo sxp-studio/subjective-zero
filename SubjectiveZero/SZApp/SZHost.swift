@@ -403,9 +403,9 @@ final class SZHost {
         SZAppStateIO.load()?.routingProfiles ?? []
     internal(set) var activeRoutingProfileName: String? =
         SZAppStateIO.load()?.activeRoutingProfileName
-    /// Whether the Claude Ladder starter row was ever seeded (a one-shot, so deleting it
-    /// stays deleted).
-    var routingStarterSeeded: Bool = SZAppStateIO.load()?.routingStarterSeeded ?? false
+    /// Shipped starter rows already seeded, so deleting one keeps it deleted.
+    var routingSeededStarterNames: [String] =
+        SZAppStateIO.load()?.routingSeededStarterNames ?? []
     /// The toggle's memory: the profile that was active when routing was last turned off.
     var routingLastProfileName: String? = SZAppStateIO.load()?.routingLastProfileName
     /// Fallback sentences already narrated for the current profile state — chat deliveries

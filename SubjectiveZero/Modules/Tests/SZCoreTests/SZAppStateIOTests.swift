@@ -202,11 +202,14 @@ private func temporaryURL() -> URL {
                        "builder-heavy": SZRouteEnvelope(providerID: "claude",
                                                         model: "claude-opus-5", fastMode: true)],
         ])
+    let seeded = ["Claude Routing (sxp.studio)", "Codex Routing (sxp.studio)"]
     try SZAppStateIO.save(SZAppState(routingProfiles: [fastFleet],
-                                     activeRoutingProfileName: "fast-fleet"), to: url)
+                                     activeRoutingProfileName: "fast-fleet",
+                                     routingSeededStarterNames: seeded), to: url)
     let loaded = SZAppStateIO.load(from: url)
     #expect(loaded?.routingProfiles == [fastFleet])
     #expect(loaded?.activeRoutingProfileName == "fast-fleet")
+    #expect(loaded?.routingSeededStarterNames == seeded)
 }
 
 @Test func fileWithoutRoutingProfilesStillDecodes() throws {
@@ -220,6 +223,7 @@ private func temporaryURL() -> URL {
     #expect(loaded != nil)
     #expect(loaded?.routingProfiles == nil)
     #expect(loaded?.activeRoutingProfileName == nil)
+    #expect(loaded?.routingSeededStarterNames == nil)
 }
 
 @Test func preSlotProfileShapesDecodeToAnEmptyTableNeverAGuess() throws {

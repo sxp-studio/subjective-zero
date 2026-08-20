@@ -515,9 +515,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// The active profile's name; nil = routing off (every request byte-identical to no
     /// routing). A name no saved profile carries degrades to off at resolution, never at decode.
     public var activeRoutingProfileName: String?
-    /// Whether the Claude Ladder starter row was seeded into the profiles list (once, on the
-    /// pane's first open with a usable claude provider) — so deleting it stays deleted.
-    public var routingStarterSeeded: Bool?
+    /// Shipped starter rows already seeded into the profiles list, so deleting one stays deleted.
+    public var routingSeededStarterNames: [String]?
     /// The profile that was active when routing was last toggled off — the toggle's memory,
     /// so flipping back on restores the same arm.
     public var routingLastProfileName: String?
@@ -546,7 +545,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         poppedOutPanels: [SZPoppedOutPanel]? = nil,
         routingProfiles: [SZRoutingProfile]? = nil,
         activeRoutingProfileName: String? = nil,
-        routingStarterSeeded: Bool? = nil,
+        routingSeededStarterNames: [String]? = nil,
         routingLastProfileName: String? = nil
     ) {
         self.windowSize = windowSize
@@ -570,7 +569,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.poppedOutPanels = poppedOutPanels
         self.routingProfiles = routingProfiles
         self.activeRoutingProfileName = activeRoutingProfileName
-        self.routingStarterSeeded = routingStarterSeeded
+        self.routingSeededStarterNames = routingSeededStarterNames
         self.routingLastProfileName = routingLastProfileName
     }
 
