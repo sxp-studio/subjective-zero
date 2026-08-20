@@ -65,6 +65,7 @@ extension SZHost {
     func applyRecommendedRouting(agent agentID: String, profileNamed requested: String?,
                                  replacingExisting: Bool) {
         guard let profile = routingEditedProfile(named: requested),
+              profile.name != Self.routingStarterName,
               let agent = agentGraphPlanAgents().first(where: { $0.id == agentID }) else { return }
         let declared = Set(agent.graph.slots.map(\.id))
         let fragment = agent.recommendedRouting.filter { declared.contains($0.key) }
@@ -201,7 +202,8 @@ extension SZHost {
     /// carried onto one it may not fit.
     func assignRoutingEnvelope(profileNamed requested: String?, position: SZRoutingPosition,
                                providerID: String?, modelID: String?) {
-        guard var profile = routingEditedProfile(named: requested) else { return }
+        guard var profile = routingEditedProfile(named: requested),
+              profile.name != Self.routingStarterName else { return }
         let envelope = providerID.map { SZRouteEnvelope(providerID: $0, model: modelID) }
         profile.setEnvelope(envelope, agent: position.agent, slot: position.slot)
         upsertRoutingProfile(profile)
@@ -210,6 +212,7 @@ extension SZHost {
     /// Retune a SET position's reasoning effort (nil = the provider's own selection decides).
     func setRoutingPositionEffort(profileNamed requested: String?, position: SZRoutingPosition, effort: String?) {
         guard var profile = routingEditedProfile(named: requested),
+              profile.name != Self.routingStarterName,
               var envelope = profile.envelope(agent: position.agent, slot: position.slot) else { return }
         envelope.reasoningEffort = effort
         profile.setEnvelope(envelope, agent: position.agent, slot: position.slot)
@@ -220,6 +223,7 @@ extension SZHost {
     /// honours it.
     func setRoutingPositionFastMode(profileNamed requested: String?, position: SZRoutingPosition, enabled: Bool) {
         guard var profile = routingEditedProfile(named: requested),
+              profile.name != Self.routingStarterName,
               var envelope = profile.envelope(agent: position.agent, slot: position.slot) else { return }
         envelope.fastMode = enabled
         profile.setEnvelope(envelope, agent: position.agent, slot: position.slot)
@@ -294,19 +298,23 @@ extension SZHost {
     }
 
     /// Copy a profile's whole table under a fresh name; nil when the source vanished.
+    /// The shipped starter's copy drops the provenance suffix — the copy is the user's.
     @discardableResult
     func duplicateRoutingProfile(named source: String) -> String? {
         guard var copy = routingProfiles.first(where: { $0.name == source }) else { return nil }
-        copy.name = routingUniqueName("\(source) Copy")
+        copy.name = routingUniqueName(source == Self.routingStarterName
+                                        ? "Claude Routing" : "\(source) Copy")
         upsertRoutingProfile(copy)
         return copy.name
     }
 
     /// Rename in place — the active pointer follows, so renaming the active profile never
-    /// turns routing off. Refused for an empty or already-taken name.
+    /// turns routing off. Refused for an empty or already-taken name, and for the shipped
+    /// starter (read-only whole: duplicate it instead).
     @discardableResult
     func renameRoutingProfile(from old: String, to newRaw: String) -> Bool {
         let new = newRaw.trimmingCharacters(in: .whitespaces)
+        guard old != Self.routingStarterName else { return false }
         guard !new.isEmpty, new != old,
               let index = routingProfiles.firstIndex(where: { $0.name == old }),
               !routingProfiles.contains(where: { $0.name == new }) else { return false }

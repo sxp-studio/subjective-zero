@@ -227,28 +227,23 @@ public struct SZRoutingSettingsView: View {
     /// the list render the pinned truth, locked.
     private var envLocked: Bool { envKilled || envPinnedProfileName != nil }
 
+    /// The pane's teaching, carried whole by the (?) beside the toggle.
+    private static let explainer = "Each agent lists the kinds of work it needs a model for. A profile picks a model for each; anything left on Default runs on the active provider."
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Routing").font(.system(size: 17, weight: .semibold))
 
-            // The explainer earns its lines only while there's nothing else to look at;
-            // once routing is on, the list and the Default menus say the same thing in
-            // place, and the sentence retreats into the toggle's tooltip.
-            if !routingEnabled {
-                Text("Each agent lists the kinds of work it needs a model for. A profile picks a model for each; anything left on Default runs on the active provider.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-
             VStack(alignment: .leading, spacing: 4) {
-                Toggle("Enable Model Routing",
-                       isOn: Binding(get: { routingEnabled }, set: { onSetRoutingEnabled($0) }))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .font(.system(size: 13, weight: .medium))
-                    .disabled(envLocked)
-                    .help("Each agent lists the kinds of work it needs a model for. A profile picks a model for each; anything left on Default runs on the active provider")
+                HStack(spacing: 7) {
+                    Toggle("Enable Model Routing",
+                           isOn: Binding(get: { routingEnabled }, set: { onSetRoutingEnabled($0) }))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .font(.system(size: 13, weight: .medium))
+                        .disabled(envLocked)
+                    SZHelpBubble(text: Self.explainer)
+                }
                 toggleHelper
             }
 
@@ -327,7 +322,9 @@ public struct SZRoutingSettingsView: View {
                                  selected: profile.name == selectedProfileName,
                                  renaming: renameTarget == profile.name,
                                  select: { onSelectProfile(profile.name) },
-                                 beginRename: { renameTarget = profile.name },
+                                 beginRename: {
+                                     if !profile.isProtected { renameTarget = profile.name }
+                                 },
                                  commitRename: { new in
                                      onRenameProfile(profile.name, new)
                                      renameTarget = nil
@@ -356,6 +353,12 @@ public struct SZRoutingSettingsView: View {
                 if let selected = selectedProfileName { onDuplicateProfile(selected) }
             }
             Spacer()
+            if selectedRowProtected {
+                Text("Ships with the app. Duplicate it to customize.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 4)
+            }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
@@ -398,7 +401,7 @@ public struct SZRoutingSettingsView: View {
             Text(agent.title)
                 .font(.system(size: 13, weight: .semibold))
             Spacer()
-            if agent.recommendedCount > 0 {
+            if agent.recommendedCount > 0, !selectedRowProtected {
                 SZCardChipButton(label: "Use Recommended Models", symbol: "wand.and.stars",
                                  help: "Fill this agent's slots with the models its pack recommends") {
                     if agent.recommendedConflicts == 0 { onApplyRecommended(agent.id, true) }
@@ -442,11 +445,18 @@ public struct SZRoutingSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            if row.isSet {
-                effortMenu(row)
-                fastToggle(row)
+            if selectedRowProtected {
+                // A shipped profile is read-only: each row states its route, nothing pickable.
+                Text(row.isSet ? row.selectionLabel : row.clearLabel)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+            } else {
+                if row.isSet {
+                    effortMenu(row)
+                    fastToggle(row)
+                }
+                envelopeMenu(row)
             }
-            envelopeMenu(row)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -605,6 +615,32 @@ private struct SZListGadget: View {
             .disabled(disabled)
             .opacity(disabled ? 0.4 : 1)
             .help(help)
+    }
+}
+
+/// A quiet (?) carrying a surface's teaching: hover for the tooltip, click for a popover
+/// with the same words readable at leisure.
+private struct SZHelpBubble: View {
+    let text: String
+    @State private var shown = false
+    @State private var hovered = false
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(hovered || shown ? .primary : .secondary)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(text)
+        .popover(isPresented: $shown, arrowEdge: .bottom) {
+            Text(text)
+                .font(.system(size: 12))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 300, alignment: .leading)
+                .padding(12)
+        }
     }
 }
 
