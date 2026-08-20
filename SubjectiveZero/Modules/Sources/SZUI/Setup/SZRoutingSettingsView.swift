@@ -355,16 +355,17 @@ public struct SZRoutingSettingsView: View {
     private func agentCard(_ agent: SZRoutingAgentCard) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             cardHeader(agent)
+            // Dividers separate ROWS only — the header band is its own edge, and a hairline
+            // right under it read as a smudge.
             if agent.rows.isEmpty {
-                Divider().padding(.leading, 14)
                 Text("This agent doesn't ask for model choices — it runs on the default provider.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
             } else {
-                ForEach(agent.rows) { row in
-                    Divider().padding(.leading, 14)
+                ForEach(Array(agent.rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { Divider().padding(.leading, 14) }
                     slotRow(row)
                 }
             }
@@ -386,26 +387,22 @@ public struct SZRoutingSettingsView: View {
             Text(agent.title)
                 .font(.system(size: 13, weight: .semibold))
             Spacer()
-            Button {
-                onShowAgentGraph(agent.id)
-            } label: {
-                Label("View Graph", systemImage: "arrow.up.forward")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Close settings and show \(agent.title)'s graph")
+            SZViewGraphButton(title: agent.title) { onShowAgentGraph(agent.id) }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        // A soft wash of the agent's hue behind its name — the card's header band.
-        // Untinted packs get a plain lift so every card still reads a header.
+        // The agent's hue as the header band — a gradient settling toward the trailing
+        // edge, so the name sits in the color and the controls stay quiet. Untinted packs
+        // get a plain lift so every card still reads a header.
         .background(UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10)
             .fill(headerWash(SZAgentTint.color(agent.tint))))
     }
 
-    private func headerWash(_ tint: Color?) -> Color {
-        tint.map { $0.opacity(0.13) } ?? Color.white.opacity(0.04)
+    private func headerWash(_ tint: Color?) -> AnyShapeStyle {
+        guard let tint else { return AnyShapeStyle(Color.white.opacity(0.04)) }
+        return AnyShapeStyle(LinearGradient(
+            colors: [tint.opacity(0.24), tint.opacity(0)],
+            startPoint: .leading, endPoint: .trailing))
     }
 
     private func slotRow(_ row: SZRoutingPositionRow) -> some View {
@@ -508,6 +505,34 @@ public struct SZRoutingSettingsView: View {
                 onSetPositionFastMode(row.position, !row.fastModeEnabled)
             }
         }
+    }
+}
+
+/// The card header's deep link — a real bordered button, centered on the header's height,
+/// lifting under the cursor.
+private struct SZViewGraphButton: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Label("View Graph", systemImage: "arrow.up.forward")
+                .font(.system(size: 11))
+                .foregroundStyle(hovered ? .primary : .secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 5)
+                    .fill(Color.white.opacity(hovered ? 0.10 : 0.05)))
+                .overlay(RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(hovered ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.quaternary),
+                                  lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .frame(maxHeight: .infinity, alignment: .center)
+        .help("Close settings and show \(title)'s graph")
     }
 }
 
