@@ -47,6 +47,8 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
     case stepDeclaresNothing(agent: String, node: String, step: String)
     /// The step provider could not produce a declaration (compile/load failure).
     case stepUnavailable(agent: String, step: String, detail: String)
+    /// `routing.json` recommends a route for a slot the pack's graph never declares.
+    case undeclaredRoutedSlot(agent: String, slot: String)
 
     public var description: String {
         switch self {
@@ -78,6 +80,8 @@ public enum SZAgentPackDefect: Error, Sendable, Equatable, CustomStringConvertib
             "\(agent) node '\(node)': steps/\(step) declares no outcomes, yet edges leave it"
         case .stepUnavailable(let agent, let step, let detail):
             "\(agent)/steps/\(step) has no declaration: \(detail)"
+        case .undeclaredRoutedSlot(let agent, let slot):
+            "\(agent)/routing.json recommends slot '\(slot)', which the graph never declares"
         }
     }
 }
@@ -202,8 +206,20 @@ public enum SZAgentPackLoader {
                     hasSource: fm.fileExists(atPath: stepFolder.appending(path: "Step.swift").path))
             }
 
+        // routing.json is optional (a recommendation): absent is silence, broken is a
+        // defect while the pack still loads whole.
+        var recommendedRouting: [String: SZRouteEnvelope] = [:]
+        let routingURL = folder.appending(path: "routing.json")
+        if fm.fileExists(atPath: routingURL.path) {
+            switch decode([String: SZRouteEnvelope].self, routingURL, in: folderName) {
+            case .success(let decoded): recommendedRouting = decoded
+            case .failure(let defect): defects.append(defect)
+            }
+        }
+
         return (SZAgentPack(id: manifest.id, seat: manifest.seat, graph: graph,
-                            prompts: prompts, promptSources: promptSources, steps: steps),
+                            prompts: prompts, promptSources: promptSources, steps: steps,
+                            recommendedRouting: recommendedRouting),
                 defects)
     }
 
@@ -239,6 +255,12 @@ public enum SZAgentPackLoader {
         for pack in packs.sorted(by: { $0.id < $1.id }) {
             guard let graph = pack.graph else { continue }   // noGraph already reported
             defects += graph.defects().map { .graphShape(agent: pack.id, defect: $0) }
+            // A recommendation may only speak the graph's own slot vocabulary. (Unknown
+            // PROVIDERS are fine — the user may lack them; resolution narrates that live.)
+            let declared = Set(graph.slots.map(\.id))
+            defects += pack.recommendedRouting.keys.sorted()
+                .filter { !declared.contains($0) }
+                .map { .undeclaredRoutedSlot(agent: pack.id, slot: $0) }
             defects += await nodeDefects(pack: pack, graph: graph,
                                          filledSeats: filledSeats, steps: steps)
         }

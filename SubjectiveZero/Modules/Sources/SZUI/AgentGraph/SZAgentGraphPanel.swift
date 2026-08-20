@@ -38,15 +38,20 @@ public struct SZAgentGraphPlanAgent: Identifiable, Equatable, Sendable {
     public var stepOutcomes: [String: [String]]
     /// The seat this agent holds — what a dispatch's `to` resolves against. nil = seatless.
     public var seat: String?
+    /// The pack's recommended routes (slot id → envelope) — the Routing pane's
+    /// "Use Recommended Models" source. Empty = the pack ships none.
+    public var recommendedRouting: [String: SZRouteEnvelope]
 
     public init(id: String, title: String, symbol: String, graph: SZAgentGraph,
-                stepOutcomes: [String: [String]] = [:], seat: String? = nil) {
+                stepOutcomes: [String: [String]] = [:], seat: String? = nil,
+                recommendedRouting: [String: SZRouteEnvelope] = [:]) {
         self.id = id
         self.title = title
         self.symbol = symbol
         self.graph = graph
         self.stepOutcomes = stepOutcomes
         self.seat = seat
+        self.recommendedRouting = recommendedRouting
     }
 }
 

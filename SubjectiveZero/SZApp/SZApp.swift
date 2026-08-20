@@ -587,6 +587,10 @@ struct SZApp: App {
                 host.dismissProviderSetupForNavigation()
                 agentGraphPlanFocus = agentID
                 if !host.panelLayout.contains(.agentGraph) { host.showPanel(.agentGraph) }
+            },
+            onApplyRecommended: { agentID, replace in
+                host.applyRecommendedRouting(agent: agentID, profileNamed: selection,
+                                             replacingExisting: replace)
             })
     }
 

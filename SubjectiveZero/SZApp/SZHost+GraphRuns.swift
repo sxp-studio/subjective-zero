@@ -163,7 +163,8 @@ extension SZHost {
                     // that declare none.
                     symbol: graph.symbol ?? Self.agentGraphSymbol(for: pack),
                     graph: graph,
-                    seat: pack.seat?.rawValue)
+                    seat: pack.seat?.rawValue,
+                    recommendedRouting: pack.recommendedRouting)
             }
         }
         agentGraphPlanCache = agents

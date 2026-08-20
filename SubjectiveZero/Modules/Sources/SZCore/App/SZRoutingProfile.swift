@@ -64,4 +64,16 @@ public struct SZRoutingProfile: Codable, Equatable, Sendable, Identifiable {
         slots[slot] = envelope
         agents[agent] = slots.isEmpty ? nil : slots
     }
+
+    /// One agent's slots merged in from a fragment (a pack's recommended routes). Pure, so
+    /// the conflict rule is pinnable: `replacingExisting` false fills only unset slots.
+    public func merging(_ fragment: [String: SZRouteEnvelope], agent: String,
+                        replacingExisting: Bool) -> SZRoutingProfile {
+        var merged = self
+        for (slot, route) in fragment
+        where replacingExisting || envelope(agent: agent, slot: slot) == nil {
+            merged.setEnvelope(route, agent: agent, slot: slot)
+        }
+        return merged
+    }
 }

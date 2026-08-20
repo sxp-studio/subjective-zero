@@ -94,6 +94,13 @@ receives dispatches maps the Director's task grades to slots via
 `"grades": { "light", "standard", "heavy" }`. Every reference must land on a declaration
 (shape-gated); an unfilled slot simply runs the app default.
 
+A pack may also ship **recommended routes**: an optional `routing.json` beside `agent.json`,
+shape `{ "<slot id>": { "providerID", "model"?, "reasoningEffort"?, "fastMode"? } }`, slot
+ids from the pack's own graph (an undeclared id is a pack defect; an uninstalled provider is
+not — the user may lack it, and live resolution narrates that). It is a recommendation, not
+a route: it applies only when the user clicks the agent card's "Use Recommended Models" in
+AI Settings → Routing, merging into the profile being edited.
+
 **The door is the step node with the reserved id `door`** — every delivery enters there,
 and it must be a step: the agent's routing intelligence is code the author opens, reads,
 and replaces. It examines the message's words and the world's state and answers an outcome

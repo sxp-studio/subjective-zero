@@ -128,14 +128,22 @@ public struct SZRoutingAgentCard: Identifiable, Equatable, Sendable {
     /// The pack's declared tint name (SZAgentTint vocabulary); nil = untinted.
     public var tint: String?
     public var rows: [SZRoutingPositionRow]
+    /// The pack's recommendation, host-counted for THIS edited profile: how many slots it
+    /// would fill, and how many of those are already set (the conflict prompt's numbers).
+    /// 0 recommended = no fragment shipped, the button stays absent.
+    public var recommendedCount: Int
+    public var recommendedConflicts: Int
 
     public init(id: String, title: String, symbol: String, tint: String? = nil,
-                rows: [SZRoutingPositionRow] = []) {
+                rows: [SZRoutingPositionRow] = [],
+                recommendedCount: Int = 0, recommendedConflicts: Int = 0) {
         self.id = id
         self.title = title
         self.symbol = symbol
         self.tint = tint
         self.rows = rows
+        self.recommendedCount = recommendedCount
+        self.recommendedConflicts = recommendedConflicts
     }
 }
 
@@ -162,10 +170,15 @@ public struct SZRoutingSettingsView: View {
     private let onSetPositionFastMode: (SZRoutingPosition, Bool) -> Void
     /// Close the settings sheet and land the Agent Graph panel on this agent's plan.
     private let onShowAgentGraph: (String) -> Void
+    /// Apply a pack's recommended routes to the edited profile: (agent id, replace
+    /// already-set slots). The view only prompts; the merge is the host's.
+    private let onApplyRecommended: (String, Bool) -> Void
 
     // The rename alert's target + draft (view-local; committed via onRenameProfile).
     @State private var renameTarget: String?
     @State private var renameDraft = ""
+    // The conflict prompt's subject: a card whose recommendation would replace set slots.
+    @State private var recommendTarget: SZRoutingAgentCard?
 
     public init(profiles: [SZRoutingProfileRow],
                 editedProfileName: String?,
@@ -182,7 +195,8 @@ public struct SZRoutingSettingsView: View {
                 onAssignEnvelope: @escaping (SZRoutingPosition, String?, String?) -> Void = { _, _, _ in },
                 onSetPositionEffort: @escaping (SZRoutingPosition, String?) -> Void = { _, _ in },
                 onSetPositionFastMode: @escaping (SZRoutingPosition, Bool) -> Void = { _, _ in },
-                onShowAgentGraph: @escaping (String) -> Void = { _ in }) {
+                onShowAgentGraph: @escaping (String) -> Void = { _ in },
+                onApplyRecommended: @escaping (String, Bool) -> Void = { _, _ in }) {
         self.profiles = profiles
         self.editedProfileName = editedProfileName
         self.agents = agents
@@ -199,6 +213,7 @@ public struct SZRoutingSettingsView: View {
         self.onSetPositionEffort = onSetPositionEffort
         self.onSetPositionFastMode = onSetPositionFastMode
         self.onShowAgentGraph = onShowAgentGraph
+        self.onApplyRecommended = onApplyRecommended
     }
 
     private var activeProfile: SZRoutingProfileRow? { profiles.first(where: \.isActive) }
@@ -241,6 +256,16 @@ public struct SZRoutingSettingsView: View {
                 renameTarget = nil
             }
             Button("Cancel", role: .cancel) { renameTarget = nil }
+        }
+        .alert("Some slots are already set",
+               isPresented: Binding(get: { recommendTarget != nil },
+                                    set: { if !$0 { recommendTarget = nil } }),
+               presenting: recommendTarget) { agent in
+            Button("Replace All") { onApplyRecommended(agent.id, true); recommendTarget = nil }
+            Button("Keep Mine") { onApplyRecommended(agent.id, false); recommendTarget = nil }
+            Button("Cancel", role: .cancel) { recommendTarget = nil }
+        } message: { agent in
+            Text("\(agent.recommendedConflicts) of the \(agent.recommendedCount) recommended slots already have a model. Replace them, or keep yours and fill only the empty ones?")
         }
     }
 
@@ -417,7 +442,17 @@ public struct SZRoutingSettingsView: View {
             Text(agent.title)
                 .font(.system(size: 13, weight: .semibold))
             Spacer()
-            SZViewGraphButton(title: agent.title) { onShowAgentGraph(agent.id) }
+            if isEditable, agent.recommendedCount > 0 {
+                SZCardChipButton(label: "Use Recommended Models", symbol: "wand.and.stars",
+                                 help: "Fill this agent's slots with the models its pack recommends") {
+                    if agent.recommendedConflicts == 0 { onApplyRecommended(agent.id, true) }
+                    else { recommendTarget = agent }
+                }
+            }
+            SZCardChipButton(label: "View Graph", symbol: "arrow.up.forward",
+                             help: "Close settings and show \(agent.title)'s graph") {
+                onShowAgentGraph(agent.id)
+            }
         }
         .padding(.horizontal, 14)
         // The card's 2pt outline overlaps the header's top edge, so the VISIBLE band starts
@@ -592,16 +627,18 @@ private struct SZProfileListRow: View {
     }
 }
 
-/// The card header's deep link — a real bordered button, centered on the header's height,
-/// lifting under the cursor.
-private struct SZViewGraphButton: View {
-    let title: String
+/// A card header's chip-sized action (View Graph, Use Recommended Models) — a real bordered
+/// button, centered on the header's height, lifting under the cursor.
+private struct SZCardChipButton: View {
+    let label: String
+    let symbol: String
+    let help: String
     let action: () -> Void
     @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            Label("View Graph", systemImage: "arrow.up.forward")
+            Label(label, systemImage: symbol)
                 .font(.system(size: 11))
                 .foregroundStyle(hovered ? .primary : .secondary)
                 .padding(.horizontal, 8)
@@ -615,7 +652,7 @@ private struct SZViewGraphButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help("Close settings and show \(title)'s graph")
+        .help(help)
     }
 }
 

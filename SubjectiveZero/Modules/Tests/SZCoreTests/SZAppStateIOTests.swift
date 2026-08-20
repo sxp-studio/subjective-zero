@@ -240,6 +240,27 @@ private func temporaryURL() -> URL {
     #expect(envelope.model == "gpt-6")
 }
 
+@Test func mergingAFragmentRespectsTheKeepMineRule() {
+    // A pack's recommendation lands per its conflict answer: replacing rewrites set slots,
+    // keep-mine fills only silence. Other agents' tables never move.
+    let mine = SZRouteEnvelope(providerID: "codex")
+    let theirs = SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5")
+    let profile = SZRoutingProfile(name: "p", agents: [
+        "coding": ["builder": mine],
+        "director": ["planner": mine],
+    ])
+    let fragment = ["builder": theirs, "sorter": theirs]
+
+    let kept = profile.merging(fragment, agent: "coding", replacingExisting: false)
+    #expect(kept.envelope(agent: "coding", slot: "builder") == mine)
+    #expect(kept.envelope(agent: "coding", slot: "sorter") == theirs)
+
+    let replaced = profile.merging(fragment, agent: "coding", replacingExisting: true)
+    #expect(replaced.envelope(agent: "coding", slot: "builder") == theirs)
+    #expect(replaced.envelope(agent: "coding", slot: "sorter") == theirs)
+    #expect(replaced.envelope(agent: "director", slot: "planner") == mine)
+}
+
 @Test func noteRecentProjectDedupesToFront() {
     var state = SZAppState(recentProjectPaths: ["/tmp/A.subz", "/tmp/B.subz", "/tmp/C.subz"])
     state.noteRecentProject(path: "/tmp/B.subz")

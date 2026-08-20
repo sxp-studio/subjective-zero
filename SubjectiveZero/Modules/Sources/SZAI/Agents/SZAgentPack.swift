@@ -24,6 +24,10 @@ public struct SZAgentPack: Sendable, Equatable {
     public var promptSources: [String: String]
     /// Step-folder inventory: every directory under `steps/`, sorted by name.
     public var steps: [StepFolder]
+    /// The pack's recommended routes (`routing.json`, optional): slot id → envelope, for
+    /// this agent's own declared slots. A recommendation, applied only by the user's hand
+    /// in the Routing pane — never resolved directly.
+    public var recommendedRouting: [String: SZRouteEnvelope]
 
     /// One `steps/<name>/` directory. A folder without a `Step.swift` is inventory, not a
     /// step — a graph node naming it is a defect the loader reports.
@@ -40,13 +44,15 @@ public struct SZAgentPack: Sendable, Equatable {
     public init(id: String, seat: SZAgentSeat? = nil,
                 graph: SZAgentGraph? = nil,
                 prompts: [String] = [], promptSources: [String: String] = [:],
-                steps: [StepFolder] = []) {
+                steps: [StepFolder] = [],
+                recommendedRouting: [String: SZRouteEnvelope] = [:]) {
         self.id = id
         self.seat = seat
         self.graph = graph
         self.prompts = prompts
         self.promptSources = promptSources
         self.steps = steps
+        self.recommendedRouting = recommendedRouting
     }
 
     public func step(named name: String) -> StepFolder? {

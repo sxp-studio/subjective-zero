@@ -23,6 +23,7 @@ private struct ScratchPack {
     var prompts: [String] = []
     var promptTexts: [String: String] = [:]
     var steps: [String: Bool] = [:]
+    var routing: String? = nil       // raw routing.json (nil = none written)
 }
 
 private func makeRoot(_ packs: [ScratchPack]) throws -> URL {
@@ -38,6 +39,10 @@ private func makeRoot(_ packs: [ScratchPack]) throws -> URL {
         if let graph = pack.graph {
             try graph.write(to: dir.appending(path: "graph.json"),
                             atomically: true, encoding: .utf8)
+        }
+        if let routing = pack.routing {
+            try routing.write(to: dir.appending(path: "routing.json"),
+                              atomically: true, encoding: .utf8)
         }
         if !pack.prompts.isEmpty || !pack.promptTexts.isEmpty {
             let prompts = dir.appending(path: "prompts")
@@ -595,4 +600,58 @@ private let shippedPackSteps = StubSteps(infos: [
         pack.steps.filter(\.hasSource).map { "\(pack.id)/\($0.name)" }
     })
     #expect(shipped == Set(shippedPackSteps.infos.keys))
+}
+
+// MARK: - Recommended routing (routing.json)
+
+/// A graph declaring one slot, for the recommendation tests.
+private func slottedTurnGraph() -> String {
+    """
+    {"nodes": [{"id": "door", "step": "door"},
+               {"id": "work", "turn": {"brief": "impl", "slot": "builder"}}],
+     "edges": [{"from": "door", "outcome": "go", "to": "work"}],
+     "slots": [{"id": "builder", "description": "Implements the node"}]}
+    """
+}
+
+@Test func aRecommendationLoadsAndSpeaksOnlyDeclaredSlots() async throws {
+    var coding = codingPack()
+    coding.graph = slottedTurnGraph()
+    coding.routing = "{\"builder\": {\"providerID\": \"claude\", \"model\": \"claude-haiku-4-5\"}}"
+    let root = try makeRoot([directorPack(), coding])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    #expect(loaded.defects.isEmpty)
+    let pack = try #require(loaded.packs.first { $0.id == "coding-b" })
+    #expect(pack.recommendedRouting["builder"]
+        == SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5"))
+    #expect(await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps).isEmpty)
+}
+
+@Test func aRecommendationForAnUndeclaredSlotIsAPackDefect() async throws {
+    var coding = codingPack()
+    coding.graph = slottedTurnGraph()
+    // An unknown PROVIDER is fine (the user may lack it; resolution narrates that live) —
+    // an unknown SLOT is the author's mistake, flagged.
+    coding.routing = "{\"ghost\": {\"providerID\": \"no-such-cli\"}}"
+    let root = try makeRoot([directorPack(), coding])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    #expect(loaded.defects.isEmpty)   // load-tier clean: the file reads, the pack is whole
+    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
+    #expect(defects == [.undeclaredRoutedSlot(agent: "coding-b", slot: "ghost")])
+}
+
+@Test func aBrokenRecommendationIsADefectWhileThePackLoadsWhole() throws {
+    var coding = codingPack()
+    coding.routing = "not json"
+    let root = try makeRoot([directorPack(), coding])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    let pack = try #require(loaded.packs.first { $0.id == "coding-b" })
+    #expect(pack.recommendedRouting.isEmpty && pack.graph != nil)
+    #expect(loaded.defects.contains { defect in
+        if case .unreadable(let file, _) = defect { return file == "coding-b/routing.json" }
+        return false
+    })
 }

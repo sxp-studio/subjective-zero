@@ -38,13 +38,36 @@ extension SZHost {
     func routingAgentCards(editedName: String?) -> [SZRoutingAgentCard] {
         let profile = editedName.flatMap { name in routingProfiles.first { $0.name == name } }
         return agentGraphPlanAgents().map { agent in
-            SZRoutingAgentCard(id: agent.id, title: agent.title, symbol: agent.symbol,
-                               tint: agent.graph.tint,
-                               rows: agent.graph.slots.map {
-                                   routingRow(agent: agent.id, slot: $0, graph: agent.graph,
-                                              profile: profile)
-                               })
+            // The pack's recommendation, counted against THIS profile: only slots the
+            // graph declares count, and conflicts are the ones the user already filled.
+            let declared = Set(agent.graph.slots.map(\.id))
+            let recommended = agent.recommendedRouting.keys.filter(declared.contains)
+            let conflicts = profile.map { p in
+                recommended.filter { p.envelope(agent: agent.id, slot: $0) != nil }.count
+            } ?? 0
+            return SZRoutingAgentCard(id: agent.id, title: agent.title, symbol: agent.symbol,
+                                      tint: agent.graph.tint,
+                                      rows: agent.graph.slots.map {
+                                          routingRow(agent: agent.id, slot: $0, graph: agent.graph,
+                                                     profile: profile)
+                                      },
+                                      recommendedCount: profile == nil ? 0 : recommended.count,
+                                      recommendedConflicts: conflicts)
         }
+    }
+
+    /// Apply a pack's recommended routes to the edited profile — the card button's intent,
+    /// through the one write path. Slots the graph doesn't declare never apply (the loader
+    /// flags them as pack defects); `replacingExisting` false fills only unset slots.
+    func applyRecommendedRouting(agent agentID: String, profileNamed requested: String?,
+                                 replacingExisting: Bool) {
+        guard let profile = routingEditedProfile(named: requested),
+              let agent = agentGraphPlanAgents().first(where: { $0.id == agentID }) else { return }
+        let declared = Set(agent.graph.slots.map(\.id))
+        let fragment = agent.recommendedRouting.filter { declared.contains($0.key) }
+        guard !fragment.isEmpty else { return }
+        upsertRoutingProfile(profile.merging(fragment, agent: agentID,
+                                             replacingExisting: replacingExisting))
     }
 
     /// One slot's row: labels, options, and — only when an envelope is set — the effort/fast
