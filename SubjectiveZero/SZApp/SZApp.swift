@@ -261,8 +261,9 @@ struct SZApp: App {
     @NSApplicationDelegateAdaptor(SZAppDelegate.self) private var appDelegate
     @State private var host = SZHost()
     @State private var selectedNodeID: SZNodeID?      // canvas selection (edit/move/wire) — NOT chat scope
-    /// Which routing profile the AI Settings form edits (nil = active, else the first) —
-    /// presentation state, so it lives here beside the sheet rather than in app-state.
+    /// Which row of the Routing pane's profiles list is selected: nil = no choice made yet
+    /// (the active profile, else the first, else Off), "" = the Off row explicitly, a name =
+    /// that profile. Presentation state, so it lives beside the sheet, not in app-state.
     @State private var editedRoutingProfile: String?
     /// The AI Settings section last viewed — reopening the sheet returns there (per launch,
     /// like the edit selection above; not persisted).
@@ -540,11 +541,19 @@ struct SZApp: App {
     /// The AI Settings Routing pane, wired to the host mapping (SZHost+RoutingSettings). Built
     /// here because the edit selection is presentation state (`editedRoutingProfile`) and every
     /// intent needs the host in scope — the gearMenu pattern, typed instead of erased.
+    /// The list selection the pane shows: the Off sentinel ("") resolves to nil (the Off
+    /// row), everything else through the host's requested → active → first fallback.
+    private var resolvedRoutingSelection: String? {
+        editedRoutingProfile == "" ? nil
+            : host.routingEditedProfile(named: editedRoutingProfile)?.name
+    }
+
     private var routingSettingsView: SZRoutingSettingsView {
-        SZRoutingSettingsView(
+        let selection = resolvedRoutingSelection
+        return SZRoutingSettingsView(
             profiles: host.routingProfileRows,
-            editedProfileName: host.routingEditedProfile(named: editedRoutingProfile)?.name,
-            agents: host.routingAgentCards(profileNamed: editedRoutingProfile),
+            editedProfileName: selection,
+            agents: host.routingAgentCards(editedName: selection),
             envPinnedProfileName: host.routingEnvPinnedProfileName,
             claudeLadderAvailable: host.routingClaudeLadderAvailable,
             onSelectActiveProfile: { _ = host.setActiveRoutingProfile($0) },
@@ -557,19 +566,20 @@ struct SZApp: App {
                 editedRoutingProfile = host.duplicateRoutingProfile(named: $0) ?? editedRoutingProfile
             },
             onDeleteProfile: { name in
+                let wasSelected = resolvedRoutingSelection == name
                 host.deleteRoutingProfile(named: name)
-                if editedRoutingProfile == name { editedRoutingProfile = nil }
+                if wasSelected { editedRoutingProfile = "" }
             },
-            onEditProfile: { editedRoutingProfile = $0 },
+            onEditProfile: { editedRoutingProfile = $0 ?? "" },
             onAssignEnvelope: {
-                host.assignRoutingEnvelope(profileNamed: editedRoutingProfile, position: $0,
+                host.assignRoutingEnvelope(profileNamed: selection, position: $0,
                                            providerID: $1, modelID: $2)
             },
             onSetPositionEffort: {
-                host.setRoutingPositionEffort(profileNamed: editedRoutingProfile, position: $0, effort: $1)
+                host.setRoutingPositionEffort(profileNamed: selection, position: $0, effort: $1)
             },
             onSetPositionFastMode: {
-                host.setRoutingPositionFastMode(profileNamed: editedRoutingProfile, position: $0, enabled: $1)
+                host.setRoutingPositionFastMode(profileNamed: selection, position: $0, enabled: $1)
             },
             onShowAgentGraph: { agentID in
                 // Dismiss via the host path, NOT the sheet binding — its set-false is a Skip

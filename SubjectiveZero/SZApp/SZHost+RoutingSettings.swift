@@ -32,10 +32,11 @@ extension SZHost {
             ?? routingProfiles.first
     }
 
-    /// The pane's cards for the edited profile: one per plan agent (director first), rows in
-    /// each graph's slot DECLARATION order.
-    func routingAgentCards(profileNamed requested: String?) -> [SZRoutingAgentCard] {
-        guard let profile = routingEditedProfile(named: requested) else { return [] }
+    /// The pane's cards: one per plan agent (director first), rows in each graph's slot
+    /// DECLARATION order. `editedName` nil = the Off row: no profile, every row resolve-only
+    /// (its live resolution as the selection label, no options — the pane renders it static).
+    func routingAgentCards(editedName: String?) -> [SZRoutingAgentCard] {
+        let profile = editedName.flatMap { name in routingProfiles.first { $0.name == name } }
         return agentGraphPlanAgents().map { agent in
             SZRoutingAgentCard(id: agent.id, title: agent.title, symbol: agent.symbol,
                                tint: agent.graph.tint,
@@ -51,25 +52,31 @@ extension SZHost {
     /// honour. The clear/unset labels are DERIVED, never hand-written: a grade-variant slot
     /// inherits its standard slot's route, everything else the app default.
     private func routingRow(agent agentID: String, slot: SZAgentGraph.Slot,
-                            graph: SZAgentGraph, profile: SZRoutingProfile)
+                            graph: SZAgentGraph, profile: SZRoutingProfile?)
         -> SZRoutingPositionRow {
         let position = SZRoutingPosition(agent: agentID, slot: slot.id)
-        let envelope = profile.envelope(agent: agentID, slot: slot.id)
-        let options = routingEnvelopeOptions(selected: envelope)
+        let envelope = profile?.envelope(agent: agentID, slot: slot.id)
         // Every unfilled row reads "Default" — one word, everywhere. The menu's clear row
         // carries the LIVE resolution, which is where the rows honestly differ: a grade
         // variant resolves through its standard slot's route (when filled), everything
         // else through the app default.
         let standardID = SZRoutingInheritance.standardSlot(for: slot.id, grades: graph.grades)
         let resolution = standardID
-            .flatMap { profile.envelope(agent: agentID, slot: $0) }
+            .flatMap { id in profile?.envelope(agent: agentID, slot: id) }
             .map(routingEnvelopeDisplay) ?? routingAppDefaultDisplay
-        let unsetLabel = "Default"
         let clearLabel = "Default (\(resolution))"
+        // Off (no profile): the resolution IS the row — stated in full, nothing pickable.
+        guard let profile else {
+            return SZRoutingPositionRow(position: position, label: slot.label ?? slot.id,
+                                        caption: slot.description,
+                                        selectionLabel: clearLabel, clearLabel: clearLabel,
+                                        isSet: false)
+        }
+        let options = routingEnvelopeOptions(selected: envelope)
         guard let envelope else {
             return SZRoutingPositionRow(position: position, label: slot.label ?? slot.id,
                                         caption: slot.description,
-                                        selectionLabel: unsetLabel, clearLabel: clearLabel,
+                                        selectionLabel: "Default", clearLabel: clearLabel,
                                         isSet: false, options: options)
         }
         let provider = SZProviderRegistry.shared.provider(id: envelope.providerID)
@@ -195,12 +202,29 @@ extension SZHost {
     // MARK: - Profile lifecycle (the bar's New / Rename / Duplicate)
 
     /// Create an empty profile under a fresh name; returns the name so the caller can select
-    /// it for edit.
+    /// it for edit. When routing is Off (and no launch pin holds it there), the new profile
+    /// becomes active — a running arm is never stolen, only silence is filled.
     @discardableResult
     func createRoutingProfile() -> String {
         let name = routingUniqueName("Profile")
         upsertRoutingProfile(SZRoutingProfile(name: name))
+        activateCreatedRoutingProfileIfOff(name)
         return name
+    }
+
+    /// The create-flow's activation rule, pure so it's pinnable: fill silence (routing Off),
+    /// never steal a running arm, and stay out of the way when the launch env governs
+    /// routing (=0 kill or a name pin).
+    nonisolated static func createShouldActivate(active: String?, env: String?) -> Bool {
+        active == nil && (env == nil || env == "1")
+    }
+
+    /// Shared by Empty and the presets. Respects the mid-run refusal — on refusal the
+    /// profile stays created, merely not active.
+    private func activateCreatedRoutingProfileIfOff(_ name: String) {
+        guard Self.createShouldActivate(active: activeRoutingProfileName,
+                                        env: Self.modelRoutingEnv) else { return }
+        _ = setActiveRoutingProfile(name)
     }
 
     /// Whether the New Profile menu offers the Claude Ladder preset — the claude provider
@@ -211,8 +235,8 @@ extension SZHost {
 
     /// The Claude Ladder starter: Haiku sorts, Sonnet builds and answers, Opus takes the
     /// planning and the heavy work. Fills only the built-in agents; builder-light stays
-    /// unfilled on purpose (its Default follows the Builder row). Saved, not activated — the caller
-    /// selects it for edit.
+    /// unfilled on purpose (its Default follows the Builder row). Activated when routing
+    /// was Off, like every create; the caller selects it for edit.
     @discardableResult
     func createClaudeLadderRoutingProfile() -> String {
         let opus = SZRouteEnvelope(providerID: "claude", model: "claude-opus-5")
@@ -225,6 +249,7 @@ extension SZHost {
                        "assistant": sonnet, "sorter": haiku],
             "debug": ["assistant": sonnet],
         ]))
+        activateCreatedRoutingProfileIfOff(name)
         return name
     }
 

@@ -168,4 +168,45 @@ struct SZRoutingHostTests {
                     .resolve(SZModelCall(class: .turn, agent: "coding", slot: "builder-default"))
                     .model == "claude-opus-5")
     }
+
+    // MARK: - The Routing pane's mapping
+
+    @Test func creationActivatesOnlyIntoSilence() {
+        // Fill silence, never steal a running arm, defer to the launch env in every form.
+        #expect(SZHost.createShouldActivate(active: nil, env: nil))
+        #expect(SZHost.createShouldActivate(active: nil, env: "1"))
+        #expect(!SZHost.createShouldActivate(active: nil, env: "0"))
+        #expect(!SZHost.createShouldActivate(active: nil, env: "fast-fleet"))
+        #expect(!SZHost.createShouldActivate(active: "fast-fleet", env: nil))
+    }
+
+    @Test func offCardsStateEachSlotsLiveResolutionWithNothingPickable() {
+        // The Off row (and the no-profiles empty state): every row is resolve-only — the
+        // full "Default (…)" truth as its label, no options for the pane to render.
+        let host = bareHost()
+        let cards = host.routingAgentCards(editedName: nil)
+        #expect(!cards.isEmpty)
+        for row in cards.flatMap(\.rows) {
+            #expect(!row.isSet && row.options.isEmpty)
+            #expect(row.selectionLabel.hasPrefix("Default ("))
+            #expect(row.selectionLabel == row.clearLabel)
+        }
+        // A vanished requested name resolves the same way — never a phantom profile.
+        #expect(host.routingAgentCards(editedName: "gone").flatMap(\.rows).allSatisfy { !$0.isSet })
+    }
+
+    @Test func editedProfileCardsKeepTheOneWordDefaultOnUnsetRows() {
+        let host = bareHost(profiles: [fastFleet], active: nil)
+        let rows = host.routingAgentCards(editedName: "fast-fleet").flatMap(\.rows)
+        // Filled positions read their envelope; unfilled ones the one-word "Default" with
+        // the live resolution kept to the menu's clear row.
+        #expect(rows.contains { $0.isSet })
+        let unset = rows.filter { !$0.isSet }
+        #expect(!unset.isEmpty)
+        for row in unset {
+            #expect(row.selectionLabel == "Default")
+            #expect(row.clearLabel.hasPrefix("Default ("))
+            #expect(!row.options.isEmpty)
+        }
+    }
 }

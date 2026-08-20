@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The AI Settings Routing pane — named profiles filling the agent graphs' declared MODEL
-// SLOTS with generation envelopes. Top: the ACTIVE-profile menu (Off = the identity world)
-// + profile management; below: one grouped card per agent, one divider-separated row per
-// declared slot. SZUI can't import SZAI: cards arrive host-mapped (SZHost+RoutingSettings),
-// keyed by the typed SZRoutingPosition — every row is an (agent, slot).
+// SLOTS with generation envelopes. The profile is the visible container: a pinned list
+// (Off first, ACTIVE badged, activation on the toolbar's right edge) whose selection IS
+// what the editor below shows — tinted agent cards, one row per declared slot; the Off row
+// renders them read-only with each slot's live resolution. SZUI can't import SZAI: cards
+// arrive host-mapped (SZHost+RoutingSettings), keyed by the typed SZRoutingPosition.
 import AppKit
 import SwiftUI
 
@@ -140,8 +141,8 @@ public struct SZRoutingAgentCard: Identifiable, Equatable, Sendable {
 
 public struct SZRoutingSettingsView: View {
     private let profiles: [SZRoutingProfileRow]
-    /// The profile whose table the form shows (host-resolved: requested → active → first);
-    /// nil = no saved profiles, the pane shows only the empty-state sentence.
+    /// The list's selection, host-resolved: a saved profile's name, or nil = the Off row.
+    /// Off shows the same agent cards read-only, every row stating its live resolution.
     private let editedProfileName: String?
     private let agents: [SZRoutingAgentCard]
     /// Non-nil = SZ_MODEL_ROUTING pins this profile at launch; the active menu locks.
@@ -155,7 +156,7 @@ public struct SZRoutingSettingsView: View {
     private let onRenameProfile: (String, String) -> Void   // (old, new)
     private let onDuplicateProfile: (String) -> Void
     private let onDeleteProfile: (String) -> Void
-    private let onEditProfile: (String) -> Void
+    private let onEditProfile: (String?) -> Void            // nil = the Off row
     private let onAssignEnvelope: (SZRoutingPosition, String?, String?) -> Void   // (position, providerID, modelID); (p, nil, nil) = clear
     private let onSetPositionEffort: (SZRoutingPosition, String?) -> Void
     private let onSetPositionFastMode: (SZRoutingPosition, Bool) -> Void
@@ -177,7 +178,7 @@ public struct SZRoutingSettingsView: View {
                 onRenameProfile: @escaping (String, String) -> Void = { _, _ in },
                 onDuplicateProfile: @escaping (String) -> Void = { _ in },
                 onDeleteProfile: @escaping (String) -> Void = { _ in },
-                onEditProfile: @escaping (String) -> Void = { _ in },
+                onEditProfile: @escaping (String?) -> Void = { _ in },
                 onAssignEnvelope: @escaping (SZRoutingPosition, String?, String?) -> Void = { _, _, _ in },
                 onSetPositionEffort: @escaping (SZRoutingPosition, String?) -> Void = { _, _ in },
                 onSetPositionFastMode: @escaping (SZRoutingPosition, Bool) -> Void = { _, _ in },
@@ -201,6 +202,8 @@ public struct SZRoutingSettingsView: View {
     }
 
     private var activeProfile: SZRoutingProfileRow? { profiles.first(where: \.isActive) }
+    /// Off (nil selection) shows the cards read-only — live resolutions, no controls.
+    private var isEditable: Bool { editedProfileName != nil }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -211,21 +214,23 @@ public struct SZRoutingSettingsView: View {
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
 
-            profileBar
+            if let pinned = envPinnedProfileName {
+                Text("Pinned to \"\(pinned)\" for this launch (SZ_MODEL_ROUTING). Relaunch without it to switch profiles.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
 
-            if let name = editedProfileName {
-                editorBar(name)
+            profilesBox
+
+            VStack(alignment: .leading, spacing: 10) {
+                editorHeader
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(agents) { agentCard($0) }
                     }
                 }
                 .modifier(SZScrollBottomFade())
-            } else {
-                Text("No profiles yet. Every agent runs on the default provider. Create a profile to give specific work its own model.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                Spacer()
             }
         }
         .alert("Rename Profile", isPresented: Binding(get: { renameTarget != nil },
@@ -239,114 +244,139 @@ public struct SZRoutingSettingsView: View {
         }
     }
 
-    // MARK: - Profile bar (the ACTIVE selection + profile management)
+    // MARK: - Profiles list (selection = what the editor below shows)
 
-    private var profileBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                Text("Active")
-                    .font(.system(size: 13, weight: .medium))
-                activeMenu
-                    .disabled(envPinnedProfileName != nil)
-                Spacer()
-                newProfileMenu
+    /// The pane's one container for profile identity: the pinned Off row, the saved
+    /// profiles (scrolling past four), and the toolbar whose right edge holds activation.
+    /// The ACTIVE badge marks what runs; the selection highlight marks what's shown.
+    private var profilesBox: some View {
+        VStack(spacing: 0) {
+            profileListRow(name: "Off", caption: "The default provider runs everything",
+                           selected: !isEditable, active: activeProfile == nil) {
+                onEditProfile(nil)
             }
-            if let pinned = envPinnedProfileName {
-                Text("Pinned to \"\(pinned)\" for this launch (SZ_MODEL_ROUTING). Relaunch without it to switch profiles.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+            if profiles.count > 4 {
+                ScrollView { profileRows }.frame(height: 104)
+            } else {
+                profileRows
             }
+            listToolbar
         }
+        .background(RoundedRectangle(cornerRadius: 8)
+            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82)))
+        .overlay(RoundedRectangle(cornerRadius: 8)
+            .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
     }
 
-    private var activeMenu: some View {
-        Menu {
-            Button {
-                onSelectActiveProfile(nil)
-            } label: {
-                if activeProfile == nil { Label("Off: the default provider runs everything", systemImage: "checkmark") }
-                else { Text("Off: the default provider runs everything") }
-            }
-            Divider()
+    private var profileRows: some View {
+        VStack(spacing: 0) {
             ForEach(profiles) { profile in
-                Button {
-                    onSelectActiveProfile(profile.name)
-                } label: {
-                    if profile.isActive { Label(profile.name, systemImage: "checkmark") }
-                    else { Text(profile.name) }
+                Divider().padding(.leading, 12)
+                profileListRow(name: profile.name, caption: nil,
+                               selected: profile.name == editedProfileName,
+                               active: profile.isActive) {
+                    onEditProfile(profile.name)
                 }
             }
-        } label: {
-            Text(activeProfile?.name ?? "Off")
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 210)
         }
-        .menuStyle(.button)
-        .controlSize(.small)
-        .help("The profile new chats and runs use. Switching is refused while a run is in flight")
     }
 
-    /// New Profile: start empty, or from a preset (only offered while its provider is usable).
-    private var newProfileMenu: some View {
-        Menu {
-            Button("Empty Profile") { onCreateProfile() }
-            if claudeLadderAvailable {
-                Divider()
-                Button("Claude Ladder: Haiku sorts, Sonnet builds and answers, Opus takes the heavy work") {
-                    onCreateClaudeLadder()
-                }
-            }
-        } label: {
-            Text("New Profile")
-        }
-        .menuStyle(.button)
-        .controlSize(.small)
-        .fixedSize()
-        .help("Start empty, or from a preset. Presets only fill the built-in agents")
+    private func profileListRow(name: String, caption: String?, selected: Bool, active: Bool,
+                                select: @escaping () -> Void) -> some View {
+        SZProfileListRow(name: name, caption: caption, selected: selected, active: active,
+                         select: select)
     }
 
-    /// Which profile the FORM shows (independent of which is active), plus its management menu.
-    private func editorBar(_ edited: String) -> some View {
-        HStack(spacing: 10) {
-            Text("Editing")
-                .font(.system(size: 13, weight: .medium))
+    /// +, −, and the gear act on the SELECTED row; the right edge switches what RUNS
+    /// ("Use This Profile" / "Turn Routing Off"), hidden when the selection already runs.
+    private var listToolbar: some View {
+        HStack(spacing: 2) {
             Menu {
-                ForEach(profiles) { profile in
-                    Button {
-                        onEditProfile(profile.name)
-                    } label: {
-                        if profile.name == edited { Label(profile.name, systemImage: "checkmark") }
-                        else { Text(profile.name) }
+                Button("Empty Profile") { onCreateProfile() }
+                if claudeLadderAvailable {
+                    Divider()
+                    Button("Claude Ladder: Haiku sorts, Sonnet builds and answers, Opus takes the heavy work") {
+                        onCreateClaudeLadder()
                     }
                 }
             } label: {
-                Text(edited)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 210)
+                Image(systemName: "plus")
             }
             .menuStyle(.button)
-            .controlSize(.small)
-            .help("Pick which profile the form below edits. The active profile can be edited live")
+            .menuIndicator(.hidden)
+            .buttonStyle(.borderless)
+            .fixedSize()
+            .help("New profile: start empty, or from a preset. Presets only fill the built-in agents")
+            Button {
+                if let edited = editedProfileName { onDeleteProfile(edited) }
+            } label: {
+                Image(systemName: "minus")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!isEditable)
+            .help("Delete the selected profile. Deleting the active profile turns routing off")
             Menu {
                 Button("Rename…") {
-                    renameDraft = edited
-                    renameTarget = edited
+                    renameDraft = editedProfileName ?? ""
+                    renameTarget = editedProfileName
                 }
-                Button("Duplicate") { onDuplicateProfile(edited) }
-                Divider()
-                Button("Delete", role: .destructive) { onDeleteProfile(edited) }
+                Button("Duplicate") { if let edited = editedProfileName { onDuplicateProfile(edited) } }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.button)
             .menuIndicator(.hidden)
-            .controlSize(.small)
+            .buttonStyle(.borderless)
             .fixedSize()
-            .help("Rename, duplicate, or delete \"\(edited)\". Deleting the active profile turns routing off")
+            .disabled(!isEditable)
+            .help("Rename or duplicate the selected profile")
             Spacer()
+            activationButton
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(UnevenRoundedRectangle(bottomLeadingRadius: 8, bottomTrailingRadius: 8)
+            .fill(Color.black.opacity(0.12)))
+    }
+
+    /// The one control that changes what runs. Absent when the selection already runs;
+    /// locked (not hidden) under a launch pin so the state stays explicable.
+    @ViewBuilder
+    private var activationButton: some View {
+        if let edited = editedProfileName, edited != activeProfile?.name {
+            Button("Use This Profile") { onSelectActiveProfile(edited) }
+                .buttonStyle(.bordered)
+                .disabled(envPinnedProfileName != nil)
+                .help(envPinnedProfileName != nil
+                    ? "SZ_MODEL_ROUTING pins the profile for this launch"
+                    : "Run new chats and runs on \"\(edited)\". Refused while a run is in flight")
+        } else if !isEditable, activeProfile != nil {
+            Button("Turn Routing Off") { onSelectActiveProfile(nil) }
+                .buttonStyle(.bordered)
+                .disabled(envPinnedProfileName != nil)
+                .help(envPinnedProfileName != nil
+                    ? "SZ_MODEL_ROUTING pins the profile for this launch"
+                    : "Run everything on the default provider. Refused while a run is in flight")
+        }
+    }
+
+    /// The editor's scope title: the selected profile's name, or Off's read-only summary.
+    @ViewBuilder
+    private var editorHeader: some View {
+        if let edited = editedProfileName {
+            Text(edited)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        } else if profiles.isEmpty {
+            Text("No profiles yet. Create one to give specific work its own model.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        } else {
+            Text("Where each kind of work goes right now")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -421,11 +451,18 @@ public struct SZRoutingSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            if row.isSet {
-                effortMenu(row)
-                fastToggle(row)
+            if isEditable {
+                if row.isSet {
+                    effortMenu(row)
+                    fastToggle(row)
+                }
+                envelopeMenu(row)
+            } else {
+                // Off: no controls, just the truth — where this slot's work goes today.
+                Text(row.selectionLabel)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
             }
-            envelopeMenu(row)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -508,6 +545,50 @@ public struct SZRoutingSettingsView: View {
                 onSetPositionFastMode(row.position, !row.fastModeEnabled)
             }
         }
+    }
+}
+
+/// One row of the profiles list: name (Off carries its caption), the selection wash, and
+/// the ACTIVE badge on whichever row governs new work. Its own view — hover is per-row state.
+private struct SZProfileListRow: View {
+    let name: String
+    let caption: String?
+    let selected: Bool
+    let active: Bool
+    let select: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: select) {
+            HStack(spacing: 8) {
+                Text(name)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let caption {
+                    Text(caption)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                if active {
+                    Text("Active")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.16), in: Capsule())
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(selected ? Color.accentColor.opacity(0.22)
+                                 : Color.white.opacity(hovered ? 0.04 : 0))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
     }
 }
 

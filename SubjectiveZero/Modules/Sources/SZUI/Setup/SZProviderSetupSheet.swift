@@ -241,7 +241,7 @@ public struct SZProviderSetupSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Choose the default agent provider for runs and chat.")
+                Text("Choose the default agent provider. Runs, chat, and anything Routing leaves unset use it.")
                 Text("Cards re-check on their own while this sheet is open. Install or log in and watch them turn green. Only Ready providers can run agents.")
                     .foregroundStyle(.secondary)
             }
@@ -307,6 +307,16 @@ public struct SZProviderSetupSheet: View {
                 HStack(spacing: 8) {
                     Text(card.displayName).font(.system(size: 13, weight: .semibold))
                     statusBadge(card)
+                    // The noun the Routing pane's "Default (…)" rows point at, anchored to
+                    // the card it resolves to.
+                    if selected {
+                        Text("Default")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                            .foregroundStyle(Color.accentColor)
+                    }
                     Spacer()
                     modelMenu(card)
                     testButton(card)
@@ -394,13 +404,12 @@ public struct SZProviderSetupSheet: View {
                         }
                     }
                 } label: {
+                    // Bare value, no "Model:" prefix — position and the chevron say what it
+                    // is; secondary until hovered so it reads as a control, not a spec line.
                     // Cap the width and truncate — a long qualified id (the raw-id fallback path)
                     // must never expand the row and shove Test off the fixed-width card. `.fixedSize`
                     // would do exactly that (it sizes to the label's full ideal width), so it's out.
-                    Text(selectedLabel.isEmpty ? "Model" : "Model: \(selectedLabel)")
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 190)
+                    SZModelPillLabel(text: selectedLabel.isEmpty ? "Model" : selectedLabel)
                 }
                 .menuStyle(.button)
                 .controlSize(.small)
@@ -570,5 +579,21 @@ struct SZCopyableDetailDisclosure: View {
             .padding(12)
             .frame(width: 420, height: 220)
         }
+    }
+}
+
+/// The model pill's text: quiet at rest, primary under the cursor — a control, not a spec
+/// line. Its own view because hover is per-pill state.
+private struct SZModelPillLabel: View {
+    let text: String
+    @State private var hovered = false
+
+    var body: some View {
+        Text(text)
+            .foregroundStyle(hovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: 190)
+            .onHover { hovered = $0 }
     }
 }
