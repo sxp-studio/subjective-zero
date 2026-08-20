@@ -247,8 +247,10 @@ public struct SZNodeEditorPanel: View {
 
     public var body: some View {
         canvasArea
-            .overlay(alignment: .bottom) { hudBar.padding(.bottom, 16) }
+            // Overlay order is draw order: the map is scenery, the HUD is the controls, so a wide
+            // HUD in a narrow window covers the map rather than losing its gear behind it.
             .overlay(alignment: .bottomTrailing) { miniMapOverlay }
+            .overlay(alignment: .bottom) { hudBar.padding(.bottom, 16) }
             // Declared AFTER the HUD → the menu always draws above it (and everything else).
             .overlay(alignment: .topLeading) { contextMenuOverlay }
             // A deleted target (agent promote/merge mid-run) closes the menu rather than leaving
