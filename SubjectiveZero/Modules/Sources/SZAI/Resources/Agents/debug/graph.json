@@ -3,7 +3,7 @@
   "symbol": "ladybug.fill",
   "tint": "lilac",
   "slots": [
-    { "id": "assistant", "label": "Assistant",
+    { "id": "assistant", "label": "Chat",
       "description": "Answers in the debug console" }
   ],
   "nodes": [

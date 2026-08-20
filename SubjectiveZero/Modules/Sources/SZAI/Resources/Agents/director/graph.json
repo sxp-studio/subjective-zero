@@ -3,11 +3,11 @@
   "symbol": "eyeglasses",
   "tint": "purple",
   "slots": [
-    { "id": "planner", "label": "Planner",
+    { "id": "planner", "label": "Plan",
       "description": "Plans the graph, briefs each node, and checks the results" },
-    { "id": "assistant", "label": "Assistant",
+    { "id": "assistant", "label": "Chat",
       "description": "Answers you in chat" },
-    { "id": "sorter", "label": "Sorter",
+    { "id": "sorter", "label": "Sort",
       "description": "Decides whether each message is new work, a change, or a question" }
   ],
   "asks": "sorter",

@@ -374,7 +374,7 @@ public struct SZRoutingSettingsView: View {
         // The agent's own tint outlines its card — the same accent its chat lines and
         // graph wear, so the three surfaces read as one identity.
         .overlay(RoundedRectangle(cornerRadius: 10)
-            .strokeBorder((SZAgentTint.color(agent.tint) ?? .clear).opacity(0.38), lineWidth: 1))
+            .strokeBorder((SZAgentTint.color(agent.tint) ?? .clear).opacity(0.5), lineWidth: 2))
     }
 
     private func cardHeader(_ agent: SZRoutingAgentCard) -> some View {
