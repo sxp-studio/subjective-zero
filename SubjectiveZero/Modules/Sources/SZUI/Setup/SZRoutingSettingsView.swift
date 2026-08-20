@@ -243,7 +243,7 @@ public struct SZRoutingSettingsView: View {
             if routingEnabled {
                 Divider()
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Profiles")
                         .font(.system(size: 13, weight: .semibold))
                     profilesBox
