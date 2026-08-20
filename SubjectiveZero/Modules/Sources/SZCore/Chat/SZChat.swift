@@ -172,6 +172,120 @@ public struct SZTokenUsage: Sendable, Equatable, Codable {
     }
 }
 
+/// A finished build, as one line of the conversation: the strip's own lane, settled.
+///
+/// A run is a state while it happens (the run strip owns that) and a RECEIPT once it is over —
+/// the same object at two moments, not two vocabularies. The strip's group vanishes when the run
+/// ends, so this is the transcript's only durable record that a build happened, and the message's
+/// `graphRunID` is what makes it a way back into the Agent Graph.
+///
+/// It carries no clock of its own: a receipt turn reuses `duration`, the field an agent turn
+/// already spends on "Worked for 21s".
+public struct SZChatReceipt: Equatable, Sendable {
+    /// What the run did, in the lane's name slot — "built Warm Orange", "built 3 nodes",
+    /// "built 2 of 3". The work, never a run id: with several builds finishing at once, a count
+    /// alone made three different runs read as one sentence repeated.
+    public var label: String
+    /// The ending, in the ONE badge vocabulary (`SZRunBadge.style(for:)`) — so a receipt, a strip
+    /// lane and a RUNS row all say the same word for the same fact. This is the run's ACCOUNTING
+    /// outcome, which a traversal's own conclusion need not match: a build whose traversal ended
+    /// cleanly with a node unimplemented is `.failed` here, because that is what happened to the
+    /// work.
+    public var conclusion: SZAgentGraphRun.Conclusion
+    /// The one thing a lane cannot say for itself — why a build died (a dead CLI, a spent budget),
+    /// shown as a quiet line under the pill. nil on every healthy ending: a run that worked owes no
+    /// explanation, and the nodes it could not finish explain themselves in their own turns.
+    public var detail: String?
+
+    public init(label: String, conclusion: SZAgentGraphRun.Conclusion, detail: String? = nil) {
+        self.label = label
+        self.conclusion = conclusion
+        self.detail = detail
+    }
+
+    // MARK: - What a finished build says
+    //
+    // Pure, so the wording is testable without a host and a run. `work` is the ONE node's title
+    // when the run had exactly one — naming it is what stops three concurrent one-node builds from
+    // finishing as the same sentence three times.
+
+    /// The run reached its own end.
+    public static func forEnding(implemented: Int, failed: Int, work: String?) -> SZChatReceipt {
+        // Some of the work did not land: say the shortfall, and badge it as such even though the
+        // TRAVERSAL ended cleanly — the receipt reports on the work, not on the graph walk.
+        if failed > 0 {
+            return SZChatReceipt(label: shortfallLabel(implemented: implemented, failed: failed, work: work),
+                                 conclusion: .failed(reason: "\(failed) unfinished"))
+        }
+        return SZChatReceipt(label: builtLabel(implemented, work: work), conclusion: .ended)
+    }
+
+    /// Someone stopped the run. A Stop is not a failure, so the badge stays neutral either way;
+    /// what changes is whether there is a shortfall worth naming.
+    public static func forStop(implemented: Int, unfinished: Int, work: String?) -> SZChatReceipt {
+        let label = unfinished > 0
+            ? "\(unfinished) node\(unfinished == 1 ? "" : "s") unfinished"
+            : builtLabel(implemented, work: work)
+        return SZChatReceipt(label: label, conclusion: .cancelled)
+    }
+
+    /// The run threw — the reason rides along, because nothing else in the transcript will say it.
+    public static func forFailure(implemented: Int, unfinished: Int, work: String?,
+                                  reason: String) -> SZChatReceipt {
+        SZChatReceipt(label: shortfallLabel(implemented: implemented, failed: unfinished, work: work),
+                      conclusion: .failed(reason: reason), detail: reason)
+    }
+
+    /// A run that fell short. The single-node case is NAMED for the same reason the healthy one is:
+    /// a dead CLI takes down whichever builds were in flight, and three of them all reading
+    /// "built 0 of 1" — with the same reason underneath — is the exact indistinguishability this
+    /// whole change exists to remove. Counts carry the rest, where no one name would be true.
+    private static func shortfallLabel(implemented: Int, failed: Int, work: String?) -> String {
+        if implemented == 0, failed == 1, let work, !work.isEmpty { return "\(work) unfinished" }
+        return "built \(implemented) of \(implemented + failed)"
+    }
+
+    // MARK: - Codable
+    //
+    // HAND-WRITTEN, for the same reason `SZChatAttachment` and `SZTurnEvent` are. `conclusion` is
+    // an enum WITH ASSOCIATED VALUES on synthesized Codable, so an unrecognized case does not
+    // decode as nil — it THROWS ("Invalid number of keys found, expected one"), and
+    // `decodeIfPresent` does not absorb that. One throw unwinds the whole `messages` array →
+    // `SZChatTranscriptIO.load`'s `try?` → nil → the scope loads with NO history → the next flush
+    // writes that emptiness back over the sidecar. A conversation would be destroyed, silently, by
+    // something as ordinary as adding a case to `SZTraversalEnding` and then opening the project
+    // under an older build. So the receipt degrades and the MESSAGE always survives: an ending we
+    // cannot read is reported as `.ended`, and the words in `text` are the durable fact regardless.
+
+    private enum CodingKeys: String, CodingKey { case label, conclusion, detail }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        conclusion = (try? c.decode(SZAgentGraphRun.Conclusion.self, forKey: .conclusion)) ?? .ended
+        detail = try c.decodeIfPresent(String.self, forKey: .detail)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(label, forKey: .label)
+        try c.encode(conclusion, forKey: .conclusion)
+        try c.encodeIfPresent(detail, forKey: .detail)
+    }
+}
+
+extension SZChatReceipt: Codable {}
+
+extension SZChatReceipt {
+    /// "built Warm Orange" when a run had one node, a count otherwise — and an honest sentence
+    /// when a build found nothing to do, which is a real outcome and not an empty one.
+    private static func builtLabel(_ implemented: Int, work: String?) -> String {
+        if implemented == 0 { return "nothing needed building" }
+        if implemented == 1, let work, !work.isEmpty { return "built \(work)" }
+        return "built \(implemented) node\(implemented == 1 ? "" : "s")"
+    }
+}
+
 public struct SZChatMessage: Identifiable, Equatable, Sendable {
     public let id: UUID
     public var role: SZChatRole
@@ -201,11 +315,14 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
     /// the Agent Graph panel. Stamped on the run's own narrations; nil on everything else. NOT the
     /// Profiler's `SZTurnEvent.runID`: that is the trace identity, and the two are different ids.
     public var graphRunID: UUID?
+    /// Set when this turn IS a finished build rather than something someone said — rendered as a
+    /// settled lane instead of a speaker's turn. nil on every ordinary message.
+    public var receipt: SZChatReceipt?
 
     public init(id: UUID = UUID(), role: SZChatRole, text: String, thinking: String = "",
                 timestamp: Date = Date(), duration: TimeInterval? = nil, usage: SZTokenUsage? = nil,
                 breakdown: [SZTurnEvent]? = nil, attachments: [SZChatAttachment] = [],
-                transient: Bool = false, graphRunID: UUID? = nil) {
+                transient: Bool = false, graphRunID: UUID? = nil, receipt: SZChatReceipt? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -217,13 +334,14 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
         self.attachments = attachments
         self.transient = transient
         self.graphRunID = graphRunID
+        self.receipt = receipt
     }
 }
 
 extension SZChatMessage: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, role, text, thinking, timestamp, duration, usage, breakdown, attachments, transient
-        case graphRunID
+        case graphRunID, receipt
     }
 
     // Hand-written for append tolerance (see header).
@@ -240,6 +358,11 @@ extension SZChatMessage: Codable {
         attachments = try c.decodeIfPresent([SZChatAttachment].self, forKey: .attachments) ?? []
         transient = try c.decodeIfPresent(Bool.self, forKey: .transient) ?? false
         graphRunID = try c.decodeIfPresent(UUID.self, forKey: .graphRunID)
+        // `try?` OUTSIDE the receipt's own tolerant decoder, not instead of it: that decoder can
+        // only forgive what it gets to read, and a `receipt` of the wrong SHAPE entirely (a string
+        // where an object belongs) throws in `decodeIfPresent` before it ever runs. Either way the
+        // rule is the same — the message survives, and its `text` still says what happened.
+        receipt = (try? c.decodeIfPresent(SZChatReceipt.self, forKey: .receipt)) ?? nil
     }
 
     // Hand-written to keep the common case clean: `duration` and `transient` are omitted rather
@@ -258,5 +381,6 @@ extension SZChatMessage: Codable {
         try c.encode(attachments, forKey: .attachments)
         if transient { try c.encode(true, forKey: .transient) }
         try c.encodeIfPresent(graphRunID, forKey: .graphRunID)
+        try c.encodeIfPresent(receipt, forKey: .receipt)
     }
 }

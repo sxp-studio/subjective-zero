@@ -1221,16 +1221,39 @@ final class SZHost {
         return true
     }
 
-    /// Append a host-emitted line to the Director Agent transcript. During a run the Director tab
-    /// carries operation-level narration (run begin / split-merge ops / complete) while each node's tab
-    /// streams that agent's implementation detail. These are plain host strings, distinct from an LLM
-    /// Director's own streamed narration.
-    /// Returns the narration's message id so a caller can decorate it (the run-complete rollup).
+    /// Append a host-emitted line to the Director Agent transcript — refusals, per-node outcomes,
+    /// split/merge ops — while each node's tab streams that agent's implementation detail. These are
+    /// plain host strings, distinct from an LLM Director's own streamed narration. A run's ENDING
+    /// does not come through here: it is a receipt (`narrateRunReceipt`), not a sentence.
+    /// Returns the message id so a caller can decorate it.
     @discardableResult
     func narrateDirector(_ text: String) -> UUID {
         let id = store.appendChatMessage(SZChatMessage(role: .assistant, text: text), to: .director)
         // Narration is part of the durable narrative, but mid-run it can arrive per node — the
         // run-end flushAllTranscripts covers those; only standalone narrations flush eagerly.
+        if !isRunning { flushTranscript(.director) }
+        return id
+    }
+
+    /// Close a build with a RECEIPT rather than a sentence: the strip's lane, settled into the
+    /// conversation at the moment it finished. The host used to bookend every run with
+    /// "Run started…" and "Run complete…" in the Director's own costume — the first restating the
+    /// strip that was already on screen, the second restating the agent's own summary directly
+    /// above it. Only the ending is news, and it is a thing, not a speech.
+    ///
+    /// `label` says what the run did, `conclusion` picks the badge from the one vocabulary, and
+    /// `thread` is what the row jumps to in the Agent Graph. Returns the message id so a caller can
+    /// decorate it (the trace rollup).
+    @discardableResult
+    func narrateRunReceipt(_ receipt: SZChatReceipt, seconds: TimeInterval, thread: UUID) -> UUID {
+        // `text` still carries the receipt's words: it is what an OLDER build reading this sidecar
+        // renders (it knows no `receipt` field), and what a cold-start recap replays to an agent.
+        // The struct is the rendering; the sentence is the durable fact.
+        let text = [receipt.label, receipt.detail].compactMap { $0 }.joined(separator: " — ")
+        let id = store.appendChatMessage(
+            SZChatMessage(role: .assistant, text: text, duration: seconds, receipt: receipt),
+            to: .director)
+        linkNarrationToRun(id, thread: thread)
         if !isRunning { flushTranscript(.director) }
         return id
     }

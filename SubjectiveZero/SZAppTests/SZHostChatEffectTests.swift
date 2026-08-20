@@ -60,7 +60,7 @@ struct SZHostChatEffectTests {
         #expect(host.pendingTasks.map(\.instruction) == ["later"])
     }
 
-    @Test func mintingDuringAnActiveRunQueuesBehindItWithOneNarratedLine() {
+    @Test func mintingDuringAnActiveRunQueuesBehindItInTheStrip() {
         let host = SZHost()
         let node = SZNodeID()
         let run = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "test run"),
@@ -68,8 +68,10 @@ struct SZHostChatEffectTests {
         host.activeRuns[run.taskID] = run
         defer { host.activeRuns = [:] }
         host.mintRun(instruction: "again")
-        // Queued, not dropped — and said so once.
+        // Queued, not dropped — and shown as a scheduled row, not said. The conversation stays
+        // clear of a state the strip holds for the whole time it is true.
         #expect(host.pendingTasks.map(\.instruction) == ["again"])
-        #expect(host.store.messages(for: .director).contains { $0.text.contains("Queued") })
+        #expect(host.scheduledTaskRows.count == 1)
+        #expect(host.store.messages(for: .director).isEmpty)
     }
 }

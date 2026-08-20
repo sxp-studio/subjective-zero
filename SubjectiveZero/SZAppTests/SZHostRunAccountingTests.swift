@@ -146,19 +146,35 @@ struct SZHostRunAccountingTests {
 
     // MARK: cancelRun
 
-    /// The count + narration happen synchronously in the cancel, while the work set is still this run's —
+    /// The count + receipt happen synchronously in the cancel, while the work set is still this run's —
     /// the cancelled task's own catch is a zombie and stays silent (so a Stop-then-Build can't stamp a
-    /// stray "cancelled" line under the new run's start line).
-    @Test func cancelNarratesTheUnfinishedCountOnceAndRetiresWorkingPills() {
+    /// stray "stopped" receipt under a newer run's).
+    @Test func cancelRecordsTheUnfinishedCountOnceAndRetiresWorkingPills() {
         let a = Self.built(), b = Self.draft()
         let host = host([a, b])
         host.nodeAgentState[a.id] = SZNodeAgentState(phase: .coding, message: "wiring the mask polygon")
         host.nodeAgentState[b.id] = SZNodeAgentState(phase: .queued)
         host.cancelRun()
-        #expect(directorLines(host) == ["Run cancelled — 1 node unfinished."])   // the built one is done
+        // One receipt, badged as a stop — a Stop is nobody's failure — naming the shortfall.
+        let receipts = host.store.messages(for: .director).compactMap(\.receipt)
+        #expect(receipts.map(\.label) == ["1 node unfinished"])   // the built one is done
+        #expect(receipts.map(\.conclusion) == [.cancelled])
         #expect(host.nodeAgentState[a.id]?.phase == .idle)
         #expect(host.nodeAgentState[b.id]?.phase == .idle)
         #expect(host.nodeStatusLines.isEmpty)   // nothing left to feed the next run as a blocker
+    }
+
+    /// A work-set node that NO LONGER EXISTS is not a built one. `implemented` used to be derived
+    /// as `workSet.count - unfinished`, and a Stop on a run that owns a staged split rolls the op
+    /// back FIRST — deleting every piece — so nothing was left dirty and the receipt claimed
+    /// "built 3 nodes" for work that was never built and is no longer in the graph.
+    @Test func cancelDoesNotCountVanishedNodesAsBuilt() {
+        let host = host([])                      // an empty graph: every work-set id resolves to nothing
+        run(host).workSet = [SZNodeID(), SZNodeID(), SZNodeID()]
+        host.cancelRun()
+        let receipts = host.store.messages(for: .director).compactMap(\.receipt)
+        #expect(receipts.map(\.label) == ["nothing needed building"])
+        #expect(receipts.map(\.conclusion) == [.cancelled])
     }
 
     @Test func cancelKeepsAnAgentsOwnReport() {
@@ -170,10 +186,14 @@ struct SZHostRunAccountingTests {
         #expect(host.nodeAgentState[b.id]?.message == "which palette?")
     }
 
-    @Test func cancelWithNothingLeftUnfinishedSaysSo() {
+    /// Nothing was left unfinished, so the receipt says what the run BUILT instead of naming a
+    /// shortfall that isn't there — and still badges the stop, because that is how it ended.
+    @Test func cancelWithNothingLeftUnfinishedReportsWhatItBuilt() {
         let host = host([Self.built()])
         host.cancelRun()
-        #expect(directorLines(host) == ["Run cancelled."])
+        let receipts = host.store.messages(for: .director).compactMap(\.receipt)
+        #expect(receipts.map(\.label) == ["built Built"])
+        #expect(receipts.map(\.conclusion) == [.cancelled])
     }
 
     // MARK: recordRunFailure

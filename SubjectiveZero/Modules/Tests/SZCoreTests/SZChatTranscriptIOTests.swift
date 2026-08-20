@@ -80,6 +80,45 @@ private func sampleMessages() -> [SZChatMessage] {
     #expect(loaded[1].graphRunID == nil)
 }
 
+/// A build's receipt survives the sidecar whole — label, badge and the reason a failure carries —
+/// so a reopened project still shows what was built and how it ended, not just a bare sentence.
+@Test func transcriptRoundTripPreservesARunReceipt() throws {
+    let projectURL = temporaryProjectURL()
+    defer { try? FileManager.default.removeItem(at: projectURL) }
+    let messages = [
+        SZChatMessage(role: .assistant, text: "built Warm Orange", duration: 24,
+                      receipt: SZChatReceipt(label: "built Warm Orange", conclusion: .ended)),
+        SZChatMessage(role: .assistant, text: "built 0 of 1 — the agent went silent", duration: 120,
+                      receipt: SZChatReceipt(label: "built 0 of 1",
+                                             conclusion: .failed(reason: "the agent went silent"),
+                                             detail: "the agent went silent")),
+        SZChatMessage(role: .user, text: "more contrast"),
+    ]
+
+    try SZChatTranscriptIO.save(messages, scopeKey: SZChatScope.directorKey, projectURL: projectURL)
+    let loaded = try #require(SZChatTranscriptIO.load(scopeKey: SZChatScope.directorKey, projectURL: projectURL))
+
+    #expect(loaded[0].receipt == SZChatReceipt(label: "built Warm Orange", conclusion: .ended))
+    #expect(loaded[0].duration == 24)                 // the receipt's clock rides on `duration`
+    #expect(loaded[1].receipt?.detail == "the agent went silent")
+    #expect(loaded[2].receipt == nil)                 // absence stays absence
+}
+
+/// Append tolerance, the file's stated contract: a sidecar written before `receipt` existed still
+/// loads. It keeps its sentence — which is exactly why the receipt's words are also written to
+/// `text` — and simply renders as an ordinary line rather than a lane.
+@Test func transcriptWithoutAReceiptStillDecodes() throws {
+    let projectURL = temporaryProjectURL()
+    defer { try? FileManager.default.removeItem(at: projectURL) }
+    let url = SZChatTranscriptIO.fileURL(projectURL: projectURL, scopeKey: SZChatScope.directorKey)
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"transcript":{"messages":[{"role":"assistant","text":"Run complete."}]}}"#.utf8).write(to: url)
+
+    let loaded = try #require(SZChatTranscriptIO.load(scopeKey: SZChatScope.directorKey, projectURL: projectURL))
+    #expect(loaded[0].receipt == nil)
+    #expect(loaded[0].text == "Run complete.")
+}
+
 /// Append tolerance, the file's stated contract: a sidecar written before `graphRunID` existed
 /// still loads, with no link rather than a decode failure that would erase the whole transcript.
 @Test func transcriptWithoutGraphRunIDStillDecodes() throws {
