@@ -1,0 +1,46 @@
+[
+  {
+    "requiresProvider": "claude",
+    "profile": {
+      "name": "Claude Routing (sxp.studio)",
+      "agents": {
+        "director": {
+          "planner": { "providerID": "claude", "model": "claude-opus-5" },
+          "assistant": { "providerID": "claude", "model": "claude-sonnet-5" },
+          "sorter": { "providerID": "claude", "model": "claude-haiku-4-5" }
+        },
+        "coding": {
+          "builder-default": { "providerID": "claude", "model": "claude-sonnet-5" },
+          "builder-heavy": { "providerID": "claude", "model": "claude-opus-5" },
+          "assistant": { "providerID": "claude", "model": "claude-sonnet-5" },
+          "sorter": { "providerID": "claude", "model": "claude-haiku-4-5" }
+        },
+        "debug": {
+          "assistant": { "providerID": "claude", "model": "claude-sonnet-5" }
+        }
+      }
+    }
+  },
+  {
+    "requiresProvider": "codex",
+    "profile": {
+      "name": "Codex Routing (sxp.studio)",
+      "agents": {
+        "director": {
+          "planner": { "providerID": "codex", "model": "gpt-5.6-sol" },
+          "assistant": { "providerID": "codex", "model": "gpt-5.6-terra" },
+          "sorter": { "providerID": "codex", "model": "gpt-5.6-luna" }
+        },
+        "coding": {
+          "builder-default": { "providerID": "codex", "model": "gpt-5.6-terra" },
+          "builder-heavy": { "providerID": "codex", "model": "gpt-5.6-sol" },
+          "assistant": { "providerID": "codex", "model": "gpt-5.6-terra" },
+          "sorter": { "providerID": "codex", "model": "gpt-5.6-luna" }
+        },
+        "debug": {
+          "assistant": { "providerID": "codex", "model": "gpt-5.6-terra" }
+        }
+      }
+    }
+  }
+]

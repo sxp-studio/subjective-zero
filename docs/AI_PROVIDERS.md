@@ -68,47 +68,37 @@ For each, we wrap and surface to the UI:
 - **thinking** level - claude: `--effort {low, medium, high, xhigh, max}`; codex: a `-c`
   reasoning config key (not enumerable, manifest-declared).
 
-> **Shipped (supersedes the two paragraphs below):** the static capability
-> manifest IS each provider's Swift constants - `models` (PINNED version ids + display labels,
-> `SZProviderModel`: "claude-opus-4-8" → "Opus 4.8", "gpt-5.6-terra" → "GPT-5.6 Terra" - never
-> floating aliases, so a version label can't silently re-point; new models ship via app updates, and a
-> type-any-model manual override stays deferred) / `defaultModel` /
-> `supportedReasoningEfforts` (`[]` = no provider-level fallback menu — the CLI has no effort
-> concept, or declares efforts per enumerated model only; claude `--effort`
-> low/medium/high/xhigh/max, uniform across its seven models - recorded from claude 2.1.206 and
-> re-confirmed by a `max` turn on each model at 2.1.220; codex provider default
-> low/medium/high/xhigh - recorded from codex-cli 0.144.1's `models_cache.json`, with per-model
-> overrides where a model diverges: GPT-5.6 Sol and Terra add max/ultra, GPT-5.6 Luna adds max, and
-> Sol alone defaults to `low` instead of `medium`) / `supportsFastMode` (per-model too: the
-> provider-level flag says the CLI *can* express fast mode in argv, and
-> `supportsFastMode(for: model)` says whether the CLI will *enable* it for that model. claude accepts
-> the settings blob for all seven models — it swallows any unknown settings key silently — but its own
-> `result.fast_mode_state` reads `on` only for Opus 5 and Opus 4.8, so the other five declare
-> `supportsFastMode: false` and the composer hides the toggle. On Opus 4.7 that gate is load-bearing
-> rather than cosmetic: the CLI reports `on` there and the API then fails the turn with a 400 naming
-> the unsupported `speed` parameter, so an offered toggle would break runs. Note "enabled" ≠ "served fast": whether
-> a turn actually runs fast is an account entitlement the response reports per turn as `usage.speed`,
-> which reads `standard` while an org's fast-mode spend is disabled — not a model property, and not
-> modeled here. codex's five models are unmeasured on this axis, so none overrides and all inherit
-> `true`. grok declares NO effort menu and `supportsFastMode: false`: grok 0.2.93's
-> `--reasoning-effort` silently accepts any value — even an invalid token, exit 0, no warning, so
-> acceptance proves nothing — and measured comparisons (`none` vs `high`, `minimal` vs `xhigh`,
-> both models, 2026-07-12) showed no change in thought volume, so the flag is treated as not
-> honoured and argv never carries it). Model ids and effort tokens
-> are live-verified against the CLI, never inferred: a slug the ChatGPT backend won't serve is
-> rejected with a 400 that no in-process test can see, so a model joins the list only once the
-> manifest carries it AND a live launch returns clean (GPT-5.6 Sol shipped announced-but-ungated for
-> a window, 400ing every turn). grok's two ids (`grok-composer-2.5-fast` — the CLI's own default —
-> and `grok-build`) are the CLI's own enumeration: uniquely among our CLIs, `grok models` lists
-> them, so re-verification on a CLI update is one command; note `grok-build` is unversioned, and
-> there is no versioned alternative to pin. Picking a new model resets that provider's agent
-> sessions (a thread is bound to the model that opened it); changing effort or fast mode does not.
-> The **default envelope is global**: one active provider + its generation choices, edited in
-> AI Settings, persisted per provider in app-state.json
-> ([STATE.md](STATE.md)), clamped at read by `resolvedGenerationSettings`, and stamped into
-> every `SZAgentRunRequest` (runs, Director turns, chats). Fast mode DID land as launch argv -
-> claude via an inline `--settings {"fastMode":true}` blob, codex via
-> `-c service_tier="fast" -c features.fast_mode=true`.
+### The capability manifest
+
+Each provider's Swift constants are its manifest. Facts are measured against the installed
+CLI, never inferred; a model id joins the list only once the manifest carries it AND a live
+launch returns clean (GPT-5.6 Sol shipped announced-but-ungated for a window, 400ing every
+turn — a failure no in-process test can see).
+
+- **`models`** — pinned version ids with display labels (`"claude-opus-4-8"` → "Opus 4.8"),
+  never floating aliases, so a label can't silently re-point. New models ship via app
+  updates; a type-any-model override stays deferred. grok's two ids come from the CLI's own
+  `grok models` enumeration (`grok-build` is unversioned; no versioned alternative exists).
+- **`supportedReasoningEfforts`** — `[]` means no effort menu (no CLI effort concept, or
+  per-model menus only). claude: low/medium/high/xhigh/max, uniform across its seven models
+  (recorded at 2.1.206, re-confirmed at 2.1.220). codex: low/medium/high/xhigh from
+  codex-cli 0.144.1's `models_cache.json`, with per-model overrides — Sol and Terra add
+  max/ultra, Luna adds max, Sol alone defaults to low. grok: no menu — its
+  `--reasoning-effort` accepts any token silently and measured comparisons (2026-07-12)
+  showed no effect, so argv never carries it.
+- **`supportsFastMode`** — the provider flag says the CLI can express fast mode in argv;
+  `supportsFastMode(for: model)` says the CLI will enable it for that model. claude reports
+  it on only for Opus 5 and Opus 4.8, so the other models declare false and the toggle
+  hides (on Opus 4.7 the gate prevents a real 400). "Enabled" is not "served fast": the
+  account entitlement is reported per turn as `usage.speed` and is not modeled. codex's
+  models are unmeasured on this axis and inherit true. Argv shape: claude
+  `--settings {"fastMode":true}`, codex `-c service_tier="fast" -c features.fast_mode=true`.
+
+Picking a new model resets that provider's agent sessions (a thread is bound to the model
+that opened it); changing effort or fast mode does not. The **default envelope is global**:
+one active provider plus its generation choices, edited in AI Settings, persisted per
+provider in app-state.json ([STATE.md](STATE.md)), clamped at read by
+`resolvedGenerationSettings`, and stamped into every `SZAgentRunRequest`.
 
 ## Model routing (shipped)
 

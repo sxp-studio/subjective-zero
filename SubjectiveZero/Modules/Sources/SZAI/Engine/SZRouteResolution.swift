@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// An envelope's landing on a concrete provider: merge over the provider's stored baseline,
-// then through the ONE clamp point (`resolvedGenerationSettings(from:)`). The clamp never
-// substitutes silently — a routed model the live catalog doesn't list is surfaced as
-// `substitutedModel` so the host can say so in a sentence.
+// An envelope resolved onto a concrete provider: merge over the provider's stored baseline,
+// then clamp via `resolvedGenerationSettings(from:)`. A routed model the live catalog
+// doesn't list is surfaced as `substitutedModel`, never substituted silently.
 import SZCore
 
 /// What an envelope resolved to on its provider: concrete settings, plus the asked-for
@@ -28,9 +27,8 @@ extension SZProvider {
             reasoningEffort: envelope.reasoningEffort ?? baseline.reasoningEffort,
             fastMode: envelope.fastMode ?? baseline.fastMode)
         let clamped = resolvedGenerationSettings(from: merged)
-        // The clamp resolved an asked-for model away exactly when the live catalog doesn't
-        // list it — including an empty pre-fetch dynamic catalog. Never a guess: the caller
-        // narrates the substitution instead of hiding it.
+        // Substitution = the live catalog doesn't list the asked model (an empty pre-fetch
+        // dynamic catalog included); the caller narrates it.
         let asked = envelope.model
         let substituted = asked != nil && clamped.model != asked ? asked : nil
         return SZRoutedGeneration(settings: clamped, substitutedModel: substituted)

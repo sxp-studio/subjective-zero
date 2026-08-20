@@ -442,9 +442,8 @@ extension SZHostBridge {
             throw SZMCPError.message(host.fenceDenial(nodes: [id], origin: .agent) ?? "node \(id) is locked")
         }
         guard result.found else { throw SZMCPError.message("no node \(id)") }
-        // The grade never rides the node mutation — it is run-scoped host state the
-        // dispatch reads, not node data (an orchestration hint persisted onto the artifact
-        // graph is the P02 mistake). Recorded here, after every refusal has had its say.
+        // The grade never rides the node mutation — it is run-scoped host state, not node data
+        // (persisting an orchestration hint onto the artifact graph is the P02 mistake).
         if let complexity { host.recordNodeGrade(id, complexity) }
         // A blank prompt node that `startRun` kept OUT of the work set becomes real work the instant the
         // Director gives it a prompt — join it to the run so the fleet builds it this pass, exactly as
@@ -598,9 +597,8 @@ extension SZHostBridge {
         if let fast = arguments["fast_mode"] as? Bool, !host.setActiveFastMode(fast) {
             throw SZMCPError.message("\(provider) does not support fast mode")
         }
-        // Echo the RESOLVED selection so a driving agent's world model tracks the applied truth —
-        // plus the active routing profile, because a profile may override this selection per
-        // graph position (the caller just set the FALLBACK, not necessarily what every turn runs).
+        // Echo the resolved selection, plus the active routing profile — a profile may override
+        // this per graph position (the caller set the fallback, not what every turn runs).
         let resolved = host.resolvedGenerationSettings(for: host.activeProviderID)
         var response: [String: Any] = ["provider": host.activeProviderID,
                                        "model": resolved.model ?? "",

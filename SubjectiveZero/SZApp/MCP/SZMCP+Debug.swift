@@ -102,9 +102,8 @@ extension SZHostBridge {
         return SZJSONRPC.encode(["paused": host.isPaused])
     }
 
-    /// The A/B harness's routing mutator — the same host funnels as AI Settings (persist, busy
-    /// guard, session affinity), so a drive exercises the shipped behavior, never a parallel path.
-    /// Upsert first, then activate, so one call can install and switch to a fresh arm.
+    /// The A/B harness's routing mutator — the same host funnels as AI Settings, so a drive
+    /// exercises the shipped behavior. Upsert first, then activate, so one call can do both.
     private func debugSetRouting(_ arguments: [String: Any]) throws -> String {
         guard arguments.object("profile") != nil || arguments.string("active") != nil else {
             throw SZMCPError.message("debug_set_routing needs `profile` (a routing profile object) and/or `active` (a saved name, \"\" = Off)")
@@ -134,7 +133,7 @@ extension SZHostBridge {
                     + (saved.isEmpty ? "(none)" : saved.joined(separator: ", ")))
             }
             if !host.setActiveRoutingProfile(name) {
-                // The busy guard — report it as state, the reply's whole point for a harness.
+                // The busy guard, reported as state rather than an error.
                 response["refused"] = "a run is in flight — the active profile is unchanged"
             }
         }
@@ -142,9 +141,8 @@ extension SZHostBridge {
         return SZJSONRPC.encode(response)
     }
 
-    /// The routing world in one read. `resolved` is built through the REAL path (`makeRouter`)
-    /// with the narration memory snapshotted around it, so a debug read never consumes a fallback
-    /// sentence the user's next delivery is owed.
+    /// The routing world in one read. `resolved` goes through the real path (`makeRouter`) with
+    /// the narration memory snapshotted around it, so a read never consumes a pending fallback note.
     private func debugRoutingState() -> String {
         var state: [String: Any] = [
             "profiles": host.routingProfiles.map(\.name),
@@ -171,7 +169,7 @@ extension SZHostBridge {
             }
             state["resolved"] = resolved
         } catch {
-            // The launch pin names a profile that doesn't exist — refusal IS the state.
+            // The launch pin names a profile that doesn't exist — the refusal is the state.
             state["resolved"] = ["refused": "\(error)"]
         }
         return SZJSONRPC.encode(state)

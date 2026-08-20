@@ -75,8 +75,7 @@ extension SZHost {
             if inFlightAssistantIDs[scope.key] == assistantID { inFlightAssistantIDs[scope.key] = nil }
             let wall = (ContinuousClock.now - startedMono).szSeconds
             store.setChatDuration(wall, assistantID, in: scope)
-            // The receipt: what this turn ACTUALLY ran, from the request it ran with.
-            // Unconditional — release data, never trace-gated.
+            // The receipt: what this turn actually ran; unconditional, never trace-gated.
             store.setChatGeneration(SZTurnGeneration(
                 providerID: provider.id, model: request.model,
                 reasoningEffort: request.reasoningEffort, fastMode: request.fastMode,
@@ -137,8 +136,8 @@ extension SZHost {
         // is unaffected: `SZProvider.run` backfills the id it came with, this skips the identical
         // rewrite, and `sendChat`'s `dropSessionIfStale` owns that probation.
         if persistSession, !result.outcome.failed, let sessionID = result.outcome.sessionID {
-            // The pin carries the envelope the thread OPENED with — under an active profile,
-            // a later resume re-runs it even if routing has moved this position (affinity).
+            // The pin carries the envelope the thread opened with — what a later resume
+            // re-runs even if routing has moved this position (affinity).
             agentSessions[scope.key] = SZAgentSession(
                 providerID: provider.id, sessionID: sessionID,
                 envelope: SZRouteEnvelope(providerID: provider.id, model: request.model,
@@ -272,12 +271,10 @@ extension SZHost {
     ) async throws -> (result: SZAgentRunResult, generation: String) {
         let run = activeRun(for: claim)
         let scope = SZChatScope.director
-        // A RUN resumes its OWN Director thread. The host's slot is keyed by scope, so two
-        // concurrent runs sharing it would interleave in one CLI conversation. Off a run
-        // (the chat lane) the scope slot is still the right one.
+        // A run resumes its own Director thread: the host's slot is keyed by scope, so two
+        // concurrent runs sharing it would interleave in one CLI conversation.
         let sessionSlot = run != nil ? run?.directorSession : agentSessions[scope.key]
-        // Session affinity: a resumed director thread keeps the envelope that opened it,
-        // whatever the profile says now. Inert while routing is off.
+        // Session affinity: a resumed director thread keeps the envelope that opened it.
         let effective = session == .resume ? choice.honoringSession(sessionSlot) : choice
         guard let provider = SZProviderRegistry.shared.provider(id: effective.providerID) else {
             throw SZMCPError.message("unknown provider: \(effective.providerID)")
@@ -312,8 +309,8 @@ extension SZHost {
         let result = try await deliver(scope: scope, request: request, provider: provider,
                                        persistSession: run == nil, claim: claim,
                                        via: effective.via).result
-        // A run keeps its Director thread on ITS OWN state, not the host's scope slot. The
-        // pin carries the envelope the thread OPENED with — what affinity re-runs above.
+        // A run keeps its Director thread on its own state, not the host's scope slot; the
+        // pin carries the opening envelope affinity re-runs above.
         if let run, !result.outcome.failed, let sessionID = result.outcome.sessionID {
             run.directorSession = SZAgentSession(
                 providerID: provider.id, sessionID: sessionID,
@@ -380,8 +377,8 @@ extension SZHost {
         admissionSuspended = false   // a new ask is the user acting again
         flushTaskQueue()
         pumpMailboxes()   // fires now if the work is free; else the next release re-fires
-        // After the pump, and only if the task is still waiting: "queued" because something ELSE
-        // was running contradicted the "Run started" line the same pump had just produced.
+        // After the pump, and only if still waiting: narrate "queued", since something else
+        // running contradicted the "Run started" line the pump just produced.
         if let ahead = pendingTasks.firstIndex(where: { $0.id == task.id }) {
             narrateDirector(ahead == 0
                 ? "Queued. It starts when the work it needs is free."
@@ -620,8 +617,8 @@ extension SZHost {
                     dispatchPrompts = dispatchPrompts.filter {
                         !run.workSet.contains($0.key) || hiddenPieces.contains($0.key)
                     }
-                    // A grade describes ONE briefing's read of the task — it dies with its
-                    // run, so the next run's cold start can never prime a stale envelope.
+                    // A grade is one briefing's read of the task — it dies with its run,
+                    // so the next run's cold start can't inherit a stale grade.
                     nodeGrades = nodeGrades.filter { !run.workSet.contains($0.key) }
                 }
                 // Every traversal seals itself as its engine returns; this sweep is the belt
@@ -713,9 +710,8 @@ extension SZHost {
         let codingAttachments = try await Self.attachments(of: codingPack, graph: codingGraph, steps: steps)
 
         let renderer = SZBriefRenderer(packRoot: packsRoot)
-        // The run's routing table, resolved ONCE — a mid-run profile edit never moves a
-        // live run. Dropped routes narrate under the "Run started" line; a launch pin
-        // naming no saved profile refuses the run outright.
+        // The run's routing table, resolved once — a mid-run profile edit never moves a live
+        // run. Dropped routes narrate under "Run started"; an unknown launch-pin profile refuses the run.
         let routing: (router: any SZModelRouting, notes: [String])
         do {
             routing = try makeRouter(providerID: providerID)
@@ -737,8 +733,7 @@ extension SZHost {
         let sighting = SZTraversalSighting(id: thread, agent: directorID)
         beginAgentGraphRun(sighting, thread: thread)
         // The grading teaching renders only when the profile fills a light/heavy grade slot
-        // of the dispatched pack — an assessment nothing reads would spend prompt budget on
-        // a no-op.
+        // of the dispatched pack — an assessment nothing reads would waste prompt budget.
         let gradingEnabled: Bool = {
             guard let table = router as? SZProfileRouter,
                   let gradeSlots = codingGraph.grades else { return false }
@@ -921,8 +916,7 @@ extension SZHost {
                     guard let self else { return SZTurnReport(failed: true, detail: "the host is gone") }
                     let workingDirectory = cacheDirectory.appending(path: "agent/\(nodeID.uuidString)")
                     try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
-                    // Session affinity: a resumed node thread keeps the envelope that
-                    // opened it. Inert while routing is off.
+                    // Session affinity: a resumed node thread keeps the envelope that opened it.
                     let effective = turnOrder.session == .resume
                         ? turnOrder.choice.honoringSession(self.agentSessions[scopeKey])
                         : turnOrder.choice
@@ -965,10 +959,9 @@ extension SZHost {
                 },
                 effect: { [weak self] effect in await self?.perform(effect: effect) },
                 onNote: { [weak self] note in self?.noteAgentGraphRun(sighting, note) })
-            // The child's router carries its task's grade pick, frozen at THIS dispatch —
-            // the engine never learns about grading. The grade selects a SLOT through the
-            // dispatched pack's own mapping; an unfilled grade slot falls to the standard
-            // one, then to the ordinary cascade.
+            // The child's router carries its task's grade pick, frozen at this dispatch —
+            // the engine never learns about grading. An unfilled grade slot falls to the
+            // standard one, then to the ordinary cascade.
             let gradedChoice: SZModelChoice? = {
                 guard let table = router as? SZProfileRouter,
                       let grade = nodeGrades[nodeID],

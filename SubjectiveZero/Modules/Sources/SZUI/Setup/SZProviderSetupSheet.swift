@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The AI Settings sheet (the Xcode-Settings shape): a sidebar toggles focused panes — Providers
-// (provider cards with live status badges, inline remedies, and an explicit Confirm for the
-// default; also the first-run surface, unchanged in substance) and Routing (named routing
-// profiles, SZRoutingSettingsView). Each card: radio select, capsule badge, message, monospaced
-// path line, accent-tinted selection, fix-in-place remedies, and a per-card Test probe.
-// SZUI can't import SZAI: everything arrives as host-mapped values + closures, the panel's
-// established seam.
+// The AI Settings sheet (the Xcode-Settings shape): a sidebar toggles focused panes —
+// Providers (provider cards with live status badges, inline remedies, and Confirm for the
+// default; also the first-run surface) and Routing (named profiles, SZRoutingSettingsView).
+// SZUI can't import SZAI: everything arrives as host-mapped values + closures.
 import AppKit
 import SwiftUI
 
@@ -96,9 +93,8 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
 public struct SZProviderSetupSheet: View {
     private let cards: [SZProviderSetupCard]
     private let selectedID: String?
-    /// The Routing pane's content, built by the presenter (the gearMenu AnyView pattern —
-    /// its rows/closures are wired where the host is in scope). nil = no Routing section
-    /// (previews/tests), the sidebar hides it.
+    /// The Routing pane's content, built by the presenter (the gearMenu AnyView pattern).
+    /// nil = no Routing section (previews/tests); the sidebar hides it.
     private let routing: SZRoutingSettingsView?
     private let onSelect: (String) -> Void
     private let onRefresh: () -> Void
@@ -262,8 +258,8 @@ public struct SZProviderSetupSheet: View {
                 Button { onJoinDiscord() } label: { Label("Ask on Discord", systemImage: "questionmark.bubble") }
                     .help("Stuck? The community Discord can help you get set up.")
                 Spacer()
-                // Skip/Confirm is FIRST-RUN vocabulary — the one-time default-provider
-                // decision. A settled install just closes, like every settings pane.
+                // Skip/Confirm is first-run vocabulary (the one-time default-provider
+                // decision); a settled install just closes.
                 if isFirstRun {
                     Button("Skip for Now") { onSkip() }
                     Button("Confirm") { onConfirm() }
@@ -513,18 +509,16 @@ public struct SZProviderSetupSheet: View {
     }
 }
 
-/// Fades a scroller's last 22pt while more content sits below the fold — via an alpha MASK
-/// on the scroll content, not a painted gradient: the sheet ground is system material, so
-/// paint would band. Fully opaque at the true bottom. Shared by both Setup panes.
+/// Fades a scroller's last 22pt while more content sits below — an alpha mask on the scroll
+/// content, not a painted gradient (the sheet ground is material; paint would band).
 struct SZScrollBottomFade: ViewModifier {
     @State private var hasMoreBelow = false
     @State private var hasMoreAbove = false
 
     func body(content: Content) -> some View {
         content
-            // Quantized to Bools on purpose (the transcript's rule): the raw distance
-            // changes every scroll tick, and writing that to state would re-render at
-            // scroll cadence.
+            // Quantized to Bools on purpose: the raw distance changes every scroll tick,
+            // and writing it to state would re-render at scroll cadence.
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentSize.height - geometry.contentOffset.y
                     - geometry.containerSize.height > 12
@@ -536,7 +530,7 @@ struct SZScrollBottomFade: ViewModifier {
             } action: { _, more in
                 withAnimation(.easeOut(duration: 0.15)) { hasMoreAbove = more }
             }
-            // The fades ARE the scroll affordance — the overlay scroller just fought them.
+            // The fades are the scroll affordance — the overlay scroller just fought them.
             .scrollIndicators(.hidden)
             .mask(VStack(spacing: 0) {
                 LinearGradient(colors: [hasMoreAbove ? .clear : .black, .black],

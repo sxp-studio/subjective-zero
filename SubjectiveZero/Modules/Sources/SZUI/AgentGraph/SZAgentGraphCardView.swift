@@ -111,16 +111,15 @@ struct SZAgentGraphCardView: View {
         .frame(height: SZNodeLayout.headerHeight)
     }
 
-    /// The turn's model slot, worn as a quiet chip at the header's trailing edge — which
-    /// row in Routing feeds this turn. Inside the fixed-height header on purpose, so a
-    /// slotted card measures exactly like a plain one.
+    /// The turn's model slot, worn as a quiet chip at the header's trailing edge. Inside the
+    /// fixed-height header on purpose, so a slotted card measures exactly like a plain one.
     @ViewBuilder private var slotChip: some View {
         if let slot = face.slot {
             Text(slot)
                 .font(.system(size: 8, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.55))
                 .lineLimit(1)
-                // The chip shows whole and the TITLE ellipsizes, never a half-truncated chip.
+                // The chip shows whole and the title ellipsizes, never a half-truncated chip.
                 .fixedSize()
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
@@ -210,9 +209,8 @@ struct SZAgentGraphCardView: View {
     @ViewBuilder private func statLine(_ stats: SZAgentGraphCardStats) -> some View {
         if let duration = stats.duration {
             statText(SZTurnBreakdown.format(duration))
-            // The settled visit's receipt, verbatim after the wall time — middle-truncated
-            // to the strip's one line, the full string in the tooltip. Text only: the
-            // footer's height is a constant, and a running visit never claims a receipt.
+            // The settled visit's receipt after the wall time — middle-truncated to one
+            // line, full string in the tooltip. Text only: the footer's height stays constant.
             if let generation = stats.generation {
                 statText("·")
                 Text(generation)

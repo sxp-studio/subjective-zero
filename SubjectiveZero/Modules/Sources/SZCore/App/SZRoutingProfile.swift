@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Named routing profiles — the data half of model routing (docs/AI_PROVIDERS.md). The agent
-// graphs declare MODEL SLOTS (the kinds of model work they need); a profile fills them:
-// (agent, slot) → generation envelope. Pure data, stored raw in app-state.json and validated
-// at resolution time like every preference. An unfilled slot falls to the app default —
-// coarser, never wrong — so a profile need only say what it means.
+// Named routing profiles — the data half of model routing (docs/AI_PROVIDERS.md). Agent
+// graphs declare model slots; a profile fills them: (agent, slot) → generation envelope.
+// Pure data, stored raw in app-state.json, validated at resolution time. An unfilled slot
+// falls to the app default.
 
 /// One route's generation envelope. Every field but the provider inherits when nil, so an
-/// envelope can say as little as "codex" or as much as a full tune. Extensible: a future
-/// knob is one more optional field, and tolerant decode means no schema churn.
+/// envelope can say as little as "codex" or as much as a full tune.
 public struct SZRouteEnvelope: Codable, Equatable, Sendable {
-    /// The provider that serves the route — an envelope that names no provider routes nothing.
+    /// The provider that serves the route.
     public var providerID: String
     /// nil = the provider's stored selection (and its clamp) decides.
     public var model: String?
@@ -25,9 +23,8 @@ public struct SZRouteEnvelope: Codable, Equatable, Sendable {
     }
 }
 
-/// A named assignment of models to the graphs' declared slots. Keys are the packs' own
-/// vocabulary — agent id → slot id — so a profile survives every node rename and rewire,
-/// and can only go stale as loudly as an unfilled row in the settings pane.
+/// A named assignment of models to the graphs' declared slots. Keys are pack vocabulary
+/// (agent id → slot id), so a profile survives node renames and rewires.
 public struct SZRoutingProfile: Codable, Equatable, Sendable, Identifiable {
     /// The profile's identity — what AI Settings lists and SZ_MODEL_ROUTING names.
     public var name: String
@@ -44,8 +41,7 @@ public struct SZRoutingProfile: Codable, Equatable, Sendable, Identifiable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
-        // Pre-slot profile shapes (per-agent envelopes, grade/queries fields) carry keys
-        // the slot world can't honestly map — they decode to an empty table, never a guess.
+        // Pre-slot profile shapes carry keys this table can't map; they decode to empty.
         agents = (try? c.decodeIfPresent([String: [String: SZRouteEnvelope]].self,
                                          forKey: .agents)) ?? [:]
     }
@@ -65,8 +61,8 @@ public struct SZRoutingProfile: Codable, Equatable, Sendable, Identifiable {
         agents[agent] = slots.isEmpty ? nil : slots
     }
 
-    /// One agent's slots merged in from a fragment (a pack's recommended routes). Pure, so
-    /// the conflict rule is pinnable: `replacingExisting` false fills only unset slots.
+    /// Merge one agent's slots from a fragment (a pack's recommended routes);
+    /// `replacingExisting` false fills only unset slots.
     public func merging(_ fragment: [String: SZRouteEnvelope], agent: String,
                         replacingExisting: Bool) -> SZRoutingProfile {
         var merged = self

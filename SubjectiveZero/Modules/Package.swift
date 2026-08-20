@@ -27,6 +27,7 @@ let package = Package(
                 .copy("Resources/Prompts"),    // agent prompts as bundled .md.mustache files
                 .copy("Resources/Docs"),       // agent-fetchable reference docs (agent_docs_*)
                 .copy("Resources/Extensions"), // staged CLI extensions (pi's MCP bridge)
+                .copy("Resources/RoutingStarters.json"),  // the shipped routing starters
             ]
         ),
         .target(name: "SZRuntime", dependencies: ["SZCore"], plugins: ["SZFactGen"]),

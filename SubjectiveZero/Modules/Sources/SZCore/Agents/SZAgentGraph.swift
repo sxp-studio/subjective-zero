@@ -16,11 +16,10 @@ public struct SZAgentGraph: Sendable, Equatable {
     /// settings cards. nil = the seat's built-in default.
     public var symbol: String?
     /// The agent's tint, as a named color token ("purple", "orange", "lilac", …) — its
-    /// accent across the same surfaces. Unknown names degrade to no tint, never a guess.
+    /// accent across the same surfaces. Unknown names degrade to no tint.
     public var tint: String?
-    /// The MODEL SLOTS this graph declares — the kinds of model work it needs, each with
-    /// the author's own description (the settings pane's caption). Turn nodes reference a
-    /// slot; a routing profile fills them with models. Declaration order is display order.
+    /// The model slots this graph declares — the kinds of model work it needs. Turn nodes
+    /// reference a slot; a routing profile fills them. Declaration order is display order.
     public var slots: [Slot]
     /// The Director's grade → slot mapping for dispatched work ("light"/"standard"/"heavy"
     /// → a declared slot id). Only meaningful on a pack that receives dispatches.
@@ -336,9 +335,8 @@ extension SZAgentGraph {
             }
         }
 
-        // The slot contract, both ways at the declaration side: well-formed unique ids, and
-        // every reference landing on one. (An unreferenced declaration is legal — a pack
-        // may declare ahead of wiring.)
+        // Slot contract: well-formed unique ids, and every reference landing on one. (An
+        // unreferenced declaration is legal — a pack may declare ahead of wiring.)
         var declared: Set<String> = []
         for slot in slots {
             if slot.id.isEmpty || slot.id.contains(where: {

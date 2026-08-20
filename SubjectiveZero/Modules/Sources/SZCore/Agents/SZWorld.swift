@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The world one delivery evaluates against — everything here is true between messages; a
-// message only adds words. Steps see the `facts(message:)` slice over the wire; the graph
-// and statuses feed brief rendering host-side and never cross the step ABI.
+// The durable host state one delivery is evaluated against; the message itself only adds
+// its text. Compiled steps receive just the serialized `facts(message:)` subset — the
+// graph and node statuses stay host-side, used only to render briefs.
 import Foundation
 
 public struct SZWorld: Sendable {

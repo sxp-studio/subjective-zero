@@ -206,8 +206,7 @@ public enum SZAgentPackLoader {
                     hasSource: fm.fileExists(atPath: stepFolder.appending(path: "Step.swift").path))
             }
 
-        // routing.json is optional (a recommendation): absent is silence, broken is a
-        // defect while the pack still loads whole.
+        // routing.json is optional: absent is fine, broken is a defect but the pack still loads.
         var recommendedRouting: [String: SZRouteEnvelope] = [:]
         let routingURL = folder.appending(path: "routing.json")
         if fm.fileExists(atPath: routingURL.path) {
@@ -255,8 +254,8 @@ public enum SZAgentPackLoader {
         for pack in packs.sorted(by: { $0.id < $1.id }) {
             guard let graph = pack.graph else { continue }   // noGraph already reported
             defects += graph.defects().map { .graphShape(agent: pack.id, defect: $0) }
-            // A recommendation may only speak the graph's own slot vocabulary. (Unknown
-            // PROVIDERS are fine — the user may lack them; resolution narrates that live.)
+            // Recommendations may only name declared slots; unknown providers are fine
+            // (the user may lack them; resolution narrates that live).
             let declared = Set(graph.slots.map(\.id))
             defects += pack.recommendedRouting.keys.sorted()
                 .filter { !declared.contains($0) }

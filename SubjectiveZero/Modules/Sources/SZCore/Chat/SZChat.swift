@@ -88,9 +88,8 @@ public struct SZChatFeedItem: Identifiable, Equatable, Sendable {
 public struct SZAgentSession: Codable, Equatable, Sendable {
     public let providerID: String
     public let sessionID: String
-    /// The generation envelope the session OPENED with — what a resume re-runs when routing
-    /// has since moved this position (session affinity). nil on pre-routing session files;
-    /// inert while routing is off.
+    /// The generation envelope the session opened with — what a resume re-runs when routing
+    /// has since moved this position (session affinity). nil on pre-routing session files.
     public var envelope: SZRouteEnvelope?
 
     public init(providerID: String, sessionID: String, envelope: SZRouteEnvelope? = nil) {
@@ -177,10 +176,9 @@ public struct SZTokenUsage: Sendable, Equatable, Codable {
     }
 }
 
-/// The generation envelope a finished turn ACTUALLY ran — the transcript's per-turn record
-/// of which model served it. Stamped unconditionally at turn end (release data, never
-/// trace-gated); `via` names the routing rule that picked it ("fast-fleet · coding",
-/// "session", nil = the default). Display truth, never parsed.
+/// The generation envelope a finished turn actually ran — the transcript's per-turn record.
+/// Stamped unconditionally at turn end (never trace-gated); `via` names the routing rule
+/// that picked it ("fast-fleet · coding", "session", nil = the default). Display only.
 public struct SZTurnGeneration: Codable, Equatable, Sendable {
     public var providerID: String
     public var model: String?

@@ -79,18 +79,15 @@ public enum SZAgentGraphLayout {
     static let layerGap: CGFloat = SZGraphLayout.layerGap
     static let nodeGap: CGFloat = SZGraphLayout.nodeGap
 
-    // Width is content-driven: a card starts compact and grows only until its own header
-    // (glyph · title · slot chip · finished badge's reserve) fits whole — the chip must
-    // never cost the title its words. Char-count heuristics like the node editor's numeric
-    // fields, so sizing stays pure, testable, and can never lag the render.
+    // Width is content-driven: a card grows only until its own header fits whole — the chip
+    // must never cost the title its words. Char-count heuristics keep sizing pure and testable.
     public static let minCardWidth: CGFloat = 200
     public static let maxCardWidth: CGFloat = 320
     static let titleCharWidth: CGFloat = 6.8   // 12pt semibold, average glyph
     static let chipCharWidth: CGFloat = 5.2    // the slot chip's 8pt monospaced
 
-    /// The header-fit width, clamped: paddings 12+12, glyph 22 + 7, the title's estimate,
-    /// the slot chip (7 gap + 8 pad) when worn, and a standing 21pt reserve so the Run
-    /// view's finished badge never squeezes a title that fit in the Plan view.
+    /// The header-fit width, clamped: paddings 12+12, glyph 22+7, the title's estimate, the
+    /// slot chip (7 gap + 8 pad) when worn, and a 21pt reserve for the Run view's finished badge.
     public static func width(of face: SZAgentGraphFace) -> CGFloat {
         var width: CGFloat = 12 + 22 + 7 + CGFloat(face.title.count) * titleCharWidth + 21 + 12
         if let slot = face.slot {
@@ -258,7 +255,7 @@ public enum SZAgentGraphLayout {
         }
 
         let bypassed = bypassedRanks(of: graph, ranks: ranks)
-        // SIZED WITH THE SAME FACE THE RENDERER DRAWS — an enriched card (declared
+        // Sized with the same face the renderer draws — an enriched card (declared
         // outcomes attached) must grow its frame, or its sockets slide off the rows.
         let sizesByRank = byRank.mapValues { nodes in
             nodes.map { size(of: face(of: $0, in: graph, stepOutcomes: stepOutcomes)) }

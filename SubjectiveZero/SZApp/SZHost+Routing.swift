@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Model routing, host side — the ONE place a delivery's router is built and the active
+// Model routing, host side: the one place a delivery's router is built and the active
 // profile's envelopes become concrete choices. Resolution happens once per run and once per
-// prose delivery (a live run never moves under a profile edit); anything a profile asks for
-// that the live world can't honour falls one rung down with a sentence the user reads —
-// never a silent substitution. No active profile ⇒ the identity router, byte-identical to
-// the pre-routing app. SZ_MODEL_ROUTING pins a profile at launch (=0 kills routing; an
-// unknown name REFUSES the delivery rather than guessing — the SZ_AGENT_PACKS rule).
+// prose delivery, so a live run never moves under a profile edit. A route the live world
+// can't honour falls one rung down with a narrated note, never silently. No active profile
+// = the identity router. SZ_MODEL_ROUTING pins a profile at launch (=0 disables routing;
+// an unknown name refuses the delivery).
 import Foundation
 import SZAI
 import SZCore
@@ -27,20 +26,16 @@ extension SZHost {
     /// Whether a profile governs new work right now (the settings sheet's Off is nil).
     var routingActive: Bool { (try? activeRoutingProfile()) != nil }
 
-    /// The session id a routed turn may resume. A PINLESS session under a route that moved
-    /// the provider is not resumable — a codex thread can't be resumed by claude — so the
-    /// turn cold-starts on the routed provider instead of handing it another CLI's id.
-    /// (A pinned session never hits the mismatch: affinity already moved the choice back.)
+    /// The session id a routed turn may resume. A session whose provider differs from the
+    /// routed choice cold-starts instead — one CLI can't resume another CLI's session id.
     nonisolated static func resumableSessionID(of session: SZAgentSession?,
                                                under choice: SZModelChoice) -> String? {
         guard let session, session.providerID == choice.providerID else { return nil }
         return session.sessionID
     }
 
-    /// The profile new deliveries resolve against, honouring the launch pin. A persisted
-    /// active name no saved profile carries degrades to off (the stale-preference rule);
-    /// an ENV name that resolves nowhere throws — explicit intent is never guessed away.
-    /// `env` is injectable for tests only; production always reads the launch pin.
+    /// The profile new deliveries resolve against, honouring the launch pin: a stale
+    /// persisted name degrades to off, an unknown ENV name throws. `env` is for tests only.
     func activeRoutingProfile(env: String? = SZHost.modelRoutingEnv) throws -> SZRoutingProfile? {
         switch env {
         case "0": return nil
@@ -54,11 +49,8 @@ extension SZHost {
         }
     }
 
-    /// The router a delivery hands its engine and query service, plus the fallback
-    /// sentences resolution produced (the caller narrates them — run lane under the "Run
-    /// started" line, chat lane as a note on the delivering scope). With no active profile:
-    /// the identity router — one choice for every call, `providerID` with its stored row
-    /// clamped to real capabilities — and no sentences.
+    /// The router a delivery hands its engine and query service, plus fallback notes for
+    /// the caller to narrate. No active profile: the identity router and no notes.
     func makeRouter(providerID: String) throws -> (router: any SZModelRouting, notes: [String]) {
         let generation = resolvedGenerationSettings(for: providerID)
         let fallback = SZModelChoice(
@@ -70,8 +62,7 @@ extension SZHost {
         }
 
         var notes: [String] = []
-        /// One envelope to one concrete choice — or nil (dropped, narrated): the position
-        /// falls one rung down by simply not appearing in the table.
+        /// One envelope to one choice; nil = dropped and narrated, the position falls back.
         func resolved(_ envelope: SZRouteEnvelope, position: String) -> SZModelChoice? {
             guard let provider = SZProviderRegistry.shared.provider(id: envelope.providerID) else {
                 notes.append("\(position) is routed to \(envelope.providerID), which isn't a "
@@ -110,9 +101,8 @@ extension SZHost {
                 dedupedRoutingNotes(notes))
     }
 
-    /// Chat deliveries resolve per message, so a broken route would otherwise say the same
-    /// sentence on every send: a note repeats only after the set changes (profile edits and
-    /// activation clear the memory — the world moved, say it again).
+    /// Chat resolves per message, so a note repeats only after the note set changes
+    /// (profile edits and activation clear the memory).
     private func dedupedRoutingNotes(_ notes: [String]) -> [String] {
         let fresh = notes.filter { !narratedRoutingNotes.contains($0) }
         narratedRoutingNotes.formUnion(notes)
@@ -121,11 +111,8 @@ extension SZHost {
 
     // MARK: - Work grades (the Director's per-task read)
 
-    /// Record the Director's grade for a node's implementation task. Write-wins while the
-    /// node is still undispatched — a reconcile re-brief may regrade — and FROZEN from the
-    /// moment a coding turn ran for it (`dispatchPrompts` carries that fact): a retry must
-    /// resolve exactly as the cold start did, and a mid-run flip would move it. Unknown
-    /// grade words are refused at the MCP boundary, so this stores only the three.
+    /// Record the Director's grade for a node. Last write wins while undispatched; frozen
+    /// once a coding turn ran for it, so a retry resolves exactly as the cold start did.
     func recordNodeGrade(_ node: SZNodeID, _ grade: String) {
         guard dispatchPrompts[node] == nil else { return }
         nodeGrades[node] = grade
@@ -133,9 +120,8 @@ extension SZHost {
 
     // MARK: - Profile mutation (AI Settings / the debug bus)
 
-    /// Switch the active profile (nil = Off). Refused while a run is traversing — a live
-    /// experiment keeps its arm. No session resets: switches govern NEW conversations; a
-    /// live thread keeps the envelope that opened it (session affinity), by design.
+    /// Switch the active profile (nil = Off). Refused while a run is traversing; switches
+    /// govern new conversations only — live threads keep their session affinity.
     @discardableResult
     func setActiveRoutingProfile(_ name: String?) -> Bool {
         guard !isRunning else {
@@ -164,9 +150,8 @@ extension SZHost {
         persistAppState()
     }
 
-    /// Delete by name. The selected row is what runs, so deleting it is a switch: refused
-    /// while a run is in flight (the same fence as any switch), and otherwise the seat
-    /// passes to the first remaining profile, or routing turns off with the last one.
+    /// Delete by name. Deleting the active profile is a switch: refused mid-run, otherwise
+    /// the seat passes to the first remaining profile, or routing turns off.
     @discardableResult
     func deleteRoutingProfile(named name: String) -> Bool {
         guard routingProfiles.contains(where: { $0.name == name }) else { return false }

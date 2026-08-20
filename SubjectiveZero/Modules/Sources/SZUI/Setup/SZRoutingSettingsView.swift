@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The AI Settings Routing pane — named profiles filling the agent graphs' declared MODEL
-// SLOTS with generation envelopes. One toggle: off hides everything and the active provider
-// runs it all; on shows the profiles list, where the SELECTED row is both what runs and
-// what the tinted agent cards below edit (no separate activation). Double-click renames in
-// place. SZUI can't import SZAI: cards arrive host-mapped (SZHost+RoutingSettings), keyed
-// by the typed SZRoutingPosition.
+// The AI Settings Routing pane — named profiles filling the agent graphs' declared model
+// slots with generation envelopes. One toggle; the selected profile row is both what runs
+// and what the tinted agent cards below edit (no separate activation). Double-click renames
+// in place. SZUI can't import SZAI: cards arrive host-mapped (SZHost+RoutingSettings),
+// keyed by SZRoutingPosition.
 import AppKit
 import SwiftUI
 
@@ -25,8 +24,7 @@ public enum SZGenerationLabels {
 }
 
 /// One saved profile in the pane's list; `isActive` marks the row that runs (= selected).
-/// `isProtected` = it ships with the app, read-only whole: no edit, rename, or delete —
-/// the row wears a lock, and Duplicate is the way to a customizable copy.
+/// `isProtected` = ships with the app, read-only; Duplicate makes a customizable copy.
 public struct SZRoutingProfileRow: Identifiable, Equatable, Sendable {
     public var name: String
     public var isActive: Bool
@@ -73,12 +71,11 @@ public struct SZRoutingPosition: Hashable, Sendable {
     }
 }
 
-/// Where an UNFILLED slot's work goes — the derivation behind a grade variant's live
-/// "Default (…)" resolution. Pure so the rule is pinnable in tests; the host renders from it.
+/// Where an unfilled slot's work goes — the derivation behind the live "Default (…)"
+/// labels. Pure so tests can pin the rule; the host renders from it.
 public enum SZRoutingInheritance {
-    /// The standard slot a grade-variant slot falls back to: `slot` appears as a
-    /// light/heavy value in the graph's grade table, and the table names a DIFFERENT
-    /// standard slot to fall to. nil = no variant relation — the app default catches it.
+    /// The standard slot a grade-variant slot falls back to: `slot` is a light/heavy value
+    /// in the graph's grade table naming a different standard slot. nil = no variant relation.
     public static func standardSlot(for slot: String, grades: [String: String]?) -> String? {
         guard let grades,
               grades.contains(where: { $0.key != "standard" && $0.value == slot }),
@@ -95,8 +92,8 @@ public struct SZRoutingPositionRow: Identifiable, Equatable, Sendable {
     public var label: String           // the slot's authored label (or its id, verbatim)
     public var caption: String         // the pack's description, rendered verbatim
     public var selectionLabel: String  // "Default" (unset) or "Codex · GPT-5.6 Terra"
-    /// The envelope menu's first row — the clear action, spelled as where the work then
-    /// goes: "Default (Claude · Opus 5)" (grade variants resolve through their standard slot).
+    /// The envelope menu's clear action, spelled as where the work then goes:
+    /// "Default (Claude · Opus 5)".
     public var clearLabel: String
     public var isSet: Bool
     public var options: [SZRoutingEnvelopeOption]
@@ -132,9 +129,8 @@ public struct SZRoutingAgentCard: Identifiable, Equatable, Sendable {
     /// The pack's declared tint name (SZAgentTint vocabulary); nil = untinted.
     public var tint: String?
     public var rows: [SZRoutingPositionRow]
-    /// The pack's recommendation, host-counted for THIS edited profile: how many slots it
-    /// would fill, and how many of those are already set (the conflict prompt's numbers).
-    /// 0 recommended = no fragment shipped, the button stays absent.
+    /// The pack's recommendation counted against the edited profile: slots it would fill,
+    /// and how many of those are already set. 0 recommended = no button.
     public var recommendedCount: Int
     public var recommendedConflicts: Int
 
@@ -153,12 +149,12 @@ public struct SZRoutingAgentCard: Identifiable, Equatable, Sendable {
 
 public struct SZRoutingSettingsView: View {
     private let profiles: [SZRoutingProfileRow]
-    /// The one selection: `isActive` in `profiles` marks the row that RUNS and is edited
-    /// below — routing has no separate edit target. nil active row = routing is off.
+    /// The one selection: the row that runs and is edited below (no separate edit target).
+    /// nil = routing is off.
     private let selectedProfileName: String?
     private let agents: [SZRoutingAgentCard]
-    /// The live resolution of the active provider ("Claude Code · Opus 5") — the toggle's
-    /// off-state helper says where everything runs.
+    /// Live resolution of the active provider ("Claude Code · Opus 5"), for the toggle's
+    /// off-state helper.
     private let activeProviderSummary: String
     /// Non-nil = SZ_MODEL_ROUTING pins this profile at launch; the toggle and list lock.
     private let envPinnedProfileName: String?
@@ -279,8 +275,8 @@ public struct SZRoutingSettingsView: View {
         }
     }
 
-    /// The sentence under the toggle: the launch env's lock when it governs, else where
-    /// everything runs while routing is off. On says nothing — the list speaks.
+    /// The sentence under the toggle: the env lock when it governs, else where everything
+    /// runs while routing is off. Nothing while routing is on.
     @ViewBuilder
     private var toggleHelper: some View {
         Group {
@@ -371,8 +367,7 @@ public struct SZRoutingSettingsView: View {
     private func agentCard(_ agent: SZRoutingAgentCard) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             cardHeader(agent)
-            // Dividers separate ROWS only — the header band is its own edge, and a hairline
-            // right under it read as a smudge.
+            // Dividers separate rows only; a hairline under the header band reads as a smudge.
             if agent.rows.isEmpty {
                 Text("This agent doesn't ask for model choices; it runs on the default provider.")
                     .font(.system(size: 11))
@@ -388,8 +383,7 @@ public struct SZRoutingSettingsView: View {
         }
         .background(RoundedRectangle(cornerRadius: 10)
             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82)))
-        // The agent's own tint outlines its card — the same accent its chat lines and
-        // graph wear, so the three surfaces read as one identity.
+        // The agent's tint outlines its card — the same accent as its chat lines and graph.
         .overlay(RoundedRectangle(cornerRadius: 10)
             .strokeBorder((SZAgentTint.color(agent.tint) ?? .clear).opacity(0.5), lineWidth: 2))
     }
@@ -416,13 +410,11 @@ public struct SZRoutingSettingsView: View {
             }
         }
         .padding(.horizontal, 14)
-        // The card's 2pt outline overlaps the header's top edge, so the VISIBLE band starts
-        // 2pt down — bias the content by that much, then fix the height so centering is
-        // arithmetic, not font metrics.
+        // The card's 2pt outline overlaps the header's top edge: bias the content down by
+        // 2pt, then fix the height so centering is arithmetic, not font metrics.
         .padding(.top, 2)
         .frame(height: 40)
-        // The agent's hue as the header band — contained to the header, half strength at
-        // the top deepening to full at its bottom edge.
+        // The agent's hue as the header band, half strength at top to full at bottom.
         .background(UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10)
             .fill(headerWash(SZAgentTint.color(agent.tint))))
     }
@@ -439,8 +431,7 @@ public struct SZRoutingSettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.label)
                     .font(.system(size: 13, weight: .medium))
-                // The pack author's words, shown WHOLE — the row grows rather than cutting
-                // a description short.
+                // The pack author's words, shown whole; the row grows instead of truncating.
                 Text(row.caption)
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
@@ -466,8 +457,7 @@ public struct SZRoutingSettingsView: View {
 
     private func envelopeMenu(_ row: SZRoutingPositionRow) -> some View {
         Menu {
-            // The clear action, spelled as its destination ("Default (…)", live-resolved;
-            // grade variants resolve through their standard slot) — the menu explains the inherit.
+            // The clear action, spelled as its destination ("Default (…)", live-resolved).
             Button {
                 onAssignEnvelope(row.position, nil, nil)
             } label: {
@@ -494,7 +484,7 @@ public struct SZRoutingSettingsView: View {
         .help("Pick the provider and model this runs on. The first item shows where it goes when you don't")
     }
 
-    /// Only when the routed model has an effort concept — an absent menu is the honest render.
+    /// Shown only when the routed model has an effort concept.
     @ViewBuilder
     private func effortMenu(_ row: SZRoutingPositionRow) -> some View {
         if !row.effortOptions.isEmpty {
@@ -529,9 +519,8 @@ public struct SZRoutingSettingsView: View {
         }
     }
 
-    /// Only where the ROUTED model honours it — an inert toggle is a lie. A bordered chip
-    /// (accent-filled when on, brightening under the cursor), so it reads as a pressable
-    /// control, not a status glyph.
+    /// Shown only where the routed model supports it. A bordered chip (accent-filled when
+    /// on), so it reads as a pressable control, not a status glyph.
     @ViewBuilder
     private func fastToggle(_ row: SZRoutingPositionRow) -> some View {
         if row.supportsFastMode {
@@ -542,10 +531,8 @@ public struct SZRoutingSettingsView: View {
     }
 }
 
-/// One row of the profiles list: an inset rounded selection pill (the sidebar's recipe,
-/// not an edge-to-edge bar) — the selected row is what runs. Double-click renames in
-/// place; Return commits, Esc or clicking away cancels. Its own view — hover is per-row
-/// state.
+/// One row of the profiles list (the sidebar's selection-pill recipe). Double-click renames
+/// in place; Return commits, Esc or clicking away cancels. Own view — hover is per-row state.
 private struct SZProfileListRow: View {
     let name: String
     let caption: String?
@@ -596,8 +583,7 @@ private struct SZProfileListRow: View {
             }
             Spacer()
         }
-        // Full-bleed rows, clipped by the box: the text shares the cards' 14pt inset so
-        // the pane reads as one left edge.
+        // Full-bleed rows; the text shares the cards' 14pt inset so the pane keeps one left edge.
         .padding(.horizontal, 14)
         .frame(height: 26)
         .background(selected ? Color.accentColor.opacity(0.22)
@@ -610,8 +596,7 @@ private struct SZProfileListRow: View {
     }
 }
 
-/// One toolbar gadget under the profiles list: a 22pt square that lifts under the cursor —
-/// the chip recipe at glyph size, so the strip reads as one family with the chips.
+/// One toolbar gadget under the profiles list: the chip recipe at 22pt glyph size.
 private struct SZListGadget: View {
     let symbol: String
     var disabled = false
@@ -685,9 +670,8 @@ private struct SZChipMenuFace: View {
     }
 }
 
-/// The gadget's face, on its own so a Menu can wear it as a label. Under the cursor it
-/// lifts like the chips do (fill AND ring), and carries its own tooltip so hover help
-/// fires the same whether a Button or a Menu hosts it.
+/// The gadget's face, separate so a Menu can wear it as a label. Carries its own tooltip
+/// so hover help fires the same whether a Button or a Menu hosts it.
 private struct SZListGadgetFace: View {
     let symbol: String
     var help: String = ""
@@ -741,10 +725,8 @@ private struct SZCardChipButton: View {
     }
 }
 
-/// The fast-mode chip, worded: "Fast On" / "Fast Off" with the bolt. Activation is a
-/// one-shot show: the accent CHARGES the chip left to right, then a highlight shimmers
-/// across the bolt. Turning off stays quiet, and Reduce Motion collapses it all to the
-/// plain state change.
+/// The fast-mode chip: "Fast On"/"Fast Off" with the bolt. Turning on floods the accent
+/// left to right, then shimmers the bolt; off stays quiet; Reduce Motion skips the show.
 private struct SZFastToggleChip: View {
     let isOn: Bool
     let action: () -> Void
@@ -763,8 +745,7 @@ private struct SZFastToggleChip: View {
 
     var body: some View {
         Button(action: action) {
-            // The label's box is the WIDER of the two texts, always — flipping the word
-            // must never nudge the row.
+            // Size to the wider of the two texts so flipping the word never nudges the row.
             ZStack {
                 Label { Text("Fast Off") } icon: { bolt }.hidden()
                 Label { Text(isOn ? "Fast On" : "Fast Off") } icon: { bolt }
@@ -797,8 +778,7 @@ private struct SZFastToggleChip: View {
         }
     }
 
-    /// The charge: base lift, with the accent flooding left → right on activation and
-    /// fading away on deactivation.
+    /// Base lift, accent flooding left → right on activation, fading on deactivation.
     private var chipFill: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {

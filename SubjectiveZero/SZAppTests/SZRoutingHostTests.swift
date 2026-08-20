@@ -212,8 +212,9 @@ struct SZRoutingHostTests {
         }
     }
 
-    @Test func codexStarterUsesOnlyItsShippedCatalogLadder() {
-        let profile = SZHost.codexLadderProfile()
+    @Test func codexStarterUsesOnlyItsShippedCatalog() throws {
+        let profile = try #require(SZHost.routingStarters
+            .first { $0.requiresProvider == "codex" }?.profile)
         let catalog = Set(SZCodexProvider().models.map(\.id))
         #expect(profile.name == "Codex Routing (sxp.studio)")
         #expect(profile.agents.values.flatMap(\.values).allSatisfy {

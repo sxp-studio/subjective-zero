@@ -35,16 +35,14 @@ public struct SZModelCall: Sendable {
 /// A routing verdict: which provider serves the call, and optionally which model and effort.
 /// `model`/`reasoningEffort` are the same opaque pass-through tokens the provider seam
 /// already speaks (`SZAgentRunRequest`) — nil defers to the provider's own default.
-/// `fastMode` is concrete (the clamp resolved it); the query lane never reads it — a query
-/// request carries no fast flag at all.
+/// `fastMode` is concrete (the clamp resolved it); the query lane never reads it.
 public struct SZModelChoice: Sendable {
     public var providerID: String
     public var model: String?
     public var reasoningEffort: String?
     public var fastMode: Bool
-    /// Which routing rule produced this choice — "‹profile› · ‹position›", "session", nil =
-    /// the default (no profile spoke). Display + receipt text, never parsed; nil is also
-    /// what gates session affinity off, keeping unrouted behavior byte-identical.
+    /// Which routing rule produced this choice ("‹profile› · ‹position›", "session"; nil =
+    /// the default). Display text, never parsed; nil also gates session affinity off.
     public var via: String?
 
     public init(providerID: String, model: String? = nil, reasoningEffort: String? = nil,

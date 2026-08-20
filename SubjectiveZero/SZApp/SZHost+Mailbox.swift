@@ -152,7 +152,6 @@ extension SZHost {
         func runDeliveredTurn(_ order: SZTurnOrder, prompt: String) async throws
             -> (result: SZAgentRunResult, generation: String) {
             // Session affinity: a resumed conversation keeps the envelope that opened it.
-            // Inert while routing is off.
             let effective = order.session == .resume
                 ? order.choice.honoringSession(existing) : order.choice
             guard let turnProvider = SZProviderRegistry.shared.provider(id: effective.providerID) else {
@@ -346,9 +345,8 @@ extension SZHost {
             }
         }
         let renderer = SZBriefRenderer(packRoot: packsRoot)
-        // This delivery's routing table. Dropped routes narrate on the delivering scope
-        // (once per profile state, not per message); a launch pin naming no saved profile
-        // refuses the delivery outright.
+        // This delivery's routing table. Dropped routes narrate on the delivering scope (once
+        // per profile state, not per message); an unknown launch-pin profile refuses the delivery.
         let routing: (router: any SZModelRouting, notes: [String])
         do {
             routing = try makeRouter(providerID: providerID)
@@ -361,8 +359,7 @@ extension SZHost {
                 SZChatMessage(role: .assistant, text: "⚠️ \(note)", transient: true), to: scope)
             flushTranscript(scope)
         }
-        // (The grading teaching never renders in this lane — the chat/amend briefs carry
-        // no {{grading}} token; only the build lane's decompose/reconcile do.)
+        // (No grading teaching in this lane — the chat/amend briefs carry no {{grading}} token.)
         // One query service per delivery (the door's triage ask); production executor.
         let queries = SZQueryService(
             renderer: renderer, router: router,

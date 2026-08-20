@@ -24,9 +24,8 @@ public struct SZAgentPack: Sendable, Equatable {
     public var promptSources: [String: String]
     /// Step-folder inventory: every directory under `steps/`, sorted by name.
     public var steps: [StepFolder]
-    /// The pack's recommended routes (`routing.json`, optional): slot id → envelope, for
-    /// this agent's own declared slots. A recommendation, applied only by the user's hand
-    /// in the Routing pane — never resolved directly.
+    /// The pack's recommended routes (`routing.json`, optional): slot id → envelope for
+    /// this agent's declared slots. Applied only by the user in the Routing pane.
     public var recommendedRouting: [String: SZRouteEnvelope]
 
     /// One `steps/<name>/` directory. A folder without a `Step.swift` is inventory, not a
