@@ -222,7 +222,7 @@ is one traversal of an agent graph, recorded (`SZAgentGraphRun`). A task is *sch
 ## Model routing
 
 Which envelope (provider · model · effort · fast) serves a given model call is policy, resolved
-once per delivery behind the `SZModelRouting` seam ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)
+once per delivery behind the `SZModelRouting` seam ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)
 has the profile format and env semantics). The parts that live in orchestration:
 
 - **The resolution ladder**, most specific first: **session pin > grade > slot > default**.

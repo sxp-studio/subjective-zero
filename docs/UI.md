@@ -6,8 +6,8 @@ same surface is drivable by agents and by tests ([MCP.md](MCP.md)).
 
 ## Layout
 
-The window is a **freely rearrangeable panel layout** (this supersedes the earlier "node editor
-floats over the viewport" sketch - panels are tiled sections, not overlays): a binary split tree
+The window is a **freely rearrangeable panel layout** — panels are tiled sections, not
+overlays: a binary split tree
 (`SZPanelLayoutState`, SZCore) whose leaves are the panels, rendered by SZUI's
 `SZPanelLayoutContainerView` as rounded tiles on a near-black window background.
 
@@ -207,7 +207,7 @@ Graph panel.
   that chose it (`via`). A provider *switch* still resets agent sessions (transcripts stay) and
   is refused while agents are busy; with a routing profile active, different graph positions may
   run different envelopes, and the receipts are how you see what actually ran
-  ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)).
+  ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)).
 - A **streaming turn's working row** shows dots + elapsed only; stopping lives in the composer's
   action slot. A stopped turn keeps its session and partial reply.
 - This is a **from-scratch** design - keep it clean and native.
@@ -239,24 +239,30 @@ Graph panel.
 
 ## Settings
 
-- **Agent Providers (shipped)** - the provider half of the AI Settings sheet, on ⌘,
+- **Agent Providers** - the provider half of the AI Settings sheet, on ⌘,
   (`CommandGroup(replacing: .appSettings)`), the chat ⋯ menu's "AI Settings…" item, and
   auto-presented on first run until a default is confirmed. Provider cards with live status
   badges (Ready / Verified / Not Installed / Login Needed / Failing), inline remedies (copyable
   install command; "Open Terminal to Log In" - a `.command` file handed to Terminal.app, no
   Apple-Events prompt), a per-card Test running the one-shot prompt probe, and a 3s cheap-tier
-  re-check loop while open so remedies flip cards green on their own. Confirm persists
-  `defaultProviderID`; Skip returns next launch ([AI_PROVIDERS.md](AI_PROVIDERS.md)).
-- **AI Settings sheet** - the provider cards above now sit behind a two-item sidebar,
+  re-check loop while open so remedies flip cards green on their own. First run: Confirm
+  persists `defaultProviderID`, Skip returns next launch. Settled installs pick by clicking:
+  selecting a READY card switches the active provider on the spot, and the Active capsule
+  marks the provider actually in use ([AI_PROVIDERS.md](AI_PROVIDERS.md)).
+- **AI Settings sheet** - the provider cards above sit behind a two-item sidebar,
   **Providers | Routing**. Providers is the card surface described above (active provider +
-  model / effort / fast per provider — the global default envelope; the old composer pill and HUD
-  picker are both deleted). **Routing** edits the named routing profiles
-  ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)): an Off row plus one row per saved
-  profile (the active one checked), each profile filling the agent graphs' declared model
-  slots — one card per agent, one row per slot with the pack author's own caption (the
-  built-ins: the Director's Plan/Chat/Sort, Coding's Build rows the task grades
-  pick among, Debug's Assistant). Activating or editing a profile
-  affects NEW conversations only, and switching is refused while a run is in flight. The
+  model / effort / fast per provider — the global default envelope; generation controls live
+  here, not in the composer). **Routing**
+  ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)): an Enable Model Routing toggle (off
+  hides the rest and says where everything runs; a (?) bubble carries the explainer) over a
+  Profiles list where the SELECTED row is both what runs and what the cards below edit —
+  double-click renames in place, + creates and selects, the toolbar deletes and duplicates.
+  Two shipped read-only starters seed once their provider is usable (Claude Routing and
+  Codex Routing, both "(sxp.studio)"): locked rows, no edit or rename or delete — Duplicate
+  births an editable copy. Below, one tinted card per agent, one row per declared slot with
+  the pack author's caption (the built-ins: the Director's Plan/Chat/Sort, Coding's Build
+  rows the task grades pick among, Debug's Assistant). Switching governs NEW conversations
+  only and is refused while a run is in flight. The
   unhealthy-provider **warning dot** lost its composer home: it lives on the sheet's surfaces (the
   provider card / sidebar badge) — runs and new chats on an unhealthy provider still refuse and
   open the sheet instead of failing silently.

@@ -100,7 +100,7 @@ one active provider plus its generation choices, edited in AI Settings, persiste
 provider in app-state.json ([STATE.md](STATE.md)), clamped at read by
 `resolvedGenerationSettings`, and stamped into every `SZAgentRunRequest`.
 
-## Model routing (shipped)
+## Model routing
 
 The agent graphs declare **model slots** — the kinds of model work each agent needs, every
 slot with the pack author's own description (`slots` in graph.json, [AGENT_GRAPHS.md](AGENT_GRAPHS.md)).
@@ -110,8 +110,8 @@ Settings sheet's Routing pane, [UI.md](UI.md)). Slots are the packs' own stable 
 so a profile survives every node rename and rewire; the built-ins declare planner /
 assistant / sorter (director), builder-default / builder-light / builder-heavy / assistant /
 sorter (coding, with `grades` mapping the Director's light / standard / heavy task grades to
-the builder slots), and assistant (debug). The old composer picker is gone: the
-forward-looking selection lives in AI Settings, and the backward-looking truth is the
+the builder slots), and assistant (debug). The forward-looking selection lives in AI
+Settings, and the backward-looking truth is the
 **per-turn receipt** each finished reply carries in the transcript — the envelope the turn
 *actually* ran, with the routing rule that chose it (`via`). Semantics:
 
@@ -167,7 +167,7 @@ headless turn; if that bites in practice, a per-provider isolation toggle is the
 Sessions are driven through the non-interactive run + structured output path so responses parse
 cleanly back into the orchestrator.
 
-## Health & verification (shipped)
+## Health & verification
 
 Provider health is **three tiers, cheapest first** (`SZProviderHealth.swift` /
 `SZProviderProbe.swift`), reported as `SZProviderHealthReport` with the six-status vocabulary
@@ -197,14 +197,14 @@ Provider health is **three tiers, cheapest first** (`SZProviderHealth.swift` /
 
 Each provider also vends its remedies as data: `installCommand` (copy-paste) and `loginCommand`
 (what the setup sheet's Terminal launcher runs - auth is interactive by design; the app never
-attempts it headless). Surfaces: the first-run **Agent Providers sheet**, the HUD picker's
-dimmed items, run/chat pre-flights ([UI.md](UI.md)), and the headless self-check
+attempts it headless). Surfaces: the first-run **Agent Providers sheet**, the AI Settings cards and their
+dimmed model menus, run/chat pre-flights ([UI.md](UI.md)), and the headless self-check
 `SZApp --verify-agent-providers --json [--probe]` (exit 0 = ≥1 ready, 1 = none, 2 = error;
 contract in [APP_SETUP.md](APP_SETUP.md)).
 
 **Testing hook:** `SZ_PATH_OVERRIDE=<dirs>` replaces the entire synthesized search path
 (`SZAgentEnvironment.searchPath()`), so a provider-less machine or a shim CLI can be simulated
-live for the sheet, the picker, the guards, and the verifier.
+live for the sheet, the cards, the guards, and the verifier.
 
 **Mid-turn failure surface.** The pre-flights only cover a turn's START; a CLI
 that dies mid-turn comes back as a bare non-zero exit, not a thrown error. Every turn funnels
@@ -242,11 +242,11 @@ catalog IS trustworthy capability data: `pi --mode rpc` → `get_available_model
 per-model metadata (`thinkingLevelMap`, modalities, context window) measured by the CLI itself,
 which satisfies the never-infer rule at runtime. So `SZPiProvider` fetches its catalog from the
 CLI (token-free), the host caches it in `provider-catalogs.json` (Application Support) and
-re-seeds it at launch — the picker serves last-known truth offline — and re-fetches when the
+re-seeds it at launch — the model menus serve last-known truth offline — and re-fetches when the
 cheap health status transitions to ready (login/install landing is exactly when the catalog
 changes) or the snapshot is a day old. Model ids are stored qualified (`openai-codex/gpt-5.5`),
 the exact `--model` argv token. Until a first successful fetch, pi serves an EMPTY catalog —
-the picker dims and pre-flights refuse, which is the truthful state for a logged-out harness.
+the model menus dim and pre-flights refuse, which is the truthful state for a logged-out harness.
 Static manifests remain the rule for CLIs that can't enumerate.
 
 **Decision:**

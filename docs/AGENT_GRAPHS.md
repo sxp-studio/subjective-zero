@@ -85,7 +85,7 @@ A node takes **exactly one of three forms** — enforced at decode:
 | `"dispatch": { "to" }` | fan the run's work set out to a seat — and **wait for the set** | `settled`, when the last lands (or the watchdog synthesizes the stragglers) |
 
 **Model slots** are the graph's declared kinds of model work — what a routing profile fills
-with models ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)). The graph opens with
+with models ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)). The graph opens with
 `"slots": [{ "id", "label"?, "description" }]` (ids lowercase `[a-z0-9-]`, declaration order
 = the settings pane's row order, `description` is the pane's caption — the author's own
 words); a turn node names its slot via `"slot"`, a step node's asks name theirs via `"ask"`

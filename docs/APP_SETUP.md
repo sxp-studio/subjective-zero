@@ -106,7 +106,7 @@ sheet shows the same remedies listed here.
 - opencode is a multi-provider harness like pi: which models it serves depends on what the USER
   authed, so the app enumerates them from the CLI at runtime (`opencode models --verbose`) instead of shipping
   a fixed list (the model picker is empty until at least one provider is authed).
-- Choosing the model: pick it in-app from the composer's provider pill ▸ **Model**, or — if opencode
+- Choosing the model: pick it in-app from AI Settings ▸ Agent Providers ▸ the opencode card's **Model** menu, or — if opencode
   is showing as **Failing** in Agent Providers (e.g. its default model's quota is exhausted) — from the
   **Model** menu on the opencode card there (picking one re-tests it on the spot). The app also honors
   a `model` you set in your opencode config (whatever `opencode debug config` reports as the resolved

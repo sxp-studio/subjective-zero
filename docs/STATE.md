@@ -15,9 +15,8 @@ from it, agents read it via MCP, the runtime compiles from it.
   reschedule) see every change, whoever made it (user, agent via MCP, or host).
 - **Undo is artifact-level checkpoints, not command sourcing (M8).** We deliberately do NOT build
   a serializable command/`Transaction` log with per-command `revert`. There are only two kinds of
-  mutable state, so a checkpoint is a full snapshot of both; restore is "set it back", not "replay
-  inverses". (An earlier draft of this doc specced command-sourced undo; the checkpoint model
-  superseded it - see M8.)
+  mutable state, so a checkpoint is a full snapshot of both; restore is "set it back", not
+  "replay inverses".
 - **Generated artifacts are staged.** Node source and contracts are written to a staging area
   and only promoted into the live project on a successful build, so a failed agent/build run
   never corrupts the project.
@@ -58,19 +57,21 @@ screen frames, restored (frames sanitized against the current displays) when the
 appears; the panel's dock-back spot rides `panelLayout.restorePositions`, not this record.
 Also live: `defaultProviderID` - the provider confirmed in the Agent Providers setup sheet
 ([AI_PROVIDERS.md](AI_PROVIDERS.md)); nil means first-run setup hasn't been confirmed, which is
-what auto-presents the sheet at launch (post-first-run, a composer picker switch re-persists it -
-the selection front-and-center must survive relaunch). Also live:
+what auto-presents the sheet at launch (post-first-run, picking a ready card in AI Settings
+re-persists it). Also live:
 `openProjectPath` (the last USER-opened project, reopened next launch) and `recentProjectPaths`,
 i.e. File ▸ Open Recent, newest first, capped at 10 (`SZAppState.noteRecentProject`). Also live:
 `providerGenerationSettings` - per-provider generation choices (model /
-reasoning effort / fast mode) keyed by provider id, written immediately on every composer-picker
-change; rows are stored raw and clamped against the provider's real capabilities at read
+reasoning effort / fast mode) keyed by provider id, written immediately from AI Settings and
+`ui_set_provider`; rows are stored raw and clamped against the provider's real capabilities at read
 (`resolvedGenerationSettings`), so a stale model id degrades to the default instead of failing.
 Per-provider keying = switching codex→claude→codex keeps each provider's choices. Also live:
 `routingProfiles` + `activeRoutingProfileName` - the named model-routing profiles and which one
-governs new work ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)); profiles are stored
+governs new work ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)); profiles are stored
 raw and resolved at delivery time, and a stale active name (its profile deleted elsewhere) reads
-as routing off, like every other preference.
+as routing off, like every other preference. Also live: `routingSeededStarterNames` - the
+shipped starter profiles already seeded, so deleting one stays deleted - and
+`routingLastProfileName` - the arm the Routing toggle released, restored when it flips back on.
 `windowSize`/`theme` remain dormant placeholders.
 
 **Project lifecycle.** The launch chain is `SZ_PROJECT` env (dev override - never recorded in
@@ -94,7 +95,7 @@ session ids are bound to this machine's CLI state, so they live beside app-state
 `~/Library/Application Support/SubjectiveZero/agent-sessions.json` (`SZAgentSessionIO`), keyed by
 project path - never in the bundle. Each session record also carries its `envelope` - the
 generation envelope the thread OPENED with, which is the session pin routing's affinity honours
-on resume ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)); records without one (older
+on resume ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)); records without one (older
 files) decode untouched. The `.debug` scratch transcript stays ephemeral. Sidecars load
 forgivingly: a missing or corrupt file means an empty transcript, never a project-open error.
 
