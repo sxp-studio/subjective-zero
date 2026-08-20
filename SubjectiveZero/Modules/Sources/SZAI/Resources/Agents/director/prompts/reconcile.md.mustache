@@ -43,7 +43,7 @@ For EACH unresolved node above, make the **smallest** change that will unblock i
   That reads on BUILT nodes only — a never-built draft (`"kind": "prompt"`) never carries a
   `rebuildReason`, and its absence there means unimplemented work, not a clean bill. (A node flagged
   `intentChanged` carries no `rebuildDetail` — the prompt IS the evidence; it still needs a rebuild.)
-
+{{grading}}
 Change ONLY what will unblock these nodes — do not restructure the rest of the graph. Nodes marked
 `(empty — …)` are the user's undecided placeholders: mention them in your one-line summary and leave them
 untouched — no prompt, no ports, no wiring — unless the user's instruction for THIS run names them. You can

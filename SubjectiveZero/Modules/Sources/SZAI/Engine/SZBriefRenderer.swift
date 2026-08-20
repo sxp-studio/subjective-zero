@@ -52,6 +52,10 @@ public struct SZBriefExtras: Sendable {
     public var nodeSource: String?
     /// The split/merge render bundle.
     public var graphOp: GraphOp?
+    /// Whether the active routing profile maps a work grade — flips the `{{grading}}`
+    /// teaching in the Director's briefing templates. Off renders it empty, so an inactive
+    /// profile leaves every prompt byte-identical.
+    public var gradingEnabled: Bool = false
 
     /// One split/merge operation as a piece's seed brief needs it: the original (split) or
     /// the constituents (merge), plus the reconciled boundary contract.
@@ -93,12 +97,13 @@ public struct SZBriefExtras: Sendable {
 
     public init(preserveBehavior: Bool = false, libraryIndex: String? = nil,
                 nodeContract: String? = nil, nodeSource: String? = nil,
-                graphOp: GraphOp? = nil) {
+                graphOp: GraphOp? = nil, gradingEnabled: Bool = false) {
         self.preserveBehavior = preserveBehavior
         self.libraryIndex = libraryIndex
         self.nodeContract = nodeContract
         self.nodeSource = nodeSource
         self.graphOp = graphOp
+        self.gradingEnabled = gradingEnabled
     }
 }
 
@@ -133,6 +138,7 @@ public struct SZBriefRenderer: Sendable {
     // MARK: - The authoring namespace (the pack gate's ground truth)
 
     static let toolbeltPartial = "prompts/toolbelt.md.mustache"
+    static let gradingPartial = "prompts/grading.md.mustache"
     static let cardsPartial = "prompts/cards.md.mustache"
     static let referencePreservePartial = "prompts/reference-preserve.md.mustache"
     static let referenceInlinePartial = "prompts/reference-inline.md.mustache"
@@ -146,7 +152,7 @@ public struct SZBriefRenderer: Sendable {
         "graph", "message", "toolbelt", "cards", "node", "contract", "source",
         "round", "cap", "blockers", "inbox", "mutations", "instruction", "tasks",
         "prompt", "title", "symbol", "inputs", "outputs", "boundary", "abi", "reference", "schema",
-        "blocker", "director_message",
+        "blocker", "director_message", "grading",
         "original", "intent", "stage", "count", "constituents",
     ]
 
@@ -154,6 +160,7 @@ public struct SZBriefRenderer: Sendable {
     /// mention the token. A token lists every variant its section can select.
     public static let requiredPartials: [String: [String]] = [
         "toolbelt": [toolbeltPartial],
+        "grading": [gradingPartial],
         "cards": [cardsPartial],
         "reference": [referencePreservePartial, referenceInlinePartial, referenceLibraryPartial],
         "schema": [schemaInlinePartial, schemaFetchPartial],
@@ -188,6 +195,9 @@ public struct SZBriefRenderer: Sendable {
             SZDirectorPrompt.graphSummary(try need(world.graph, "graph", "a project"))) }
         add("message") { SZPromptTemplate.defused(message) }
         try add("toolbelt") { try template(agent, Self.toolbeltPartial) }
+        // Rendered only when the active profile maps a grade — teaching an assessment
+        // nothing reads would spend prompt budget on a no-op.
+        try add("grading") { extras.gradingEnabled ? try template(agent, Self.gradingPartial) : "" }
         try add("cards") { try template(agent, Self.cardsPartial) }
         try add("node") { try need(world.node, "node", "a bound node").uuidString }
         try add("round") { String(try need(world.run, "round", "a live run").round) }

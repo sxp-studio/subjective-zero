@@ -37,7 +37,7 @@ extension SZHostBridge {
                  ]),
             tool("ui_disconnect", "Remove a connection by id.",
                  properties: ["connection": ["type": "string"]]),
-            tool("ui_update_node", "Update a node's title / sfSymbol / prompt / contract (reflows its UI).",
+            tool("ui_update_node", "Update a node's title / sfSymbol / prompt / summary (reflows its UI). While briefing, `complexity` (light | standard | heavy) is your one-word read of the implementation task — it may pick the model that implements it. Assess the task, not the node's importance; an unassessed node runs on the standard route.",
                  properties: [
                     "node": ["type": "string"],
                     "title": ["type": "string"], "sfSymbol": ["type": "string"],
@@ -403,6 +403,16 @@ extension SZHostBridge {
                 }
                 return e
             }
+        }
+        // The grade never rides the node mutation below — it is run-scoped host state the
+        // dispatch reads, not node data (an orchestration hint persisted onto the artifact
+        // graph is the P02 mistake).
+        if let complexity = arguments.string("complexity") {
+            guard SZRoutingProfile.grades.contains(complexity) else {
+                throw SZMCPError.message(
+                    "unknown complexity \"\(complexity)\" — expected light, standard, or heavy")
+            }
+            host.recordNodeGrade(id, complexity)
         }
         // `requireUnfenced` first only for its richer refusal message (it names the holder and throws);
         // `updateNodeContent` is the authoritative gate and re-checks. The funnel also carries the

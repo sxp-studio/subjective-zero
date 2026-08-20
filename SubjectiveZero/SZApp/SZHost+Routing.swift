@@ -122,6 +122,18 @@ extension SZHost {
         return fresh
     }
 
+    // MARK: - Work grades (the Director's per-task read)
+
+    /// Record the Director's grade for a node's implementation task. Write-wins while the
+    /// node is still undispatched — a reconcile re-brief may regrade — and FROZEN from the
+    /// moment a coding turn ran for it (`dispatchPrompts` carries that fact): a retry must
+    /// resolve exactly as the cold start did, and a mid-run flip would move it. Unknown
+    /// grade words are refused at the MCP boundary, so this stores only the three.
+    func recordNodeGrade(_ node: SZNodeID, _ grade: String) {
+        guard dispatchPrompts[node] == nil else { return }
+        nodeGrades[node] = grade
+    }
+
     // MARK: - Profile mutation (AI Settings / the debug bus)
 
     /// Switch the active profile (nil = Off). Refused while a run is traversing — a live

@@ -225,6 +225,13 @@ struct SZBriefPinTests {
         out["director-reconcile-r1-bare.md"] = try renderer.render(
             agent: "director", template: "reconcile", message: "",
             world: SZWorld(graph: base, run: run(workSet: [grayID], round: 1, roundCap: 2)))
+        // With a grade-mapping profile active, the briefing templates teach the grade —
+        // pinned so the teaching itself can't drift; every OTHER render above proves the
+        // token renders to nothing while grading is off (their pins predate it, unmoved).
+        out["director-decompose-grading.md"] = try renderer.render(
+            agent: "director", template: "decompose", message: "",
+            world: SZWorld(graph: base, run: run(instruction: "make the camera feed grayscale")),
+            extras: SZBriefExtras(gradingEnabled: true))
 
         // — graphSummary's fallback branches, through the one summary renderer —
         out["director-graph-summary-variants.md"] =

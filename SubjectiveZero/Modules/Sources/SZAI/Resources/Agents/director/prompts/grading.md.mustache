@@ -1,0 +1,9 @@
+## Grade each node you brief
+While briefing a node with `ui_update_node`, also declare `complexity` — your one-word read of the
+implementation TASK, which picks the model that implements it:
+- `light` — a quick fix or trivial effect: change a color, invert, scale a value, a solid fill.
+- `standard` — a typical single-effect node: a blur, a pixelate, a gradient, an overlay.
+- `heavy` — stateful, multi-pass, or simulation work: feedback between frames, particle or fluid
+  systems, reaction-diffusion, anything needing intermediate buffers.
+Assess the task, not the node's importance — a one-line tweak to a crucial node is still `light`.
+Don't deliberate: your first read is fine, and an unassessed node simply runs on the standard route.

@@ -128,6 +128,22 @@ struct SZRoutingHostTests {
         #expect(try host.makeRouter(providerID: "claude").notes.count == 1)
     }
 
+    @Test func aGradeIsWriteWinsUntilDispatchThenFrozen() {
+        let host = bareHost()
+        let node = SZNodeID()
+        host.recordNodeGrade(node, "light")
+        host.recordNodeGrade(node, "heavy")   // a reconcile re-brief may regrade
+        #expect(host.nodeGrades[node] == "heavy")
+        host.dispatchPrompts[node] = "built"  // a coding turn ran for it
+        host.recordNodeGrade(node, "light")   // frozen — the retry must resolve identically
+        #expect(host.nodeGrades[node] == "heavy")
+        // A FIRST grade arriving after dispatch is refused for the same reason.
+        let late = SZNodeID()
+        host.dispatchPrompts.updateValue(nil, forKey: late)   // dispatched promptless (key present)
+        host.recordNodeGrade(late, "light")
+        #expect(host.nodeGrades[late] == nil)
+    }
+
     @Test func gradesAndQueriesResolveIntoTheTable() throws {
         var profile = fastFleet
         profile.queries = SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5")

@@ -121,6 +121,12 @@ final class SZHost {
     /// a different thing and preserves the pre-existing clear-on-promote behaviour for off-run paths (a
     /// node-scoped chat turn that compiles, a library instantiate).
     internal(set) var dispatchPrompts: [SZNodeID: String?] = [:]
+    /// The Director's per-node work grades ("light"/"standard"/"heavy"), written while
+    /// briefing (`ui_update_node`'s `complexity`), read at dispatch to prime each fleet
+    /// child's router. Write-wins until the node dispatches, frozen after (a retry must
+    /// re-resolve exactly as its cold start did) — see `recordNodeGrade`. Never persisted:
+    /// a grade describes one briefing's read of the task, not the node.
+    internal(set) var nodeGrades: [SZNodeID: String] = [:]
     /// The nodes `promoteStagedNode` landed for their LATEST dispatch of the current run — the run's success
     /// evidence (`surfaceUnresolvedNodes`). Cleared at run start and in the run task's claim-guarded settle
     /// (a cancelled run's zombie must not clear a newer run's set), and per node at each coding dispatch: a
@@ -797,6 +803,7 @@ final class SZHost {
         hiddenPieces = []
         pendingGraphOp = nil
         dispatchPrompts = [:]
+        nodeGrades = [:]
         activeRuns = [:]           // nothing runs across a switch (the busy gate holds), but the
         pendingTasks = []          // invariant stays local: a task scheduled for A never sees B
         admissionSuspended = false // a Stop in A must not freeze B's queue, where nothing stopped

@@ -721,8 +721,12 @@ extension SZHost {
 
         let sighting = SZTraversalSighting(id: thread, agent: directorID)
         beginAgentGraphRun(sighting, thread: thread)
+        // The grading teaching renders only when the profile maps a grade — an assessment
+        // nothing reads would spend prompt budget on a no-op.
+        let gradingEnabled = (router as? SZProfileRouter)?.grades.isEmpty == false
         let delivery = SZDelivery(
             agent: directorID, message: "",
+            extras: SZBriefExtras(gradingEnabled: gradingEnabled),
             renderer: renderer, queries: queries,
             world: { [weak self] in
                 guard let self else { return SZWorld() }
@@ -928,9 +932,15 @@ extension SZHost {
                 },
                 effect: { [weak self] effect in await self?.perform(effect: effect) },
                 onNote: { [weak self] note in self?.noteAgentGraphRun(sighting, note) })
+            // The child's router carries its node's grade pick, frozen at THIS dispatch —
+            // the engine never learns about grading, and a retry resolves identically.
+            let childRouter: any SZModelRouting =
+                if let table = router as? SZProfileRouter, let grade = nodeGrades[nodeID] {
+                    table.primed(grade: grade)
+                } else { router }
             deliveries.append((order, SZGraphEngine(
                 agent: coding.id, graph: coding.graph, attachments: coding.attachments,
-                host: child, steps: steps, router: router), sighting))
+                host: child, steps: steps, router: childRouter), sighting))
         }
         enum Land: Sendable {
             case settled(node: String, outcome: String)
