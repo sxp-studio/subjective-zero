@@ -69,7 +69,7 @@ public struct SZRoutingPosition: Hashable, Sendable {
 }
 
 /// Where an UNFILLED slot's work goes — the derivation behind a grade variant's live
-/// "Default — …" resolution. Pure so the rule is pinnable in tests; the host renders from it.
+/// "Default (…)" resolution. Pure so the rule is pinnable in tests; the host renders from it.
 public enum SZRoutingInheritance {
     /// The standard slot a grade-variant slot falls back to: `slot` appears as a
     /// light/heavy value in the graph's grade table, and the table names a DIFFERENT
@@ -91,7 +91,7 @@ public struct SZRoutingPositionRow: Identifiable, Equatable, Sendable {
     public var caption: String         // the pack's description, rendered verbatim
     public var selectionLabel: String  // "Default" (unset) or "Codex · GPT-5.6 Terra"
     /// The envelope menu's first row — the clear action, spelled as where the work then
-    /// goes: "Default — Claude · Opus 5" (grade variants resolve through their standard slot).
+    /// goes: "Default (Claude · Opus 5)" (grade variants resolve through their standard slot).
     public var clearLabel: String
     public var isSet: Bool
     public var options: [SZRoutingEnvelopeOption]
@@ -206,7 +206,7 @@ public struct SZRoutingSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Routing").font(.system(size: 17, weight: .semibold))
 
-            Text("Each agent lists the kinds of work it needs a model for. A profile picks a model for each — anything left on Default runs on the default provider.")
+            Text("Each agent lists the kinds of work it needs a model for. A profile picks a model for each; anything left on Default runs on the default provider.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
@@ -222,7 +222,7 @@ public struct SZRoutingSettingsView: View {
                 }
                 .modifier(SZScrollBottomFade())
             } else {
-                Text("No profiles yet. Every agent runs on the default provider — create a profile to give specific work its own model.")
+                Text("No profiles yet. Every agent runs on the default provider. Create a profile to give specific work its own model.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -252,7 +252,7 @@ public struct SZRoutingSettingsView: View {
                 newProfileMenu
             }
             if let pinned = envPinnedProfileName {
-                Text("Pinned to \"\(pinned)\" for this launch (SZ_MODEL_ROUTING) — relaunch without it to switch profiles.")
+                Text("Pinned to \"\(pinned)\" for this launch (SZ_MODEL_ROUTING). Relaunch without it to switch profiles.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -265,8 +265,8 @@ public struct SZRoutingSettingsView: View {
             Button {
                 onSelectActiveProfile(nil)
             } label: {
-                if activeProfile == nil { Label("Off — the default provider runs everything", systemImage: "checkmark") }
-                else { Text("Off — the default provider runs everything") }
+                if activeProfile == nil { Label("Off: the default provider runs everything", systemImage: "checkmark") }
+                else { Text("Off: the default provider runs everything") }
             }
             Divider()
             ForEach(profiles) { profile in
@@ -285,7 +285,7 @@ public struct SZRoutingSettingsView: View {
         }
         .menuStyle(.button)
         .controlSize(.small)
-        .help("The profile new chats and runs use — switching is refused while a run is in flight")
+        .help("The profile new chats and runs use. Switching is refused while a run is in flight")
     }
 
     /// New Profile: start empty, or from a preset (only offered while its provider is usable).
@@ -294,7 +294,7 @@ public struct SZRoutingSettingsView: View {
             Button("Empty Profile") { onCreateProfile() }
             if claudeLadderAvailable {
                 Divider()
-                Button("Claude Ladder — Haiku sorts, Sonnet builds and answers, Opus takes the heavy work") {
+                Button("Claude Ladder: Haiku sorts, Sonnet builds and answers, Opus takes the heavy work") {
                     onCreateClaudeLadder()
                 }
             }
@@ -304,7 +304,7 @@ public struct SZRoutingSettingsView: View {
         .menuStyle(.button)
         .controlSize(.small)
         .fixedSize()
-        .help("Start empty, or from a preset — presets only fill the built-in agents")
+        .help("Start empty, or from a preset. Presets only fill the built-in agents")
     }
 
     /// Which profile the FORM shows (independent of which is active), plus its management menu.
@@ -329,7 +329,7 @@ public struct SZRoutingSettingsView: View {
             }
             .menuStyle(.button)
             .controlSize(.small)
-            .help("Pick which profile the form below edits — the active profile can be edited live")
+            .help("Pick which profile the form below edits. The active profile can be edited live")
             Menu {
                 Button("Rename…") {
                     renameDraft = edited
@@ -345,7 +345,7 @@ public struct SZRoutingSettingsView: View {
             .menuIndicator(.hidden)
             .controlSize(.small)
             .fixedSize()
-            .help("Rename, duplicate, or delete \"\(edited)\" — deleting the active profile turns routing off")
+            .help("Rename, duplicate, or delete \"\(edited)\". Deleting the active profile turns routing off")
             Spacer()
         }
     }
@@ -358,7 +358,7 @@ public struct SZRoutingSettingsView: View {
             // Dividers separate ROWS only — the header band is its own edge, and a hairline
             // right under it read as a smudge.
             if agent.rows.isEmpty {
-                Text("This agent doesn't ask for model choices — it runs on the default provider.")
+                Text("This agent doesn't ask for model choices; it runs on the default provider.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 14)
@@ -370,14 +370,10 @@ public struct SZRoutingSettingsView: View {
                 }
             }
         }
-        // The agent's hue pools along the card's top and dissolves down THROUGH the card —
-        // no band edge to cut against — over the base fill, under a matching outline. Same
-        // accent as its chat lines and graph, so the three surfaces read as one identity.
-        // (Background order: nearest first — the gradient sits atop the base fill.)
-        .background(RoundedRectangle(cornerRadius: 10)
-            .fill(headerWash(SZAgentTint.color(agent.tint))))
         .background(RoundedRectangle(cornerRadius: 10)
             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82)))
+        // The agent's own tint outlines its card — the same accent its chat lines and
+        // graph wear, so the three surfaces read as one identity.
         .overlay(RoundedRectangle(cornerRadius: 10)
             .strokeBorder((SZAgentTint.color(agent.tint) ?? .clear).opacity(0.5), lineWidth: 2))
     }
@@ -394,16 +390,21 @@ public struct SZRoutingSettingsView: View {
             SZViewGraphButton(title: agent.title) { onShowAgentGraph(agent.id) }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        // The card's 2pt outline overlaps the header's top edge, so the VISIBLE band starts
+        // 2pt down — bias the content by that much, then fix the height so centering is
+        // arithmetic, not font metrics.
+        .padding(.top, 2)
+        .frame(height: 40)
+        // The agent's hue as the header band — contained to the header, half strength at
+        // the top deepening to full at its bottom edge.
+        .background(UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10)
+            .fill(headerWash(SZAgentTint.color(agent.tint))))
     }
 
-    /// The card-top pool of the agent's hue: strongest along the top edge, fully gone by
-    /// mid-card — a dissolve, never a band with an edge.
     private func headerWash(_ tint: Color?) -> AnyShapeStyle {
         guard let tint else { return AnyShapeStyle(Color.white.opacity(0.03)) }
         return AnyShapeStyle(LinearGradient(
-            stops: [.init(color: tint.opacity(0.22), location: 0),
-                    .init(color: tint.opacity(0), location: 0.45)],
+            colors: [tint.opacity(0.11), tint.opacity(0.22)],
             startPoint: .top, endPoint: .bottom))
     }
 
@@ -432,7 +433,7 @@ public struct SZRoutingSettingsView: View {
 
     private func envelopeMenu(_ row: SZRoutingPositionRow) -> some View {
         Menu {
-            // The clear action, spelled as its destination ("Default — …", live-resolved;
+            // The clear action, spelled as its destination ("Default (…)", live-resolved;
             // grade variants resolve through their standard slot) — the menu explains the inherit.
             Button {
                 onAssignEnvelope(row.position, nil, nil)
@@ -460,7 +461,7 @@ public struct SZRoutingSettingsView: View {
         }
         .menuStyle(.button)
         .controlSize(.small)
-        .help("Pick the provider and model this runs on — the first item shows where it goes when you don't")
+        .help("Pick the provider and model this runs on. The first item shows where it goes when you don't")
     }
 
     /// Only when the routed model has an effort concept — an absent menu is the honest render.
@@ -493,7 +494,7 @@ public struct SZRoutingSettingsView: View {
             }
             .menuStyle(.button)
             .controlSize(.small)
-            .help("Reasoning effort for this model — Default is the model's own")
+            .help("Reasoning effort for this model. Default is the model's own")
         }
     }
 
@@ -523,7 +524,7 @@ private struct SZViewGraphButton: View {
                 .font(.system(size: 11))
                 .foregroundStyle(hovered ? .primary : .secondary)
                 .padding(.horizontal, 8)
-                .padding(.vertical, 3)
+                .frame(height: 22)   // a fixed box — SwiftUI centers it exactly
                 .background(RoundedRectangle(cornerRadius: 5)
                     .fill(Color.white.opacity(hovered ? 0.10 : 0.05)))
                 .overlay(RoundedRectangle(cornerRadius: 5)
@@ -537,29 +538,88 @@ private struct SZViewGraphButton: View {
     }
 }
 
-/// The fast-mode chip: accent-filled when on, quaternary-bordered when off, and visibly
-/// alive under the cursor (its own view — hover is per-chip state).
+/// The fast-mode chip, worded: "Fast On" / "Fast Off" with the bolt. Activation is a
+/// one-shot show: the accent CHARGES the chip left to right, then a highlight shimmers
+/// across the bolt. Turning off stays quiet, and Reduce Motion collapses it all to the
+/// plain state change.
 private struct SZFastToggleChip: View {
     let isOn: Bool
     let action: () -> Void
     @State private var hovered = false
+    @State private var sweep: CGFloat            // the accent flood's progress (1 = settled)
+    @State private var charge: Double            // the accent's visibility (fades out on off)
+    @State private var shimmer: CGFloat = -1.4   // the bolt highlight's position (off-glyph)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(isOn: Bool, action: @escaping () -> Void) {
+        self.isOn = isOn
+        self.action = action
+        _sweep = State(initialValue: 1)
+        _charge = State(initialValue: isOn ? 1 : 0)
+    }
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(isOn ? Color.white : (hovered ? Color.primary : Color.secondary))
-                .frame(width: 26, height: 19)
-                .background(RoundedRectangle(cornerRadius: 5)
-                    .fill(isOn ? Color.accentColor.opacity(hovered ? 0.85 : 1)
-                               : Color.white.opacity(hovered ? 0.08 : 0)))
-                .overlay(RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(hovered ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.quaternary),
-                                  lineWidth: isOn ? 0 : 1))
-                .contentShape(RoundedRectangle(cornerRadius: 5))
+            // The label's box is the WIDER of the two texts, always — flipping the word
+            // must never nudge the row.
+            ZStack {
+                Label { Text("Fast Off") } icon: { bolt }.hidden()
+                Label { Text(isOn ? "Fast On" : "Fast Off") } icon: { bolt }
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(isOn ? Color.white : (hovered ? Color.primary : Color.secondary))
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .background(chipFill)
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(hovered ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.quaternary),
+                              lineWidth: isOn ? 0 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help(isOn ? "Fast mode is on" : "Turn on fast mode")
+        .onChange(of: isOn) { _, on in
+            if on {
+                guard !reduceMotion else { sweep = 1; charge = 1; return }
+                sweep = 0
+                charge = 1
+                withAnimation(.easeOut(duration: 0.28)) { sweep = 1 }
+                shimmer = -1.4
+                withAnimation(.easeInOut(duration: 0.5).delay(0.18)) { shimmer = 1.4 }
+            } else {
+                // Off is quiet: the accent just fades back to the gray lift.
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { charge = 0 }
+            }
+        }
+    }
+
+    /// The charge: base lift, with the accent flooding left → right on activation and
+    /// fading away on deactivation.
+    private var chipFill: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color.white.opacity(hovered ? 0.10 : 0.05))
+                Rectangle()
+                    .fill(Color.accentColor.opacity(hovered ? 0.85 : 1))
+                    .frame(width: geo.size.width * sweep)
+                    .opacity(charge)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+        }
+    }
+
+    /// The bolt, with a one-shot highlight sweeping across the glyph after the charge lands.
+    private var bolt: some View {
+        Image(systemName: "bolt.fill")
+            .overlay {
+                GeometryReader { geo in
+                    LinearGradient(colors: [.clear, .white, .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .offset(x: geo.size.width * shimmer)
+                }
+                .mask(Image(systemName: "bolt.fill"))
+            }
     }
 }
