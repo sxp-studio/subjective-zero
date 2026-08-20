@@ -36,6 +36,9 @@ struct SZAgentGraphCardState: Equatable {
 struct SZAgentGraphCardStats: Equatable {
     var startedAt: Date
     var duration: TimeInterval?
+    /// The settled visit's envelope receipt ("codex · gpt-5.6-terra · fast") — text on the
+    /// footer line, never a height. nil while running and on records without one.
+    var generation: String?
 }
 
 struct SZAgentGraphCardView: View {
@@ -101,10 +104,29 @@ struct SZAgentGraphCardView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer(minLength: 0)
+            dutyChip
             finishedGlyph
         }
         .padding(.horizontal, 12)
         .frame(height: SZNodeLayout.headerHeight)
+    }
+
+    /// A turn's work-kind word, worn as a quiet chip at the header's trailing edge — a
+    /// routing FACT off the graph, not a status. Inside the fixed-height header on purpose,
+    /// so a dutied card measures exactly like a plain one.
+    @ViewBuilder private var dutyChip: some View {
+        if let duty = face.duty {
+            Text(duty)
+                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.55))
+                .lineLimit(1)
+                // A duty word is short; it shows whole and the TITLE ellipsizes, never
+                // a half-truncated chip.
+                .fixedSize()
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(Color.white.opacity(0.08)))
+        }
     }
 
     /// The implementation door, tucked just BELOW the card like the node editor's action
@@ -189,6 +211,19 @@ struct SZAgentGraphCardView: View {
     @ViewBuilder private func statLine(_ stats: SZAgentGraphCardStats) -> some View {
         if let duration = stats.duration {
             statText(SZTurnBreakdown.format(duration))
+            // The settled visit's receipt, verbatim after the wall time — middle-truncated
+            // to the strip's one line, the full string in the tooltip. Text only: the
+            // footer's height is a constant, and a running visit never claims a receipt.
+            if let generation = stats.generation {
+                statText("·")
+                Text(generation)
+                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.45))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .contentTransition(.identity)
+                    .help(generation)
+            }
         } else {
             SZAgentGraphCardDots()
             TimelineView(.periodic(from: .now, by: 1)) { context in

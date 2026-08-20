@@ -66,7 +66,11 @@ i.e. File ▸ Open Recent, newest first, capped at 10 (`SZAppState.noteRecentPro
 reasoning effort / fast mode) keyed by provider id, written immediately on every composer-picker
 change; rows are stored raw and clamped against the provider's real capabilities at read
 (`resolvedGenerationSettings`), so a stale model id degrades to the default instead of failing.
-Per-provider keying = switching codex→claude→codex keeps each provider's choices.
+Per-provider keying = switching codex→claude→codex keeps each provider's choices. Also live:
+`routingProfiles` + `activeRoutingProfileName` - the named model-routing profiles and which one
+governs new work ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)); profiles are stored
+raw and resolved at delivery time, and a stale active name (its profile deleted elsewhere) reads
+as routing off, like every other preference.
 `windowSize`/`theme` remain dormant placeholders.
 
 **Project lifecycle.** The launch chain is `SZ_PROJECT` env (dev override - never recorded in
@@ -88,7 +92,10 @@ project, and on a machine with no resumable session the restored transcript is r
 fresh agent session's first prompt (the cold-start recap) so it catches up. Resumable provider
 session ids are bound to this machine's CLI state, so they live beside app-state.json in
 `~/Library/Application Support/SubjectiveZero/agent-sessions.json` (`SZAgentSessionIO`), keyed by
-project path - never in the bundle. The `.debug` scratch transcript stays ephemeral. Sidecars load
+project path - never in the bundle. Each session record also carries its `envelope` - the
+generation envelope the thread OPENED with, which is the session pin routing's affinity honours
+on resume ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)); records without one (older
+files) decode untouched. The `.debug` scratch transcript stays ephemeral. Sidecars load
 forgivingly: a missing or corrupt file means an empty transcript, never a project-open error.
 
 **Undelivered work is machine-local, deliberately.** Two queues persist under `.subz/.staging/`:

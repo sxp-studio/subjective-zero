@@ -261,6 +261,9 @@ struct SZApp: App {
     @NSApplicationDelegateAdaptor(SZAppDelegate.self) private var appDelegate
     @State private var host = SZHost()
     @State private var selectedNodeID: SZNodeID?      // canvas selection (edit/move/wire) — NOT chat scope
+    /// Which routing profile the AI Settings form edits (nil = active, else the first) —
+    /// presentation state, so it lives here beside the sheet rather than in app-state.
+    @State private var editedRoutingProfile: String?
     /// Opens the "Tokens" scene (the Profiler's token-inspection window).
     @Environment(\.openWindow) private var openWindow
     // Sparkle (SZUpdater.swift). Explicit init: constructing the controller in a default-value
@@ -322,13 +325,15 @@ struct SZApp: App {
             .overlay(alignment: .top) {
                 if !host.welcomePresented { SZWindowTitleOverlay(title: host.projectWindowTitle) }
             }
-            // The Agent Providers setup sheet — auto-presents on a first-run launch (SZHost+
-            // ProviderHealth), reopened via ⌘, or the HUD provider picker. A set-false (Esc/swipe) is a
-            // Skip: dismiss without confirming, so first-run simply re-presents next launch.
+            // The AI Settings sheet — auto-presents on a first-run launch (SZHost+ProviderHealth,
+            // landing on Providers), reopened via ⌘, or the composer's ⋯ menu. A set-false
+            // (Esc/swipe) is a Skip: dismiss without confirming, so first-run simply re-presents
+            // next launch.
             .sheet(isPresented: Binding(get: { host.providerSetupPresented },
                                         set: { if !$0 { host.skipProviderSetup() } })) {
                 SZProviderSetupSheet(cards: host.providerSetupCards,
                                      selectedID: host.selectedSetupProviderID,
+                                     routing: routingSettingsView,
                                      onSelect: { host.selectSetupProvider($0) },
                                      onRefresh: { Task { await host.refreshProviderHealthOnce() } },
                                      onTest: { host.runProviderProbe($0) },
@@ -400,7 +405,7 @@ struct SZApp: App {
             // ⌘, — the app's only settings surface today; graduates into a real Settings window
             // once more prefs earn one (docs/UI.md).
             CommandGroup(replacing: .appSettings) {
-                Button("AI Providers…") { host.presentProviderSetup() }
+                Button("AI Settings…") { host.presentProviderSetup() }
                     .keyboardShortcut(",", modifiers: .command)
             }
             CommandGroup(after: .sidebar) {
@@ -521,8 +526,42 @@ struct SZApp: App {
                        set: { $0 ? host.showPanel(id) : host.closePanel(id) })
     }
 
+    /// The AI Settings Routing pane, wired to the host mapping (SZHost+RoutingSettings). Built
+    /// here because the edit selection is presentation state (`editedRoutingProfile`) and every
+    /// intent needs the host in scope — the gearMenu pattern, typed instead of erased.
+    private var routingSettingsView: SZRoutingSettingsView {
+        SZRoutingSettingsView(
+            profiles: host.routingProfileRows,
+            editedProfileName: host.routingEditedProfile(named: editedRoutingProfile)?.name,
+            positions: host.routingPositionRows(profileNamed: editedRoutingProfile),
+            envPinnedProfileName: host.routingEnvPinnedProfileName,
+            onSelectActiveProfile: { _ = host.setActiveRoutingProfile($0) },
+            onCreateProfile: { editedRoutingProfile = host.createRoutingProfile() },
+            onRenameProfile: { old, new in
+                if host.renameRoutingProfile(from: old, to: new) { editedRoutingProfile = new }
+            },
+            onDuplicateProfile: {
+                editedRoutingProfile = host.duplicateRoutingProfile(named: $0) ?? editedRoutingProfile
+            },
+            onDeleteProfile: { name in
+                host.deleteRoutingProfile(named: name)
+                if editedRoutingProfile == name { editedRoutingProfile = nil }
+            },
+            onEditProfile: { editedRoutingProfile = $0 },
+            onAssignEnvelope: {
+                host.assignRoutingEnvelope(profileNamed: editedRoutingProfile, position: $0,
+                                           providerID: $1, modelID: $2)
+            },
+            onSetPositionEffort: {
+                host.setRoutingPositionEffort(profileNamed: editedRoutingProfile, position: $0, effort: $1)
+            },
+            onSetPositionFastMode: {
+                host.setRoutingPositionFastMode(profileNamed: editedRoutingProfile, position: $0, enabled: $1)
+            })
+    }
+
     /// The HUD gear menu's items — the canvas-side mirror of the macOS menu bar. Mirrors the `.commands`
-    /// wiring verbatim (same host methods + bindings) so the two stay in lockstep, then adds AI Providers…
+    /// wiring verbatim (same host methods + bindings) so the two stay in lockstep, then adds AI Settings…
     /// and the community links. Keyboard shortcuts are deliberately omitted here — the menu bar owns the
     /// canonical ⌘-shortcuts; duplicating them on these items would double-register the key equivalents.
     @ViewBuilder
@@ -600,7 +639,7 @@ struct SZApp: App {
                                                   set: { host.setLivePreviews($0) }))
         }
         Divider()
-        Button("AI Providers…") { host.presentProviderSetup() }
+        Button("AI Settings…") { host.presentProviderSetup() }
         Divider()
         // Collapse the community/support links into one Help submenu so the gear's top level stays light.
         // Mirrors the macOS menu bar's Help menu — both render `helpLinks`, so they never drift.
@@ -757,7 +796,7 @@ struct SZApp: App {
                               onCreateMediaNodes: { host.createMediaNodes($0) },
                               onNodeAdded: { host.noteNodeAdded($0) },
                               // The HUD gear menu — an in-canvas mirror of the macOS menu bar (Project /
-                              // View / Graph), plus AI Providers… and community links. Built here where
+                              // View / Graph), plus AI Settings… and community links. Built here where
                               // `host`, panelVisibilityBinding, and the app-bundle Discord asset are in
                               // scope; erased to AnyView for the pure SZUI panel. Re-evaluates on host
                               // changes (Observation) so disabled states / toggles stay live.
@@ -767,7 +806,7 @@ struct SZApp: App {
             // the panel calls isQueued for every user message on every streamed token.
             let queuedIDs = Set(host.mailbox.envelopes.lazy.filter { $0.state == .queued }.map(\.id))
             SZChatPanel(store: host.store, feed: host.chatFeed,
-                        project: host.store.project, provider: host.activeProviderID,
+                        project: host.store.project,
                         streaming: !host.chatInFlight.isEmpty,
                         streamingIDs: Set(host.inFlightAssistantIDs.values),
                         isRunning: host.isRunning, showTokenCounts: host.showTokenCounts,
@@ -788,12 +827,7 @@ struct SZApp: App {
                         onConsumePendingDraft: { host.consumeComposerDraft($0) },
                         pendingMention: host.pendingComposerMention,
                         onConsumePendingMention: { host.consumeComposerMention($0) },
-                        generationPickerItems: host.providerGenerationPickerItems,
-                        onSetProvider: { host.setActiveProvider($0) },
-                        onSetModel: { host.setActiveModel($0) },
-                        onSetReasoningEffort: { host.setActiveReasoningEffort($0) },
-                        onSetFastMode: { host.setActiveFastMode($0) },
-                        onOpenProviderSetup: { host.presentProviderSetup() })
+                        onOpenAISettings: { host.presentProviderSetup() })
                 // The transcript's "open in Profiler" link — set only where the surface exists,
                 // so the button simply doesn't render in builds without the panel.
                 .environment(\.szRevealInProfiler, revealInProfilerAction)

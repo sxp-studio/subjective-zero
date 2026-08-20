@@ -67,7 +67,10 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 - `ui_set_node_body`                        // none | preview | custom — a node's body region (the custom
                                             // card = the node's Card.swift; cols/rows/pinned = its footprint)
 - `ui_connect`, `ui_disconnect`            // flow or data edges
-- `ui_update_node`                          // title, sfSymbol, prompt, summary, permissions → triggers reflow
+- `ui_update_node`                          // title, sfSymbol, prompt, summary, permissions → triggers reflow.
+                                            // `complexity` (light|standard|heavy) records the Director's grade
+                                            // of the node's implementation task — run-scoped routing state the
+                                            // dispatch reads, not node data; frozen once a coding turn ran
 - `ui_edit_ports`                           // the ONLY way to add/retype/remove ports; omission preserves,
                                             // removal is explicit. Editing a built node's ports marks it
                                             // `needsRebuild` (it keeps rendering its old code until a Coding
@@ -90,9 +93,20 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
                                             // Both refuse a task already running: that is a steer,
                                             // sent with ui_send_chat to its agents
 - `ui_set_provider`                         // active provider + optional model / reasoning_effort /
-                                            // fast_mode (mirrors the composer picker; a provider
+                                            // fast_mode (the global default envelope; a provider
                                             // CHANGE resets agent sessions and is refused while
-                                            // busy; response echoes the resolved selection)
+                                            // busy; response echoes the resolved selection plus
+                                            // `active_profile` — a routing profile may override
+                                            // the selection per graph position)
+- `ui_set_routing_profile`                  // activate a saved model-routing profile by name, or
+                                            // Off (null/""/omitted). Refused while a run is in
+                                            // flight and for an unknown name (the error lists the
+                                            // saved names); switches govern NEW conversations only
+                                            // — live threads keep the envelope that opened them.
+                                            // Echoes {active_profile}
+- `ui_routing_profiles`                     // {profiles, active_profile, env_pinned} — the saved
+                                            // profiles and which governs (env_pinned = the
+                                            // SZ_MODEL_ROUTING launch pin, when it names one)
 - `ui_show_panel`, `ui_close_panel`, `ui_move_panel`  // panel layout: reopen / ✕ / header drag & drop
 - `ui_clone_panel`, `ui_popout_panel`, `ui_dock_panel`  // viewport clones + pop-out windows (panels addressed by token, e.g. "viewport:2")
 
@@ -145,6 +159,16 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
   no count).
 - `debug_set_paused` - freeze/resume the render clock (mirrors the HUD Pause/Play) so successive
   `agent_view_frame`s render the same instant: the deterministic way to A/B a live input.
+- `debug_set_routing` - the headless A/B harness's routing tool: upsert a full routing profile
+  (an `SZRoutingProfile` JSON object) and/or switch the active one, through the SAME host
+  mutators as AI Settings — persistence and the busy guard apply, and a switch refused mid-run
+  comes back as `{refused: <why>}`.
+- `debug_routing_state` - the routing world as JSON: active + saved profiles, the raw
+  `SZ_MODEL_ROUTING` pin, recorded node grades (uuid → light|standard|heavy), and the resolved
+  table as a delivery starting now would bind it — per-position "provider · model · effort ·
+  fast" strings for agents/duties/grades/queries plus the fallback and the resolution's
+  fallback notes (read without consuming the once-per-state narration). A pin naming a missing
+  profile reads as `{refused: <detail>}`.
 - `debug_record_session`, `debug_replay_session` *(deferred - not a V1 gate; see below)*
 
 ## V1 scope (functional minimum + verify hooks)

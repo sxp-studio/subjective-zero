@@ -74,7 +74,7 @@ extension SZHostBridge {
                  ]),
             tool("ui_tidy_graph", "Auto-layout the whole graph into clean left-to-right dependency columns (upstream nodes left of downstream), mirroring Graph ▸ Tidy Graph. Preserves the graph's overall midpoint. Takes no arguments; returns the applied `[node, x, y]` centers (empty if the graph has no nodes).",
                  properties: [:]),
-            tool("ui_set_provider", "Set the active provider (and optionally its model / reasoning effort / fast mode) for new agent sessions (runs + a fresh Director Agent chat). Mirrors the composer's provider cluster. NOTE: changing the provider resets all agent sessions (transcripts survive; each next message rebuilds context from its transcript) and is refused while a run or chat turn is in flight. The options apply to the provider being set and must be values it supports. Returns the resolved selection.",
+            tool("ui_set_provider", "Set the active provider (and optionally its model / reasoning effort / fast mode) for new agent sessions (runs + a fresh Director Agent chat). Mirrors the composer's provider cluster. NOTE: changing the provider resets all agent sessions (transcripts survive; each next message rebuilds context from its transcript) and is refused while a run or chat turn is in flight. The options apply to the provider being set and must be values it supports. Returns the resolved selection, plus `active_profile`: an active routing profile may still override this selection per graph position.",
                  properties: [
                     "provider": ["type": "string",
                                  "enum": SZProviderRegistry.shared.providers.map(\.id)],
@@ -82,6 +82,11 @@ extension SZHostBridge {
                     "reasoning_effort": ["type": "string", "description": "one of the provider's supported efforts (omit = keep/default; unsupported on claude)"],
                     "fast_mode": ["type": "boolean", "description": "toggle the provider's fast tier (omit = keep/default)"],
                  ], agentCallable: false),   // user-level setting; resets all sessions — not an agent action
+            tool("ui_set_routing_profile", "Activate a saved model-routing profile by name, or turn routing off (omit `profile`, or send \"\"). A profile maps graph positions — agents, their duty words, the Director's task grades, step queries — to provider/model envelopes, overriding the default selection per position. Switches govern NEW conversations only: a live thread keeps the envelope that opened it. Refused while a run is in flight, and for a name that isn't a saved profile (the error lists the saved names). Echoes {active_profile}.",
+                 properties: [
+                    "profile": ["type": "string", "description": "a saved profile name; null/\"\"/omitted = Off"],
+                 ]),
+            tool("ui_routing_profiles", "The saved model-routing profiles: {profiles: [names], active_profile, env_pinned}. `env_pinned` is the profile SZ_MODEL_ROUTING pinned at launch (null when the variable is unset or is only the 0/1 switch); while pinned, the pin — not `active_profile` — governs new work."),
             tool("ui_run", "Start the implementation run over the current graph — a Coding Agent per pending node, with the active provider. `instruction` (optional) steers the run. Called from your own chat turn, the task is QUEUED and starts when your turn ends (finish your reply; do not wait for it). A task asked for while another is running is queued too — never refused — and starts when the work it needs is free.",
                  properties: [
                     "instruction": ["type": "string", "description": "optional free-text steer for the run"],
@@ -181,6 +186,8 @@ extension SZHostBridge {
         case "ui_merge_nodes":     return try uiMergeNodes(arguments)
         case "ui_tidy_graph":      return try uiTidyGraph(arguments)
         case "ui_set_provider":    return try uiSetProvider(arguments)
+        case "ui_set_routing_profile": return try uiSetRoutingProfile(arguments)
+        case "ui_routing_profiles": return uiRoutingProfiles()
         case "ui_run":             return uiRun(arguments)
         case "ui_amend_task":      return try uiAmendTask(arguments)
         case "ui_cancel_task":     return try uiCancelTask(arguments)
@@ -586,13 +593,63 @@ extension SZHostBridge {
         if let fast = arguments["fast_mode"] as? Bool, !host.setActiveFastMode(fast) {
             throw SZMCPError.message("\(provider) does not support fast mode")
         }
-        // Echo the RESOLVED selection so a driving agent's world model tracks the applied truth.
+        // Echo the RESOLVED selection so a driving agent's world model tracks the applied truth —
+        // plus the active routing profile, because a profile may override this selection per
+        // graph position (the caller just set the FALLBACK, not necessarily what every turn runs).
         let resolved = host.resolvedGenerationSettings(for: host.activeProviderID)
         var response: [String: Any] = ["provider": host.activeProviderID,
                                        "model": resolved.model ?? "",
-                                       "fast_mode": resolved.fastMode ?? false]
+                                       "fast_mode": resolved.fastMode ?? false,
+                                       "active_profile": Self.jsonNull(effectiveRoutingProfileName)]
         if let effort = resolved.reasoningEffort { response["reasoning_effort"] = effort }
         return SZJSONRPC.encode(response)
+    }
+
+    /// The saved-profile name app-state currently activates — a stale persisted name (its profile
+    /// deleted elsewhere) reads as Off, matching `activeRoutingProfile`'s degrade rule.
+    var effectiveRoutingProfileName: String? {
+        host.routingProfiles.first { $0.name == host.activeRoutingProfileName }?.name
+    }
+
+    /// An optional string as its JSON payload value: the string, or JSON null.
+    nonisolated static func jsonNull(_ value: String?) -> Any {
+        if let value { return value }
+        return NSNull()
+    }
+
+    /// Activate a profile (or Off) through the SAME host mutator as AI Settings, so the busy
+    /// guard, persistence, and session affinity are the one shipped behavior.
+    private func uiSetRoutingProfile(_ arguments: [String: Any]) throws -> String {
+        // null strips to absent at dispatch, so null, "" and omitted all mean Off.
+        let raw = arguments.string("profile")
+        let name = (raw?.isEmpty ?? true) ? nil : raw
+        if let name, !host.routingProfiles.contains(where: { $0.name == name }) {
+            let saved = host.routingProfiles.map(\.name)
+            throw SZMCPError.message("no routing profile named \"\(name)\" — saved profiles: "
+                + (saved.isEmpty ? "(none)" : saved.joined(separator: ", ")))
+        }
+        guard host.setActiveRoutingProfile(name) else {
+            throw SZMCPError.message(
+                "cannot switch the routing profile while a run is in flight — live work keeps its models")
+        }
+        return SZJSONRPC.encode(["active_profile": Self.jsonNull(effectiveRoutingProfileName)])
+    }
+
+    private func uiRoutingProfiles() -> String {
+        SZJSONRPC.encode([
+            "profiles": host.routingProfiles.map(\.name),
+            "active_profile": Self.jsonNull(effectiveRoutingProfileName),
+            "env_pinned": Self.jsonNull(Self.envPinnedRoutingProfileName),
+        ])
+    }
+
+    /// The profile SZ_MODEL_ROUTING pins by NAME — nil when unset or when the value is only the
+    /// 0/1 switch (kill / app-state governs).
+    static var envPinnedRoutingProfileName: String? {
+        switch SZHost.modelRoutingEnv {
+        case nil, "0", "1": nil
+        case .some(let name): name
+        }
     }
 
     private func uiRun(_ arguments: [String: Any]) -> String {

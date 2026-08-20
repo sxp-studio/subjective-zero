@@ -254,7 +254,8 @@ struct SZAgentGraphCanvasContent: View {
     private func stats(for entry: SZAgentGraphRun.Entry,
                        face: SZAgentGraphFace) -> SZAgentGraphCardStats? {
         guard SZAgentGraphLayout.spends(face.form), let startedAt = entry.startedAt else { return nil }
-        return SZAgentGraphCardStats(startedAt: startedAt, duration: entry.duration)
+        return SZAgentGraphCardStats(startedAt: startedAt, duration: entry.duration,
+                                     generation: entry.generation)
     }
 
     /// "The traversal entered here" — the `end` capsule's mirror image. GREEN, deliberately

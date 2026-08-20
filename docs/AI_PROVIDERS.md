@@ -103,16 +103,40 @@ For each, we wrap and surface to the UI:
 > them, so re-verification on a CLI update is one command; note `grok-build` is unversioned, and
 > there is no versioned alternative to pin. Picking a new model resets that provider's agent
 > sessions (a thread is bound to the model that opened it); changing effort or fast mode does not.
-> Selection is
-> **global** (not per agent role -
-> per-role overrides deferred to agent profiles), edited in the chat composer's
-> `SZProviderGenerationPickerView`, persisted per provider in app-state.json
+> The **default envelope is global**: one active provider + its generation choices, edited in
+> AI Settings, persisted per provider in app-state.json
 > ([STATE.md](STATE.md)), clamped at read by `resolvedGenerationSettings`, and stamped into
 > every `SZAgentRunRequest` (runs, Director turns, chats). Fast mode DID land as launch argv -
 > claude via an inline `--settings {"fastMode":true}` blob, codex via
 > `-c service_tier="fast" -c features.fast_mode=true`.
 
-These choices are set per agent role (Director Agent vs Coding Agent can differ) in settings.
+## Model routing (shipped)
+
+On top of the global default, named **routing profiles** map graph positions to generation
+envelopes (`{providerID, model?, reasoningEffort?, fastMode?}` — `SZRoutingProfile`, edited in
+the AI Settings sheet's Routing pane, [UI.md](UI.md)). The positions are the agent graphs' own
+vocabulary, so a profile survives every rename and rewire: per-**agent** floors, finer
+per-**duty-word** routes (the work-kind label a turn node declares), the Director's three
+per-task **grades** (light / standard / heavy) for dispatched fleet work, and one **queries**
+envelope for step asks. The old composer picker is gone: the forward-looking selection lives in
+AI Settings, and the backward-looking truth is the **per-turn receipt** each finished reply
+carries in the transcript — the envelope the turn *actually* ran, with the routing rule that
+chose it (`via`). Semantics:
+
+- **Resolution ladder**, most specific first: session pin > grade > duty > agent > default;
+  queries take the one queries envelope or the default. Anything a profile doesn't map falls one
+  rung — coarser, never wrong ([AGENT_ORCHESTRATION.md](AGENT_ORCHESTRATION.md#model-routing)).
+- **Session affinity**: a live thread keeps the envelope that opened it; activating, editing, or
+  deleting a profile governs NEW conversations only — nothing moves under a running session, and
+  a profile switch is refused outright while a run is in flight.
+- **`SZ_MODEL_ROUTING`** (launch env): `=0` kills routing for the session; `=<name>` pins that
+  profile; an unknown name REFUSES the delivery rather than guessing (the SZ_AGENT_PACKS rule).
+  Unset or `=1`: app-state governs. With no active profile the router is the identity —
+  byte-identical to the pre-routing app.
+- **Never-guess fallback, narrated**: an envelope naming an unknown or unready provider drops its
+  rung with a sentence the user reads; an off-catalog model runs the provider's clamp with a
+  sentence naming what was asked and what runs instead. Never a silent substitution, and each
+  sentence is said once per profile state.
 
 ## Sessions
 

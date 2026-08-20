@@ -20,7 +20,6 @@ public struct SZChatPanel: View {
     private let scope: SZChatScope                 // the composer's recipient — the Director
     private let feed: [SZChatFeedItem]             // THE conversation: every agent's words to you
     private let project: SZProject?
-    private let provider: String
     private let streaming: Bool                    // any turn is in flight → the composer's Stop slot
     private let streamingIDs: Set<UUID>            // the messages actually being written right now
     private let isRunning: Bool                    // a build is in flight → the strip shows it
@@ -51,15 +50,9 @@ public struct SZChatPanel: View {
     // = autocomplete off (previews/tests).
     private let mentionCandidates: [SZMentionCandidate]
 
-    // The provider generation picker in the composer's bottom bar (host-mapped items + the same
-    // intents `ui_set_provider` drives). Defaults keep the picker absent for callers that don't
-    // wire it (previews/tests).
-    private let generationPickerItems: [SZProviderGenerationPickerItem]
-    private let onSetProvider: (String) -> Void
-    private let onSetModel: (String) -> Void
-    private let onSetReasoningEffort: (String) -> Void
-    private let onSetFastMode: (Bool) -> Void
-    private let onOpenProviderSetup: () -> Void
+    // The ⋯ menu's way into the AI Settings sheet (providers + routing profiles) — the
+    // generation controls' home since the composer pill retired.
+    private let onOpenAISettings: () -> Void
 
     // Composer control hover highlights + the locked-state timer start (view-local UI state).
     @State private var sendHover = false
@@ -116,7 +109,7 @@ public struct SZChatPanel: View {
     static let panelFill = Color(white: 0.12)
 
     public init(store: SZStore, scope: SZChatScope = .director, feed: [SZChatFeedItem], project: SZProject?,
-                provider: String, streaming: Bool, streamingIDs: Set<UUID> = [],
+                streaming: Bool, streamingIDs: Set<UUID> = [],
                 isRunning: Bool = false,
                 showTokenCounts: Bool = false,
                 showTurnBreakdown: Bool = false,
@@ -136,17 +129,11 @@ public struct SZChatPanel: View {
                 onConsumePendingDraft: @escaping (UUID) -> Void = { _ in },
                 pendingMention: SZComposerMentionInjection? = nil,
                 onConsumePendingMention: @escaping (UUID) -> Void = { _ in },
-                generationPickerItems: [SZProviderGenerationPickerItem] = [],
-                onSetProvider: @escaping (String) -> Void = { _ in },
-                onSetModel: @escaping (String) -> Void = { _ in },
-                onSetReasoningEffort: @escaping (String) -> Void = { _ in },
-                onSetFastMode: @escaping (Bool) -> Void = { _ in },
-                onOpenProviderSetup: @escaping () -> Void = {}) {
+                onOpenAISettings: @escaping () -> Void = {}) {
         self.store = store
         self.scope = scope
         self.feed = feed
         self.project = project
-        self.provider = provider
         self.streaming = streaming
         self.streamingIDs = streamingIDs
         self.isRunning = isRunning
@@ -168,12 +155,7 @@ public struct SZChatPanel: View {
         self.onConsumePendingDraft = onConsumePendingDraft
         self.pendingMention = pendingMention
         self.onConsumePendingMention = onConsumePendingMention
-        self.generationPickerItems = generationPickerItems
-        self.onSetProvider = onSetProvider
-        self.onSetModel = onSetModel
-        self.onSetReasoningEffort = onSetReasoningEffort
-        self.onSetFastMode = onSetFastMode
-        self.onOpenProviderSetup = onOpenProviderSetup
+        self.onOpenAISettings = onOpenAISettings
     }
 
     /// The selected node (if the scope names one that still exists).
@@ -265,36 +247,36 @@ public struct SZChatPanel: View {
     /// The conversation's own actions, in the composer rather than in a strip above the
     /// transcript. There is one conversation now, so a header row existed to hold a single button
     /// — and a band of chrome across the top of the panel is a lot of furniture for one item.
-    @ViewBuilder
     private var composerMenu: some View {
-        // Offered whenever the FEED has anything in it — the panel's own contents, not one scope's.
-        // Keyed to the Director's scope it hid itself on a conversation whose visible half lived in
-        // node transcripts.
-        if !feed.isEmpty {
-            Menu {
-                // Clear = a FULL reset (transcript + the agent's session — the host side documents
-                // why they go together). Disabled while a turn streams.
-                Button(role: .destructive) { onClearTranscript(scope) } label: {
-                    Label("Clear Transcript & Reset Agent", systemImage: "trash")
-                }
-                .disabled(streaming)
-            } label: {
-                // Same size, same weight, same hover as the + beside it: they are two buttons on
-                // one row, and the menu's own chrome (a bezel, its own metrics) made them read as
-                // controls from different apps.
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 20))
-                    .foregroundStyle(menuHover ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                    .scaleEffect(menuHover ? 1.1 : 1)
-                    .contentShape(Circle())
+        // Always offered: AI Settings must stay reachable from the panel even before the first
+        // message (the feed gate belonged to the era when Clear was the menu's only item).
+        Menu {
+            Button { onOpenAISettings() } label: {
+                Label("AI Settings…", systemImage: "slider.horizontal.3")
             }
-            .buttonStyle(.plain)
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .trackingHover($menuHover)
-            .help("Conversation actions")
+            Divider()
+            // Clear = a FULL reset (transcript + the agent's session — the host side documents
+            // why they go together). Disabled while a turn streams or there is nothing to clear.
+            Button(role: .destructive) { onClearTranscript(scope) } label: {
+                Label("Clear Transcript & Reset Agent", systemImage: "trash")
+            }
+            .disabled(streaming || feed.isEmpty)
+        } label: {
+            // Same size, same weight, same hover as the + beside it: they are two buttons on
+            // one row, and the menu's own chrome (a bezel, its own metrics) made them read as
+            // controls from different apps.
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 20))
+                .foregroundStyle(menuHover ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .scaleEffect(menuHover ? 1.1 : 1)
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .trackingHover($menuHover)
+        .help("Conversation actions")
     }
 
     private func nodeFor(_ s: SZChatScope) -> SZNode? {
@@ -530,15 +512,6 @@ public struct SZChatPanel: View {
                 .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 8)
-            if !generationPickerItems.isEmpty {
-                SZProviderGenerationPickerView(
-                    items: generationPickerItems,
-                    onSetProvider: onSetProvider,
-                    onSetModel: onSetModel,
-                    onSetReasoningEffort: onSetReasoningEffort,
-                    onSetFastMode: onSetFastMode,
-                    onOpenProviderSetup: onOpenProviderSetup)
-            }
             // The Stop rides NEXT TO send while a run / this scope's turn is in flight — the input
             // stays live (a send queues), but stopping is always one click, on every tab.
             if let stop = activeStop {
@@ -793,21 +766,30 @@ private struct SZChatTurnRow: View, Equatable {
                         // (send / stop-turn / stop-run); a second stop that wanders is worse.
                     }
                 } else if let duration = message.duration, message.role == .assistant {
-                    // Final time + tokens, kept below the reply. Tokens are opt-in (View ▸ Show
-                    // Token Counts), and not every CLI reports usage.
+                    // Final time + the turn's receipt + tokens, kept below the reply. The receipt
+                    // names what ACTUALLY ran (model, else provider; "· fast" when it was); hover
+                    // carries the full envelope + the routing rule that picked it. Tokens are
+                    // opt-in (View ▸ Show Token Counts), and not every CLI reports usage. A turn
+                    // without a receipt renders exactly as before receipts existed.
                     let tokens = showTokenCounts ? message.usage.map {
                         " · \(szFormatTokensCompact($0.inputTokens)) in / \(szFormatTokensCompact($0.outputTokens)) out"
                     } ?? "" : ""
-                    let caption = "Worked for \(szFormatDurationCompact(duration))\(tokens)"
+                    let ran = message.generation.map {
+                        " · \($0.model ?? $0.providerID)\($0.fastMode ? " · fast" : "")"
+                    } ?? ""
+                    let caption = "Worked for \(szFormatDurationCompact(duration))\(ran)\(tokens)"
+                    let hover = message.generation.map { $0.label + ($0.via.map { " — via \($0)" } ?? "") }
                     if showTurnBreakdown, let breakdown = message.breakdown, !breakdown.isEmpty {
                         // The same caption, now a disclosure over the turn's recorded phases.
-                        SZTurnBreakdownView(turnCaption: caption, events: breakdown,
-                                            profilerTarget: breakdown.compactMap(\.runID).first ?? message.id,
-                                            turnID: message.id)
+                        let disclosure = SZTurnBreakdownView(turnCaption: caption, events: breakdown,
+                                                             profilerTarget: breakdown.compactMap(\.runID).first ?? message.id,
+                                                             turnID: message.id)
+                        if let hover { disclosure.help(hover) } else { disclosure }
                     } else {
-                        Text(caption)
+                        let text = Text(caption)
                             .font(.system(size: 9, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tertiary)
+                        if let hover { text.help(hover) } else { text }
                     }
                 } else if showTurnBreakdown, message.role == .assistant,
                           let breakdown = message.breakdown, !breakdown.isEmpty {

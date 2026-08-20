@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Per-provider generation choices (model / reasoning effort / fast mode) — the preference half of
-// provider selection, following the SZHost+Chat.swift sibling pattern. Mutators validate against
+// The DEFAULT provider's generation choices (model / reasoning effort / fast mode) — the
+// preference half of provider selection, following the SZHost+Chat.swift sibling pattern; the
+// setup sheet's per-card picker and `ui_set_provider` are the ways in. Mutators validate against
 // the ACTIVE provider's real capability surface, write that provider's row, persist immediately
 // (the snapToGrid story — a preference, not the setup sheet's Confirm gate), and re-fire the
 // provider-default telemetry (its joined signature dedupes no-op repeats). Rows are stored raw and
@@ -9,39 +10,8 @@
 import Foundation
 import SZAI
 import SZCore
-import SZUI
 
 extension SZHost {
-    /// The composer picker's items: every provider with its full generation surface + resolved
-    /// selection, only healthy ones selectable — an absent option is a mystery, a dimmed one is a
-    /// diagnosis. (The old HUD `providerPickerItems` mapping's successor; SZUI can't import SZAI,
-    /// so capabilities arrive pre-mapped.)
-    var providerGenerationPickerItems: [SZProviderGenerationPickerItem] {
-        SZProviderRegistry.shared.providers.map { provider in
-            let status = displayedProviderHealth(provider.id)?.status
-            let resolved = provider.resolvedGenerationSettings(from: providerGenerationSettings[provider.id])
-            let selectedModel = resolved.model ?? provider.defaultModel
-            // A user-disabled provider stays listed but dimmed WITH the reason in its label —
-            // menu rows carry no tooltip, and its health entry is empty (checks skip it), so
-            // without the suffix a dimmed row would read as a mystery.
-            let disabled = disabledProviderIDs.contains(provider.id)
-            return SZProviderGenerationPickerItem(
-                id: provider.id,
-                label: disabled ? "\(provider.displayName) (disabled)" : provider.displayName,
-                isEnabled: !disabled
-                    && (status == nil || status == .ready),   // unknown stays permissive, like the pre-flights
-                isActive: provider.id == activeProviderID,
-                models: provider.models.map {
-                    SZProviderGenerationPickerModelItem(id: $0.id, label: $0.displayName)
-                },
-                supportedReasoningEfforts: provider.supportedReasoningEfforts(for: selectedModel),
-                supportsFastMode: provider.supportsFastMode(for: selectedModel),
-                selectedModel: selectedModel,
-                selectedReasoningEffort: resolved.reasoningEffort,
-                fastModeEnabled: resolved.fastMode ?? false)
-        }
-    }
-
     /// The stored row for `providerID`, clamped to the provider's real capabilities — always
     /// concrete values, ready for an `SZAgentRunRequest`. Identity-empty for an unknown id.
     func resolvedGenerationSettings(for providerID: String) -> SZProviderGenerationSettings {

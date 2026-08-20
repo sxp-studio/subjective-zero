@@ -219,6 +219,29 @@ is one traversal of an agent graph, recorded (`SZAgentGraphRun`). A task is *sch
 - Pending tasks persist to `.subz/.staging/tasks.json` (`SZTaskQueueIO`) — under staging because
   a task spends tokens when it starts. A RUNNING task is never restored.
 
+## Model routing
+
+Which envelope (provider · model · effort · fast) serves a given model call is policy, resolved
+once per delivery behind the `SZModelRouting` seam ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)
+has the profile format and env semantics). The parts that live in orchestration:
+
+- **The resolution ladder**, most specific first: **session pin > grade > duty > agent >
+  default**. A resumed thread keeps the envelope that opened it; a fleet child dispatched under a
+  grade runs the grade's envelope; otherwise the turn's duty word, then its agent's floor, then
+  the app default. Queries take the profile's one queries envelope or the default — a triage ask
+  under a heavy node is still a triage ask.
+- **Duty words live in graph.json**: a turn node may declare its work kind (`"duty": "plan"` /
+  `"build"` / `"chat"`, lowercase `[a-z0-9-]`, shape-gated) — a pack-author label that travels
+  with the node through every rename and rewire, never a model name. The engine forwards it to
+  the router verbatim; an unlabeled turn simply routes by its agent.
+- **Grades are recorded at briefing, frozen at dispatch**: the Director grades each node's
+  implementation task while briefing it (`ui_update_node`'s `complexity`), write-wins until a
+  coding turn runs for the node — from then the grade is frozen, so a retry resolves exactly as
+  the cold start did.
+- **Receipts are the audit trail**: every finished turn's transcript message carries the envelope
+  it actually ran (+ its `via` provenance), and the RUNS records carry the same truth per visit,
+  with a work child's grade beside it. Fallback drops are narrated as sentences, never silent.
+
 ## Cross-agent messaging
 
 - Director Agent → a node's Coding Agent DURING a run: `ui_send_chat` is recorded as a `.steer`

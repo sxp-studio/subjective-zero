@@ -335,6 +335,7 @@ struct SZAgentGraphRunRow: View {
                                 // card's clock: swap the string, don't dissolve it.
                                 .contentTransition(.identity)
                             badge
+                            gradeTag
                             Spacer(minLength: 0)
                         }
                     }
@@ -357,6 +358,21 @@ struct SZAgentGraphRunRow: View {
               // The badge folds `.interrupted` into "stopped"; the distinction lives here, so a
               // run the app died under is still tellable from one you ended yourself.
               + (run.conclusion == .interrupted ? " · \(SZAgentGraphRun.interruptedDetail)" : ""))
+    }
+
+    /// The Director's grade for this dispatched task ("light"/"standard"/"heavy") — the
+    /// visit mark's typography in the Director's violet: a mark on the brief, not an
+    /// ending, so it wears a tinted ground rather than a badge's filled capsule.
+    @ViewBuilder private var gradeTag: some View {
+        if let grade = run.grade {
+            Text(grade)
+                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(SZEdgeStyle.intentViolet)
+                .lineLimit(1)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 0.5)
+                .background(Capsule().fill(SZEdgeStyle.intentViolet.opacity(0.14)))
+        }
     }
 
     /// How it ended, in the canvas terminal's own words and colours — or a pulse while it

@@ -1,13 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Agent Providers setup sheet — provider cards with live status badges, inline remedies, and
-// an explicit Confirm for the default. Each card: radio select, capsule badge, message, monospaced
-// path line, accent-tinted selection — plus (roadmap Task 2) a six-status vocabulary, fix-in-place
-// remedies (copyable install command, a Terminal login launcher), and a per-card Test that runs the
-// one-shot prompt probe.
-// SZUI can't import SZAI: everything arrives as host-mapped `SZProviderSetupCard` values +
-// closures, the panel's established seam.
+// The AI Settings sheet (the Xcode-Settings shape): a sidebar toggles focused panes — Providers
+// (provider cards with live status badges, inline remedies, and an explicit Confirm for the
+// default; also the first-run surface, unchanged in substance) and Routing (named routing
+// profiles, SZRoutingSettingsView). Each card: radio select, capsule badge, message, monospaced
+// path line, accent-tinted selection, fix-in-place remedies, and a per-card Test probe.
+// SZUI can't import SZAI: everything arrives as host-mapped values + closures, the panel's
+// established seam.
 import AppKit
 import SwiftUI
+
+/// One model entry in a picker menu: the opaque id the host selects by + the label the menu
+/// shows ("claude-opus-4-8" → "Opus 4.8" — pinned versions, honest labels).
+public struct SZProviderGenerationPickerModelItem: Identifiable, Equatable, Sendable {
+    public var id: String
+    public var label: String
+
+    public init(id: String, label: String) {
+        self.id = id
+        self.label = label
+    }
+}
+
+/// The sheet's sidebar sections: provider health/auth/default vs. the routing profiles —
+/// related surfaces, deliberately not one list.
+public enum SZProviderSetupSection: String, CaseIterable, Sendable {
+    case providers
+    case routing
+}
 
 /// One provider's card — a pure view-model the host maps from its merged health truth.
 public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
@@ -77,6 +96,10 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
 public struct SZProviderSetupSheet: View {
     private let cards: [SZProviderSetupCard]
     private let selectedID: String?
+    /// The Routing pane's content, built by the presenter (the gearMenu AnyView pattern —
+    /// its rows/closures are wired where the host is in scope). nil = no Routing section
+    /// (previews/tests), the sidebar hides it.
+    private let routing: SZRoutingSettingsView?
     private let onSelect: (String) -> Void
     private let onRefresh: () -> Void
     private let onTest: (String) -> Void
@@ -89,7 +112,12 @@ public struct SZProviderSetupSheet: View {
     private let onOpenSetupGuide: () -> Void
     private let onJoinDiscord: () -> Void
 
+    /// The sidebar selection; seeded by the presenter (auto-present lands on Providers).
+    @State private var section: SZProviderSetupSection
+
     public init(cards: [SZProviderSetupCard], selectedID: String?,
+                routing: SZRoutingSettingsView? = nil,
+                initialSection: SZProviderSetupSection = .providers,
                 onSelect: @escaping (String) -> Void, onRefresh: @escaping () -> Void,
                 onTest: @escaping (String) -> Void,
                 onSetModel: @escaping (String, String) -> Void,
@@ -101,6 +129,8 @@ public struct SZProviderSetupSheet: View {
                 onJoinDiscord: @escaping () -> Void) {
         self.cards = cards
         self.selectedID = selectedID
+        self.routing = routing
+        _section = State(initialValue: initialSection)
         self.onSelect = onSelect
         self.onRefresh = onRefresh
         self.onTest = onTest
@@ -117,9 +147,71 @@ public struct SZProviderSetupSheet: View {
     private var selectedCard: SZProviderSetupCard? { cards.first { $0.id == selectedID } }
 
     public var body: some View {
+        HStack(spacing: 0) {
+            sidebar
+            Group {
+                switch section {
+                case .providers: providersPane
+                case .routing: routingPane
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(width: 820, height: 580)
+    }
+
+    // MARK: - Sidebar (the Xcode-Settings shape: sections toggle, panes stay focused)
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("AI Settings")
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+            sidebarItem(.providers, label: "Providers", systemImage: "cpu")
+            if routing != nil {
+                sidebarItem(.routing, label: "Routing", systemImage: "arrow.triangle.branch")
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 16)
+        .frame(width: 178, alignment: .leading)
+        .frame(maxHeight: .infinity)
+        .background(Color(nsColor: .underPageBackgroundColor).opacity(0.6))
+    }
+
+    private func sidebarItem(_ target: SZProviderSetupSection, label: String,
+                             systemImage: String) -> some View {
+        let selected = section == target
+        return Button {
+            section = target
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 18)
+                Text(label)
+                    .font(.system(size: 13))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            // The Xcode selection pill: a full accent fill with white content, not a tint.
+            .background(RoundedRectangle(cornerRadius: 7)
+                .fill(selected ? Color.accentColor : .clear))
+            .foregroundStyle(selected ? Color.white : Color.primary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Providers pane (the original sheet, unchanged in substance)
+
+    private var providersPane: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Agent Providers").font(.system(size: 17, weight: .semibold))
+                Text("Providers").font(.system(size: 17, weight: .semibold))
                 Spacer()
                 Button { onRefresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
             }
@@ -151,8 +243,22 @@ public struct SZProviderSetupSheet: View {
                     .disabled(!(selectedCard?.isConfirmable ?? false))
             }
         }
-        .padding(20)
-        .frame(width: 640, height: 520)
+    }
+
+    // MARK: - Routing pane (presenter-built content; a Done that mirrors the sheet's dismiss)
+
+    @ViewBuilder
+    private var routingPane: some View {
+        if let routing {
+            VStack(alignment: .leading, spacing: 14) {
+                routing
+                Spacer(minLength: 0)
+                HStack {
+                    Spacer()
+                    Button("Done") { onSkip() }   // post-first-run close; routing never gates Confirm
+                }
+            }
+        }
     }
 
     // MARK: - Card

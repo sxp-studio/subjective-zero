@@ -36,6 +36,12 @@ extension SZHostBridge {
                  properties: ["message": ["type": "string", "description": "the message text, as typed"]]),
             tool("debug_set_paused", "Freeze or resume the render clock (mirrors the HUD Pause/Play button). `paused:true` freezes time + frame index so successive `agent_view_frame`s render the same instant — the deterministic way to A/B an input (e.g. sweep a slider and compare frames without the camera/animation drifting between captures). `paused:false` resumes. Idempotent; returns the applied `paused`.",
                  properties: ["paused": ["type": "boolean", "description": "true = pause, false = resume"]]),
+            tool("debug_set_routing", "Routing mutation for headless A/B harnesses, through the SAME host mutators as AI Settings (persists to app-state.json, busy guard applies). `profile` upserts a full routing profile — {name, queries?, light?, standard?, heavy?, agents?: {<id>: {all?, duties?: {<word>: envelope}}}}, envelopes = {providerID, model?, reasoningEffort?, fastMode?} — creating or replacing by name. `active` then switches the active profile (\"\" = Off; JSON null reads as absent, so send \"\"). A switch refused because a run is in flight comes back as {refused: <why>} rather than an error, with the standing active_profile beside it.",
+                 properties: [
+                    "active": ["type": "string", "description": "a saved profile name to activate, or \"\" for Off"],
+                    "profile": ["type": "object", "description": "a full SZRoutingProfile JSON object to create-or-replace by name"],
+                 ]),
+            tool("debug_routing_state", "The routing world as JSON: `active_profile` (the saved name app-state activates), `env` (the raw SZ_MODEL_ROUTING launch pin), `profiles` (saved names), `node_grades` (node uuid → light|standard|heavy, as recorded), and `resolved` — the table a delivery starting NOW would bind, built through the real resolution path (without consuming the once-per-state fallback narration): per-position \"provider · model · effort · fast\" strings for agents/duties/grades/queries plus the fallback, and the `notes` resolution produced. A launch pin naming a missing profile reads as {refused: <detail>}."),
             tool("debug_quit", "Quit the app cleanly, exactly like ⌘Q (windows close, state persists, the camera stops). Test-bus only — the way an automated drive ends a session instead of resorting to kill signals that skip teardown. Replies before terminating."),
             tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, the door, seats, dispatch targets, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes) compile every step folder through the real toolchain first — expect seconds, not milliseconds. Omit `path` for the live packs root (the materialized bundled packs, or SZ_AGENT_PACKS).",
                  properties: ["path": ["type": "string", "description": "absolute path to a pack root (a directory of agent folders)"]]),
@@ -59,6 +65,8 @@ extension SZHostBridge {
         case "debug_fail_node_once":   return try debugFailNodeOnce(arguments)
         case "debug_send_user_chat":   return try debugSendUserChat(arguments)
         case "debug_set_paused":       return try debugSetPaused(arguments)
+        case "debug_set_routing":      return try debugSetRouting(arguments)
+        case "debug_routing_state":    return debugRoutingState()
         case "debug_quit":             return debugQuit()
         // debug_check_pack never lands here — SZMCPServer routes it down the off-main lane
         // (SZHostBridge.offMainToolNames) before the MainActor hop.
@@ -92,6 +100,84 @@ extension SZHostBridge {
         }
         if host.isPaused != paused { host.togglePlayback() }
         return SZJSONRPC.encode(["paused": host.isPaused])
+    }
+
+    /// The A/B harness's routing mutator — the same host funnels as AI Settings (persist, busy
+    /// guard, session affinity), so a drive exercises the shipped behavior, never a parallel path.
+    /// Upsert first, then activate, so one call can install and switch to a fresh arm.
+    private func debugSetRouting(_ arguments: [String: Any]) throws -> String {
+        guard arguments.object("profile") != nil || arguments.string("active") != nil else {
+            throw SZMCPError.message("debug_set_routing needs `profile` (a routing profile object) and/or `active` (a saved name, \"\" = Off)")
+        }
+        var response: [String: Any] = [:]
+        if var raw = arguments.object("profile") {
+            // `agents` is the one non-optional collection; a profile sent without it means "none".
+            if raw["agents"] == nil { raw["agents"] = [String: Any]() }
+            let profile: SZRoutingProfile
+            do {   // the same JSON dialect app-state stores: object → data → Codable
+                let data = try JSONSerialization.data(withJSONObject: raw)
+                profile = try JSONDecoder().decode(SZRoutingProfile.self, from: data)
+            } catch {
+                throw SZMCPError.message("debug_set_routing: `profile` does not decode as a routing profile — \(error)")
+            }
+            guard !profile.name.isEmpty else {
+                throw SZMCPError.message("debug_set_routing: `profile.name` must be non-empty")
+            }
+            host.upsertRoutingProfile(profile)
+            response["upserted"] = profile.name
+        }
+        if let raw = arguments.string("active") {
+            let name = raw.isEmpty ? nil : raw
+            if let name, !host.routingProfiles.contains(where: { $0.name == name }) {
+                let saved = host.routingProfiles.map(\.name)
+                throw SZMCPError.message("debug_set_routing: no routing profile named \"\(name)\" — saved profiles: "
+                    + (saved.isEmpty ? "(none)" : saved.joined(separator: ", ")))
+            }
+            if !host.setActiveRoutingProfile(name) {
+                // The busy guard — report it as state, the reply's whole point for a harness.
+                response["refused"] = "a run is in flight — the active profile is unchanged"
+            }
+        }
+        response["active_profile"] = Self.jsonNull(effectiveRoutingProfileName)
+        return SZJSONRPC.encode(response)
+    }
+
+    /// The routing world in one read. `resolved` is built through the REAL path (`makeRouter`)
+    /// with the narration memory snapshotted around it, so a debug read never consumes a fallback
+    /// sentence the user's next delivery is owed.
+    private func debugRoutingState() -> String {
+        var state: [String: Any] = [
+            "profiles": host.routingProfiles.map(\.name),
+            "active_profile": Self.jsonNull(effectiveRoutingProfileName),
+            "env": Self.jsonNull(SZHost.modelRoutingEnv),
+            "node_grades": Dictionary(uniqueKeysWithValues:
+                host.nodeGrades.map { ($0.key.uuidString, $0.value) }),
+        ]
+        let narrated = host.narratedRoutingNotes
+        defer { host.narratedRoutingNotes = narrated }
+        // One choice as the receipt-style display string: "provider · model · effort · fast".
+        func line(_ choice: SZModelChoice) -> String {
+            [choice.providerID, choice.model, choice.reasoningEffort,
+             choice.fastMode ? "fast" : nil].compactMap { $0 }.joined(separator: " · ")
+        }
+        do {
+            let (router, notes) = try host.makeRouter(providerID: host.activeProviderID)
+            var resolved: [String: Any] = ["notes": notes]
+            if let table = router as? SZProfileRouter {
+                resolved["fallback"] = line(table.fallback)
+                resolved["agents"] = table.agents.mapValues(line)
+                resolved["duties"] = table.duties.mapValues(line)
+                resolved["grades"] = table.grades.mapValues(line)
+                if let queries = table.queries { resolved["queries"] = line(queries) }
+            } else if let identity = router as? SZIdentityRouter {
+                resolved["fallback"] = line(identity.choice)   // routing off: one choice for every call
+            }
+            state["resolved"] = resolved
+        } catch {
+            // The launch pin names a profile that doesn't exist — refusal IS the state.
+            state["resolved"] = ["refused": "\(error)"]
+        }
+        return SZJSONRPC.encode(state)
     }
 
     /// The pack pre-flight, rendered by the same loader path the host will use. The tool

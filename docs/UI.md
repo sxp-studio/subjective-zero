@@ -158,9 +158,9 @@ Graph panel.
   implementation turns into node transcripts with nothing marking them as fleet work, so without
   the epoch an old project's first open would fill the conversation with every coding turn it ever
   ran.
-- The panel has NO header row. One conversation had nothing to name, so its single action —
-  **Clear Transcript & Reset Agent**, which clears every scope the feed is made of — moved into a
-  ⋯ menu beside the composer's +.
+- The panel has NO header row. One conversation had nothing to name, so its actions —
+  **AI Settings…** (the provider + routing sheet) and **Clear Transcript & Reset Agent**, which
+  clears every scope the feed is made of — moved into a ⋯ menu beside the composer's +.
 - **@mentions** are the addressing substrate turned into a targeting HINT: `@project`, `@all`,
   `@<node title>` — typed via an autocomplete (`@` at a word boundary), inserted as atomic accent
   tokens, stored as canonical markup (`@[Blur](node:UUID)`, SZCore `SZMentionMarkup`), expanded
@@ -186,12 +186,15 @@ Graph panel.
   build's own lane in the strip. Click only — Return never stops anything. The composer is never disabled:
   a send while something streams simply queues, with a chip on its bubble.
 - The **composer** is a Codex-style rounded two-row card floating on the panel background: the
-  growing text field on top; a bottom bar with `+` attach (left) and the **provider generation
-  picker** + circular send (right). The picker (`SZProviderGenerationPickerView`) is one pill
-  (`[health dot] [bolt] model · effort ⌄`) opening a nested menu: providers (unhealthy = dimmed),
-  model / reasoning-effort (hidden for a CLI with no effort concept) / fast-mode submenus, and
-  "Agent Providers…" into the setup sheet. Selection is **global** (always what Run uses); a
-  provider *switch* resets agent sessions (transcripts stay) and is refused while agents are busy.
+  growing text field on top; a bottom bar with `+` attach and the ⋯ menu (left) and the circular
+  send (right). The provider pill is GONE: the forward-looking selection lives in the **AI
+  Settings sheet** (⌘,, or the ⋯ menu's "AI Settings…"), and the backward-looking truth is the
+  **receipt caption** under each finished reply — `Worked for 12s · gpt-5.6-terra · fast` —
+  whose hover reveals the full envelope (provider · model · effort · fast) and the routing rule
+  that chose it (`via`). A provider *switch* still resets agent sessions (transcripts stay) and
+  is refused while agents are busy; with a routing profile active, different graph positions may
+  run different envelopes, and the receipts are how you see what actually ran
+  ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)).
 - A **streaming turn's working row** shows dots + elapsed only; stopping lives in the composer's
   action slot. A stopped turn keeps its session and partial reply.
 - This is a **from-scratch** design - keep it clean and native.
@@ -223,25 +226,31 @@ Graph panel.
 
 ## Settings
 
-- **Agent Providers sheet (shipped)** - the app's only settings surface today, on ⌘,
-  (`CommandGroup(replacing: .appSettings)`), the HUD picker's "Agent Providers…" menu item, and
+- **Agent Providers (shipped)** - the provider half of the AI Settings sheet, on ⌘,
+  (`CommandGroup(replacing: .appSettings)`), the chat ⋯ menu's "AI Settings…" item, and
   auto-presented on first run until a default is confirmed. Provider cards with live status
   badges (Ready / Verified / Not Installed / Login Needed / Failing), inline remedies (copyable
   install command; "Open Terminal to Log In" - a `.command` file handed to Terminal.app, no
   Apple-Events prompt), a per-card Test running the one-shot prompt probe, and a 3s cheap-tier
   re-check loop while open so remedies flip cards green on their own. Confirm persists
   `defaultProviderID`; Skip returns next launch ([AI_PROVIDERS.md](AI_PROVIDERS.md)).
-- Provider selection lives in the chat composer's `SZProviderGenerationPickerView` (Task 5 -
-  the old HUD `SZProviderPickerView` is deleted; the HUD is canvas tools only: chat · add ·
-  delete, with a working dot on the chat toggle while agents run with the panel closed).
-  Unhealthy providers render dimmed but visible; runs and new chats on an unhealthy
-  provider refuse and open the sheet instead of failing silently; the pill wears a warning dot
-  while the ACTIVE provider is unhealthy (the menu's "Agent Providers…" item is the way in).
+- **AI Settings sheet** - the provider cards above now sit behind a two-item sidebar,
+  **Providers | Routing**. Providers is the card surface described above (active provider +
+  model / effort / fast per provider — the global default envelope; the old composer pill and HUD
+  picker are both deleted). **Routing** edits the named routing profiles
+  ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)): an Off row plus one row per saved
+  profile (the active one checked), each profile mapping agents, their duty words, the Director's
+  light/standard/heavy grades, and step queries to envelopes. Activating or editing a profile
+  affects NEW conversations only, and switching is refused while a run is in flight. The
+  unhealthy-provider **warning dot** lost its composer home: it lives on the sheet's surfaces (the
+  provider card / sidebar badge) — runs and new chats on an unhealthy provider still refuse and
+  open the sheet instead of failing silently.
+- **Envelopes are visible where work is**: each finished reply's receipt caption in the
+  transcript; the RUNS panel's cards show `duration · envelope` per turn plus the node's grade
+  tag on fleet work; turn cards wear their duty-word chip. The receipts are the ground truth a
+  routing profile is judged against.
 - **macOS permissions dashboard (future)** - camera, microphone, etc.: current status + a way to
   request, reflecting what the runtime holds ([RUNTIME.md](RUNTIME.md)).
-- Per-agent-type (Director vs Coding) generation overrides remain future work - likely as agent
-  profiles; the shipped selection is deliberately global (the pill sits next to Run and must
-  always describe what Run will do).
 
 ## Principles
 
