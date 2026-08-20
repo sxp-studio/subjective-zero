@@ -184,6 +184,30 @@ struct SZRoutingHostTests {
 
     // MARK: - The Routing pane's mapping
 
+    // MARK: - The profile lifecycle's refusal branches (they return before any persist)
+
+    @Test func theShippedStartersRefuseDeleteAndRename() throws {
+        let starters = SZHost.routingStarters.map(\.profile)
+        let starter = try #require(starters.first?.name)
+        let host = bareHost(profiles: starters + [fastFleet], active: nil)
+        #expect(!host.deleteRoutingProfile(named: starter))
+        #expect(!host.renameRoutingProfile(from: starter, to: "Mine"))
+        // A starter name is refused as a rename TARGET too — a user profile must never
+        // wander into the read-only set.
+        #expect(!host.renameRoutingProfile(from: "fast-fleet", to: starter))
+        #expect(host.routingProfiles.count == starters.count + 1)
+    }
+
+    @Test func deletingTheRunningProfileIsFencedMidRun() {
+        let host = bareHost(profiles: [fastFleet], active: "fast-fleet")
+        let run = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "t"),
+                             instruction: "x", ownsGraphOp: false, workSet: [])
+        host.activeRuns[run.taskID] = run
+        #expect(!host.deleteRoutingProfile(named: "fast-fleet"))
+        #expect(host.routingProfiles.count == 1)
+        #expect(host.activeRoutingProfileName == "fast-fleet")
+    }
+
     @Test func aPinlessSessionUnderAMovedRouteIsNotResumable() {
         // A codex thread can't be resumed by claude: the id is dropped, the turn cold-starts.
         let session = SZAgentSession(providerID: "codex", sessionID: "s-1")
