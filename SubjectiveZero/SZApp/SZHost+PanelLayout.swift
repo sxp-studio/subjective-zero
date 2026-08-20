@@ -146,7 +146,9 @@ extension SZHost {
                                                 ? nil : poppedOutPanels.values.sorted { $0.panel < $1.panel },
                                              routingProfiles: routingProfiles.isEmpty
                                                 ? nil : routingProfiles,
-                                             activeRoutingProfileName: activeRoutingProfileName))
+                                             activeRoutingProfileName: activeRoutingProfileName,
+                                             routingStarterSeeded: routingStarterSeeded ? true : nil,
+                                             routingLastProfileName: routingLastProfileName))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

@@ -261,10 +261,6 @@ struct SZApp: App {
     @NSApplicationDelegateAdaptor(SZAppDelegate.self) private var appDelegate
     @State private var host = SZHost()
     @State private var selectedNodeID: SZNodeID?      // canvas selection (edit/move/wire) — NOT chat scope
-    /// Which row of the Routing pane's profiles list is selected: nil = no choice made yet
-    /// (the active profile, else the first, else Off), "" = the Off row explicitly, a name =
-    /// that profile. Presentation state, so it lives beside the sheet, not in app-state.
-    @State private var editedRoutingProfile: String?
     /// The AI Settings section last viewed — reopening the sheet returns there (per launch,
     /// like the edit selection above; not persisted).
     @State private var setupSection: SZProviderSetupSection = .providers
@@ -538,39 +534,28 @@ struct SZApp: App {
                        set: { $0 ? host.showPanel(id) : host.closePanel(id) })
     }
 
-    /// The AI Settings Routing pane, wired to the host mapping (SZHost+RoutingSettings). Built
-    /// here because the edit selection is presentation state (`editedRoutingProfile`) and every
-    /// intent needs the host in scope — the gearMenu pattern, typed instead of erased.
-    /// The list selection the pane shows: the Off sentinel ("") resolves to nil (the Off
-    /// row), everything else through the host's requested → active → first fallback.
-    private var resolvedRoutingSelection: String? {
-        editedRoutingProfile == "" ? nil
-            : host.routingEditedProfile(named: editedRoutingProfile)?.name
-    }
-
+    /// The AI Settings Routing pane, wired to the host mapping (SZHost+RoutingSettings).
+    /// No presentation state: the selected row IS the active profile, so the host's
+    /// `activeRoutingProfileName` is the whole story — the gearMenu pattern, typed.
     private var routingSettingsView: SZRoutingSettingsView {
-        let selection = resolvedRoutingSelection
+        let selection = host.activeRoutingProfileName
         return SZRoutingSettingsView(
             profiles: host.routingProfileRows,
-            editedProfileName: selection,
+            selectedProfileName: selection,
             agents: host.routingAgentCards(editedName: selection),
+            activeProviderSummary: host.routingAppDefaultDisplay,
             envPinnedProfileName: host.routingEnvPinnedProfileName,
-            claudeLadderAvailable: host.routingClaudeLadderAvailable,
-            onSelectActiveProfile: { _ = host.setActiveRoutingProfile($0) },
-            onCreateProfile: { editedRoutingProfile = host.createRoutingProfile() },
-            onCreateClaudeLadder: { editedRoutingProfile = host.createClaudeLadderRoutingProfile() },
-            onRenameProfile: { old, new in
-                if host.renameRoutingProfile(from: old, to: new) { editedRoutingProfile = new }
+            envKilled: host.routingEnvKilled,
+            onSetRoutingEnabled: { host.setRoutingEnabled($0) },
+            onSelectProfile: { _ = host.setActiveRoutingProfile($0) },
+            onCreateProfile: { _ = host.createRoutingProfile() },
+            onRenameProfile: { old, new in _ = host.renameRoutingProfile(from: old, to: new) },
+            onDuplicateProfile: { name in
+                if let copy = host.duplicateRoutingProfile(named: name) {
+                    _ = host.setActiveRoutingProfile(copy)   // identical table: no move
+                }
             },
-            onDuplicateProfile: {
-                editedRoutingProfile = host.duplicateRoutingProfile(named: $0) ?? editedRoutingProfile
-            },
-            onDeleteProfile: { name in
-                let wasSelected = resolvedRoutingSelection == name
-                host.deleteRoutingProfile(named: name)
-                if wasSelected { editedRoutingProfile = "" }
-            },
-            onEditProfile: { editedRoutingProfile = $0 ?? "" },
+            onDeleteProfile: { host.deleteRoutingProfile(named: $0) },
             onAssignEnvelope: {
                 host.assignRoutingEnvelope(profileNamed: selection, position: $0,
                                            providerID: $1, modelID: $2)

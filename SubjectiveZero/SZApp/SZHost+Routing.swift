@@ -27,6 +27,16 @@ extension SZHost {
     /// Whether a profile governs new work right now (the settings sheet's Off is nil).
     var routingActive: Bool { (try? activeRoutingProfile()) != nil }
 
+    /// The session id a routed turn may resume. A PINLESS session under a route that moved
+    /// the provider is not resumable — a codex thread can't be resumed by claude — so the
+    /// turn cold-starts on the routed provider instead of handing it another CLI's id.
+    /// (A pinned session never hits the mismatch: affinity already moved the choice back.)
+    nonisolated static func resumableSessionID(of session: SZAgentSession?,
+                                               under choice: SZModelChoice) -> String? {
+        guard let session, session.providerID == choice.providerID else { return nil }
+        return session.sessionID
+    }
+
     /// The profile new deliveries resolve against, honouring the launch pin. A persisted
     /// active name no saved profile carries degrades to off (the stale-preference rule);
     /// an ENV name that resolves nowhere throws — explicit intent is never guessed away.
@@ -154,15 +164,23 @@ extension SZHost {
         persistAppState()
     }
 
-    /// Delete by name; deleting the active profile turns routing off (narrated via status).
+    /// Delete by name. The selected row is what runs, so deleting it is a switch: refused
+    /// while a run is in flight (the same fence as any switch), and otherwise the seat
+    /// passes to the first remaining profile, or routing turns off with the last one.
     @discardableResult
     func deleteRoutingProfile(named name: String) -> Bool {
         guard routingProfiles.contains(where: { $0.name == name }) else { return false }
+        if activeRoutingProfileName == name, isRunning {
+            status = "profile not deleted: a run is in flight"
+            return false
+        }
         routingProfiles.removeAll { $0.name == name }
         if activeRoutingProfileName == name {
-            activeRoutingProfileName = nil
-            status = "routing off: its profile \"\(name)\" was deleted"
+            activeRoutingProfileName = routingProfiles.first?.name
+            status = activeRoutingProfileName.map { "routing now follows \"\($0)\"" }
+                ?? "routing off: its profile \"\(name)\" was deleted"
         }
+        if routingLastProfileName == name { routingLastProfileName = nil }
         narratedRoutingNotes.removeAll()
         persistAppState()
         return true

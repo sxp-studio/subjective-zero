@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The AI Settings Routing pane — named profiles filling the agent graphs' declared MODEL
-// SLOTS with generation envelopes. The profile is the visible container: a pinned list
-// (Off first, ACTIVE badged, activation on the toolbar's right edge) whose selection IS
-// what the editor below shows — tinted agent cards, one row per declared slot; the Off row
-// renders them read-only with each slot's live resolution. SZUI can't import SZAI: cards
-// arrive host-mapped (SZHost+RoutingSettings), keyed by the typed SZRoutingPosition.
+// SLOTS with generation envelopes. One toggle: off hides everything and the active provider
+// runs it all; on shows the profiles list, where the SELECTED row is both what runs and
+// what the tinted agent cards below edit (no separate activation). Double-click renames in
+// place. SZUI can't import SZAI: cards arrive host-mapped (SZHost+RoutingSettings), keyed
+// by the typed SZRoutingPosition.
 import AppKit
 import SwiftUI
 
@@ -24,7 +24,7 @@ public enum SZGenerationLabels {
     }
 }
 
-/// One saved profile in the profile bar's menus.
+/// One saved profile in the pane's list; `isActive` marks the row that runs (= selected).
 public struct SZRoutingProfileRow: Identifiable, Equatable, Sendable {
     public var name: String
     public var isActive: Bool
@@ -149,22 +149,23 @@ public struct SZRoutingAgentCard: Identifiable, Equatable, Sendable {
 
 public struct SZRoutingSettingsView: View {
     private let profiles: [SZRoutingProfileRow]
-    /// The list's selection, host-resolved: a saved profile's name, or nil = the Off row.
-    /// Off shows the same agent cards read-only, every row stating its live resolution.
-    private let editedProfileName: String?
+    /// The one selection: `isActive` in `profiles` marks the row that RUNS and is edited
+    /// below — routing has no separate edit target. nil active row = routing is off.
+    private let selectedProfileName: String?
     private let agents: [SZRoutingAgentCard]
-    /// Non-nil = SZ_MODEL_ROUTING pins this profile at launch; the active menu locks.
+    /// The live resolution of the active provider ("Claude Code · Opus 5") — the toggle's
+    /// off-state helper says where everything runs.
+    private let activeProviderSummary: String
+    /// Non-nil = SZ_MODEL_ROUTING pins this profile at launch; the toggle and list lock.
     private let envPinnedProfileName: String?
-    /// Whether the New Profile menu offers the Claude Ladder starter (host-gated on the
-    /// claude provider being installed and healthy).
-    private let claudeLadderAvailable: Bool
-    private let onSelectActiveProfile: (String?) -> Void
+    /// SZ_MODEL_ROUTING=0: routing is off for this launch no matter what's persisted.
+    private let envKilled: Bool
+    private let onSetRoutingEnabled: (Bool) -> Void
+    private let onSelectProfile: (String) -> Void
     private let onCreateProfile: () -> Void
-    private let onCreateClaudeLadder: () -> Void
     private let onRenameProfile: (String, String) -> Void   // (old, new)
     private let onDuplicateProfile: (String) -> Void
     private let onDeleteProfile: (String) -> Void
-    private let onEditProfile: (String?) -> Void            // nil = the Off row
     private let onAssignEnvelope: (SZRoutingPosition, String?, String?) -> Void   // (position, providerID, modelID); (p, nil, nil) = clear
     private let onSetPositionEffort: (SZRoutingPosition, String?) -> Void
     private let onSetPositionFastMode: (SZRoutingPosition, Bool) -> Void
@@ -174,41 +175,40 @@ public struct SZRoutingSettingsView: View {
     /// already-set slots). The view only prompts; the merge is the host's.
     private let onApplyRecommended: (String, Bool) -> Void
 
-    // The rename alert's target + draft (view-local; committed via onRenameProfile).
+    // The row being renamed inline (double-click begins; commit via onRenameProfile).
     @State private var renameTarget: String?
-    @State private var renameDraft = ""
     // The conflict prompt's subject: a card whose recommendation would replace set slots.
     @State private var recommendTarget: SZRoutingAgentCard?
 
     public init(profiles: [SZRoutingProfileRow],
-                editedProfileName: String?,
+                selectedProfileName: String?,
                 agents: [SZRoutingAgentCard],
+                activeProviderSummary: String = "",
                 envPinnedProfileName: String? = nil,
-                claudeLadderAvailable: Bool = false,
-                onSelectActiveProfile: @escaping (String?) -> Void = { _ in },
+                envKilled: Bool = false,
+                onSetRoutingEnabled: @escaping (Bool) -> Void = { _ in },
+                onSelectProfile: @escaping (String) -> Void = { _ in },
                 onCreateProfile: @escaping () -> Void = {},
-                onCreateClaudeLadder: @escaping () -> Void = {},
                 onRenameProfile: @escaping (String, String) -> Void = { _, _ in },
                 onDuplicateProfile: @escaping (String) -> Void = { _ in },
                 onDeleteProfile: @escaping (String) -> Void = { _ in },
-                onEditProfile: @escaping (String?) -> Void = { _ in },
                 onAssignEnvelope: @escaping (SZRoutingPosition, String?, String?) -> Void = { _, _, _ in },
                 onSetPositionEffort: @escaping (SZRoutingPosition, String?) -> Void = { _, _ in },
                 onSetPositionFastMode: @escaping (SZRoutingPosition, Bool) -> Void = { _, _ in },
                 onShowAgentGraph: @escaping (String) -> Void = { _ in },
                 onApplyRecommended: @escaping (String, Bool) -> Void = { _, _ in }) {
         self.profiles = profiles
-        self.editedProfileName = editedProfileName
+        self.selectedProfileName = selectedProfileName
         self.agents = agents
+        self.activeProviderSummary = activeProviderSummary
         self.envPinnedProfileName = envPinnedProfileName
-        self.claudeLadderAvailable = claudeLadderAvailable
-        self.onSelectActiveProfile = onSelectActiveProfile
+        self.envKilled = envKilled
+        self.onSetRoutingEnabled = onSetRoutingEnabled
+        self.onSelectProfile = onSelectProfile
         self.onCreateProfile = onCreateProfile
-        self.onCreateClaudeLadder = onCreateClaudeLadder
         self.onRenameProfile = onRenameProfile
         self.onDuplicateProfile = onDuplicateProfile
         self.onDeleteProfile = onDeleteProfile
-        self.onEditProfile = onEditProfile
         self.onAssignEnvelope = onAssignEnvelope
         self.onSetPositionEffort = onSetPositionEffort
         self.onSetPositionFastMode = onSetPositionFastMode
@@ -216,46 +216,46 @@ public struct SZRoutingSettingsView: View {
         self.onApplyRecommended = onApplyRecommended
     }
 
-    private var activeProfile: SZRoutingProfileRow? { profiles.first(where: \.isActive) }
-    /// Off (nil selection) shows the cards read-only — live resolutions, no controls.
-    private var isEditable: Bool { editedProfileName != nil }
+    private var routingEnabled: Bool { selectedProfileName != nil && !envKilled }
+    /// The launch env owns routing this session (=0 kill or a name pin): the toggle and
+    /// the list render the pinned truth, locked.
+    private var envLocked: Bool { envKilled || envPinnedProfileName != nil }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Routing").font(.system(size: 17, weight: .semibold))
 
-            Text("Each agent lists the kinds of work it needs a model for. A profile picks a model for each; anything left on Default runs on the default provider.")
+            Text("Each agent lists the kinds of work it needs a model for. A profile picks a model for each; anything left on Default runs on the active provider.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
 
-            if let pinned = envPinnedProfileName {
-                Text("Pinned to \"\(pinned)\" for this launch (SZ_MODEL_ROUTING). Relaunch without it to switch profiles.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Use a routing profile",
+                       isOn: Binding(get: { routingEnabled }, set: { onSetRoutingEnabled($0) }))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .font(.system(size: 13, weight: .medium))
+                    .disabled(envLocked)
+                toggleHelper
             }
 
-            profilesBox
+            if routingEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Profiles")
+                        .font(.system(size: 13, weight: .semibold))
+                    profilesBox
+                }
 
-            VStack(alignment: .leading, spacing: 10) {
-                editorHeader
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(agents) { agentCard($0) }
                     }
                 }
                 .modifier(SZScrollBottomFade())
+            } else {
+                Spacer()
             }
-        }
-        .alert("Rename Profile", isPresented: Binding(get: { renameTarget != nil },
-                                                      set: { if !$0 { renameTarget = nil } })) {
-            TextField("Name", text: $renameDraft)
-            Button("Rename") {
-                if let old = renameTarget { onRenameProfile(old, renameDraft) }
-                renameTarget = nil
-            }
-            Button("Cancel", role: .cancel) { renameTarget = nil }
         }
         .alert("Some slots are already set",
                isPresented: Binding(get: { recommendTarget != nil },
@@ -269,22 +269,37 @@ public struct SZRoutingSettingsView: View {
         }
     }
 
-    // MARK: - Profiles list (selection = what the editor below shows)
+    /// The sentence under the toggle: the launch env's lock when it governs, else where
+    /// everything runs while routing is off. On says nothing — the list speaks.
+    @ViewBuilder
+    private var toggleHelper: some View {
+        Group {
+            if envKilled {
+                Text("SZ_MODEL_ROUTING turns routing off for this launch. Relaunch without it to use profiles.")
+            } else if let pinned = envPinnedProfileName {
+                Text("Pinned to \"\(pinned)\" for this launch (SZ_MODEL_ROUTING). Relaunch without it to switch profiles.")
+            } else if !routingEnabled {
+                Text("Everything runs on \(activeProviderSummary), the active provider.")
+            }
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+    }
 
-    /// The pane's one container for profile identity: the pinned Off row, the saved
-    /// profiles (scrolling past four), and the toolbar whose right edge holds activation.
-    /// The ACTIVE badge marks what runs; the selection highlight marks what's shown.
+    // MARK: - Profiles list (the selected row runs, and is what the cards below edit)
+
     private var profilesBox: some View {
         VStack(spacing: 0) {
-            profileListRow(name: "Off", caption: "The default provider runs everything",
-                           selected: !isEditable, active: activeProfile == nil) {
-                onEditProfile(nil)
+            Group {
+                if profiles.count > 4 {
+                    ScrollView { profileRows }.frame(height: 130)
+                } else {
+                    profileRows
+                }
             }
-            if profiles.count > 4 {
-                ScrollView { profileRows }.frame(height: 104)
-            } else {
-                profileRows
-            }
+            .padding(4)
+            Divider()
             listToolbar
         }
         .background(RoundedRectangle(cornerRadius: 8)
@@ -294,115 +309,41 @@ public struct SZRoutingSettingsView: View {
     }
 
     private var profileRows: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 1) {
             ForEach(profiles) { profile in
-                Divider().padding(.leading, 12)
-                profileListRow(name: profile.name, caption: nil,
-                               selected: profile.name == editedProfileName,
-                               active: profile.isActive) {
-                    onEditProfile(profile.name)
-                }
+                SZProfileListRow(name: profile.name, caption: nil,
+                                 selected: profile.name == selectedProfileName,
+                                 renaming: renameTarget == profile.name,
+                                 select: { onSelectProfile(profile.name) },
+                                 beginRename: { renameTarget = profile.name },
+                                 commitRename: { new in
+                                     onRenameProfile(profile.name, new)
+                                     renameTarget = nil
+                                 },
+                                 cancelRename: { renameTarget = nil })
             }
         }
+        .disabled(envLocked)
     }
 
-    private func profileListRow(name: String, caption: String?, selected: Bool, active: Bool,
-                                select: @escaping () -> Void) -> some View {
-        SZProfileListRow(name: name, caption: caption, selected: selected, active: active,
-                         select: select)
-    }
-
-    /// +, −, and the gear act on the SELECTED row; the right edge switches what RUNS
-    /// ("Use This Profile" / "Turn Routing Off"), hidden when the selection already runs.
+    /// + creates (and runs) an empty profile; − and duplicate act on the selected row.
     private var listToolbar: some View {
-        HStack(spacing: 2) {
-            Menu {
-                Button("Empty Profile") { onCreateProfile() }
-                if claudeLadderAvailable {
-                    Divider()
-                    Button("Claude Ladder: Haiku sorts, Sonnet builds and answers, Opus takes the heavy work") {
-                        onCreateClaudeLadder()
-                    }
-                }
-            } label: {
-                Image(systemName: "plus")
+        HStack(spacing: 4) {
+            SZListGadget(symbol: "plus", disabled: envLocked,
+                         help: "New empty profile") { onCreateProfile() }
+            SZListGadget(symbol: "minus", disabled: envLocked || selectedProfileName == nil,
+                         help: "Delete the selected profile") {
+                if let selected = selectedProfileName { onDeleteProfile(selected) }
             }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(.borderless)
-            .fixedSize()
-            .help("New profile: start empty, or from a preset. Presets only fill the built-in agents")
-            Button {
-                if let edited = editedProfileName { onDeleteProfile(edited) }
-            } label: {
-                Image(systemName: "minus")
+            SZListGadget(symbol: "plus.square.on.square",
+                         disabled: envLocked || selectedProfileName == nil,
+                         help: "Duplicate the selected profile") {
+                if let selected = selectedProfileName { onDuplicateProfile(selected) }
             }
-            .buttonStyle(.borderless)
-            .disabled(!isEditable)
-            .help("Delete the selected profile. Deleting the active profile turns routing off")
-            Menu {
-                Button("Rename…") {
-                    renameDraft = editedProfileName ?? ""
-                    renameTarget = editedProfileName
-                }
-                Button("Duplicate") { if let edited = editedProfileName { onDuplicateProfile(edited) } }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(.borderless)
-            .fixedSize()
-            .disabled(!isEditable)
-            .help("Rename or duplicate the selected profile")
             Spacer()
-            activationButton
         }
-        .controlSize(.small)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(UnevenRoundedRectangle(bottomLeadingRadius: 8, bottomTrailingRadius: 8)
-            .fill(Color.black.opacity(0.12)))
-    }
-
-    /// The one control that changes what runs. Absent when the selection already runs;
-    /// locked (not hidden) under a launch pin so the state stays explicable.
-    @ViewBuilder
-    private var activationButton: some View {
-        if let edited = editedProfileName, edited != activeProfile?.name {
-            Button("Use This Profile") { onSelectActiveProfile(edited) }
-                .buttonStyle(.bordered)
-                .disabled(envPinnedProfileName != nil)
-                .help(envPinnedProfileName != nil
-                    ? "SZ_MODEL_ROUTING pins the profile for this launch"
-                    : "Run new chats and runs on \"\(edited)\". Refused while a run is in flight")
-        } else if !isEditable, activeProfile != nil {
-            Button("Turn Routing Off") { onSelectActiveProfile(nil) }
-                .buttonStyle(.bordered)
-                .disabled(envPinnedProfileName != nil)
-                .help(envPinnedProfileName != nil
-                    ? "SZ_MODEL_ROUTING pins the profile for this launch"
-                    : "Run everything on the default provider. Refused while a run is in flight")
-        }
-    }
-
-    /// The editor's scope title: the selected profile's name, or Off's read-only summary.
-    @ViewBuilder
-    private var editorHeader: some View {
-        if let edited = editedProfileName {
-            Text(edited)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-                .truncationMode(.middle)
-        } else if profiles.isEmpty {
-            Text("No profiles yet. Create one to give specific work its own model.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        } else {
-            Text("Where each kind of work goes right now")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
     }
 
     // MARK: - Agent cards (one per pack, one row per declared slot)
@@ -442,7 +383,7 @@ public struct SZRoutingSettingsView: View {
             Text(agent.title)
                 .font(.system(size: 13, weight: .semibold))
             Spacer()
-            if isEditable, agent.recommendedCount > 0 {
+            if agent.recommendedCount > 0 {
                 SZCardChipButton(label: "Use Recommended Models", symbol: "wand.and.stars",
                                  help: "Fill this agent's slots with the models its pack recommends") {
                     if agent.recommendedConflicts == 0 { onApplyRecommended(agent.id, true) }
@@ -486,18 +427,11 @@ public struct SZRoutingSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            if isEditable {
-                if row.isSet {
-                    effortMenu(row)
-                    fastToggle(row)
-                }
-                envelopeMenu(row)
-            } else {
-                // Off: no controls, just the truth — where this slot's work goes today.
-                Text(row.selectionLabel)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
+            if row.isSet {
+                effortMenu(row)
+                fastToggle(row)
             }
+            envelopeMenu(row)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -524,15 +458,12 @@ public struct SZRoutingSettingsView: View {
                 .disabled(!option.isEnabled)
             }
         } label: {
-            // Cap-and-truncate: a long label must never shove the row wider than the fixed sheet.
-            Text(row.selectionLabel)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 210)
-                .foregroundStyle(row.isSet ? Color.primary : Color.secondary)
+            SZChipMenuFace(text: row.selectionLabel, quiet: !row.isSet)
         }
         .menuStyle(.button)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
         .help("Pick the provider and model this runs on. The first item shows where it goes when you don't")
     }
 
@@ -560,12 +491,13 @@ public struct SZRoutingSettingsView: View {
                     }
                 }
             } label: {
-                Text(row.selectedEffort.map(SZGenerationLabels.effort) ?? "Effort")
-                    .lineLimit(1)
-                    .frame(maxWidth: 90)
+                SZChipMenuFace(text: row.selectedEffort.map(SZGenerationLabels.effort) ?? "Effort",
+                               quiet: row.selectedEffort == nil, maxWidth: 90)
             }
             .menuStyle(.button)
-            .controlSize(.small)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .help("Reasoning effort for this model. Default is the model's own")
         }
     }
@@ -583,72 +515,158 @@ public struct SZRoutingSettingsView: View {
     }
 }
 
-/// One row of the profiles list: name (Off carries its caption), the selection wash, and
-/// the ACTIVE badge on whichever row governs new work. Its own view — hover is per-row state.
+/// One row of the profiles list: an inset rounded selection pill (the sidebar's recipe,
+/// not an edge-to-edge bar) — the selected row is what runs. Double-click renames in
+/// place; Return commits, Esc or clicking away cancels. Its own view — hover is per-row
+/// state.
 private struct SZProfileListRow: View {
     let name: String
     let caption: String?
     let selected: Bool
-    let active: Bool
+    let renaming: Bool
     let select: () -> Void
+    let beginRename: () -> Void
+    let commitRename: (String) -> Void
+    let cancelRename: () -> Void
     @State private var hovered = false
+    @State private var draft = ""
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        Button(action: select) {
-            HStack(spacing: 8) {
+        HStack(spacing: 8) {
+            if renaming {
+                TextField("Name", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .focused($fieldFocused)
+                    .onSubmit { commitRename(draft) }
+                    .onExitCommand { cancelRename() }
+                    .onAppear {
+                        draft = name
+                        fieldFocused = true
+                    }
+                    .onChange(of: fieldFocused) { _, focused in
+                        if !focused { cancelRename() }   // clicking away abandons the edit
+                    }
+            } else {
                 Text(name)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 12, weight: selected ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if let caption {
-                    Text(caption)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                if active {
-                    Text("Active")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(Color.accentColor.opacity(0.16), in: Capsule())
-                        .foregroundStyle(Color.accentColor)
-                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(selected ? Color.accentColor.opacity(0.22)
-                                 : Color.white.opacity(hovered ? 0.04 : 0))
-            .contentShape(Rectangle())
+            if let caption {
+                Text(caption)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 9)
+        .frame(height: 26)
+        .background(RoundedRectangle(cornerRadius: 6)
+            .fill(selected ? Color.accentColor.opacity(0.22)
+                           : Color.white.opacity(hovered ? 0.05 : 0)))
+        .contentShape(RoundedRectangle(cornerRadius: 6))
+        // Double-click first so it wins the race; a lone click still selects promptly.
+        .onTapGesture(count: 2) { beginRename() }
+        .onTapGesture { select() }
         .onHover { hovered = $0 }
     }
 }
 
-/// A card header's chip-sized action (View Graph, Use Recommended Models) — a real bordered
-/// button, centered on the header's height, lifting under the cursor.
+/// One toolbar gadget under the profiles list: a 22pt square that lifts under the cursor —
+/// the chip recipe at glyph size, so the strip reads as one family with the chips.
+private struct SZListGadget: View {
+    let symbol: String
+    var disabled = false
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) { SZListGadgetFace(symbol: symbol) }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            .opacity(disabled ? 0.4 : 1)
+            .help(help)
+    }
+}
+
+/// A menu's chip face: the chip recipe with its own chevron, quiet while it shows the
+/// unset word. Cap-and-truncate: a long label must never shove the row wider than the sheet.
+private struct SZChipMenuFace: View {
+    let text: String
+    var quiet = false
+    var maxWidth: CGFloat = 210
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: maxWidth)
+                .fixedSize(horizontal: false, vertical: true)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 7.5, weight: .semibold))
+                .opacity(0.55)
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(quiet && !hovered ? Color.secondary : Color.primary)
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .background(RoundedRectangle(cornerRadius: 5)
+            .fill(Color.white.opacity(hovered ? 0.10 : 0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 5)
+            .strokeBorder(hovered ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.quaternary),
+                          lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 5))
+        .onHover { hovered = $0 }
+    }
+}
+
+/// The gadget's face, on its own so a Menu can wear it as a label.
+private struct SZListGadgetFace: View {
+    let symbol: String
+    @State private var hovered = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(hovered ? .primary : .secondary)
+            .frame(width: 22, height: 22)
+            .background(RoundedRectangle(cornerRadius: 5)
+                .fill(Color.white.opacity(hovered ? 0.10 : 0)))
+            .contentShape(RoundedRectangle(cornerRadius: 5))
+            .onHover { hovered = $0 }
+    }
+}
+
+/// The card headers' chip-sized action recipe (View Graph, Use Recommended Models) — a
+/// real bordered button, 22pt tall, lifting under the cursor.
 private struct SZCardChipButton: View {
     let label: String
-    let symbol: String
+    var symbol: String? = nil
     let help: String
     let action: () -> Void
     @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            Label(label, systemImage: symbol)
-                .font(.system(size: 11))
-                .foregroundStyle(hovered ? .primary : .secondary)
-                .padding(.horizontal, 8)
-                .frame(height: 22)   // a fixed box — SwiftUI centers it exactly
-                .background(RoundedRectangle(cornerRadius: 5)
-                    .fill(Color.white.opacity(hovered ? 0.10 : 0.05)))
-                .overlay(RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(hovered ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.quaternary),
-                                  lineWidth: 1))
-                .contentShape(RoundedRectangle(cornerRadius: 5))
+            HStack(spacing: 5) {
+                if let symbol { Image(systemName: symbol) }
+                Text(label)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(hovered ? .primary : .secondary)
+            .padding(.horizontal, 8)
+            .frame(height: 22)   // a fixed box — SwiftUI centers it exactly
+            .background(RoundedRectangle(cornerRadius: 5)
+                .fill(Color.white.opacity(hovered ? 0.10 : 0.05)))
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(hovered ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.quaternary),
+                              lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }

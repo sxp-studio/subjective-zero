@@ -241,7 +241,7 @@ public struct SZProviderSetupSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Choose the default agent provider. Runs, chat, and anything Routing leaves unset use it.")
+                Text("Choose the active agent provider. Runs, chat, and anything Routing leaves unset use it.")
                 Text("Cards re-check on their own while this sheet is open. Install or log in and watch them turn green. Only Ready providers can run agents.")
                     .foregroundStyle(.secondary)
             }
@@ -307,10 +307,10 @@ public struct SZProviderSetupSheet: View {
                 HStack(spacing: 8) {
                     Text(card.displayName).font(.system(size: 13, weight: .semibold))
                     statusBadge(card)
-                    // The noun the Routing pane's "Default (…)" rows point at, anchored to
-                    // the card it resolves to.
+                    // The provider the Routing pane's helper and "Default (…)" rows resolve
+                    // to, anchored to the card itself.
                     if selected {
-                        Text("Default")
+                        Text("Active")
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)

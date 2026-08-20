@@ -129,8 +129,9 @@ extension SZHost {
             .filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    /// The live resolution of the app default — what an unrouted slot actually runs on.
-    private var routingAppDefaultDisplay: String {
+    /// The live resolution of the app default — what an unrouted slot actually runs on,
+    /// and the toggle's off-state helper ("Everything runs on X, the active provider").
+    var routingAppDefaultDisplay: String {
         routingEnvelopeDisplay(SZRouteEnvelope(providerID: activeProviderID))
     }
 
@@ -224,56 +225,65 @@ extension SZHost {
 
     // MARK: - Profile lifecycle (the bar's New / Rename / Duplicate)
 
-    /// Create an empty profile under a fresh name; returns the name so the caller can select
-    /// it for edit. When routing is Off (and no launch pin holds it there), the new profile
-    /// becomes active — a running arm is never stolen, only silence is filled.
+    /// Create an empty profile under a fresh name and select it — the selected row is what
+    /// runs, and a fresh empty table resolves everything to the active provider, so the
+    /// selection itself changes nothing until slots are filled. Mid-run the switch is
+    /// refused and the profile stays created, unselected.
     @discardableResult
     func createRoutingProfile() -> String {
         let name = routingUniqueName("Profile")
         upsertRoutingProfile(SZRoutingProfile(name: name))
-        activateCreatedRoutingProfileIfOff(name)
+        _ = setActiveRoutingProfile(name)
         return name
     }
 
-    /// The create-flow's activation rule, pure so it's pinnable: fill silence (routing Off),
-    /// never steal a running arm, and stay out of the way when the launch env governs
-    /// routing (=0 kill or a name pin).
-    nonisolated static func createShouldActivate(active: String?, env: String?) -> Bool {
-        active == nil && (env == nil || env == "1")
+    /// The pane's toggle. ON restores the remembered arm (else the first profile, else a
+    /// fresh empty one); OFF remembers the arm and releases it. Every path goes through
+    /// `setActiveRoutingProfile`, so the mid-run refusal holds on both flips.
+    func setRoutingEnabled(_ enabled: Bool) {
+        if enabled {
+            let remembered = routingLastProfileName
+                .flatMap { name in routingProfiles.first { $0.name == name }?.name }
+            if let candidate = remembered ?? routingProfiles.first?.name {
+                _ = setActiveRoutingProfile(candidate)
+            } else {
+                _ = createRoutingProfile()   // creates and selects
+            }
+        } else {
+            routingLastProfileName = activeRoutingProfileName
+            _ = setActiveRoutingProfile(nil)
+        }
     }
 
-    /// Shared by Empty and the presets. Respects the mid-run refusal — on refusal the
-    /// profile stays created, merely not active.
-    private func activateCreatedRoutingProfileIfOff(_ name: String) {
-        guard Self.createShouldActivate(active: activeRoutingProfileName,
-                                        env: Self.modelRoutingEnv) else { return }
-        _ = setActiveRoutingProfile(name)
-    }
-
-    /// Whether the New Profile menu offers the Claude Ladder preset — the claude provider
-    /// under the same usability rule its envelope options apply.
-    var routingClaudeLadderAvailable: Bool {
-        SZProviderRegistry.shared.provider(id: "claude") != nil && routingProviderUsable("claude")
-    }
+    /// SZ_MODEL_ROUTING=0: routing is off for this launch no matter what app-state says —
+    /// the pane's toggle renders (and locks on) this truth.
+    var routingEnvKilled: Bool { Self.modelRoutingEnv == "0" }
 
     /// The Claude Ladder starter: Haiku sorts, Sonnet builds and answers, Opus takes the
     /// planning and the heavy work. Fills only the built-in agents; builder-light stays
-    /// unfilled on purpose (its Default follows the Builder row). Activated when routing
-    /// was Off, like every create; the caller selects it for edit.
-    @discardableResult
-    func createClaudeLadderRoutingProfile() -> String {
+    /// unfilled on purpose (its Default follows the Builder row).
+    private static func claudeLadderProfile() -> SZRoutingProfile {
         let opus = SZRouteEnvelope(providerID: "claude", model: "claude-opus-5")
         let sonnet = SZRouteEnvelope(providerID: "claude", model: "claude-sonnet-5")
         let haiku = SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5")
-        let name = routingUniqueName("Claude Ladder")
-        upsertRoutingProfile(SZRoutingProfile(name: name, agents: [
+        return SZRoutingProfile(name: "Claude Ladder", agents: [
             "director": ["planner": opus, "assistant": sonnet, "sorter": haiku],
             "coding": ["builder-default": sonnet, "builder-heavy": opus,
                        "assistant": sonnet, "sorter": haiku],
             "debug": ["assistant": sonnet],
-        ]))
-        activateCreatedRoutingProfileIfOff(name)
-        return name
+        ])
+    }
+
+    /// Seed the Claude Ladder starter as a real row in the profiles list — once, when the
+    /// pane can first show it with a usable claude provider. NEVER activated: seeding must
+    /// not flip routing on behind the user's back. Deleting it stays deleted (the flag).
+    func seedRoutingStarterIfNeeded() {
+        guard !routingStarterSeeded,
+              SZProviderRegistry.shared.provider(id: "claude") != nil,
+              routingProviderUsable("claude"),
+              !routingProfiles.contains(where: { $0.name == "Claude Ladder" }) else { return }
+        routingStarterSeeded = true
+        upsertRoutingProfile(Self.claudeLadderProfile())
     }
 
     /// Copy a profile's whole table under a fresh name; nil when the source vanished.
@@ -295,6 +305,7 @@ extension SZHost {
               !routingProfiles.contains(where: { $0.name == new }) else { return false }
         routingProfiles[index].name = new
         if activeRoutingProfileName == old { activeRoutingProfileName = new }
+        if routingLastProfileName == old { routingLastProfileName = new }
         narratedRoutingNotes.removeAll()
         persistAppState()
         return true

@@ -65,6 +65,7 @@ extension SZHost {
         guard !welcomePresented else { return }
         selectedSetupProviderID = defaultSetupSelection()
         providerSetupPresented = true
+        seedRoutingStarterIfNeeded()   // the Routing pane's starter row exists before it's seen
         if defaultProviderID == nil { trackSetupShownTelemetry(auto: auto) }
         startProviderHealthPolling()
     }

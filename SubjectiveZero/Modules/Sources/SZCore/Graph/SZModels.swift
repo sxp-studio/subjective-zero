@@ -515,6 +515,12 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// The active profile's name; nil = routing off (every request byte-identical to no
     /// routing). A name no saved profile carries degrades to off at resolution, never at decode.
     public var activeRoutingProfileName: String?
+    /// Whether the Claude Ladder starter row was seeded into the profiles list (once, on the
+    /// pane's first open with a usable claude provider) — so deleting it stays deleted.
+    public var routingStarterSeeded: Bool?
+    /// The profile that was active when routing was last toggled off — the toggle's memory,
+    /// so flipping back on restores the same arm.
+    public var routingLastProfileName: String?
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
 
@@ -539,7 +545,9 @@ public struct SZAppState: Codable, Equatable, Sendable {
         showTurnBreakdown: Bool? = nil,
         poppedOutPanels: [SZPoppedOutPanel]? = nil,
         routingProfiles: [SZRoutingProfile]? = nil,
-        activeRoutingProfileName: String? = nil
+        activeRoutingProfileName: String? = nil,
+        routingStarterSeeded: Bool? = nil,
+        routingLastProfileName: String? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -562,6 +570,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.poppedOutPanels = poppedOutPanels
         self.routingProfiles = routingProfiles
         self.activeRoutingProfileName = activeRoutingProfileName
+        self.routingStarterSeeded = routingStarterSeeded
+        self.routingLastProfileName = routingLastProfileName
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,
