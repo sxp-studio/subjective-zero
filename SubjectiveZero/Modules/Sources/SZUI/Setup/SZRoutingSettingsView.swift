@@ -619,11 +619,10 @@ private struct SZListGadget: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) { SZListGadgetFace(symbol: symbol) }
+        Button(action: action) { SZListGadgetFace(symbol: symbol, help: help) }
             .buttonStyle(.plain)
             .disabled(disabled)
             .opacity(disabled ? 0.4 : 1)
-            .help(help)
     }
 }
 
@@ -686,9 +685,12 @@ private struct SZChipMenuFace: View {
     }
 }
 
-/// The gadget's face, on its own so a Menu can wear it as a label.
+/// The gadget's face, on its own so a Menu can wear it as a label. Under the cursor it
+/// lifts like the chips do (fill AND ring), and carries its own tooltip so hover help
+/// fires the same whether a Button or a Menu hosts it.
 private struct SZListGadgetFace: View {
     let symbol: String
+    var help: String = ""
     @State private var hovered = false
 
     var body: some View {
@@ -698,8 +700,12 @@ private struct SZListGadgetFace: View {
             .frame(width: 22, height: 22)
             .background(RoundedRectangle(cornerRadius: 5)
                 .fill(Color.white.opacity(hovered ? 0.10 : 0)))
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(hovered ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.clear),
+                              lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 5))
             .onHover { hovered = $0 }
+            .help(help)
     }
 }
 
