@@ -172,6 +172,26 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             case .defect(let detail): self = .defect(detail: detail)
             }
         }
+
+        /// THE word for this ending — five across the whole app, one per state. It lives here, not
+        /// on the badge that draws it, because a word is DATA: the strip, the RUNS list, a
+        /// transcript receipt and the `debug_*` MCP surface all have to say the same thing, and
+        /// only the colour is presentation (`SZRunBadge.style(for:)` pairs one with the other).
+        /// A driver that had to invent its own word from the case names would be a second
+        /// vocabulary for the same fact.
+        public var word: String {
+            switch self {
+            // A traversal that broke and one whose integrity broke are one word: both mean the
+            // work did not land, and nothing downstream acts on the difference.
+            case .failed, .defect: "failed"
+            // Stopped and interrupted are ONE word: both mean unfinished with nothing broken.
+            // Which it was stays in the record, and in the row's tooltip.
+            case .cancelled, .interrupted: "stopped"
+            // A DECISION, not an accident — never folded into failure.
+            case .declined: "declined"
+            case .ended: "end"
+            }
+        }
     }
 
     /// A dispatch set's settlement counts, exactly as the supervisor reports them.
