@@ -42,6 +42,8 @@ extension SZHostBridge {
                     "node": ["type": "string"],
                     "title": ["type": "string"], "sfSymbol": ["type": "string"],
                     "prompt": ["type": "string"], "summary": ["type": "string"],
+                    "complexity": ["type": "string", "enum": ["light", "standard", "heavy"],
+                                   "description": "your one-word read of the implementation task"],
                     "permissions": ["type": "array", "items": ["type": "string"],
                                     "description": "entitlements the node needs (camera, microphone)"],
                  ]),
@@ -411,15 +413,14 @@ extension SZHostBridge {
                 return e
             }
         }
-        // The grade never rides the node mutation below — it is run-scoped host state the
-        // dispatch reads, not node data (an orchestration hint persisted onto the artifact
-        // graph is the P02 mistake).
-        if let complexity = arguments.string("complexity") {
-            guard SZRoutingProfile.grades.contains(complexity) else {
+        // Validate the grade word up front, but record only after the mutation is accepted
+        // below — a refused tool call must leave no side effect standing.
+        let complexity = try arguments.string("complexity").map { word in
+            guard SZRoutingProfile.grades.contains(word) else {
                 throw SZMCPError.message(
-                    "unknown complexity \"\(complexity)\" — expected light, standard, or heavy")
+                    "unknown complexity \"\(word)\" — expected light, standard, or heavy")
             }
-            host.recordNodeGrade(id, complexity)
+            return word
         }
         // `requireUnfenced` first only for its richer refusal message (it names the holder and throws);
         // `updateNodeContent` is the authoritative gate and re-checks. The funnel also carries the
@@ -441,6 +442,10 @@ extension SZHostBridge {
             throw SZMCPError.message(host.fenceDenial(nodes: [id], origin: .agent) ?? "node \(id) is locked")
         }
         guard result.found else { throw SZMCPError.message("no node \(id)") }
+        // The grade never rides the node mutation — it is run-scoped host state the
+        // dispatch reads, not node data (an orchestration hint persisted onto the artifact
+        // graph is the P02 mistake). Recorded here, after every refusal has had its say.
+        if let complexity { host.recordNodeGrade(id, complexity) }
         // A blank prompt node that `startRun` kept OUT of the work set becomes real work the instant the
         // Director gives it a prompt — join it to the run so the fleet builds it this pass, exactly as
         // `ui_edit_ports` and `ui_add_prompt_node` do. `result.raisedRebuild` covers only `.generated`

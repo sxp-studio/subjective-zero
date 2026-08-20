@@ -171,13 +171,15 @@ struct SZRoutingHostTests {
 
     // MARK: - The Routing pane's mapping
 
-    @Test func creationActivatesOnlyIntoSilence() {
-        // Fill silence, never steal a running arm, defer to the launch env in every form.
-        #expect(SZHost.createShouldActivate(active: nil, env: nil))
-        #expect(SZHost.createShouldActivate(active: nil, env: "1"))
-        #expect(!SZHost.createShouldActivate(active: nil, env: "0"))
-        #expect(!SZHost.createShouldActivate(active: nil, env: "fast-fleet"))
-        #expect(!SZHost.createShouldActivate(active: "fast-fleet", env: nil))
+    @Test func aPinlessSessionUnderAMovedRouteIsNotResumable() {
+        // A codex thread can't be resumed by claude: the id is dropped, the turn cold-starts.
+        let session = SZAgentSession(providerID: "codex", sessionID: "s-1")
+        let moved = SZModelChoice(providerID: "claude", fastMode: false, via: "p · a · s")
+        #expect(SZHost.resumableSessionID(of: session, under: moved) == nil)
+        // Same provider (cold start, or affinity already moved the choice back): resumable.
+        let matching = SZModelChoice(providerID: "codex", fastMode: false)
+        #expect(SZHost.resumableSessionID(of: session, under: matching) == "s-1")
+        #expect(SZHost.resumableSessionID(of: nil, under: matching) == nil)
     }
 
     @Test func offCardsStateEachSlotsLiveResolutionWithNothingPickable() {

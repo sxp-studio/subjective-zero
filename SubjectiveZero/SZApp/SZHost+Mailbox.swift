@@ -165,7 +165,8 @@ extension SZHost {
                 cacheDirectory: cacheDirectory,
                 mcpServerPort: order.tools?.isEmpty == true ? nil : mcpPort,
                 allowedMCPTools: order.tools ?? SZHostBridge.agentCallableToolNames,
-                resumeSessionID: order.session == .resume ? existing?.sessionID : nil,
+                resumeSessionID: order.session == .resume
+                    ? Self.resumableSessionID(of: existing, under: effective) : nil,
                 model: effective.model,
                 reasoningEffort: effective.reasoningEffort,
                 fastMode: effective.fastMode,

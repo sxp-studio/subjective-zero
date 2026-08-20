@@ -288,7 +288,8 @@ extension SZHost {
             prompt: prompt, workingDirectory: workingDirectory, packageDirectory: projectURL,
             cacheDirectory: cacheDirectory, mcpServerPort: mcpPort,
             allowedMCPTools: SZHostBridge.agentCallableToolNames,
-            resumeSessionID: session == .resume ? sessionSlot?.sessionID : nil,
+            resumeSessionID: session == .resume
+                ? Self.resumableSessionID(of: sessionSlot, under: effective) : nil,
             model: effective.model, reasoningEffort: effective.reasoningEffort,
             fastMode: effective.fastMode,
             timeout: SZAgentTurnBudgets.codingTimeout,
@@ -619,6 +620,9 @@ extension SZHost {
                     dispatchPrompts = dispatchPrompts.filter {
                         !run.workSet.contains($0.key) || hiddenPieces.contains($0.key)
                     }
+                    // A grade describes ONE briefing's read of the task — it dies with its
+                    // run, so the next run's cold start can never prime a stale envelope.
+                    nodeGrades = nodeGrades.filter { !run.workSet.contains($0.key) }
                 }
                 // Every traversal seals itself as its engine returns; this sweep is the belt
                 // for an abnormal unwind, thread-scoped so a zombie can't touch a newer run's.
@@ -933,7 +937,8 @@ extension SZHost {
                         // resume); `.spawn` starts cold — a fresh run's first dispatch
                         // cold-starts by design.
                         resumeSessionID: turnOrder.session == .resume
-                            ? self.agentSessions[scopeKey]?.sessionID : nil,
+                            ? Self.resumableSessionID(of: self.agentSessions[scopeKey],
+                                                      under: effective) : nil,
                         model: effective.model,
                         reasoningEffort: effective.reasoningEffort,
                         fastMode: effective.fastMode,

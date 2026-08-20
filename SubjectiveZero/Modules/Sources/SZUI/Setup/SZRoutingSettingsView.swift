@@ -231,7 +231,7 @@ public struct SZRoutingSettingsView: View {
                 .textSelection(.enabled)
 
             VStack(alignment: .leading, spacing: 4) {
-                Toggle("Use a routing profile",
+                Toggle("Use Model Routing",
                        isOn: Binding(get: { routingEnabled }, set: { onSetRoutingEnabled($0) }))
                     .toggleStyle(.switch)
                     .controlSize(.small)
