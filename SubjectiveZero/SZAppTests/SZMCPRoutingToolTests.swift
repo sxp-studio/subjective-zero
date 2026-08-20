@@ -27,8 +27,8 @@ struct SZMCPRoutingToolTests {
     private var fastFleet: SZRoutingProfile {
         SZRoutingProfile(
             name: "fast-fleet",
-            agents: ["director": SZRouteEnvelope(providerID: "claude"),
-                     "coding": SZRouteEnvelope(providerID: "codex")])
+            agents: ["director": ["planner": SZRouteEnvelope(providerID: "claude")],
+                     "coding": ["builder-default": SZRouteEnvelope(providerID: "codex")]])
     }
 
     private func json(_ result: SZMCPToolResult) throws -> [String: Any] {
@@ -109,7 +109,7 @@ struct SZMCPRoutingToolTests {
         let pair = bare()
         #expect {
             _ = try pair.bridge.callTool(name: "debug_set_routing",
-                                    arguments: ["profile": ["queries": ["providerID": "claude"]]])
+                                    arguments: ["profile": ["agents": ["coding": ["sorter": ["providerID": "claude"]]]]])
         } throws: { error in
             "\(error)".contains("does not decode")
         }
@@ -136,7 +136,7 @@ struct SZMCPRoutingToolTests {
         #expect((state["node_grades"] as? [String: String])?[node.uuidString] == "heavy")
         let resolved = try #require(state["resolved"] as? [String: Any])
         #expect(resolved["fallback"] is String)
-        #expect((resolved["agents"] as? [String: String])?.keys.contains("director") == true)
+        #expect((resolved["slots"] as? [String: [String: String]])?["director"]?.keys.contains("planner") == true)
     }
 
     @Test func routingStateWithNoProfileIsTheFallbackAlone() throws {
@@ -144,14 +144,14 @@ struct SZMCPRoutingToolTests {
         let state = try json(try pair.bridge.callTool(name: "debug_routing_state", arguments: [:]))
         let resolved = try #require(state["resolved"] as? [String: Any])
         #expect(resolved["fallback"] is String)
-        #expect(resolved["agents"] == nil)   // routing off: one choice for every call
+        #expect(resolved["slots"] == nil)   // routing off: one choice for every call
     }
 
     @Test func routingStateNeverConsumesTheNarrationMemory() throws {
         // A broken route produces a fallback sentence; the debug read must report it WITHOUT
         // eating it — the user's next delivery is still owed the narration.
         var profile = fastFleet
-        profile.agents["coding"] = SZRouteEnvelope(providerID: "no-such-cli")
+        profile.agents["coding"] = ["builder-default": SZRouteEnvelope(providerID: "no-such-cli")]
         let pair = bare(profiles: [profile], active: "fast-fleet")
         let state = try json(try pair.bridge.callTool(name: "debug_routing_state", arguments: [:]))
         let notes = try #require((state["resolved"] as? [String: Any])?["notes"] as? [String])

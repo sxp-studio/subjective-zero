@@ -39,7 +39,7 @@ struct SZDeliveryTests {
 
         _ = delivery.facts()   // the evaluation starts: round 1 is pinned
         round = 2              // the world moves underneath it
-        _ = try await delivery.serveAsk(step: "probe",
+        _ = try await delivery.serveAsk(step: "probe", slot: nil,
                                         requestJSON: #"{"template": "probe", "attempt": 0}"#)
         #expect(prompts.withLock { $0 } == ["round 1"])
     }

@@ -21,10 +21,14 @@ public struct SZModelCall: Sendable {
     public var `class`: Class
     /// The agent (type) on whose behalf the call runs.
     public var agent: String
+    /// The declared model slot the call comes from — a turn node's `slot`, or the ask slot
+    /// serving a step's question. nil = the graph declared none; the app default serves.
+    public var slot: String?
 
-    public init(class: Class, agent: String) {
+    public init(class: Class, agent: String, slot: String? = nil) {
         self.class = `class`
         self.agent = agent
+        self.slot = slot
     }
 }
 

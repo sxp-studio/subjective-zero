@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Named routing profiles — the data half of model routing (docs/AI_PROVIDERS.md). A profile
-// maps an optional envelope per agent, three grade envelopes for the Director's task
-// grading, and one for step queries. Pure data, stored raw in app-state.json and validated
-// at resolution time like every preference — never a graph internal, never a capability
-// fact (those live in Providers/).
+// Named routing profiles — the data half of model routing (docs/AI_PROVIDERS.md). The agent
+// graphs declare MODEL SLOTS (the kinds of model work they need); a profile fills them:
+// (agent, slot) → generation envelope. Pure data, stored raw in app-state.json and validated
+// at resolution time like every preference. An unfilled slot falls to the app default —
+// coarser, never wrong — so a profile need only say what it means.
 
 /// One route's generation envelope. Every field but the provider inherits when nil, so an
 /// envelope can say as little as "codex" or as much as a full tune. Extensible: a future
@@ -25,66 +25,43 @@ public struct SZRouteEnvelope: Codable, Equatable, Sendable {
     }
 }
 
-/// A named, complete routing table: agent id → envelope, plus grades and queries. Anything
-/// unmapped falls one rung down (grade → agent → the app default): coarser, never wrong.
+/// A named assignment of models to the graphs' declared slots. Keys are the packs' own
+/// vocabulary — agent id → slot id — so a profile survives every node rename and rewire,
+/// and can only go stale as loudly as an unfilled row in the settings pane.
 public struct SZRoutingProfile: Codable, Equatable, Sendable, Identifiable {
     /// The profile's identity — what AI Settings lists and SZ_MODEL_ROUTING names.
     public var name: String
-    public var id: String { name }
-    /// Every step ask, all agents — the small stateless completions.
-    public var queries: SZRouteEnvelope?
-    /// The Director's grade envelopes for dispatched fleet work (light / standard / heavy).
-    public var light: SZRouteEnvelope?
-    public var standard: SZRouteEnvelope?
-    public var heavy: SZRouteEnvelope?
-    /// Per-agent routes, keyed by agent (pack) id.
-    public var agents: [String: SZRouteEnvelope]
+    /// agent id → slot id → envelope. Slots a profile doesn't fill run the app default.
+    public var agents: [String: [String: SZRouteEnvelope]]
 
-    public init(name: String, queries: SZRouteEnvelope? = nil, light: SZRouteEnvelope? = nil,
-                standard: SZRouteEnvelope? = nil, heavy: SZRouteEnvelope? = nil,
-                agents: [String: SZRouteEnvelope] = [:]) {
+    public init(name: String, agents: [String: [String: SZRouteEnvelope]] = [:]) {
         self.name = name
-        self.queries = queries
-        self.light = light
-        self.standard = standard
-        self.heavy = heavy
         self.agents = agents
     }
+
+    public var id: String { name }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
-        queries = try c.decodeIfPresent(SZRouteEnvelope.self, forKey: .queries)
-        light = try c.decodeIfPresent(SZRouteEnvelope.self, forKey: .light)
-        standard = try c.decodeIfPresent(SZRouteEnvelope.self, forKey: .standard)
-        heavy = try c.decodeIfPresent(SZRouteEnvelope.self, forKey: .heavy)
-        // Agents decode the flat shape, tolerating the short-lived nested one
-        // ({"all": envelope, "duties": …}) so an early profile keeps its routes.
-        if let flat = try? c.decodeIfPresent([String: SZRouteEnvelope].self, forKey: .agents) {
-            agents = flat
-        } else {
-            let legacy = try c.decodeIfPresent([String: LegacyAgentRoutes].self, forKey: .agents)
-            agents = (legacy ?? [:]).compactMapValues(\.all)
-        }
+        // Pre-slot profile shapes (per-agent envelopes, grade/queries fields) carry keys
+        // the slot world can't honestly map — they decode to an empty table, never a guess.
+        agents = (try? c.decodeIfPresent([String: [String: SZRouteEnvelope]].self,
+                                         forKey: .agents)) ?? [:]
     }
 
-    private enum CodingKeys: String, CodingKey { case name, queries, light, standard, heavy, agents }
+    private enum CodingKeys: String, CodingKey { case name, agents }
 
-    private struct LegacyAgentRoutes: Codable {
-        var all: SZRouteEnvelope?
-    }
-
-    /// The grade vocabulary, fixed: the Director's assessment can only say these three words.
+    /// The Director's grade vocabulary, fixed — packs map these words to their own slots.
     public static let grades = ["light", "standard", "heavy"]
 
-    /// The envelope a grade word selects; nil for an unmapped (or unknown) grade — the
-    /// grade rung simply doesn't match.
-    public func gradeEnvelope(_ grade: String) -> SZRouteEnvelope? {
-        switch grade {
-        case "light": light
-        case "standard": standard
-        case "heavy": heavy
-        default: nil
-        }
+    public func envelope(agent: String, slot: String) -> SZRouteEnvelope? {
+        agents[agent]?[slot]
+    }
+
+    public mutating func setEnvelope(_ envelope: SZRouteEnvelope?, agent: String, slot: String) {
+        var slots = agents[agent] ?? [:]
+        slots[slot] = envelope
+        agents[agent] = slots.isEmpty ? nil : slots
     }
 }

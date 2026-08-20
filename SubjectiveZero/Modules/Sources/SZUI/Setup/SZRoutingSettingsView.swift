@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The AI Settings Routing pane — named profiles mapping positions (agents,
-// grades, queries) to generation envelopes. Top: the ACTIVE-profile menu (Off = the identity
-// world) + profile management; below: the mapping form for the profile being edited, a grouped
-// divider-separated list (the Xcode Components shape). SZUI can't import SZAI: rows arrive
-// host-mapped (SZHost+RoutingSettings), keyed by the typed SZRoutingPosition — the view
-// switches on its cases for layout (indent, section headers) and echoes it back in closures.
+// The AI Settings Routing pane — named profiles filling the agent graphs' declared MODEL
+// SLOTS with generation envelopes. Top: the ACTIVE-profile menu (Off = the identity world)
+// + profile management; below: one grouped card per agent, one divider-separated row per
+// declared slot. SZUI can't import SZAI: cards arrive host-mapped (SZHost+RoutingSettings),
+// keyed by the typed SZRoutingPosition — every row is an (agent, slot).
 import AppKit
 import SwiftUI
 
@@ -57,23 +56,43 @@ public struct SZRoutingEnvelopeOption: Identifiable, Equatable, Sendable {
     }
 }
 
-/// One mappable position in a profile — typed, so the SZUI↔host seam is a switch on
-/// cases, never string matching.
-public enum SZRoutingPosition: Hashable, Sendable {
-    case agent(id: String)
-    case queries
-    case grade(String)
+/// One fillable position in a profile — an (agent, slot) pair, the packs' own vocabulary,
+/// so the SZUI↔host seam never invents a position the graphs don't declare.
+public struct SZRoutingPosition: Hashable, Sendable {
+    public var agent: String
+    public var slot: String
+
+    public init(agent: String, slot: String) {
+        self.agent = agent
+        self.slot = slot
+    }
 }
 
-/// One mappable position's row — a pure view-model. Effort/fast props are
-/// resolved against the ROUTED model host-side; empty/false hides those controls.
+/// Where an UNFILLED slot's work goes — the derivation behind the "Uses …" labels. Pure so
+/// the rule is pinnable in tests; the host renders the labels from it.
+public enum SZRoutingInheritance {
+    /// The standard slot a grade-variant slot falls back to: `slot` appears as a
+    /// light/heavy value in the graph's grade table, and the table names a DIFFERENT
+    /// standard slot to fall to. nil = no variant relation — the app default catches it.
+    public static func standardSlot(for slot: String, grades: [String: String]?) -> String? {
+        guard let grades,
+              grades.contains(where: { $0.key != "standard" && $0.value == slot }),
+              let standard = grades["standard"], standard != slot else { return nil }
+        return standard
+    }
+}
+
+/// One slot's row — a pure view-model. Effort/fast props are resolved against the ROUTED
+/// model host-side; empty/false hides those controls.
 public struct SZRoutingPositionRow: Identifiable, Equatable, Sendable {
     public var position: SZRoutingPosition
     public var id: SZRoutingPosition { position }
-    public var label: String
-    public var symbol: String?         // agent header rows carry the agent's glyph
-    public var caption: String?        // the row's one explanatory line
-    public var selectionLabel: String  // "Default" (unset) or "codex · GPT-5.6 Terra"
+    public var label: String           // the slot's authored label (or its id, verbatim)
+    public var caption: String         // the pack's description, rendered verbatim
+    public var selectionLabel: String  // "Default" / "Uses Builder" (unset) or "Codex · GPT-5.6 Terra"
+    /// The envelope menu's first row — the clear action, spelled as where the work then
+    /// goes: "App Default — Claude · Opus 5" or "Uses Builder — Claude · Sonnet 5".
+    public var clearLabel: String
     public var isSet: Bool
     public var options: [SZRoutingEnvelopeOption]
     public var effortOptions: [String]
@@ -81,16 +100,16 @@ public struct SZRoutingPositionRow: Identifiable, Equatable, Sendable {
     public var supportsFastMode: Bool
     public var fastModeEnabled: Bool
 
-    public init(position: SZRoutingPosition, label: String, symbol: String? = nil, caption: String? = nil,
-                selectionLabel: String, isSet: Bool,
+    public init(position: SZRoutingPosition, label: String, caption: String = "",
+                selectionLabel: String, clearLabel: String, isSet: Bool,
                 options: [SZRoutingEnvelopeOption] = [],
                 effortOptions: [String] = [], selectedEffort: String? = nil,
                 supportsFastMode: Bool = false, fastModeEnabled: Bool = false) {
         self.position = position
         self.label = label
-        self.symbol = symbol
         self.caption = caption
         self.selectionLabel = selectionLabel
+        self.clearLabel = clearLabel
         self.isSet = isSet
         self.options = options
         self.effortOptions = effortOptions
@@ -100,23 +119,44 @@ public struct SZRoutingPositionRow: Identifiable, Equatable, Sendable {
     }
 }
 
+/// One agent's card: identity in the header, one row per declared slot beneath.
+public struct SZRoutingAgentCard: Identifiable, Equatable, Sendable {
+    public var id: String       // the agent id — what View Graph reveals
+    public var title: String
+    public var symbol: String
+    public var rows: [SZRoutingPositionRow]
+
+    public init(id: String, title: String, symbol: String, rows: [SZRoutingPositionRow] = []) {
+        self.id = id
+        self.title = title
+        self.symbol = symbol
+        self.rows = rows
+    }
+}
+
 public struct SZRoutingSettingsView: View {
     private let profiles: [SZRoutingProfileRow]
     /// The profile whose table the form shows (host-resolved: requested → active → first);
     /// nil = no saved profiles, the pane shows only the empty-state sentence.
     private let editedProfileName: String?
-    private let positions: [SZRoutingPositionRow]
+    private let agents: [SZRoutingAgentCard]
     /// Non-nil = SZ_MODEL_ROUTING pins this profile at launch; the active menu locks.
     private let envPinnedProfileName: String?
+    /// Whether the New Profile menu offers the Claude Ladder starter (host-gated on the
+    /// claude provider being installed and healthy).
+    private let claudeLadderAvailable: Bool
     private let onSelectActiveProfile: (String?) -> Void
     private let onCreateProfile: () -> Void
+    private let onCreateClaudeLadder: () -> Void
     private let onRenameProfile: (String, String) -> Void   // (old, new)
     private let onDuplicateProfile: (String) -> Void
     private let onDeleteProfile: (String) -> Void
     private let onEditProfile: (String) -> Void
-    private let onAssignEnvelope: (SZRoutingPosition, String?, String?) -> Void   // (position, providerID, modelID); (p, nil, nil) = Default
+    private let onAssignEnvelope: (SZRoutingPosition, String?, String?) -> Void   // (position, providerID, modelID); (p, nil, nil) = clear
     private let onSetPositionEffort: (SZRoutingPosition, String?) -> Void
     private let onSetPositionFastMode: (SZRoutingPosition, Bool) -> Void
+    /// Close the settings sheet and land the Agent Graph panel on this agent's plan.
+    private let onShowAgentGraph: (String) -> Void
 
     // The rename alert's target + draft (view-local; committed via onRenameProfile).
     @State private var renameTarget: String?
@@ -124,23 +164,28 @@ public struct SZRoutingSettingsView: View {
 
     public init(profiles: [SZRoutingProfileRow],
                 editedProfileName: String?,
-                positions: [SZRoutingPositionRow],
+                agents: [SZRoutingAgentCard],
                 envPinnedProfileName: String? = nil,
+                claudeLadderAvailable: Bool = false,
                 onSelectActiveProfile: @escaping (String?) -> Void = { _ in },
                 onCreateProfile: @escaping () -> Void = {},
+                onCreateClaudeLadder: @escaping () -> Void = {},
                 onRenameProfile: @escaping (String, String) -> Void = { _, _ in },
                 onDuplicateProfile: @escaping (String) -> Void = { _ in },
                 onDeleteProfile: @escaping (String) -> Void = { _ in },
                 onEditProfile: @escaping (String) -> Void = { _ in },
                 onAssignEnvelope: @escaping (SZRoutingPosition, String?, String?) -> Void = { _, _, _ in },
                 onSetPositionEffort: @escaping (SZRoutingPosition, String?) -> Void = { _, _ in },
-                onSetPositionFastMode: @escaping (SZRoutingPosition, Bool) -> Void = { _, _ in }) {
+                onSetPositionFastMode: @escaping (SZRoutingPosition, Bool) -> Void = { _, _ in },
+                onShowAgentGraph: @escaping (String) -> Void = { _ in }) {
         self.profiles = profiles
         self.editedProfileName = editedProfileName
-        self.positions = positions
+        self.agents = agents
         self.envPinnedProfileName = envPinnedProfileName
+        self.claudeLadderAvailable = claudeLadderAvailable
         self.onSelectActiveProfile = onSelectActiveProfile
         self.onCreateProfile = onCreateProfile
+        self.onCreateClaudeLadder = onCreateClaudeLadder
         self.onRenameProfile = onRenameProfile
         self.onDuplicateProfile = onDuplicateProfile
         self.onDeleteProfile = onDeleteProfile
@@ -148,6 +193,7 @@ public struct SZRoutingSettingsView: View {
         self.onAssignEnvelope = onAssignEnvelope
         self.onSetPositionEffort = onSetPositionEffort
         self.onSetPositionFastMode = onSetPositionFastMode
+        self.onShowAgentGraph = onShowAgentGraph
     }
 
     private var activeProfile: SZRoutingProfileRow? { profiles.first(where: \.isActive) }
@@ -156,7 +202,7 @@ public struct SZRoutingSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Routing").font(.system(size: 17, weight: .semibold))
 
-            Text("New chats and runs resolve through the active profile; anything it doesn't map falls back to the default provider.")
+            Text("Each agent lists the kinds of work it needs a model for. A profile picks a model for each — anything left on Default runs on the default provider.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
@@ -166,10 +212,13 @@ public struct SZRoutingSettingsView: View {
             if let name = editedProfileName {
                 editorBar(name)
                 ScrollView {
-                    mappingForm
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(agents) { agentCard($0) }
+                    }
                 }
+                .modifier(SZScrollBottomFade())
             } else {
-                Text("No profile active. Every agent runs on the default provider, exactly as before profiles existed.")
+                Text("No profiles yet. Every agent runs on the default provider — create a profile to give specific work its own model.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -196,12 +245,10 @@ public struct SZRoutingSettingsView: View {
                 activeMenu
                     .disabled(envPinnedProfileName != nil)
                 Spacer()
-                Button("New Profile") { onCreateProfile() }
-                    .controlSize(.small)
-                    .help("Create an empty profile — everything starts on the default model")
+                newProfileMenu
             }
             if let pinned = envPinnedProfileName {
-                Text("Pinned to \"\(pinned)\" by the launch environment — relaunch without SZ_MODEL_ROUTING to change it.")
+                Text("Pinned to \"\(pinned)\" for this launch (SZ_MODEL_ROUTING) — relaunch without it to switch profiles.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -234,7 +281,26 @@ public struct SZRoutingSettingsView: View {
         }
         .menuStyle(.button)
         .controlSize(.small)
-        .help("The profile new chats and runs resolve through — switching is refused while a run is in flight")
+        .help("The profile new chats and runs use — switching is refused while a run is in flight")
+    }
+
+    /// New Profile: start empty, or from a preset (only offered while its provider is usable).
+    private var newProfileMenu: some View {
+        Menu {
+            Button("Empty Profile") { onCreateProfile() }
+            if claudeLadderAvailable {
+                Divider()
+                Button("Claude Ladder — Haiku sorts, Sonnet builds and answers, Opus takes the heavy work") {
+                    onCreateClaudeLadder()
+                }
+            }
+        } label: {
+            Text("New Profile")
+        }
+        .menuStyle(.button)
+        .controlSize(.small)
+        .fixedSize()
+        .help("Start empty, or from a preset — presets only fill the built-in agents")
     }
 
     /// Which profile the FORM shows (independent of which is active), plus its management menu.
@@ -280,56 +346,62 @@ public struct SZRoutingSettingsView: View {
         }
     }
 
-    // MARK: - The mapping form (one grouped list: agents, queries, grades)
+    // MARK: - Agent cards (one per pack, one row per declared slot)
 
-    /// Where the "Task Grading" header slots in — before the first grade row.
-    private var firstGradeID: SZRoutingPosition? {
-        positions.first { if case .grade = $0.position { true } else { false } }?.id
-    }
-
-    private var mappingForm: some View {
+    private func agentCard(_ agent: SZRoutingAgentCard) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(positions.enumerated()), id: \.element.id) { index, row in
-                if index > 0 { Divider().padding(.leading, 14) }
-                if row.id == firstGradeID { assessmentHeader }
-                positionRow(row)
+            cardHeader(agent)
+            if agent.rows.isEmpty {
+                Divider().padding(.leading, 14)
+                Text("This agent doesn't ask for model choices — it runs on the default provider.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+            } else {
+                ForEach(agent.rows) { row in
+                    Divider().padding(.leading, 14)
+                    slotRow(row)
+                }
             }
         }
         .background(RoundedRectangle(cornerRadius: 10)
             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82)))
     }
 
-    private var assessmentHeader: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Task Grading")
+    private func cardHeader(_ agent: SZRoutingAgentCard) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: agent.symbol)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 18)
+            Text(agent.title)
                 .font(.system(size: 13, weight: .semibold))
-            Text("During a run the Director grades each task it hands out; the grade picks which model implements it.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+            Spacer()
+            Button {
+                onShowAgentGraph(agent.id)
+            } label: {
+                Label("View Graph", systemImage: "arrow.up.forward")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Close settings and show \(agent.title)'s graph")
         }
         .padding(.horizontal, 14)
-        .padding(.top, 10)
+        .padding(.vertical, 10)
     }
 
-    private func positionRow(_ row: SZRoutingPositionRow) -> some View {
-        // Grade rows indent under their section header.
-        let indented = if case .grade = row.position { true } else { false }
-        return HStack(spacing: 10) {
-            if let symbol = row.symbol {
-                Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 18)
-            }
+    private func slotRow(_ row: SZRoutingPositionRow) -> some View {
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.label)
-                    .font(.system(size: 13, weight: row.symbol != nil ? .semibold : .regular))
-                if let caption = row.caption {
-                    Text(caption)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                    .font(.system(size: 13, weight: .medium))
+                Text(row.caption)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(row.caption)
             }
             Spacer()
             if row.isSet {
@@ -338,18 +410,19 @@ public struct SZRoutingSettingsView: View {
             }
             envelopeMenu(row)
         }
-        .padding(.leading, indented ? 26 : 0)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
     private func envelopeMenu(_ row: SZRoutingPositionRow) -> some View {
         Menu {
+            // The clear action, spelled as its destination — "App Default — …" or the grade
+            // variant's "Uses {standard} — …" — so the menu itself explains the inherit.
             Button {
                 onAssignEnvelope(row.position, nil, nil)
             } label: {
-                if !row.isSet { Label("Default", systemImage: "checkmark") }
-                else { Text("Default") }
+                if !row.isSet { Label(row.clearLabel, systemImage: "checkmark") }
+                else { Text(row.clearLabel) }
             }
             Divider()
             ForEach(row.options) { option in
@@ -371,7 +444,7 @@ public struct SZRoutingSettingsView: View {
         }
         .menuStyle(.button)
         .controlSize(.small)
-        .help("Pick the provider and model this runs on — Default inherits from the level above")
+        .help("Pick the provider and model this runs on — the first item shows where it goes when you don't")
     }
 
     /// Only when the routed model has an effort concept — an absent menu is the honest render.
@@ -404,11 +477,12 @@ public struct SZRoutingSettingsView: View {
             }
             .menuStyle(.button)
             .controlSize(.small)
-            .help("Reasoning effort for this model")
+            .help("Reasoning effort for this model — Default is the model's own")
         }
     }
 
-    /// Only where the ROUTED model honours it — an inert toggle is a lie.
+    /// Only where the ROUTED model honours it — an inert toggle is a lie. A bordered chip
+    /// (accent-filled when on), so it reads as a pressable control, not a status glyph.
     @ViewBuilder
     private func fastToggle(_ row: SZRoutingPositionRow) -> some View {
         if row.supportsFastMode {
@@ -416,9 +490,17 @@ public struct SZRoutingSettingsView: View {
                 onSetPositionFastMode(row.position, !row.fastModeEnabled)
             } label: {
                 Image(systemName: "bolt.fill")
-                    .foregroundStyle(row.fastModeEnabled ? Color.yellow : Color.secondary.opacity(0.5))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(row.fastModeEnabled ? Color.white : Color.secondary)
+                    .frame(width: 26, height: 19)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(row.fastModeEnabled ? Color.accentColor : Color.clear))
+                    .overlay(RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(.quaternary,
+                                      lineWidth: row.fastModeEnabled ? 0 : 1))
+                    .contentShape(RoundedRectangle(cornerRadius: 5))
             }
-            .controlSize(.small)
+            .buttonStyle(.plain)
             .help(row.fastModeEnabled ? "Fast mode is on" : "Turn on fast mode")
         }
     }

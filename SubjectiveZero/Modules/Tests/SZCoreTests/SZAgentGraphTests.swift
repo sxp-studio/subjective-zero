@@ -49,6 +49,48 @@ struct SZAgentGraphTests {
         #expect(turn.session == .spawn)
     }
 
+    @Test func aGraphDeclaresSlotsAndReferencesResolveAgainstThem() throws {
+        let json = #"""
+        {"slots": [{"id": "planner", "label": "Planner", "description": "Plans the work"},
+                   {"id": "sorter", "description": "Sorts each message"}],
+         "asks": "sorter",
+         "nodes": [{"id": "door", "step": "door", "ask": "sorter"},
+                   {"id": "plan", "turn": {"brief": "decompose", "slot": "planner"}}],
+         "edges": [{"from": "door", "outcome": "build", "to": "plan"}]}
+        """#
+        let graph = try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
+        #expect(graph.slots.map(\.id) == ["planner", "sorter"])   // declaration order kept
+        #expect(graph.slot("sorter")?.label == nil)               // label falls back to the id
+        #expect(graph.askSlot(of: graph.node("door")!) == "sorter")
+        guard case .turn(let plan) = graph.node("plan")?.form else {
+            Issue.record("expected a turn node"); return
+        }
+        #expect(plan.slot == "planner")
+        #expect(graph.defects().isEmpty)
+    }
+
+    @Test func slotReferencesMustLandOnDeclarations() {
+        var graph = makeGraph()
+        graph.nodes[1] = .init(id: "plan", title: "Plan contracts",
+                               form: .turn(.init(brief: "decompose", slot: "ghost")))
+        #expect(graph.defects().contains(.undeclaredSlot(where: "turn 'plan'", slot: "ghost")))
+        graph.asks = "phantom"
+        #expect(graph.defects().contains(.undeclaredSlot(where: "the graph's asks", slot: "phantom")))
+        graph.asks = nil
+        graph.grades = ["light": "missing", "sideways": "missing"]
+        #expect(graph.defects().contains(.undeclaredSlot(where: "grades.light", slot: "missing")))
+        #expect(graph.defects().contains(.unknownGrade("sideways")))
+    }
+
+    @Test func slotDeclarationsAreWellFormedAndUnique() {
+        var graph = makeGraph()
+        graph.slots = [.init(id: "Plan Work", description: "off grammar"),
+                       .init(id: "planner", description: "one"),
+                       .init(id: "planner", description: "two")]
+        #expect(graph.defects().contains(.malformedSlot(id: "Plan Work")))
+        #expect(graph.defects().contains(.duplicateSlot(id: "planner")))
+    }
+
     @Test func theDoorIsTheStepAtTheReservedID() throws {
         let json = #"""
         {"nodes": [{"id": "door", "step": "door"},

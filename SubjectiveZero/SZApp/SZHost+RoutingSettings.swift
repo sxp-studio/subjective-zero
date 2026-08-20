@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Routing pane's host mapping — profiles distilled to the plain rows SZUI may see (it
+// The Routing pane's host mapping — profiles distilled to the plain cards SZUI may see (it
 // can't import SZAI), and the pane's intents translated back into profile edits through
-// `upsertRoutingProfile` (one write path, one persistence story). Rows are keyed by the
-// typed SZRoutingPosition; both sides switch on its cases. Envelope options mirror the
-// provider-card rules: only healthy providers selectable, dimmed rows say why in the label.
+// `upsertRoutingProfile` (one write path, one persistence story). One card per plan agent,
+// one row per declared slot, keyed by the typed SZRoutingPosition. Envelope options mirror
+// the provider-card rules: only healthy providers selectable, dimmed rows say why in the label.
 import Foundation
 import SZAI
 import SZCore
@@ -32,36 +32,51 @@ extension SZHost {
             ?? routingProfiles.first
     }
 
-    /// The mapping form's rows for the edited profile: one row per agent, then the
-    /// top-level queries row and the three grades.
-    func routingPositionRows(profileNamed requested: String?) -> [SZRoutingPositionRow] {
+    /// The pane's cards for the edited profile: one per plan agent (director first), rows in
+    /// each graph's slot DECLARATION order.
+    func routingAgentCards(profileNamed requested: String?) -> [SZRoutingAgentCard] {
         guard let profile = routingEditedProfile(named: requested) else { return [] }
-        var rows: [SZRoutingPositionRow] = []
-        for agent in agentGraphPlanAgents() {
-            rows.append(routingRow(position: .agent(id: agent.id), label: agent.title,
-                                   symbol: agent.symbol, envelope: profile.agents[agent.id]))
+        return agentGraphPlanAgents().map { agent in
+            SZRoutingAgentCard(id: agent.id, title: agent.title, symbol: agent.symbol,
+                               rows: agent.graph.slots.map {
+                                   routingRow(agent: agent.id, slot: $0, graph: agent.graph,
+                                              profile: profile)
+                               })
         }
-        rows.append(routingRow(position: .queries, label: "Quick Questions",
-                               caption: "Small behind-the-scenes questions that sort each message — a fast model fits",
-                               envelope: profile.queries))
-        for grade in SZRoutingProfile.grades {
-            rows.append(routingRow(position: .grade(grade),
-                                   label: grade.prefix(1).uppercased() + grade.dropFirst(),
-                                   envelope: profile.gradeEnvelope(grade)))
-        }
-        return rows
     }
 
-    /// One position row: selection label, options, and — only when an envelope is set — the
-    /// effort/fast surface of the ROUTED model, so the pane never renders a control the
-    /// model can't honour.
-    private func routingRow(position: SZRoutingPosition, label: String, symbol: String? = nil,
-                            caption: String? = nil, envelope: SZRouteEnvelope?)
+    /// One slot's row: labels, options, and — only when an envelope is set — the effort/fast
+    /// surface of the ROUTED model, so the pane never renders a control the model can't
+    /// honour. The clear/unset labels are DERIVED, never hand-written: a grade-variant slot
+    /// inherits its standard slot's route, everything else the app default.
+    private func routingRow(agent agentID: String, slot: SZAgentGraph.Slot,
+                            graph: SZAgentGraph, profile: SZRoutingProfile)
         -> SZRoutingPositionRow {
+        let position = SZRoutingPosition(agent: agentID, slot: slot.id)
+        let envelope = profile.envelope(agent: agentID, slot: slot.id)
         let options = routingEnvelopeOptions(selected: envelope)
+        // Where the work goes when the row is left alone: the standard slot's route for a
+        // grade variant (its own envelope when filled, else the app default), the app
+        // default for everything else. Rendered both closed ("Uses Builder"/"Default") and
+        // as the menu's clear row ("Uses Builder — Claude · Sonnet 5").
+        let standardID = SZRoutingInheritance.standardSlot(for: slot.id, grades: graph.grades)
+        let unsetLabel: String
+        let clearLabel: String
+        if let standardID {
+            let standardLabel = graph.slot(standardID).map { $0.label ?? $0.id } ?? standardID
+            let resolution = profile.envelope(agent: agentID, slot: standardID)
+                .map(routingEnvelopeDisplay) ?? routingAppDefaultDisplay
+            unsetLabel = "Uses \(standardLabel)"
+            clearLabel = "\(unsetLabel) — \(resolution)"
+        } else {
+            unsetLabel = "Default"
+            clearLabel = "App Default — \(routingAppDefaultDisplay)"
+        }
         guard let envelope else {
-            return SZRoutingPositionRow(position: position, label: label, symbol: symbol, caption: caption,
-                                        selectionLabel: "Default", isSet: false, options: options)
+            return SZRoutingPositionRow(position: position, label: slot.label ?? slot.id,
+                                        caption: slot.description,
+                                        selectionLabel: unsetLabel, clearLabel: clearLabel,
+                                        isSet: false, options: options)
         }
         let provider = SZProviderRegistry.shared.provider(id: envelope.providerID)
         // The model the route actually runs: the envelope's pin, else the provider's own
@@ -69,27 +84,40 @@ extension SZHost {
         let routedModel = envelope.model
             ?? provider.map { resolvedGenerationSettings(for: $0.id).model ?? $0.defaultModel }
             ?? ""
-        let modelLabel = provider?.models.first { $0.id == routedModel }?.displayName ?? routedModel
-        let selectionLabel = [provider?.displayName ?? envelope.providerID, modelLabel]
-            .filter { !$0.isEmpty }.joined(separator: " · ")
         return SZRoutingPositionRow(
-            position: position, label: label, symbol: symbol, caption: caption,
-            selectionLabel: selectionLabel, isSet: true, options: options,
+            position: position, label: slot.label ?? slot.id, caption: slot.description,
+            selectionLabel: routingEnvelopeDisplay(envelope), clearLabel: clearLabel,
+            isSet: true, options: options,
             effortOptions: provider?.supportedReasoningEfforts(for: routedModel) ?? [],
             selectedEffort: envelope.reasoningEffort,
             supportsFastMode: provider?.supportsFastMode(for: routedModel) ?? false,
             fastModeEnabled: envelope.fastMode ?? false)
     }
 
+    /// An envelope as "Provider · Model" display names; raw ids keep a stale route visible.
+    private func routingEnvelopeDisplay(_ envelope: SZRouteEnvelope) -> String {
+        let provider = SZProviderRegistry.shared.provider(id: envelope.providerID)
+        let routedModel = envelope.model
+            ?? provider.map { resolvedGenerationSettings(for: $0.id).model ?? $0.defaultModel }
+            ?? ""
+        let modelLabel = provider?.models.first { $0.id == routedModel }?.displayName ?? routedModel
+        return [provider?.displayName ?? envelope.providerID, modelLabel]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// The live resolution of the app default — what an unrouted slot actually runs on.
+    private var routingAppDefaultDisplay: String {
+        routingEnvelopeDisplay(SZRouteEnvelope(providerID: activeProviderID))
+    }
+
     /// Every provider·model pair, in registry order — the same health/disable rules as the
     /// provider cards: a dimmed row says why in its label (menu rows carry no tooltip).
     private func routingEnvelopeOptions(selected: SZRouteEnvelope?) -> [SZRoutingEnvelopeOption] {
         SZProviderRegistry.shared.providers.flatMap { provider -> [SZRoutingEnvelopeOption] in
-            let disabled = disabledProviderIDs.contains(provider.id)
-            let status = displayedProviderHealth(provider.id)?.status
-            let enabled = !disabled
-                && (status == nil || status == .ready)   // unknown stays permissive, like the pre-flights
-            let reason = disabled ? " (disabled)" : (enabled ? "" : Self.routingHealthSuffix(status))
+            let enabled = routingProviderUsable(provider.id)
+            let reason: String = if disabledProviderIDs.contains(provider.id) { " (disabled)" }
+                else if enabled { "" }
+                else { Self.routingHealthSuffix(displayedProviderHealth(provider.id)?.status) }
             func option(_ modelID: String?, _ modelLabel: String?) -> SZRoutingEnvelopeOption {
                 let label = ([provider.displayName] + (modelLabel.map { [$0] } ?? []))
                     .joined(separator: " · ") + reason
@@ -105,6 +133,13 @@ extension SZHost {
         }
     }
 
+    /// The pane's health rule, shared by the option menus and the preset gate: enabled and
+    /// not known-unhealthy (unknown stays permissive, like the pre-flights).
+    private func routingProviderUsable(_ id: String) -> Bool {
+        let status = displayedProviderHealth(id)?.status
+        return !disabledProviderIDs.contains(id) && (status == nil || status == .ready)
+    }
+
     nonisolated private static func routingHealthSuffix(_ status: SZProviderHealthStatus?) -> String {
         switch status {
         case .missingCLI: " (not installed)"
@@ -117,23 +152,23 @@ extension SZHost {
 
     // MARK: - What the pane writes (position → profile edit)
 
-    /// Assign a position's envelope; providerID nil clears it back to Default. Re-picking a
-    /// provider·model starts a fresh envelope — an effort tuned for the old model is not
+    /// Assign a position's envelope; providerID nil clears it back to its inherit. Re-picking
+    /// a provider·model starts a fresh envelope — an effort tuned for the old model is not
     /// carried onto one it may not fit.
     func assignRoutingEnvelope(profileNamed requested: String?, position: SZRoutingPosition,
                                providerID: String?, modelID: String?) {
         guard var profile = routingEditedProfile(named: requested) else { return }
         let envelope = providerID.map { SZRouteEnvelope(providerID: $0, model: modelID) }
-        Self.writeRouteEnvelope(envelope, at: position, in: &profile)
+        profile.setEnvelope(envelope, agent: position.agent, slot: position.slot)
         upsertRoutingProfile(profile)
     }
 
     /// Retune a SET position's reasoning effort (nil = the provider's own selection decides).
     func setRoutingPositionEffort(profileNamed requested: String?, position: SZRoutingPosition, effort: String?) {
         guard var profile = routingEditedProfile(named: requested),
-              var envelope = Self.readRouteEnvelope(at: position, of: profile) else { return }
+              var envelope = profile.envelope(agent: position.agent, slot: position.slot) else { return }
         envelope.reasoningEffort = effort
-        Self.writeRouteEnvelope(envelope, at: position, in: &profile)
+        profile.setEnvelope(envelope, agent: position.agent, slot: position.slot)
         upsertRoutingProfile(profile)
     }
 
@@ -141,33 +176,10 @@ extension SZHost {
     /// honours it.
     func setRoutingPositionFastMode(profileNamed requested: String?, position: SZRoutingPosition, enabled: Bool) {
         guard var profile = routingEditedProfile(named: requested),
-              var envelope = Self.readRouteEnvelope(at: position, of: profile) else { return }
+              var envelope = profile.envelope(agent: position.agent, slot: position.slot) else { return }
         envelope.fastMode = enabled
-        Self.writeRouteEnvelope(envelope, at: position, in: &profile)
+        profile.setEnvelope(envelope, agent: position.agent, slot: position.slot)
         upsertRoutingProfile(profile)
-    }
-
-    nonisolated private static func readRouteEnvelope(at position: SZRoutingPosition,
-                                                      of profile: SZRoutingProfile)
-        -> SZRouteEnvelope? {
-        switch position {
-        case .queries: profile.queries
-        case .grade(let word): profile.gradeEnvelope(word)
-        case .agent(let id): profile.agents[id]
-        }
-    }
-
-    nonisolated private static func writeRouteEnvelope(_ envelope: SZRouteEnvelope?,
-                                                       at position: SZRoutingPosition,
-                                                       in profile: inout SZRoutingProfile) {
-        switch position {
-        case .queries: profile.queries = envelope
-        case .grade("light"): profile.light = envelope
-        case .grade("standard"): profile.standard = envelope
-        case .grade("heavy"): profile.heavy = envelope
-        case .grade: break   // an unknown grade word maps to nothing, deliberately
-        case .agent(let id): profile.agents[id] = envelope
-        }
     }
 
     // MARK: - Profile lifecycle (the bar's New / Rename / Duplicate)
@@ -178,6 +190,31 @@ extension SZHost {
     func createRoutingProfile() -> String {
         let name = routingUniqueName("Profile")
         upsertRoutingProfile(SZRoutingProfile(name: name))
+        return name
+    }
+
+    /// Whether the New Profile menu offers the Claude Ladder preset — the claude provider
+    /// under the same usability rule its envelope options apply.
+    var routingClaudeLadderAvailable: Bool {
+        SZProviderRegistry.shared.provider(id: "claude") != nil && routingProviderUsable("claude")
+    }
+
+    /// The Claude Ladder starter: Haiku sorts, Sonnet builds and answers, Opus takes the
+    /// planning and the heavy work. Fills only the built-in agents; builder-light stays
+    /// unfilled on purpose (it reads "Uses Builder"). Saved, not activated — the caller
+    /// selects it for edit.
+    @discardableResult
+    func createClaudeLadderRoutingProfile() -> String {
+        let opus = SZRouteEnvelope(providerID: "claude", model: "claude-opus-5")
+        let sonnet = SZRouteEnvelope(providerID: "claude", model: "claude-sonnet-5")
+        let haiku = SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5")
+        let name = routingUniqueName("Claude Ladder")
+        upsertRoutingProfile(SZRoutingProfile(name: name, agents: [
+            "director": ["planner": opus, "assistant": sonnet, "sorter": haiku],
+            "coding": ["builder-default": sonnet, "builder-heavy": opus,
+                       "assistant": sonnet, "sorter": haiku],
+            "debug": ["assistant": sonnet],
+        ]))
         return name
     }
 
@@ -213,5 +250,15 @@ extension SZHost {
             n += 1
         }
         return name
+    }
+
+    // MARK: - The View Graph deep link's dismissal
+
+    /// Close the sheet as a NAVIGATION, not a Skip: no funnel event, same polling stop as
+    /// every other dismissal. The sheet binding's set-false path (skipProviderSetup) is
+    /// deliberately bypassed.
+    func dismissProviderSetupForNavigation() {
+        providerSetupPresented = false
+        stopProviderHealthPolling()
     }
 }

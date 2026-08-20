@@ -26,8 +26,8 @@ struct SZRoutingHostTests {
     private var fastFleet: SZRoutingProfile {
         SZRoutingProfile(
             name: "fast-fleet",
-            agents: ["director": SZRouteEnvelope(providerID: "claude"),
-                     "coding": SZRouteEnvelope(providerID: "codex")])
+            agents: ["director": ["planner": SZRouteEnvelope(providerID: "claude")],
+                     "coding": ["builder-default": SZRouteEnvelope(providerID: "codex")]])
     }
 
     // MARK: - Selection
@@ -82,22 +82,23 @@ struct SZRoutingHostTests {
         let host = bareHost(profiles: [fastFleet], active: "fast-fleet")
         let (router, notes) = try host.makeRouter(providerID: "claude")
         #expect(notes.isEmpty)
-        let coding = router.resolve(SZModelCall(class: .turn, agent: "coding"))
+        let coding = router.resolve(SZModelCall(class: .turn, agent: "coding", slot: "builder-default"))
         #expect(coding.providerID == "codex")
-        #expect(coding.via == "fast-fleet · coding")
-        // An agent the profile doesn't map rides the fallback.
-        let debug = router.resolve(SZModelCall(class: .turn, agent: "debug"))
+        #expect(coding.via == "fast-fleet · coding · builder-default")
+        // A slot the profile doesn't fill — and any slotless turn — rides the fallback.
+        let debug = router.resolve(SZModelCall(class: .turn, agent: "debug", slot: "assistant"))
         #expect(debug.providerID == "claude")
         #expect(debug.via == nil)
     }
 
     @Test func anUnknownProviderDropsItsRungWithASentence() throws {
         var profile = fastFleet
-        profile.agents["coding"] = SZRouteEnvelope(providerID: "no-such-cli")
+        profile.agents["coding"] = ["builder-default": SZRouteEnvelope(providerID: "no-such-cli")]
         let host = bareHost(profiles: [profile], active: "fast-fleet")
         let (router, notes) = try host.makeRouter(providerID: "claude")
-        // The rung is gone — coding falls to the default — and the drop is a sentence.
-        #expect(router.resolve(SZModelCall(class: .turn, agent: "coding")).providerID == "claude")
+        // The slot is gone — its turns fall to the default — and the drop is a sentence.
+        #expect(router.resolve(SZModelCall(class: .turn, agent: "coding", slot: "builder-default"))
+                    .providerID == "claude")
         #expect(notes.count == 1)
         #expect(notes[0].contains("no-such-cli"))
         #expect(notes[0].contains("AI Settings"))
@@ -105,11 +106,11 @@ struct SZRoutingHostTests {
 
     @Test func anOffCatalogModelRunsTheClampWithASentence() throws {
         var profile = fastFleet
-        profile.agents["coding"] = SZRouteEnvelope(providerID: "codex", model: "gpt-imaginary")
+        profile.agents["coding"] = ["builder-default": SZRouteEnvelope(providerID: "codex", model: "gpt-imaginary")]
         let host = bareHost(profiles: [profile], active: "fast-fleet")
         let (router, notes) = try host.makeRouter(providerID: "claude")
         // The provider still serves the turn — on a model it actually lists.
-        let coding = router.resolve(SZModelCall(class: .turn, agent: "coding"))
+        let coding = router.resolve(SZModelCall(class: .turn, agent: "coding", slot: "builder-default"))
         #expect(coding.providerID == "codex")
         #expect(coding.model != "gpt-imaginary")
         #expect(notes.count == 1)
@@ -118,7 +119,7 @@ struct SZRoutingHostTests {
 
     @Test func aSentenceIsSaidOncePerProfileState() throws {
         var profile = fastFleet
-        profile.agents["coding"] = SZRouteEnvelope(providerID: "no-such-cli")
+        profile.agents["coding"] = ["builder-default": SZRouteEnvelope(providerID: "no-such-cli")]
         let host = bareHost(profiles: [profile], active: "fast-fleet")
         #expect(try host.makeRouter(providerID: "claude").notes.count == 1)
         // The next delivery resolves the same drop silently — the user already read it.
@@ -144,19 +145,27 @@ struct SZRoutingHostTests {
         #expect(host.nodeGrades[late] == nil)
     }
 
-    @Test func gradesAndQueriesResolveIntoTheTable() throws {
+    @Test func sorterAndGradeSlotsResolveIntoTheTable() throws {
         var profile = fastFleet
-        profile.queries = SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5")
-        profile.heavy = SZRouteEnvelope(providerID: "claude", model: "claude-opus-5")
+        profile.setEnvelope(SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5"),
+                            agent: "coding", slot: "sorter")
+        profile.setEnvelope(SZRouteEnvelope(providerID: "claude", model: "claude-opus-5"),
+                            agent: "coding", slot: "builder-heavy")
         let host = bareHost(profiles: [profile], active: "fast-fleet")
         let (router, notes) = try host.makeRouter(providerID: "claude")
         #expect(notes.isEmpty)
-        #expect(router.resolve(SZModelCall(class: .query, agent: "coding")).model == "claude-haiku-4-5")
+        // The sorter slot serves the door's questions.
+        #expect(router.resolve(SZModelCall(class: .query, agent: "coding", slot: "sorter"))
+                    .model == "claude-haiku-4-5")
+        // The grade path: the host resolves a grade through the pack's mapping into a
+        // choice and primes the child router with it.
         guard let table = router as? SZProfileRouter else {
             Issue.record("expected the profile router"); return
         }
-        #expect(table.grades["heavy"]?.model == "claude-opus-5")
-        #expect(table.primed(grade: "heavy")
-                    .resolve(SZModelCall(class: .turn, agent: "coding")).model == "claude-opus-5")
+        let heavy = table.choice(agent: "coding", slot: "builder-heavy")
+        #expect(heavy?.model == "claude-opus-5")
+        #expect(table.primed(graded: heavy)
+                    .resolve(SZModelCall(class: .turn, agent: "coding", slot: "builder-default"))
+                    .model == "claude-opus-5")
     }
 }

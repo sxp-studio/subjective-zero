@@ -166,7 +166,7 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 - `debug_routing_state` - the routing world as JSON: active + saved profiles, the raw
   `SZ_MODEL_ROUTING` pin, recorded node grades (uuid → light|standard|heavy), and the resolved
   table as a delivery starting now would bind it — per-position "provider · model · effort ·
-  fast" strings for agents/grades/queries plus the fallback and the resolution's
+  fast" strings per filled slot ({agent: {slot: choice}}) plus the fallback and the resolution's
   fallback notes (read without consuming the once-per-state narration). A pin naming a missing
   profile reads as `{refused: <detail>}`.
 - `debug_record_session`, `debug_replay_session` *(deferred - not a V1 gate; see below)*

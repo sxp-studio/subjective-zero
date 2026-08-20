@@ -137,9 +137,10 @@ public protocol SZTraversalServing: AnyObject, Sendable {
                  progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
         async -> SZSettledSummary?
     /// Serve one step ask (render its template against the SAME snapshot the evaluation is
-    /// pinned to — the delivery guarantees it — then route, complete, journal). Throwing
+    /// pinned to — the delivery guarantees it — then route, complete, journal). `slot` is
+    /// the asking node's declared ask slot (nil = the app default serves). Throwing
     /// `CancellationError` answers the ask as cancelled; other errors as failed.
-    func serveAsk(step: String, requestJSON: String) async throws -> String
+    func serveAsk(step: String, slot: String?, requestJSON: String) async throws -> String
     /// Perform one validated effect, after the step returned and before its edge routes.
     func perform(effect: SZEffect) async
     /// Trace push for the panel/RUNS record.

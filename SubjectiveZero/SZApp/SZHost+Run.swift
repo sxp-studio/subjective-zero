@@ -732,9 +732,16 @@ extension SZHost {
 
         let sighting = SZTraversalSighting(id: thread, agent: directorID)
         beginAgentGraphRun(sighting, thread: thread)
-        // The grading teaching renders only when the profile maps a grade — an assessment
-        // nothing reads would spend prompt budget on a no-op.
-        let gradingEnabled = (router as? SZProfileRouter)?.grades.isEmpty == false
+        // The grading teaching renders only when the profile fills a light/heavy grade slot
+        // of the dispatched pack — an assessment nothing reads would spend prompt budget on
+        // a no-op.
+        let gradingEnabled: Bool = {
+            guard let table = router as? SZProfileRouter,
+                  let gradeSlots = codingGraph.grades else { return false }
+            return ["light", "heavy"].contains { grade in
+                gradeSlots[grade].flatMap { table.agents[codingID]?[$0] } != nil
+            }
+        }()
         let delivery = SZDelivery(
             agent: directorID, message: "",
             extras: SZBriefExtras(gradingEnabled: gradingEnabled),
@@ -953,12 +960,19 @@ extension SZHost {
                 },
                 effect: { [weak self] effect in await self?.perform(effect: effect) },
                 onNote: { [weak self] note in self?.noteAgentGraphRun(sighting, note) })
-            // The child's router carries its node's grade pick, frozen at THIS dispatch —
-            // the engine never learns about grading, and a retry resolves identically.
+            // The child's router carries its task's grade pick, frozen at THIS dispatch —
+            // the engine never learns about grading. The grade selects a SLOT through the
+            // dispatched pack's own mapping; an unfilled grade slot falls to the standard
+            // one, then to the ordinary cascade.
+            let gradedChoice: SZModelChoice? = {
+                guard let table = router as? SZProfileRouter,
+                      let grade = nodeGrades[nodeID],
+                      let gradeSlots = coding.graph.grades else { return nil }
+                return table.choice(agent: coding.id, slot: gradeSlots[grade])
+                    ?? table.choice(agent: coding.id, slot: gradeSlots["standard"])
+            }()
             let childRouter: any SZModelRouting =
-                if let table = router as? SZProfileRouter, let grade = nodeGrades[nodeID] {
-                    table.primed(grade: grade)
-                } else { router }
+                (router as? SZProfileRouter).map { $0.primed(graded: gradedChoice) } ?? router
             deliveries.append((order, SZGraphEngine(
                 agent: coding.id, graph: coding.graph, attachments: coding.attachments,
                 host: child, steps: steps, router: childRouter), sighting))

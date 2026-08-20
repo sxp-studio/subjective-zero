@@ -111,10 +111,11 @@ public struct SZGraphEngine {
             case .step(let name):
                 // The snapshot is pinned HERE: the evaluation and every ask it makes see
                 // the same document, however long the step runs.
+                let askSlot = graph.askSlot(of: node)
                 let report = await steps.evaluate(
                     agent: agent, step: name, factsJSON: Self.factsJSON(host.facts()),
                     ask: { [host] request in
-                        try await host.serveAsk(step: name, requestJSON: request)
+                        try await host.serveAsk(step: name, slot: askSlot, requestJSON: request)
                     })
                 if report.cancelled {
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done, outcome: nil))
@@ -165,7 +166,7 @@ public struct SZGraphEngine {
                     continue
                 }
                 let choice = router.resolve(SZModelCall(
-                    class: .turn, agent: agent))
+                    class: .turn, agent: agent, slot: turn.slot))
                 let report = await host.runTurn(SZTurnOrder(
                     agent: agent, brief: rendered, session: turn.session,
                     tools: turn.tools, choice: choice))

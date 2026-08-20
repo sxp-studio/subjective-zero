@@ -81,8 +81,18 @@ A node takes **exactly one of three forms** — enforced at decode:
 | form | body | outcomes |
 |---|---|---|
 | `"step": "<folder>"` | the compiled `Step.swift` in the agent's pack | whatever the step's own exported declaration names |
-| `"turn": { "brief", "session"?, "tools"? }` | a full agent turn; the mustache brief (named by stem) IS the body | fixed `ok` / `error` — process truth only, content never routes |
+| `"turn": { "brief", "session"?, "tools"?, "slot"? }` | a full agent turn; the mustache brief (named by stem) IS the body | fixed `ok` / `error` — process truth only, content never routes |
 | `"dispatch": { "to" }` | fan the run's work set out to a seat — and **wait for the set** | `settled`, when the last lands (or the watchdog synthesizes the stragglers) |
+
+**Model slots** are the graph's declared kinds of model work — what a routing profile fills
+with models ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)). The graph opens with
+`"slots": [{ "id", "label"?, "description" }]` (ids lowercase `[a-z0-9-]`, declaration order
+= the settings pane's row order, `description` is the pane's caption — the author's own
+words); a turn node names its slot via `"slot"`, a step node's asks name theirs via `"ask"`
+(with the graph-level `"asks"` as the fallback for steps that name none), and a pack that
+receives dispatches maps the Director's task grades to slots via
+`"grades": { "light", "standard", "heavy" }`. Every reference must land on a declaration
+(shape-gated); an unfilled slot simply runs the app default.
 
 **The door is the step node with the reserved id `door`** — every delivery enters there,
 and it must be a step: the agent's routing intelligence is code the author opens, reads,

@@ -117,7 +117,7 @@ private final class DirectorDelivery: SZTraversalServing {
         turns.append((order.brief, order.session))
         return SZTurnReport(failed: false)
     }
-    func serveAsk(step: String, requestJSON: String) async throws -> String {
+    func serveAsk(step: String, slot: String?, requestJSON: String) async throws -> String {
         try await queries.serve(agent: "director", step: step, message: message,
                                 world: world, requestJSON: requestJSON)
     }

@@ -5,48 +5,41 @@
 // looks up, so resolution is pure, synchronous, and table-testable.
 import SZCore
 
-/// Resolution, most specific first. Turns: this delivery's grade pick, then the agent's
-/// row, then the app default. Queries: the profile's one queries envelope, else the
-/// default — grades never touch a query (a triage ask under a heavy task is still a
-/// triage ask).
+/// Resolution, most specific first. Turns: this delivery's grade pick (a fleet child's,
+/// primed by the host at dispatch), then the call's slot as the profile fills it, then the
+/// app default. Queries resolve their ask slot the same way — grades never touch one (a
+/// sorting question under a heavy task is still a sorting question).
 public struct SZProfileRouter: SZModelRouting {
     /// The app default — today's provider + clamped settings, the cascade's floor.
     public var fallback: SZModelChoice
-    /// Every step ask, all agents.
-    public var queries: SZModelChoice?
-    /// Agent id → its every-turn choice.
-    public var agents: [String: SZModelChoice]
-    /// Grade word → choice, for priming fleet children.
-    public var grades: [String: SZModelChoice]
+    /// agent id → slot id → the profile's resolved choice.
+    public var agents: [String: [String: SZModelChoice]]
     /// THIS delivery's grade-selected choice — set only on a fleet child's copy, frozen at
     /// dispatch. The engine never learns about grading; the host primes the router.
     public var graded: SZModelChoice?
 
-    public init(fallback: SZModelChoice, queries: SZModelChoice? = nil,
-                agents: [String: SZModelChoice] = [:],
-                grades: [String: SZModelChoice] = [:], graded: SZModelChoice? = nil) {
+    public init(fallback: SZModelChoice, agents: [String: [String: SZModelChoice]] = [:],
+                graded: SZModelChoice? = nil) {
         self.fallback = fallback
-        self.queries = queries
         self.agents = agents
-        self.grades = grades
         self.graded = graded
     }
 
     public func resolve(_ call: SZModelCall) -> SZModelChoice {
-        switch call.class {
-        case .query:
-            return queries ?? fallback
-        case .turn:
-            if let graded { return graded }
-            return agents[call.agent] ?? fallback
-        }
+        if case .turn = call.class, let graded { return graded }
+        return call.slot.flatMap { agents[call.agent]?[$0] } ?? fallback
     }
 
-    /// A fleet child's copy, primed with its node's grade pick. An unmapped grade word
-    /// changes nothing — the grade rung simply doesn't match.
-    public func primed(grade: String) -> SZProfileRouter {
+    /// The profile's choice for one (agent, slot); nil = unfilled.
+    public func choice(agent: String, slot: String?) -> SZModelChoice? {
+        slot.flatMap { agents[agent]?[$0] }
+    }
+
+    /// A fleet child's copy, primed with its task's grade pick (already resolved through
+    /// the pack's grade → slot mapping by the host). nil changes nothing.
+    public func primed(graded choice: SZModelChoice?) -> SZProfileRouter {
         var child = self
-        child.graded = grades[grade]
+        child.graded = choice
         return child
     }
 }

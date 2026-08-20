@@ -111,6 +111,8 @@ public struct SZProviderSetupSheet: View {
     private let onSkip: () -> Void
     private let onOpenSetupGuide: () -> Void
     private let onJoinDiscord: () -> Void
+    /// The presenter remembers the last-viewed section, so reopening returns there.
+    private let onSectionChange: (SZProviderSetupSection) -> Void
 
     /// The sidebar selection; seeded by the presenter (auto-present lands on Providers).
     @State private var section: SZProviderSetupSection
@@ -126,7 +128,8 @@ public struct SZProviderSetupSheet: View {
                 onSetEnabled: @escaping (String, Bool) -> Void,
                 onConfirm: @escaping () -> Void, onSkip: @escaping () -> Void,
                 onOpenSetupGuide: @escaping () -> Void,
-                onJoinDiscord: @escaping () -> Void) {
+                onJoinDiscord: @escaping () -> Void,
+                onSectionChange: @escaping (SZProviderSetupSection) -> Void = { _ in }) {
         self.cards = cards
         self.selectedID = selectedID
         self.routing = routing
@@ -142,6 +145,7 @@ public struct SZProviderSetupSheet: View {
         self.onSkip = onSkip
         self.onOpenSetupGuide = onOpenSetupGuide
         self.onJoinDiscord = onJoinDiscord
+        self.onSectionChange = onSectionChange
     }
 
     private var selectedCard: SZProviderSetupCard? { cards.first { $0.id == selectedID } }
@@ -159,6 +163,7 @@ public struct SZProviderSetupSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 820, height: 580)
+        .onChange(of: section) { _, new in onSectionChange(new) }
     }
 
     // MARK: - Sidebar (the Xcode-Settings shape: sections toggle, panes stay focused)
@@ -229,6 +234,7 @@ public struct SZProviderSetupSheet: View {
                     ForEach(cards) { providerCard($0) }
                 }
             }
+            .modifier(SZScrollBottomFade())
             .frame(minHeight: 260)
 
             HStack(spacing: 10) {
@@ -469,6 +475,32 @@ public struct SZProviderSetupSheet: View {
                 .controlSize(.small)
                 .help("Stop checking \(card.displayName) and hide it from runs — re-enable it here any time")
         }
+    }
+}
+
+/// Fades a scroller's last 22pt while more content sits below the fold — via an alpha MASK
+/// on the scroll content, not a painted gradient: the sheet ground is system material, so
+/// paint would band. Fully opaque at the true bottom. Shared by both Setup panes.
+struct SZScrollBottomFade: ViewModifier {
+    @State private var hasMore = false
+
+    func body(content: Content) -> some View {
+        content
+            // Quantized to a Bool on purpose (the transcript's rule): the raw distance
+            // changes every scroll tick, and writing that to state would re-render at
+            // scroll cadence.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentSize.height - geometry.contentOffset.y
+                    - geometry.containerSize.height > 12
+            } action: { _, more in
+                withAnimation(.easeOut(duration: 0.15)) { hasMore = more }
+            }
+            .mask(VStack(spacing: 0) {
+                Color.black
+                LinearGradient(colors: [.black, hasMore ? .clear : .black],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 22)
+            })
     }
 }
 

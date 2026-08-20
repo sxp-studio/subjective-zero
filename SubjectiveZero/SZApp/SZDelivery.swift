@@ -66,8 +66,8 @@ final class SZDelivery: SZTraversalServing {
         await fleet?(orders, seat, progress)
     }
 
-    func serveAsk(step: String, requestJSON: String) async throws -> String {
-        try await queries.serve(agent: agent, step: step, message: message,
+    func serveAsk(step: String, slot: String?, requestJSON: String) async throws -> String {
+        try await queries.serve(agent: agent, step: step, slot: slot, message: message,
                                 world: pinned ?? world(), extras: extras,
                                 requestJSON: requestJSON)
     }

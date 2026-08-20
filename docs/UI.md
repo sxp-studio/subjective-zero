@@ -239,8 +239,10 @@ Graph panel.
   model / effort / fast per provider — the global default envelope; the old composer pill and HUD
   picker are both deleted). **Routing** edits the named routing profiles
   ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)): an Off row plus one row per saved
-  profile (the active one checked), each profile mapping agents, the Director's
-  light/standard/heavy task grades, and the app's quick sorting questions to envelopes. Activating or editing a profile
+  profile (the active one checked), each profile filling the agent graphs' declared model
+  slots — one card per agent, one row per slot with the pack author's own caption (the
+  built-ins: the Director's Planner/Assistant/Sorter, Coding's Builder rows the task grades
+  pick among, Debug's Assistant). Activating or editing a profile
   affects NEW conversations only, and switching is refused while a run is in flight. The
   unhealthy-provider **warning dot** lost its composer home: it lives on the sheet's surfaces (the
   provider card / sidebar badge) — runs and new chats on an unhealthy provider still refuse and

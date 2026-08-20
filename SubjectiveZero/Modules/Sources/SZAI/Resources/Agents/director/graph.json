@@ -1,14 +1,23 @@
 {
   "label": "Director",
+  "slots": [
+    { "id": "planner", "label": "Planner",
+      "description": "Plans the graph, briefs each node, and checks the results" },
+    { "id": "assistant", "label": "Assistant",
+      "description": "Answers you in chat" },
+    { "id": "sorter", "label": "Sorter",
+      "description": "Decides whether each message is new work, a change, or a question" }
+  ],
+  "asks": "sorter",
   "nodes": [
-    { "id": "door", "title": "On message", "step": "door" },
-    { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose" } },
+    { "id": "door", "title": "On message", "step": "door", "ask": "sorter" },
+    { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose", "slot": "planner" } },
     { "id": "implement", "title": "Implement", "dispatch": { "to": "coding" } },
     { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
-    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume" } },
-    { "id": "amend", "title": "Amend scheduled work", "turn": { "brief": "amend" } },
-    { "id": "chat", "title": "Cold turn", "turn": { "brief": "chat" } },
-    { "id": "chat-resumed", "title": "Resumed turn", "turn": { "brief": "chat-resumed", "session": "resume" } }
+    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume", "slot": "planner" } },
+    { "id": "amend", "title": "Amend scheduled work", "turn": { "brief": "amend", "slot": "planner" } },
+    { "id": "chat", "title": "Cold turn", "turn": { "brief": "chat", "slot": "assistant" } },
+    { "id": "chat-resumed", "title": "Resumed turn", "turn": { "brief": "chat-resumed", "session": "resume", "slot": "assistant" } }
   ],
   "edges": [
     { "from": "door", "outcome": "build", "to": "decompose" },

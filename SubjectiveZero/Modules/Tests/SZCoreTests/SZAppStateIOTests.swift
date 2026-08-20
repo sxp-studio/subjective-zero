@@ -195,11 +195,12 @@ private func temporaryURL() -> URL {
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
     let fastFleet = SZRoutingProfile(
         name: "fast-fleet",
-        queries: SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5"),
-        heavy: SZRouteEnvelope(providerID: "claude", model: "claude-opus-5", fastMode: true),
         agents: [
-            "director": SZRouteEnvelope(providerID: "claude", reasoningEffort: "max"),
-            "coding": SZRouteEnvelope(providerID: "codex"),
+            "director": ["planner": SZRouteEnvelope(providerID: "claude", reasoningEffort: "max"),
+                         "sorter": SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5")],
+            "coding": ["builder-default": SZRouteEnvelope(providerID: "codex"),
+                       "builder-heavy": SZRouteEnvelope(providerID: "claude",
+                                                        model: "claude-opus-5", fastMode: true)],
         ])
     try SZAppStateIO.save(SZAppState(routingProfiles: [fastFleet],
                                      activeRoutingProfileName: "fast-fleet"), to: url)
@@ -221,12 +222,13 @@ private func temporaryURL() -> URL {
     #expect(loaded?.activeRoutingProfileName == nil)
 }
 
-@Test func aNestedLegacyAgentsShapeStillDecodesItsRoutes() throws {
-    // The short-lived nested shape ({"agents": {"coding": {"all": envelope}}}) reads back
-    // as the flat one — an early profile keeps its routes.
-    let json = #"{"name": "p", "agents": {"coding": {"all": {"providerID": "codex"}}}}"#
-    let profile = try JSONDecoder().decode(SZRoutingProfile.self, from: Data(json.utf8))
-    #expect(profile.agents["coding"]?.providerID == "codex")
+@Test func preSlotProfileShapesDecodeToAnEmptyTableNeverAGuess() throws {
+    // The short-lived pre-slot shape (per-agent envelopes) carries keys the slot world
+    // can't honestly map — the profile keeps its name and decodes with no routes.
+    let flat = #"{"name": "p", "agents": {"coding": {"providerID": "codex"}}}"#
+    let profile = try JSONDecoder().decode(SZRoutingProfile.self, from: Data(flat.utf8))
+    #expect(profile.name == "p")
+    #expect(profile.agents.isEmpty)
 }
 
 @Test func anEnvelopeWithUnknownKeysDecodesItsKnownFields() throws {

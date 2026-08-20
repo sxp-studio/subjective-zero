@@ -36,7 +36,7 @@ private final class StubHost: SZTraversalServing {
         events.append("turn:\(order.brief)")
         return turnReports.isEmpty ? SZTurnReport(failed: false) : turnReports.removeFirst()
     }
-    func serveAsk(step: String, requestJSON: String) async throws -> String {
+    func serveAsk(step: String, slot: String?, requestJSON: String) async throws -> String {
         asksSeen.append((step, requestJSON))
         return askReply
     }
@@ -384,7 +384,7 @@ struct SZGraphEngineTests {
             func facts() -> SZFacts { SZFacts(message: "") }
             func render(template: String) throws -> String { throw Broken() }
             func runTurn(_ order: SZTurnOrder) async -> SZTurnReport { SZTurnReport(failed: false) }
-            func serveAsk(step: String, requestJSON: String) async throws -> String {
+            func serveAsk(step: String, slot: String?, requestJSON: String) async throws -> String {
                 throw CancellationError()
             }
             func perform(effect: SZEffect) async {}

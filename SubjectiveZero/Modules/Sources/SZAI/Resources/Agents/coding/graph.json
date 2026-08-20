@@ -1,12 +1,26 @@
 {
   "label": "Coding",
+  "slots": [
+    { "id": "builder-default", "label": "Builder",
+      "description": "Implements a node and sees the build through" },
+    { "id": "builder-light", "label": "Builder – Light",
+      "description": "Tasks the Director sizes as light — a fast model fits" },
+    { "id": "builder-heavy", "label": "Builder – Heavy",
+      "description": "Tasks the Director sizes as heavy — stateful, multi-pass, or simulation work" },
+    { "id": "assistant", "label": "Assistant",
+      "description": "Answers in a node's chat" },
+    { "id": "sorter", "label": "Sorter",
+      "description": "Sorts each message sent to a node — a fast model fits" }
+  ],
+  "grades": { "light": "builder-light", "standard": "builder-default", "heavy": "builder-heavy" },
+  "asks": "sorter",
   "nodes": [
-    { "id": "door", "title": "On message", "step": "door" },
-    { "id": "implement", "title": "Implement", "turn": { "brief": "node-compile" } },
-    { "id": "continue", "title": "Continue", "turn": { "brief": "node-reconcile", "session": "resume" } },
-    { "id": "edit", "title": "Edit the node", "turn": { "brief": "edit", "session": "resume" } },
-    { "id": "chat", "title": "Chat turn", "turn": { "brief": "node-chat" } },
-    { "id": "chat-resumed", "title": "Resumed chat", "turn": { "brief": "node-chat-resumed", "session": "resume" } }
+    { "id": "door", "title": "On message", "step": "door", "ask": "sorter" },
+    { "id": "implement", "title": "Implement", "turn": { "brief": "node-compile", "slot": "builder-default" } },
+    { "id": "continue", "title": "Continue", "turn": { "brief": "node-reconcile", "session": "resume", "slot": "builder-default" } },
+    { "id": "edit", "title": "Edit the node", "turn": { "brief": "edit", "session": "resume", "slot": "builder-default" } },
+    { "id": "chat", "title": "Chat turn", "turn": { "brief": "node-chat", "slot": "assistant" } },
+    { "id": "chat-resumed", "title": "Resumed chat", "turn": { "brief": "node-chat-resumed", "session": "resume", "slot": "assistant" } }
   ],
   "edges": [
     { "from": "door", "outcome": "implement", "to": "implement" },

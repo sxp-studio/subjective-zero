@@ -91,7 +91,8 @@ public final class SZQueryService {
     /// Serve one step ask end to end. `message`/`world` are the SAME pinned snapshot the
     /// evaluation holds — the delivery supplies them. Throwing `CancellationError` answers
     /// the ask as cancelled; any other throw as failed.
-    public func serve(agent: String, step: String, message: String, world: SZWorld,
+    public func serve(agent: String, step: String, slot: String? = nil, message: String,
+                      world: SZWorld,
                       extras: SZBriefExtras = SZBriefExtras(),
                       requestJSON: String) async throws -> String {
         let request: AskRequest
@@ -116,7 +117,7 @@ public final class SZQueryService {
             ])
         }
 
-        let choice = router.resolve(SZModelCall(class: .query, agent: agent))
+        let choice = router.resolve(SZModelCall(class: .query, agent: agent, slot: slot))
         guard let provider = registry.provider(id: choice.providerID) else {
             throw SZQueryError.unknownProvider(choice.providerID)
         }

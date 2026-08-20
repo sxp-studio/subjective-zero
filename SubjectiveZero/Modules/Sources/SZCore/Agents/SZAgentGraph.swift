@@ -12,20 +12,47 @@ import Foundation
 public struct SZAgentGraph: Sendable, Equatable {
     /// Optional display name (drawn by the panel; never routing input).
     public var label: String?
+    /// The MODEL SLOTS this graph declares — the kinds of model work it needs, each with
+    /// the author's own description (the settings pane's caption). Turn nodes reference a
+    /// slot; a routing profile fills them with models. Declaration order is display order.
+    public var slots: [Slot]
+    /// The Director's grade → slot mapping for dispatched work ("light"/"standard"/"heavy"
+    /// → a declared slot id). Only meaningful on a pack that receives dispatches.
+    public var grades: [String: String]?
+    /// The slot every step ask lands on when its node names none — insurance so a custom
+    /// step's question can't silently bypass the user's choice. nil = the app default.
+    public var asks: String?
     public var nodes: [Node]
     public var edges: [Edge]
 
     /// The reserved id of the graph's entry node — the door.
     public static let doorID = "door"
 
+    /// One declared model slot. `label` is the settings row's name (nil = the id,
+    /// verbatim); `description` is the row's caption — the author's words, required.
+    public struct Slot: Sendable, Equatable, Identifiable, Codable {
+        public var id: String
+        public var label: String?
+        public var description: String
+        public init(id: String, label: String? = nil, description: String) {
+            self.id = id
+            self.label = label
+            self.description = description
+        }
+    }
+
     public struct Node: Sendable, Equatable, Identifiable {
         public var id: String
         public var title: String?
         public var form: Form
-        public init(id: String, title: String? = nil, form: Form) {
+        /// A step node's ask slot: every `ctx.ask` this node's evaluation fires resolves
+        /// through it. nil = the graph's `asks`, else the app default.
+        public var ask: String?
+        public init(id: String, title: String? = nil, form: Form, ask: String? = nil) {
             self.id = id
             self.title = title
             self.form = form
+            self.ask = ask
         }
     }
 
@@ -45,10 +72,14 @@ public struct SZAgentGraph: Sendable, Equatable {
         public var session: Session
         /// Tool narrowing for this turn. nil = the agent's default surface.
         public var tools: [String]?
-        public init(brief: String, session: Session = .spawn, tools: [String]? = nil) {
+        /// The declared slot this turn's model comes from. nil = the app default.
+        public var slot: String?
+        public init(brief: String, session: Session = .spawn, tools: [String]? = nil,
+                    slot: String? = nil) {
             self.brief = brief
             self.session = session
             self.tools = tools
+            self.slot = slot
         }
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -56,6 +87,7 @@ public struct SZAgentGraph: Sendable, Equatable {
             // An omitted session means spawn — the wire default matches the init's.
             session = try container.decodeIfPresent(Session.self, forKey: .session) ?? .spawn
             tools = try container.decodeIfPresent([String].self, forKey: .tools)
+            slot = try container.decodeIfPresent(String.self, forKey: .slot)
         }
         public enum Session: String, Codable, Sendable {
             /// Fresh conversation — the brief re-renders the world every time.
@@ -97,14 +129,27 @@ public struct SZAgentGraph: Sendable, Equatable {
         }
     }
 
-    public init(label: String? = nil, nodes: [Node], edges: [Edge]) {
+    public init(label: String? = nil, slots: [Slot] = [], grades: [String: String]? = nil,
+                asks: String? = nil, nodes: [Node], edges: [Edge]) {
         self.label = label
+        self.slots = slots
+        self.grades = grades
+        self.asks = asks
         self.nodes = nodes
         self.edges = edges
     }
 
     public func node(_ id: String) -> Node? {
         nodes.first { $0.id == id }
+    }
+
+    public func slot(_ id: String) -> Slot? {
+        slots.first { $0.id == id }
+    }
+
+    /// The ask slot serving a step node's questions: its own, else the graph's fallback.
+    public func askSlot(of node: Node) -> String? {
+        node.ask ?? asks
     }
 
     /// The edge leaving `from` on `outcome`, nil if the traversal ends there.
@@ -133,12 +178,15 @@ public struct SZAgentGraph: Sendable, Equatable {
 
 extension SZAgentGraph: Codable {
     enum CodingKeys: String, CodingKey {
-        case label, nodes, edges
+        case label, slots, grades, asks, nodes, edges
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         label = try container.decodeIfPresent(String.self, forKey: .label)
+        slots = try container.decodeIfPresent([Slot].self, forKey: .slots) ?? []
+        grades = try container.decodeIfPresent([String: String].self, forKey: .grades)
+        asks = try container.decodeIfPresent(String.self, forKey: .asks)
         nodes = try container.decode([Node].self, forKey: .nodes)
         edges = try container.decodeIfPresent([Edge].self, forKey: .edges) ?? []
     }
@@ -146,6 +194,9 @@ extension SZAgentGraph: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(label, forKey: .label)
+        if !slots.isEmpty { try container.encode(slots, forKey: .slots) }
+        try container.encodeIfPresent(grades, forKey: .grades)
+        try container.encodeIfPresent(asks, forKey: .asks)
         try container.encode(nodes, forKey: .nodes)
         try container.encode(edges, forKey: .edges)
     }
@@ -153,13 +204,14 @@ extension SZAgentGraph: Codable {
 
 extension SZAgentGraph.Node: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, title, step, turn, dispatch
+        case id, title, step, turn, dispatch, ask
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         title = try container.decodeIfPresent(String.self, forKey: .title)
+        ask = try container.decodeIfPresent(String.self, forKey: .ask)
         // Collect, then insist on exactly one — the count is what the rule actually says.
         var forms: [SZAgentGraph.Form] = []
         if let name = try container.decodeIfPresent(String.self, forKey: .step) {
@@ -183,6 +235,7 @@ extension SZAgentGraph.Node: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(ask, forKey: .ask)
         switch form {
         case .step(let name): try container.encode(name, forKey: .step)
         case .turn(let turn): try container.encode(turn, forKey: .turn)
@@ -211,6 +264,14 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
     case undeclaredOutcome(node: String, outcome: String)
     case nonPositiveBound(from: String, outcome: String)
     case unboundedCycle(nodes: [String])
+    /// A slot reference (`slot`, `ask`, `asks`, or a grades value) naming no declared slot
+    /// — the profile row it should land on would silently never match.
+    case undeclaredSlot(where: String, slot: String)
+    /// A declared slot id off the wire grammar — ids are routing keys, lowercase [a-z0-9-].
+    case malformedSlot(id: String)
+    case duplicateSlot(id: String)
+    /// A grades key outside light/standard/heavy — the Director can only say those three.
+    case unknownGrade(String)
 
     public var description: String {
         switch self {
@@ -237,6 +298,14 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
             "edge \(from) on '\(outcome)' declares a bound below 1"
         case .unboundedCycle(let nodes):
             "cycle \(nodes.joined(separator: " → ")) never crosses a bounded edge"
+        case .undeclaredSlot(let site, let slot):
+            "\(site) references slot '\(slot)', which the graph never declares"
+        case .malformedSlot(let id):
+            "slot id \"\(id)\" — slot ids are lowercase [a-z0-9-]"
+        case .duplicateSlot(let id):
+            "two slots share the id '\(id)'"
+        case .unknownGrade(let grade):
+            "grades key \"\(grade)\" — the Director's grades are light, standard, heavy"
         }
     }
 }
@@ -251,6 +320,38 @@ extension SZAgentGraph {
         for node in nodes {
             if !seen.insert(node.id).inserted {
                 defects.append(.duplicateNode(id: node.id))
+            }
+        }
+
+        // The slot contract, both ways at the declaration side: well-formed unique ids, and
+        // every reference landing on one. (An unreferenced declaration is legal — a pack
+        // may declare ahead of wiring.)
+        var declared: Set<String> = []
+        for slot in slots {
+            if slot.id.isEmpty || slot.id.contains(where: {
+                !($0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-"))
+            }) {
+                defects.append(.malformedSlot(id: slot.id))
+            }
+            if !declared.insert(slot.id).inserted {
+                defects.append(.duplicateSlot(id: slot.id))
+            }
+        }
+        func requireDeclared(_ slot: String?, at site: String) {
+            guard let slot, !declared.contains(slot) else { return }
+            defects.append(.undeclaredSlot(where: site, slot: slot))
+        }
+        requireDeclared(asks, at: "the graph's asks")
+        for (grade, slot) in grades ?? [:] {
+            if !["light", "standard", "heavy"].contains(grade) {
+                defects.append(.unknownGrade(grade))
+            }
+            requireDeclared(slot, at: "grades.\(grade)")
+        }
+        for node in nodes {
+            requireDeclared(node.ask, at: "node '\(node.id)' ask")
+            if case .turn(let turn) = node.form {
+                requireDeclared(turn.slot, at: "turn '\(node.id)'")
             }
         }
         let ids = Set(nodes.map(\.id))

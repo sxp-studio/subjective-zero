@@ -360,9 +360,8 @@ extension SZHost {
                 SZChatMessage(role: .assistant, text: "⚠️ \(note)", transient: true), to: scope)
             flushTranscript(scope)
         }
-        // The chat lane can brief too (the door's amend ruling) — same grading gate as a run.
-        var extras = extras
-        extras.gradingEnabled = (router as? SZProfileRouter)?.grades.isEmpty == false
+        // (The grading teaching never renders in this lane — the chat/amend briefs carry
+        // no {{grading}} token; only the build lane's decompose/reconcile do.)
         // One query service per delivery (the door's triage ask); production executor.
         let queries = SZQueryService(
             renderer: renderer, router: router,

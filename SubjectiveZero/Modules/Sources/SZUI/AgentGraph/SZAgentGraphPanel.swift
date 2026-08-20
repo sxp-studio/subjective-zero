@@ -67,6 +67,10 @@ public struct SZAgentGraphPanel: View {
     /// A run the transcript asked to reveal (host-owned, consumed once shown).
     private let focusRequest: UUID?
     private let onConsumeFocus: () -> Void
+    /// An agent whose PLAN the settings sheet asked to reveal (the Routing pane's View
+    /// Graph) — same consume handshake as the run focus above, but by agent id.
+    private let planFocusRequest: String?
+    private let onConsumePlanFocus: () -> Void
 
     @State private var mode: SZAgentGraphPanelMode = .plan
     /// The run the user PICKED, if any. nil = follow the head of the list, which is how the
@@ -105,7 +109,9 @@ public struct SZAgentGraphPanel: View {
                 resolveGraph: @escaping (SZAgentGraphRun) -> SZAgentGraph? = { _ in nil },
                 nodeTitle: @escaping (String) -> String? = { _ in nil },
                 openStepSource: ((String, SZAgentGraphFace.Source) -> Void)? = nil,
-                focusRequest: UUID? = nil, onConsumeFocus: @escaping () -> Void = {}) {
+                focusRequest: UUID? = nil, onConsumeFocus: @escaping () -> Void = {},
+                planFocusRequest: String? = nil,
+                onConsumePlanFocus: @escaping () -> Void = {}) {
         self.planAgents = planAgents
         self.runs = runs
         self.resolveGraph = resolveGraph
@@ -113,6 +119,8 @@ public struct SZAgentGraphPanel: View {
         self.openStepSource = openStepSource
         self.focusRequest = focusRequest
         self.onConsumeFocus = onConsumeFocus
+        self.planFocusRequest = planFocusRequest
+        self.onConsumePlanFocus = onConsumePlanFocus
     }
 
     /// No runs, nothing to list — force Plan rather than a Run view with no canvas.
@@ -234,8 +242,9 @@ public struct SZAgentGraphPanel: View {
         }
         // On the common container, so a request landing before any record exists is still
         // consumed (and honored the moment the run is recorded) instead of going stale.
-        .onAppear { consumeFocusRequest() }
+        .onAppear { consumeFocusRequest(); consumePlanFocusRequest() }
         .onChange(of: focusRequest) { consumeFocusRequest() }
+        .onChange(of: planFocusRequest) { consumePlanFocusRequest() }
     }
 
     /// The transcript's "open in the Agent Graph" landing — the sidebar's own pick, asked for
@@ -246,6 +255,17 @@ public struct SZAgentGraphPanel: View {
         mode = .run
         following = runs.first { $0.id == focusRequest }?.isLive ?? false
         onConsumeFocus()
+    }
+
+    /// The Routing pane's "View Graph" landing — `navigate(toSeat:)`'s move, asked for from
+    /// outside and addressed by agent id.
+    private func consumePlanFocusRequest() {
+        guard let planFocusRequest else { return }
+        mode = .plan
+        selectedRunID = nil
+        selectedAgentID = planFocusRequest
+        agentsSectionOpen = true
+        onConsumePlanFocus()
     }
 
     private var canvas: some View {
@@ -298,7 +318,9 @@ public struct SZAgentGraphPanel: View {
                 viewSize = proxy.size; centreIfNeeded()
                 // A panel recreated mid-traversal (the user visited another leaf and came
                 // back) must land on the runs, not the default Plan — on the live head.
-                if !runs.isEmpty { mode = .run; followActiveEntry() }
+                // Unless a plan focus is pending: View Graph may have just SHOWN the panel,
+                // and this onAppear must not race the consume back into Run.
+                if planFocusRequest == nil, !runs.isEmpty { mode = .run; followActiveEntry() }
             }
             .onChange(of: proxy.size) { _, new in viewSize = new; centreIfNeeded() }
             // A different run, or a different plan graph, is a different canvas: drop the

@@ -112,19 +112,24 @@ For each, we wrap and surface to the UI:
 
 ## Model routing (shipped)
 
-On top of the global default, named **routing profiles** map graph positions to generation
-envelopes (`{providerID, model?, reasoningEffort?, fastMode?}` — `SZRoutingProfile`, edited in
-the AI Settings sheet's Routing pane, [UI.md](UI.md)). The positions are stable app vocabulary,
-so a profile survives every graph rename and rewire: one route per **agent**, the Director's
-three per-task **grades** (light / standard / heavy) for dispatched fleet work, and one
-**queries** envelope for step asks. The old composer picker is gone: the forward-looking selection lives in
-AI Settings, and the backward-looking truth is the **per-turn receipt** each finished reply
-carries in the transcript — the envelope the turn *actually* ran, with the routing rule that
-chose it (`via`). Semantics:
+The agent graphs declare **model slots** — the kinds of model work each agent needs, every
+slot with the pack author's own description (`slots` in graph.json, [AGENT_GRAPHS.md](AGENT_GRAPHS.md)).
+Named **routing profiles** fill them: `(agent, slot) → envelope`
+(`{providerID, model?, reasoningEffort?, fastMode?}` — `SZRoutingProfile`, edited in the AI
+Settings sheet's Routing pane, [UI.md](UI.md)). Slots are the packs' own stable vocabulary,
+so a profile survives every node rename and rewire; the built-ins declare planner /
+assistant / sorter (director), builder-default / builder-light / builder-heavy / assistant /
+sorter (coding, with `grades` mapping the Director's light / standard / heavy task grades to
+the builder slots), and assistant (debug). The old composer picker is gone: the
+forward-looking selection lives in AI Settings, and the backward-looking truth is the
+**per-turn receipt** each finished reply carries in the transcript — the envelope the turn
+*actually* ran, with the routing rule that chose it (`via`). Semantics:
 
-- **Resolution ladder**, most specific first: session pin > grade > agent > default;
-  queries take the one queries envelope or the default. Anything a profile doesn't map falls one
-  rung — coarser, never wrong ([AGENT_ORCHESTRATION.md](AGENT_ORCHESTRATION.md#model-routing)).
+- **Resolution ladder**, most specific first: session pin > the dispatched task's grade
+  (resolved through the pack's `grades` map: the grade's slot, else the standard one) > the
+  call's slot as the profile fills it > default. Step asks resolve their node's `ask` slot
+  (else the graph's `asks`) the same way. Anything unfilled falls one rung — coarser, never
+  wrong ([AGENT_ORCHESTRATION.md](AGENT_ORCHESTRATION.md#model-routing)).
 - **Session affinity**: a live thread keeps the envelope that opened it; activating, editing, or
   deleting a profile governs NEW conversations only — nothing moves under a running session, and
   a profile switch is refused outright while a run is in flight.

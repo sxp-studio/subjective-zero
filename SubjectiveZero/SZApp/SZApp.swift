@@ -264,6 +264,12 @@ struct SZApp: App {
     /// Which routing profile the AI Settings form edits (nil = active, else the first) —
     /// presentation state, so it lives here beside the sheet rather than in app-state.
     @State private var editedRoutingProfile: String?
+    /// The AI Settings section last viewed — reopening the sheet returns there (per launch,
+    /// like the edit selection above; not persisted).
+    @State private var setupSection: SZProviderSetupSection = .providers
+    /// A Routing card's View Graph ask: land the Agent Graph panel on this agent's plan.
+    /// Consumed by the panel, the same handshake as the host's run-focus request.
+    @State private var agentGraphPlanFocus: String?
     /// Opens the "Tokens" scene (the Profiler's token-inspection window).
     @Environment(\.openWindow) private var openWindow
     // Sparkle (SZUpdater.swift). Explicit init: constructing the controller in a default-value
@@ -334,6 +340,7 @@ struct SZApp: App {
                 SZProviderSetupSheet(cards: host.providerSetupCards,
                                      selectedID: host.selectedSetupProviderID,
                                      routing: routingSettingsView,
+                                     initialSection: setupSection,
                                      onSelect: { host.selectSetupProvider($0) },
                                      onRefresh: { Task { await host.refreshProviderHealthOnce() } },
                                      onTest: { host.runProviderProbe($0) },
@@ -344,7 +351,8 @@ struct SZApp: App {
                                      onConfirm: { host.confirmDefaultProvider() },
                                      onSkip: { host.skipProviderSetup() },
                                      onOpenSetupGuide: { host.openProviderSetupGuide() },
-                                     onJoinDiscord: { host.joinDiscord() })
+                                     onJoinDiscord: { host.joinDiscord() },
+                                     onSectionChange: { setupSection = $0 })
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)
@@ -533,10 +541,12 @@ struct SZApp: App {
         SZRoutingSettingsView(
             profiles: host.routingProfileRows,
             editedProfileName: host.routingEditedProfile(named: editedRoutingProfile)?.name,
-            positions: host.routingPositionRows(profileNamed: editedRoutingProfile),
+            agents: host.routingAgentCards(profileNamed: editedRoutingProfile),
             envPinnedProfileName: host.routingEnvPinnedProfileName,
+            claudeLadderAvailable: host.routingClaudeLadderAvailable,
             onSelectActiveProfile: { _ = host.setActiveRoutingProfile($0) },
             onCreateProfile: { editedRoutingProfile = host.createRoutingProfile() },
+            onCreateClaudeLadder: { editedRoutingProfile = host.createClaudeLadderRoutingProfile() },
             onRenameProfile: { old, new in
                 if host.renameRoutingProfile(from: old, to: new) { editedRoutingProfile = new }
             },
@@ -557,6 +567,13 @@ struct SZApp: App {
             },
             onSetPositionFastMode: {
                 host.setRoutingPositionFastMode(profileNamed: editedRoutingProfile, position: $0, enabled: $1)
+            },
+            onShowAgentGraph: { agentID in
+                // Dismiss via the host path, NOT the sheet binding — its set-false is a Skip
+                // (skipProviderSetup), and a navigation must not read as one.
+                host.dismissProviderSetupForNavigation()
+                agentGraphPlanFocus = agentID
+                if !host.panelLayout.contains(.agentGraph) { host.showPanel(.agentGraph) }
             })
     }
 
@@ -858,7 +875,9 @@ struct SZApp: App {
                               },
                               openStepSource: { [weak host] in host?.openPackSource(agent: $0, source: $1) },
                               focusRequest: host.agentGraphFocusRequest,
-                              onConsumeFocus: { host.agentGraphFocusRequest = nil })
+                              onConsumeFocus: { host.agentGraphFocusRequest = nil },
+                              planFocusRequest: agentGraphPlanFocus,
+                              onConsumePlanFocus: { agentGraphPlanFocus = nil })
         }
     }
 }

@@ -88,22 +88,15 @@ extension SZHost {
                                  via: "\(profile.name) · \(position)")
         }
 
-        var agents: [String: SZModelChoice] = [:]
-        for (agentID, envelope) in profile.agents {
-            if let choice = resolved(envelope, position: agentID) {
-                agents[agentID] = choice
+        var agents: [String: [String: SZModelChoice]] = [:]
+        for (agentID, slots) in profile.agents {
+            for (slotID, envelope) in slots {
+                if let choice = resolved(envelope, position: "\(agentID) · \(slotID)") {
+                    agents[agentID, default: [:]][slotID] = choice
+                }
             }
         }
-        var grades: [String: SZModelChoice] = [:]
-        for grade in SZRoutingProfile.grades {
-            if let envelope = profile.gradeEnvelope(grade),
-               let choice = resolved(envelope, position: grade) {
-                grades[grade] = choice
-            }
-        }
-        let queries = profile.queries.flatMap { resolved($0, position: "queries") }
-        return (SZProfileRouter(fallback: fallback, queries: queries, agents: agents,
-                                grades: grades),
+        return (SZProfileRouter(fallback: fallback, agents: agents),
                 dedupedRoutingNotes(notes))
     }
 

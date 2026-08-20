@@ -1,8 +1,12 @@
 {
   "label": "Debug",
+  "slots": [
+    { "id": "assistant", "label": "Assistant",
+      "description": "Answers in the debug console" }
+  ],
   "nodes": [
     { "id": "door", "title": "On message", "step": "door" },
-    { "id": "answer", "title": "Answer", "turn": { "brief": "chat", "tools": [], "session": "resume" } }
+    { "id": "answer", "title": "Answer", "turn": { "brief": "chat", "tools": [], "session": "resume", "slot": "assistant" } }
   ],
   "edges": [
     { "from": "door", "outcome": "answer", "to": "answer" }
