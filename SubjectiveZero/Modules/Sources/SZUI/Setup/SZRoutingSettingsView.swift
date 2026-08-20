@@ -370,10 +370,14 @@ public struct SZRoutingSettingsView: View {
                 }
             }
         }
+        // The agent's hue pools along the card's top and dissolves down THROUGH the card —
+        // no band edge to cut against — over the base fill, under a matching outline. Same
+        // accent as its chat lines and graph, so the three surfaces read as one identity.
+        // (Background order: nearest first — the gradient sits atop the base fill.)
+        .background(RoundedRectangle(cornerRadius: 10)
+            .fill(headerWash(SZAgentTint.color(agent.tint))))
         .background(RoundedRectangle(cornerRadius: 10)
             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82)))
-        // The agent's own tint outlines its card — the same accent its chat lines and
-        // graph wear, so the three surfaces read as one identity.
         .overlay(RoundedRectangle(cornerRadius: 10)
             .strokeBorder((SZAgentTint.color(agent.tint) ?? .clear).opacity(0.5), lineWidth: 2))
     }
@@ -391,18 +395,15 @@ public struct SZRoutingSettingsView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        // The agent's hue as the header band — a gradient settling toward the trailing
-        // edge, so the name sits in the color and the controls stay quiet. Untinted packs
-        // get a plain lift so every card still reads a header.
-        .background(UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10)
-            .fill(headerWash(SZAgentTint.color(agent.tint))))
     }
 
+    /// The card-top pool of the agent's hue: strongest along the top edge, fully gone by
+    /// mid-card — a dissolve, never a band with an edge.
     private func headerWash(_ tint: Color?) -> AnyShapeStyle {
-        guard let tint else { return AnyShapeStyle(Color.white.opacity(0.04)) }
-        // Vertical: the color sits along the card's top edge and dissolves fully away.
+        guard let tint else { return AnyShapeStyle(Color.white.opacity(0.03)) }
         return AnyShapeStyle(LinearGradient(
-            colors: [tint.opacity(0.24), tint.opacity(0)],
+            stops: [.init(color: tint.opacity(0.22), location: 0),
+                    .init(color: tint.opacity(0), location: 0.45)],
             startPoint: .top, endPoint: .bottom))
     }
 

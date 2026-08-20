@@ -507,22 +507,33 @@ public struct SZProviderSetupSheet: View {
 /// on the scroll content, not a painted gradient: the sheet ground is system material, so
 /// paint would band. Fully opaque at the true bottom. Shared by both Setup panes.
 struct SZScrollBottomFade: ViewModifier {
-    @State private var hasMore = false
+    @State private var hasMoreBelow = false
+    @State private var hasMoreAbove = false
 
     func body(content: Content) -> some View {
         content
-            // Quantized to a Bool on purpose (the transcript's rule): the raw distance
+            // Quantized to Bools on purpose (the transcript's rule): the raw distance
             // changes every scroll tick, and writing that to state would re-render at
             // scroll cadence.
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentSize.height - geometry.contentOffset.y
                     - geometry.containerSize.height > 12
             } action: { _, more in
-                withAnimation(.easeOut(duration: 0.15)) { hasMore = more }
+                withAnimation(.easeOut(duration: 0.15)) { hasMoreBelow = more }
             }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y > 12
+            } action: { _, more in
+                withAnimation(.easeOut(duration: 0.15)) { hasMoreAbove = more }
+            }
+            // The fades ARE the scroll affordance — the overlay scroller just fought them.
+            .scrollIndicators(.hidden)
             .mask(VStack(spacing: 0) {
+                LinearGradient(colors: [hasMoreAbove ? .clear : .black, .black],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 22)
                 Color.black
-                LinearGradient(colors: [.black, hasMore ? .clear : .black],
+                LinearGradient(colors: [.black, hasMoreBelow ? .clear : .black],
                                startPoint: .top, endPoint: .bottom)
                     .frame(height: 22)
             })
