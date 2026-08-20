@@ -231,7 +231,7 @@ public struct SZRoutingSettingsView: View {
                 .textSelection(.enabled)
 
             VStack(alignment: .leading, spacing: 4) {
-                Toggle("Use Model Routing",
+                Toggle("Enable Model Routing",
                        isOn: Binding(get: { routingEnabled }, set: { onSetRoutingEnabled($0) }))
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -241,6 +241,8 @@ public struct SZRoutingSettingsView: View {
             }
 
             if routingEnabled {
+                Divider()
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Profiles")
                         .font(.system(size: 13, weight: .semibold))
@@ -291,25 +293,23 @@ public struct SZRoutingSettingsView: View {
 
     private var profilesBox: some View {
         VStack(spacing: 0) {
-            Group {
-                if profiles.count > 4 {
-                    ScrollView { profileRows }.frame(height: 130)
-                } else {
-                    profileRows
-                }
+            if profiles.count > 4 {
+                ScrollView { profileRows }.frame(height: 104)
+            } else {
+                profileRows
             }
-            .padding(4)
             Divider()
             listToolbar
         }
         .background(RoundedRectangle(cornerRadius: 8)
             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82)))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8)
             .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
     }
 
     private var profileRows: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 0) {
             ForEach(profiles) { profile in
                 SZProfileListRow(name: profile.name, caption: nil,
                                  selected: profile.name == selectedProfileName,
@@ -562,12 +562,13 @@ private struct SZProfileListRow: View {
             }
             Spacer()
         }
-        .padding(.horizontal, 9)
+        // Full-bleed rows, clipped by the box: the text shares the cards' 14pt inset so
+        // the pane reads as one left edge.
+        .padding(.horizontal, 14)
         .frame(height: 26)
-        .background(RoundedRectangle(cornerRadius: 6)
-            .fill(selected ? Color.accentColor.opacity(0.22)
-                           : Color.white.opacity(hovered ? 0.05 : 0)))
-        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .background(selected ? Color.accentColor.opacity(0.22)
+                             : Color.white.opacity(hovered ? 0.05 : 0))
+        .contentShape(Rectangle())
         // Double-click first so it wins the race; a lone click still selects promptly.
         .onTapGesture(count: 2) { beginRename() }
         .onTapGesture { select() }

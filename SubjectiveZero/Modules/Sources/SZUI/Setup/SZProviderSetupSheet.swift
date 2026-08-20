@@ -281,9 +281,10 @@ public struct SZProviderSetupSheet: View {
     @ViewBuilder
     private var routingPane: some View {
         if let routing {
-            VStack(alignment: .leading, spacing: 14) {
+            // No Spacer between: it would split the leftover height with the pane's own
+            // scroll region and open a dead gap above Done.
+            VStack(alignment: .leading, spacing: 10) {
                 routing
-                Spacer(minLength: 0)
                 HStack {
                     Spacer()
                     Button("Done") { onSkip() }   // post-first-run close; routing never gates Confirm
