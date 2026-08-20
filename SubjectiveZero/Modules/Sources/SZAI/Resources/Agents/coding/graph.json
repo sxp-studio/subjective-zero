@@ -2,11 +2,11 @@
   "label": "Coding",
   "nodes": [
     { "id": "door", "title": "On message", "step": "door" },
-    { "id": "implement", "title": "Implement", "turn": { "brief": "node-compile" } },
-    { "id": "continue", "title": "Continue", "turn": { "brief": "node-reconcile", "session": "resume" } },
-    { "id": "edit", "title": "Edit the node", "turn": { "brief": "edit", "session": "resume" } },
-    { "id": "chat", "title": "Chat turn", "turn": { "brief": "node-chat" } },
-    { "id": "chat-resumed", "title": "Resumed chat", "turn": { "brief": "node-chat-resumed", "session": "resume" } }
+    { "id": "implement", "title": "Implement", "turn": { "brief": "node-compile", "duty": "build" } },
+    { "id": "continue", "title": "Continue", "turn": { "brief": "node-reconcile", "session": "resume", "duty": "build" } },
+    { "id": "edit", "title": "Edit the node", "turn": { "brief": "edit", "session": "resume", "duty": "build" } },
+    { "id": "chat", "title": "Chat turn", "turn": { "brief": "node-chat", "duty": "chat" } },
+    { "id": "chat-resumed", "title": "Resumed chat", "turn": { "brief": "node-chat-resumed", "session": "resume", "duty": "chat" } }
   ],
   "edges": [
     { "from": "door", "outcome": "implement", "to": "implement" },

@@ -49,6 +49,40 @@ struct SZAgentGraphTests {
         #expect(turn.session == .spawn)
     }
 
+    @Test func aTurnCarriesItsDutyWordAndOmittingItMeansNone() throws {
+        let json = #"""
+        {"nodes": [{"id": "door", "step": "door"},
+                   {"id": "plan", "turn": {"brief": "decompose", "duty": "plan"}},
+                   {"id": "chat", "turn": {"brief": "chat"}}],
+         "edges": [{"from": "door", "outcome": "build", "to": "plan"},
+                   {"from": "door", "outcome": "answer", "to": "chat"}]}
+        """#
+        let graph = try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
+        guard case .turn(let plan) = graph.node("plan")?.form,
+              case .turn(let chat) = graph.node("chat")?.form else {
+            Issue.record("expected turn nodes")
+            return
+        }
+        #expect(plan.duty == "plan")
+        #expect(chat.duty == nil)
+        #expect(graph.defects().isEmpty)
+    }
+
+    @Test func anOffGrammarDutyIsADefect() {
+        // Duty words are routing keys — a stray capital or space would make a profile
+        // mapping silently unmatchable, so the gate refuses it.
+        var graph = makeGraph()
+        graph.nodes[1] = .init(id: "plan", title: "Plan contracts",
+                               form: .turn(.init(brief: "decompose", duty: "Plan work")))
+        #expect(graph.defects().contains(.malformedDuty(node: "plan", duty: "Plan work")))
+        graph.nodes[1] = .init(id: "plan", title: "Plan contracts",
+                               form: .turn(.init(brief: "decompose", duty: "")))
+        #expect(graph.defects().contains(.malformedDuty(node: "plan", duty: "")))
+        graph.nodes[1] = .init(id: "plan", title: "Plan contracts",
+                               form: .turn(.init(brief: "decompose", duty: "plan-2")))
+        #expect(graph.defects().isEmpty)
+    }
+
     @Test func theDoorIsTheStepAtTheReservedID() throws {
         let json = #"""
         {"nodes": [{"id": "door", "step": "door"},

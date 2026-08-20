@@ -2,7 +2,7 @@
   "label": "Debug",
   "nodes": [
     { "id": "door", "title": "On message", "step": "door" },
-    { "id": "answer", "title": "Answer", "turn": { "brief": "chat", "tools": [], "session": "resume" } }
+    { "id": "answer", "title": "Answer", "turn": { "brief": "chat", "tools": [], "session": "resume", "duty": "chat" } }
   ],
   "edges": [
     { "from": "door", "outcome": "answer", "to": "answer" }

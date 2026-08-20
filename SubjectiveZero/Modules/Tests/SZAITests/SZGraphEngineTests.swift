@@ -140,10 +140,38 @@ private func makeEngine(graph: SZAgentGraph = makeBuildGraph(),
                   host: host, steps: steps, router: identityRouter)
 }
 
+/// Records every call the engine resolves — pins what the router may key on.
+private final class RecordingRouter: SZModelRouting, @unchecked Sendable {
+    var calls: [SZModelCall] = []
+    func resolve(_ call: SZModelCall) -> SZModelChoice {
+        calls.append(call)
+        return SZModelChoice(providerID: "stub")
+    }
+}
+
 // MARK: - Tests
 
 @MainActor
 struct SZGraphEngineTests {
+
+    @Test func aTurnsCallCarriesItsDutyWordToTheRouter() async {
+        // The duty word is the routing key the graph declares — the engine forwards it
+        // verbatim; an unlabeled turn forwards nil (routes by agent alone).
+        var graph = makeBuildGraph()
+        graph.nodes[1] = .init(id: "plan", form: .turn(.init(brief: "decompose", duty: "plan")))
+        let router = RecordingRouter()
+        let host = StubHost()
+        host.summaries = [SZSettledSummary(setID: 1, from: "coding", outcomes: [:], round: 1)]
+        let engine = SZGraphEngine(agent: "director", graph: graph,
+                                   attachments: buildAttachments, host: host,
+                                   steps: StubSteps(scripts: buildScripts()),
+                                   router: router)
+        _ = await engine.run()
+        #expect(router.calls.count == 1)
+        #expect(router.calls[0].agent == "director")
+        #expect(router.calls[0].duty == "plan")
+        if case .turn = router.calls[0].class {} else { Issue.record("expected a turn call") }
+    }
 
     @Test func aBuildTraversalAwaitsItsFleetAndEndsAtTheUnwiredSettled() async throws {
         let host = StubHost()
