@@ -273,7 +273,7 @@ struct SZStripLane: View {
                     .contentTransition(.identity)
                 if let onStop {
                     SZLaneActionButton(symbol: "stop.fill",
-                                       help: "Stop this build — the others keep going",
+                                       help: "Stop this build. The others keep going",
                                        action: onStop)
                 }
             }

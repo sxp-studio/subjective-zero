@@ -383,7 +383,7 @@ extension SZHost {
         // was running contradicted the "Run started" line the same pump had just produced.
         if let ahead = pendingTasks.firstIndex(where: { $0.id == task.id }) {
             narrateDirector(ahead == 0
-                ? "Queued — it starts when the work it needs is free."
+                ? "Queued. It starts when the work it needs is free."
                 : "Queued behind \(ahead) other task\(ahead == 1 ? "" : "s").")
         }
         return task.id
@@ -604,8 +604,8 @@ extension SZHost {
         showChat()                                           // a run narrates into the conversation
         let dirtyCount = run.workSet.count
         let startedID = narrateDirector(dirtyCount == 0
-            ? "Run started (\(providerID)) — no nodes need implementing."
-            : "Run started (\(providerID)) — implementing \(dirtyCount) node\(dirtyCount == 1 ? "" : "s")…")
+            ? "Run started (\(providerID)): no nodes need implementing."
+            : "Run started (\(providerID)): implementing \(dirtyCount) node\(dirtyCount == 1 ? "" : "s")…")
         linkNarrationToRun(startedID, thread: thread)
         run.task = Task { @MainActor in
             defer {
@@ -641,8 +641,8 @@ extension SZHost {
                         let (done, failed) = surfaceUnresolvedNodes(run)
                         let narrationID = narrateDirector(
                             failed == 0
-                                ? (done == 0 ? "Run complete." : "Run complete — \(done) node\(done == 1 ? "" : "s") implemented.")
-                                : "Run finished — \(done) implemented, \(failed) failed. See the flagged node\(failed == 1 ? "" : "s").")
+                                ? (done == 0 ? "Run complete." : "Run complete: \(done) node\(done == 1 ? "" : "s") implemented.")
+                                : "Run finished: \(done) implemented, \(failed) failed. See the flagged node\(failed == 1 ? "" : "s").")
                         linkNarrationToRun(narrationID, thread: thread)
                         attachRunRollup(to: narrationID, run: run)
                     }
@@ -1188,7 +1188,7 @@ extension SZHost {
         let unfinished = unfinishedRunNodeCount(run)
         let cancelledID = narrateDirector(unfinished == 0
             ? "Run cancelled."
-            : "Run cancelled — \(unfinished) node\(unfinished == 1 ? "" : "s") unfinished.")
+            : "Run cancelled: \(unfinished) node\(unfinished == 1 ? "" : "s") unfinished.")
         linkNarrationToRun(cancelledID, thread: run.thread)
         clearInFlightPhasesAfterCancel(run)
         flushAllTranscripts()

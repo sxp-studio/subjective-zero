@@ -268,7 +268,7 @@ private func runFixture() -> (chat: [String: [SZChatMessage]], runID: UUID) {
             SZChatMessage(role: .assistant, text: "decomposing", timestamp: t0, duration: 17,
                           breakdown: [SZTurnEvent(stage: SZTurnStage.firstOutput, start: t0,
                                                   duration: 0.3, runID: runID)]),
-            SZChatMessage(role: .assistant, text: "Run complete — 1 node implemented.",
+            SZChatMessage(role: .assistant, text: "Run complete: 1 node implemented.",
                           timestamp: t0.addingTimeInterval(51), breakdown: rollup),
         ],
         nodeKey: [SZChatMessage(role: .assistant, text: "done", timestamp: t0.addingTimeInterval(18),

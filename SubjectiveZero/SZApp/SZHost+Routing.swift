@@ -38,7 +38,7 @@ extension SZHost {
         case .some(let name):
             guard let pinned = routingProfiles.first(where: { $0.name == name }) else {
                 throw SZRoutingRefusal(detail: "SZ_MODEL_ROUTING names '\(name)', which is "
-                    + "not a saved profile — save it in AI Settings or unset the variable.")
+                    + "not a saved profile. Save it in AI Settings or unset the variable.")
             }
             return pinned
         }
@@ -65,12 +65,12 @@ extension SZHost {
         func resolved(_ envelope: SZRouteEnvelope, position: String) -> SZModelChoice? {
             guard let provider = SZProviderRegistry.shared.provider(id: envelope.providerID) else {
                 notes.append("\(position) is routed to \(envelope.providerID), which isn't a "
-                    + "known provider — falling back. Fix the profile in AI Settings.")
+                    + "known provider. Falling back; fix the profile in AI Settings.")
                 return nil
             }
             guard !disabledProviderIDs.contains(provider.id),
                   isProviderReadyForNewWork(provider.id) else {
-                notes.append("\(provider.displayName) isn't ready — \(position) falls back. "
+                notes.append("\(provider.displayName) isn't ready, so \(position) falls back. "
                     + "Fix it in Agent Providers.")
                 return nil
             }
@@ -79,7 +79,7 @@ extension SZHost {
                 baseline: resolvedGenerationSettings(for: provider.id))
             if let asked = routed.substitutedModel {
                 notes.append("\(position) asked for \(asked), which \(provider.displayName) "
-                    + "doesn't list — running \(routed.settings.model ?? "its default") instead. "
+                    + "doesn't list. Running \(routed.settings.model ?? "its default") instead. "
                     + "Re-pick it in AI Settings.")
             }
             return SZModelChoice(providerID: provider.id, model: routed.settings.model,
@@ -129,7 +129,7 @@ extension SZHost {
     @discardableResult
     func setActiveRoutingProfile(_ name: String?) -> Bool {
         guard !isRunning else {
-            status = "routing profile unchanged — a run is in flight"
+            status = "routing profile unchanged: a run is in flight"
             return false
         }
         guard name == nil || routingProfiles.contains(where: { $0.name == name }) else { return false }
@@ -137,8 +137,8 @@ extension SZHost {
         activeRoutingProfileName = name
         narratedRoutingNotes.removeAll()
         persistAppState()
-        status = name.map { "routing on — profile \"\($0)\"; live conversations keep their models" }
-            ?? "routing off — everything runs on the default provider"
+        status = name.map { "routing on: profile \"\($0)\"; live conversations keep their models" }
+            ?? "routing off: everything runs on the default provider"
         return true
     }
 
@@ -161,7 +161,7 @@ extension SZHost {
         routingProfiles.removeAll { $0.name == name }
         if activeRoutingProfileName == name {
             activeRoutingProfileName = nil
-            status = "routing off — its profile \"\(name)\" was deleted"
+            status = "routing off: its profile \"\(name)\" was deleted"
         }
         narratedRoutingNotes.removeAll()
         persistAppState()

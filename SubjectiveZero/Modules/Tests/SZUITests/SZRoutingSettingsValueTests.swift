@@ -19,7 +19,7 @@ import Testing
     let row = SZRoutingPositionRow(position: SZRoutingPosition(agent: "director", slot: "planner"),
                                    label: "Planner", caption: "Plans the graph",
                                    selectionLabel: "Default",
-                                   clearLabel: "Default — Claude · Opus 5", isSet: false)
+                                   clearLabel: "Default (Claude · Opus 5)", isSet: false)
     #expect(row.id == SZRoutingPosition(agent: "director", slot: "planner"))
     // Same slot word under different agents is a different position — the key is the pair.
     #expect(SZRoutingPosition(agent: "director", slot: "sorter")

@@ -314,11 +314,11 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
         case .undeclaredSlot(let site, let slot):
             "\(site) references slot '\(slot)', which the graph never declares"
         case .malformedSlot(let id):
-            "slot id \"\(id)\" — slot ids are lowercase [a-z0-9-]"
+            "slot id \"\(id)\": slot ids are lowercase [a-z0-9-]"
         case .duplicateSlot(let id):
             "two slots share the id '\(id)'"
         case .unknownGrade(let grade):
-            "grades key \"\(grade)\" — the Director's grades are light, standard, heavy"
+            "grades key \"\(grade)\": the Director's grades are light, standard, heavy"
         }
     }
 }

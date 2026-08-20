@@ -155,7 +155,7 @@ struct SZHostRunAccountingTests {
         host.nodeAgentState[a.id] = SZNodeAgentState(phase: .coding, message: "wiring the mask polygon")
         host.nodeAgentState[b.id] = SZNodeAgentState(phase: .queued)
         host.cancelRun()
-        #expect(directorLines(host) == ["Run cancelled — 1 node unfinished."])   // the built one is done
+        #expect(directorLines(host) == ["Run cancelled: 1 node unfinished."])   // the built one is done
         #expect(host.nodeAgentState[a.id]?.phase == .idle)
         #expect(host.nodeAgentState[b.id]?.phase == .idle)
         #expect(host.nodeStatusLines.isEmpty)   // nothing left to feed the next run as a blocker

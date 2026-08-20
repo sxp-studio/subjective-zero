@@ -242,7 +242,7 @@ public struct SZProviderSetupSheet: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Choose the default agent provider for runs and chat.")
-                Text("Cards re-check on their own while this sheet is open — install or log in and watch them turn green. Only Ready providers can run agents.")
+                Text("Cards re-check on their own while this sheet is open. Install or log in and watch them turn green. Only Ready providers can run agents.")
                     .foregroundStyle(.secondary)
             }
             .font(.system(size: 12))
@@ -404,7 +404,7 @@ public struct SZProviderSetupSheet: View {
                 }
                 .menuStyle(.button)
                 .controlSize(.small)
-                .help("Pick the model this provider runs — applies immediately and re-tests it here")
+                .help("Pick the model this provider runs. Applies immediately and re-tests it here")
             }
         }
     }
@@ -431,7 +431,7 @@ public struct SZProviderSetupSheet: View {
             }
             .controlSize(.small)
             .disabled(card.isTesting)
-            .help("Send one tiny prompt through the real agent path — proves it actually replies")
+            .help("Send one tiny prompt through the real agent path to prove it actually replies")
         }
     }
 
@@ -469,7 +469,7 @@ public struct SZProviderSetupSheet: View {
                     Label("Open Terminal to Log In", systemImage: "terminal")
                 }
                 .controlSize(.small)
-                .help("Login is interactive — it runs in Terminal, and this card turns green when it lands")
+                .help("Login is interactive: it runs in Terminal, and this card turns green when it lands")
                 disableButton(card)
             }
         case .failed:
@@ -480,7 +480,7 @@ public struct SZProviderSetupSheet: View {
                 if let fallbackName = card.fallbackName {
                     Button("Use \(fallbackName) Instead") { onUseFallback(card.id) }
                         .controlSize(.small)
-                        .help("Make \(fallbackName) the default provider and close this sheet — \(card.displayName) stays available here if it recovers")
+                        .help("Make \(fallbackName) the default provider and close this sheet. \(card.displayName) stays available here if it recovers")
                 }
                 disableButton(card)
             }
@@ -498,7 +498,7 @@ public struct SZProviderSetupSheet: View {
         if card.canDisable {
             Button("Disable") { onSetEnabled(card.id, false) }
                 .controlSize(.small)
-                .help("Stop checking \(card.displayName) and hide it from runs — re-enable it here any time")
+                .help("Stop checking \(card.displayName) and hide it from runs. Re-enable it here any time")
         }
     }
 }

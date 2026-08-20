@@ -556,7 +556,7 @@ struct SZHostQueueNarrationTests {
 
         let queued = host.store.messages(for: .director).map(\.text).filter { $0.hasPrefix("Queued") }
         #expect(host.pendingTasks.count == 1)
-        #expect(queued == ["Queued — it starts when the work it needs is free."])
+        #expect(queued == ["Queued. It starts when the work it needs is free."])
     }
 
     @Test func theSecondTaskCountsWhatIsAheadOfIt() {
@@ -566,7 +566,7 @@ struct SZHostQueueNarrationTests {
 
         let queued = host.store.messages(for: .director).map(\.text).filter { $0.hasPrefix("Queued") }
         #expect(host.pendingTasks.count == 2)
-        #expect(queued == ["Queued — it starts when the work it needs is free.",
+        #expect(queued == ["Queued. It starts when the work it needs is free.",
                            "Queued behind 1 other task."])
     }
 

@@ -65,7 +65,7 @@ extension SZHost {
             .flatMap { profile.envelope(agent: agentID, slot: $0) }
             .map(routingEnvelopeDisplay) ?? routingAppDefaultDisplay
         let unsetLabel = "Default"
-        let clearLabel = "Default — \(resolution)"
+        let clearLabel = "Default (\(resolution))"
         guard let envelope else {
             return SZRoutingPositionRow(position: position, label: slot.label ?? slot.id,
                                         caption: slot.description,

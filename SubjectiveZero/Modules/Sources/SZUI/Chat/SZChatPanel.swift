@@ -804,7 +804,7 @@ private struct SZChatTurnRow: View, Equatable {
                         " · \($0.model ?? $0.providerID)\($0.fastMode ? " · fast" : "")"
                     } ?? ""
                     let caption = "Worked for \(szFormatDurationCompact(duration))\(ran)\(tokens)"
-                    let hover = message.generation.map { $0.label + ($0.via.map { " — via \($0)" } ?? "") }
+                    let hover = message.generation.map { $0.label + ($0.via.map { " · via \($0)" } ?? "") }
                     if showTurnBreakdown, let breakdown = message.breakdown, !breakdown.isEmpty {
                         // The same caption, now a disclosure over the turn's recorded phases.
                         let disclosure = SZTurnBreakdownView(turnCaption: caption, events: breakdown,
