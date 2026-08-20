@@ -25,7 +25,8 @@ public enum SZGenerationLabels {
 }
 
 /// One saved profile in the pane's list; `isActive` marks the row that runs (= selected).
-/// `isProtected` = it ships with the app: the minus refuses it (renaming makes it yours).
+/// `isProtected` = it ships with the app, read-only whole: no edit, rename, or delete —
+/// the row wears a lock, and Duplicate is the way to a customizable copy.
 public struct SZRoutingProfileRow: Identifiable, Equatable, Sendable {
     public var name: String
     public var isActive: Bool
@@ -320,6 +321,7 @@ public struct SZRoutingSettingsView: View {
             ForEach(profiles) { profile in
                 SZProfileListRow(name: profile.name, caption: nil,
                                  selected: profile.name == selectedProfileName,
+                                 locked: profile.isProtected,
                                  renaming: renameTarget == profile.name,
                                  select: { onSelectProfile(profile.name) },
                                  beginRename: {
@@ -548,6 +550,7 @@ private struct SZProfileListRow: View {
     let name: String
     let caption: String?
     let selected: Bool
+    let locked: Bool
     let renaming: Bool
     let select: () -> Void
     let beginRename: () -> Void
@@ -559,6 +562,12 @@ private struct SZProfileListRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            if locked {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .help("Ships with the app. Duplicate it to customize")
+            }
             if renaming {
                 TextField("Name", text: $draft)
                     .textFieldStyle(.plain)
