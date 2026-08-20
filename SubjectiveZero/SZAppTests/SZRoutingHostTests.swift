@@ -263,7 +263,8 @@ struct SZRoutingHostTests {
         #expect(profile.envelope(agent: "coding", slot: "builder-default")?.model == "gpt-5.6-terra")
         #expect(profile.envelope(agent: "director", slot: "sorter")?.model == "gpt-5.6-luna")
         #expect(profile.envelope(agent: "coding", slot: "sorter")?.model == "gpt-5.6-luna")
-        #expect(profile.envelope(agent: "coding", slot: "builder-light") == nil)
+        // Light gets the SMALL tier explicitly — the slot's caption promises a fast model.
+        #expect(profile.envelope(agent: "coding", slot: "builder-light")?.model == "gpt-5.6-luna")
 
         let host = bareHost(profiles: SZHost.routingStarterNames.map { SZRoutingProfile(name: $0) })
         #expect(host.routingProfileRows.allSatisfy { $0.isProtected })
