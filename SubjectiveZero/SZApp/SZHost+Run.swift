@@ -377,13 +377,10 @@ extension SZHost {
         admissionSuspended = false   // a new ask is the user acting again
         flushTaskQueue()
         pumpMailboxes()   // fires now if the work is free; else the next release re-fires
-        // After the pump, and only if still waiting: narrate "queued", since something else
-        // running contradicted the "Run started" line the pump just produced.
-        if let ahead = pendingTasks.firstIndex(where: { $0.id == task.id }) {
-            narrateDirector(ahead == 0
-                ? "Queued. It starts when the work it needs is free."
-                : "Queued behind \(ahead) other task\(ahead == 1 ? "" : "s").")
-        }
+        // Nothing is narrated for a task that stays waiting. Queueing is a STATE, and the strip
+        // below the transcript already holds it — as a row that also names what the task is behind
+        // and offers the ✕ to drop it, which the sentence never did. `scheduledTaskRows` is that
+        // row's one source, and `pendingTasks` order is what "behind N others" meant.
         return task.id
     }
 
@@ -592,19 +589,19 @@ extension SZHost {
         }
         // The run's own state object — the claim IS its identity, and every write below goes to
         // THIS object, so a zombie can never touch a sibling's. The RUNS thread id is the build
-        // traversal's own record id (its children share it), minted here so the opening narration
-        // can carry it — that stamp is the transcript's durable way back once it scrolls away.
+        // traversal's own record id (its children share it), minted here so the run's closing
+        // RECEIPT can carry it — that stamp is the transcript's durable way back once it scrolls away.
         let run = SZRunState(taskID: taskID, claim: claim, instruction: instruction,
                              ownsGraphOp: startedForGraphOp, workSet: workSet)
         activeRuns[taskID] = run
         let thread = run.thread
         status = "running \(providerID)…"
-        showChat()                                           // a run narrates into the conversation
-        let dirtyCount = run.workSet.count
-        let startedID = narrateDirector(dirtyCount == 0
-            ? "Run started (\(providerID)): no nodes need implementing."
-            : "Run started (\(providerID)): implementing \(dirtyCount) node\(dirtyCount == 1 ? "" : "s")…")
-        linkNarrationToRun(startedID, thread: thread)
+        showChat()                                     // a run settles into the conversation
+        // No opening line. The run strip appears in the same breath, on every tab, for the whole
+        // life of the run — with the provider, a live clock, the ■ that stops THIS build and a tap
+        // into the Agent Graph. "Run started (claude) — implementing 1 node…" restated a surface
+        // ten pixels lower that said strictly more, in the Director's own violet, as if the host
+        // were the agent. Only the ENDING is news, and it arrives as a receipt (`narrateRunReceipt`).
         run.task = Task { @MainActor in
             defer {
                 // The CAPTURED run, never a live lookup — after an eager `cancelRun` this is the
@@ -640,11 +637,10 @@ extension SZHost {
                     if !run.ownsGraphOp {
                         adoptRunRenderEndpoint(run)   // show what this run just built
                         let (done, failed) = surfaceUnresolvedNodes(run)
-                        let narrationID = narrateDirector(
-                            failed == 0
-                                ? (done == 0 ? "Run complete." : "Run complete: \(done) node\(done == 1 ? "" : "s") implemented.")
-                                : "Run finished: \(done) implemented, \(failed) failed. See the flagged node\(failed == 1 ? "" : "s").")
-                        linkNarrationToRun(narrationID, thread: thread)
+                        let narrationID = narrateRunReceipt(
+                            SZChatReceipt.forEnding(implemented: done, failed: failed,
+                                                    work: soleWorkTitle(run)),
+                            seconds: elapsed(run), thread: thread)
                         attachRunRollup(to: narrationID, run: run)
                     }
                 }
@@ -663,8 +659,13 @@ extension SZHost {
                     status = "agent run failed: \(error)"
                     if !run.ownsGraphOp {
                         let (done, failed) = surfaceUnresolvedNodes(run)
-                        let narrationID = narrateDirector("Run failed: \(error). \(done) implemented, \(failed) unfinished.")
-                        linkNarrationToRun(narrationID, thread: thread)
+                        // The reason rides ON the receipt (`detail`) rather than in a second line:
+                        // a build that died still gets one row, and the row is the one that says why.
+                        let narrationID = narrateRunReceipt(
+                            SZChatReceipt.forFailure(implemented: done, unfinished: failed,
+                                                     work: soleWorkTitle(run),
+                                                     reason: Self.oneLineDetail("\(error)")),
+                            seconds: elapsed(run), thread: thread)
                         attachRunRollup(to: narrationID, run: run)
                     }
                 }
@@ -1183,11 +1184,11 @@ extension SZHost {
         status = "run cancelled"
         // Count and narrate HERE, once: the cancelled task's own catch fires seconds later (the
         // CLIs must die first), and by then this run is gone. Everything this needs is live now.
-        let unfinished = unfinishedRunNodeCount(run)
-        let cancelledID = narrateDirector(unfinished == 0
-            ? "Run cancelled."
-            : "Run cancelled: \(unfinished) node\(unfinished == 1 ? "" : "s") unfinished.")
-        linkNarrationToRun(cancelledID, thread: run.thread)
+        let settled = settledRunNodeCounts(run)
+        narrateRunReceipt(
+            SZChatReceipt.forStop(implemented: settled.implemented, unfinished: settled.unfinished,
+                                  work: soleWorkTitle(run)),
+            seconds: elapsed(run), thread: run.thread)
         clearInFlightPhasesAfterCancel(run)
         flushAllTranscripts()
         persistAgentSessions()
@@ -1257,11 +1258,35 @@ extension SZHost {
         }
     }
 
-    /// The work-set nodes a cancelled run left dirty — for the cancel narration only; touches nothing.
-    private func unfinishedRunNodeCount(_ run: SZRunState) -> Int {
-        run.workSet.reduce(0) { n, id in
-            n + ((store.project?.graph.node(id: id)?.needsImplementation ?? false) ? 1 : 0)
+    /// The title of the ONE node a run was for, or nil when it carried several (or none, or the
+    /// node has since been merged away). This is what stops concurrent one-node builds from
+    /// finishing as the same sentence repeated: three runs, three names.
+    private func soleWorkTitle(_ run: SZRunState) -> String? {
+        guard run.workSet.count == 1, let id = run.workSet.first else { return nil }
+        return store.project?.graph.node(id: id)?.title
+    }
+
+    /// How long the run took, off the MONOTONIC start — an NTP step mid-run must not stretch or
+    /// shrink the number the receipt shows. The same anchor `attachRunRollup` uses.
+    private func elapsed(_ run: SZRunState) -> TimeInterval {
+        (ContinuousClock.now - run.startedMono).szSeconds
+    }
+
+    /// What a cancelled run actually settled, counted node by node from EVIDENCE — and a work-set
+    /// node that NO LONGER EXISTS is counted neither way, the same discipline `surfaceUnresolvedNodes`
+    /// keeps for a node merged away mid-run.
+    ///
+    /// Deriving `implemented` as `workSet.count - unfinished` instead was a false claim waiting to
+    /// happen: a Stop on a run that owns a staged split rolls the op back FIRST, deleting every
+    /// piece, so nothing was left "dirty" and the run reported `built 3 nodes` for work that was
+    /// never built and no longer exists. A missing node is not a built one.
+    private func settledRunNodeCounts(_ run: SZRunState) -> (implemented: Int, unfinished: Int) {
+        var implemented = 0, unfinished = 0
+        for id in run.workSet {
+            guard let node = store.project?.graph.node(id: id) else { continue }
+            if node.needsImplementation { unfinished += 1 } else { implemented += 1 }
         }
+        return (implemented, unfinished)
     }
 
     /// The ledger resources one agent turn on `scope` occupies: the transcript (one turn per

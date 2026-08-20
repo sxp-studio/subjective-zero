@@ -16,7 +16,7 @@ extension SZHostBridge {
             tool("debug_snapshot_state", "Return the live project graph as JSON."),
             tool("debug_card_mount", "A node's custom-card mount as JSON: {state: unmounted|loading|ready|failed, generation, warning, error, hasSource, backdrop}.",
                  properties: ["node": ["type": "string", "description": "node id (UUID)"]]),
-            tool("debug_chat_transcript", "Return a chat transcript as JSON — role/text/thinking plus, where present, timestamp/duration/usage/breakdown/generation per message (the same numbers the in-app turn breakdown shows; `generation` is the turn's receipt — provider/model/effort/fast and which routing rule picked it).",
+            tool("debug_chat_transcript", "Return a chat transcript as JSON — role/text/thinking plus, where present, timestamp/duration/usage/breakdown/generation per message (`generation` is the turn's envelope — provider/model/effort/fast and which routing rule picked it). A finished build carries `receipt` {label, outcome: end|stopped|declined|failed, detail?} and `graphRunID` — read those rather than parsing the text.",
                  properties: ["scope": ["type": "string", "description": "a node uuid, or \"director\" (default)"]]),
             tool("debug_turn_timings", "Per-turn timing data for profiling, as JSON: completed agent turns per scope — {turnID, start, duration, usage, events} where events are the turn's recorded phases (queue wait, first output, tool spans, compile/promote, the CLI's own report) with id/parent (span hierarchy) and runID (run grouping). The latest run's rollup rides the Director run-complete narration (run.* stages). `tracing` reports whether collection is on (SZ_TRACE / DEBUG).",
                  properties: ["scope": ["type": "string", "description": "a node uuid or \"director\" to filter; omit for every scope"]]),
@@ -303,7 +303,11 @@ extension SZHostBridge {
         for key in scopeKeys {
             guard let scope = SZChatScope(key: key) else { continue }
             let turns: [[String: Any]] = host.store.messages(for: scope).compactMap { message in
-                guard message.role != .user,
+                // A build's RECEIPT carries both a duration and the run rollup, but its duration is
+                // the whole run's wall, not a turn's — a driver summing per-turn durations would
+                // double-count every run. (The old run-complete narration passed this filter too,
+                // but `narrateDirector` left `duration` nil, so it was inert.)
+                guard message.role != .user, message.receipt == nil,
                       message.duration != nil || !(message.breakdown ?? []).isEmpty else { return nil }
                 var turn: [String: Any] = ["turnID": message.id.uuidString,
                                            "start": Self.iso8601.string(from: message.timestamp)]
@@ -391,6 +395,18 @@ extension SZHostBridge {
             if let via = generation.via { g["via"] = via }
             m["generation"] = g
         }
+        // A finished build, STRUCTURALLY. Without this a driving agent can only string-match the
+        // receipt's prose to learn how a run ended — which is what every harness did back when the
+        // outcome only ever existed as the sentence "Run complete — 1 node implemented."
+        if let receipt = message.receipt {
+            var r: [String: Any] = ["label": receipt.label,
+                                    "outcome": receipt.conclusion.word]
+            if let detail = receipt.detail { r["detail"] = detail }
+            m["receipt"] = r
+        }
+        // The run this turn belongs to — the same id the Agent Graph panel and `debug_run_summary`
+        // key on, so a driver can join a transcript line to its record.
+        if let runID = message.graphRunID { m["graphRunID"] = runID.uuidString }
         return m
     }
 

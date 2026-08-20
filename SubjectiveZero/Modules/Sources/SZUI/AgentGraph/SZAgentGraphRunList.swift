@@ -250,24 +250,27 @@ struct SZRunBadge: View {
     }
 
     /// An ending's words and colour — the ONE vocabulary, pure so the canvas terminal reads
-    /// the same table and so the mapping is testable without a view.
+    /// the same table and so the mapping is testable without a view. The WORD comes from the model
+    /// (`Conclusion.word`), because the MCP surface and any driver need the same five words and
+    /// cannot see this view; what is decided here is the colour it wears.
     static func style(for conclusion: SZAgentGraphRun.Conclusion?) -> (label: String, colour: Color) {
-        switch conclusion {
-        case .failed, .defect: ("failed", SZAgentGraphStyle.failed)
+        let label = conclusion?.word ?? SZAgentGraphRun.Conclusion.ended.word
+        return switch conclusion {
+        case .failed, .defect: (label, SZAgentGraphStyle.failed)
         // Stopped and interrupted are ONE badge: both mean unfinished with nothing broken, and
         // they cannot co-occur — `.interrupted` is only ever stamped when a record is restored
         // from a session that died, so it is never something you watch happen. Which of the two
         // it was stays in the row's tooltip and on the flipped entries' detail, because "the app
         // closed under this run" is a fact nothing else in the record can tell you.
-        case .cancelled, .interrupted: ("stopped", SZAgentGraphStyle.neutral)
+        case .cancelled, .interrupted: (label, SZAgentGraphStyle.neutral)
         // A DECISION, not an accident — the agents' own violet, the colour a step's ruling wears
         // on the canvas. Grey said the same thing here as "the app crashed", which it is not:
         // a refusal is never a failure, and it is never nobody's doing either.
-        case .declined:        ("declined", SZEdgeStyle.intentViolet)
+        case .declined:        (label, SZEdgeStyle.intentViolet)
         // A record sealed without a conclusion cannot happen through the host's seal; drawn
         // as a plain ending rather than left blank. The SAME blue the canvas gives a clean
         // exit — a list badge and the terminal capsule are two views of one fact.
-        case .ended, .none:    ("end", SZAgentGraphStyle.ended)
+        case .ended, .none:    (label, SZAgentGraphStyle.ended)
         }
     }
 }

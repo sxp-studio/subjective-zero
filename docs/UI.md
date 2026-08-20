@@ -180,6 +180,19 @@ Graph panel.
   the strip's own, not `SZAgentSubagentLane`: inside a dispatch card a lane fills the card's width,
   which out here read as a stack of full-width buttons. The shared thing is the vocabulary
   (`SZRunBadge`: running / end / stopped / declined / failed).
+- **A finished build settles into the transcript as a RECEIPT** — the same lane, at the point in
+  time where it ended (`SZChatReceipt`, rendered by `SZChatReceiptRow` over the shared
+  `SZLanePill`). A run is a state while it happens and a receipt once it is over: presence, then
+  record. The host says nothing at the start (the strip is already there, saying more) and nothing
+  about queueing (a scheduled row says it, and names the blocker) — **only the ending is news**.
+  The receipt names the WORK, not a count — `built Warm Orange`, `built 3 nodes`, `built 2 of 3`,
+  `1 node unfinished` — because concurrent one-node builds used to finish as the same sentence
+  repeated. It wears the `hammer` (a work lane; `eyeglasses` stays the Director's own lane), takes
+  the `SZRunBadge` vocabulary only for endings that are NOT clean, carries a failure's reason as a
+  quiet line beneath, and is the transcript's jump into the Agent Graph via `graphRunID`. It is
+  deliberately NOT a turn: no rail, no `DIRECTOR AGENT` header — the host is not the Director, and
+  a host line dressed as one is what this replaced. Its label aligns with the turns' text column,
+  not their rails.
 - **The send slot is THE action slot** (one place, two states): per-turn **Stop** while an
   interactive turn streams (session + partial reply survive); else send. It never stops a BUILD —
   with several in flight a composer button cannot say which one it means, so that lives on the

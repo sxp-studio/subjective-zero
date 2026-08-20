@@ -539,39 +539,53 @@ struct SZHostLiveThreadsTests {
     }
 }
 
-/// What the transcript says a task DID. "Queued" was narrated whenever anything else happened to
-/// be running, which under concurrency is most of the time and usually false — the pump admits a
-/// disjoint task in the same breath, and the "Run started" line right after contradicted it.
-@Suite("A task is only called queued when it is actually waiting")
+/// WHERE a waiting task is shown. The transcript used to narrate "Queued — it starts when the work
+/// it needs is free." — a sentence the run strip already renders as a row that ALSO names what the
+/// task is behind and offers the ✕ to drop it. Queueing is a state, and state belongs to the strip;
+/// the conversation now says nothing at all about it. These tests pin the contract at its new home.
+@Suite("A waiting task is shown in the strip, never narrated")
 @MainActor
 struct SZHostQueueNarrationTests {
 
-    /// Both tests assert unconditionally. An earlier pair branched on `pendingTasks` and asserted
+    /// All of these assert unconditionally. An earlier pair branched on `pendingTasks` and asserted
     /// something in each branch, which passes whatever the code does — the exact failure the
     /// change was supposed to make impossible.
-    @Test func aTaskThatIsStillWaitingSaysSoExactlyOnce() {
+    @Test func aTaskThatIsStillWaitingBecomesAStripRowAndNotALine() {
         let host = SZHost()
         // Nothing can start here (no project, no MCP port), so every minted task genuinely waits.
         host.mintRun(instruction: "make it snow")
 
-        let queued = host.store.messages(for: .director).map(\.text).filter { $0.hasPrefix("Queued") }
         #expect(host.pendingTasks.count == 1)
-        #expect(queued == ["Queued. It starts when the work it needs is free."])
+        #expect(host.scheduledTaskRows.count == 1)
+        // Not "no Queued line" — NO line. Minting is not something the host says.
+        #expect(host.store.messages(for: .director).isEmpty)
     }
 
-    @Test func theSecondTaskCountsWhatIsAheadOfIt() {
+    /// The strip lists what is ahead by showing it, in order — which is what "Queued behind 1 other
+    /// task." was spending a sentence to approximate.
+    @Test func theQueueIsShownInTheOrderItWillRun() {
         let host = SZHost()
-        host.mintRun(instruction: "first")
-        host.mintRun(instruction: "second")
+        host.mintRun(instruction: "first", title: "first")
+        host.mintRun(instruction: "second", title: "second")
 
-        let queued = host.store.messages(for: .director).map(\.text).filter { $0.hasPrefix("Queued") }
-        #expect(host.pendingTasks.count == 2)
-        #expect(queued == ["Queued. It starts when the work it needs is free.",
-                           "Queued behind 1 other task."])
+        #expect(host.scheduledTaskRows.map(\.title) == ["first", "second"])
+        #expect(host.store.messages(for: .director).isEmpty)
     }
 
-    /// The narration reads the QUEUE, not the world. A task that never entered the queue must not
-    /// be described by a line about queueing, no matter how busy the app is.
+    /// The strip row reads the LEDGER, so it can name the holder the sentence never could.
+    @Test func aBlockedTaskNamesWhatItIsBehind() {
+        let host = SZHost()
+        let node = SZNodeID()
+        let claim = SZClaimToken(label: "Warm Orange")
+        #expect(host.ledger.tryAcquire([.node(node), .transcript(.node(node))], as: claim))
+
+        host.mintRun(instruction: "rebuild it", title: "rebuild it", nodes: [node])
+
+        #expect(host.scheduledTaskRows.map(\.waitingOn) == ["Warm Orange"])
+    }
+
+    /// The strip reads the QUEUE, not the world. A task that never entered the queue must not be
+    /// described by a row about queueing, no matter how busy the app is.
     @Test func aLiveBuildElsewhereDoesNotMakeAnAskQueued() {
         let host = SZHost()
         let claim = SZClaimToken(label: "someone else")
@@ -581,14 +595,13 @@ struct SZHostQueueNarrationTests {
                                              ownsGraphOp: false, workSet: [node])
 
         host.pendingTasks.removeAll()
-        let narratedBefore = host.store.messages(for: .director).count
-        // Withdraw it the moment it is minted: what is pinned is that the LINE follows the queue's
-        // state, so a task that leaves the queue leaves no queue narration behind either.
+        // Withdraw it the moment it is minted: what is pinned is that the ROW follows the queue's
+        // state, so a task that leaves the queue leaves no queue presence behind either.
         let id = host.mintRun(instruction: "unrelated")
         host.withdrawTask(id)
 
-        let lines = host.store.messages(for: .director).dropFirst(narratedBefore).map(\.text)
-        #expect(lines.allSatisfy { !$0.contains("behind 0") })
+        #expect(host.scheduledTaskRows.isEmpty)
+        #expect(host.store.messages(for: .director).isEmpty)
     }
 }
 

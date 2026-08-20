@@ -266,10 +266,16 @@ extension SZHost {
         var lines: [String] = []
         if tail.count < messages.count { lines.append("(…\(messages.count - tail.count) earlier turns omitted)") }
         for message in tail {
-            let label = switch message.role {
-            case .user: "user"
-            case .assistant: "assistant"
-            case .director: "director agent"
+            // A build's receipt is not something anyone SAID. Labelled by role it replays to a
+            // fresh session as `assistant: built Warm Orange` — a bare verb phrase with no subject,
+            // attributed to the agent as its own prior words. It is an event in the conversation,
+            // so it is labelled as one.
+            let label = if message.receipt != nil { "build" } else {
+                switch message.role {
+                case .user: "user"
+                case .assistant: "assistant"
+                case .director: "director agent"
+                }
             }
             // Mentions replay as readable `@display`; ONE aggregate manifest below re-expands them
             // (per-message manifests would bloat a 20-message replay) — so a fresh session can act
