@@ -146,11 +146,13 @@ extension SZHost {
                            turnID: assistantID)
         }
 
-        let generation = resolvedGenerationSettings(for: providerID)
         // The turn core, driven by the graph's own ORDER: `tools` and `session` are what
-        // the turn node declares, so tool-free-ness is the debug pack's `"tools": []`
-        // rather than a scope branch here.
+        // the turn node declares (so tool-free-ness is the debug pack's `"tools": []`
+        // rather than a scope branch here), and `choice` is the router's verdict.
         func runDeliveredTurn(_ order: SZTurnOrder, prompt: String) async throws -> SZAgentRunResult {
+            guard let turnProvider = SZProviderRegistry.shared.provider(id: order.choice.providerID) else {
+                throw SZMCPError.message("unknown provider: \(order.choice.providerID)")
+            }
             let request = SZAgentRunRequest(
                 prompt: prompt,
                 workingDirectory: workingDirectory,
@@ -159,12 +161,12 @@ extension SZHost {
                 mcpServerPort: order.tools?.isEmpty == true ? nil : mcpPort,
                 allowedMCPTools: order.tools ?? SZHostBridge.agentCallableToolNames,
                 resumeSessionID: order.session == .resume ? existing?.sessionID : nil,
-                model: generation.model,
-                reasoningEffort: generation.reasoningEffort,
-                fastMode: generation.fastMode ?? false,
+                model: order.choice.model,
+                reasoningEffort: order.choice.reasoningEffort,
+                fastMode: order.choice.fastMode,
                 timeout: SZAgentTurnBudgets.codingTimeout,
                 inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
-            return try await deliver(scope: scope, request: request, provider: provider,
+            return try await deliver(scope: scope, request: request, provider: turnProvider,
                                      existingAssistantID: assistantID, claim: claim).result
         }
         do {
@@ -333,10 +335,7 @@ extension SZHost {
             }
         }
         let renderer = SZBriefRenderer(packRoot: packsRoot)
-        let generation = resolvedGenerationSettings(for: providerID)
-        let router = SZIdentityRouter(choice: SZModelChoice(
-            providerID: providerID, model: generation.model,
-            reasoningEffort: generation.reasoningEffort))
+        let router = makeRouter(providerID: providerID)
         // One query service per delivery (the door's triage ask); production executor.
         let queries = SZQueryService(
             renderer: renderer, router: router,

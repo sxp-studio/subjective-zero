@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The routing seam every model request passes through: a caller describes WHAT it is asking
 // for (`SZModelCall` — the call's class and where in the agent graph it originates) and the
-// router answers WITH WHAT (`SZModelChoice` — provider, model, effort). Step and engine code
-// never name a model; naming lives entirely behind this protocol, which is what keeps the
-// seam vendor-neutral. v1 ships the identity router (one choice for every call — the
-// session's provider); per-step user picks and an automatic strategy are future conformers,
-// wired in at host construction like any other policy.
+// router answers WITH WHAT (`SZModelChoice` — provider, model, effort, fast mode). Step and
+// engine code never name a model; naming lives entirely behind this protocol, which is what
+// keeps the seam vendor-neutral. v1 ships the identity router (one choice for every call —
+// the session's provider); the profile router is the policy conformer, wired in at host
+// construction like any other policy.
 
 /// One model request, described by intent and origin — everything a routing policy may key
 /// on. `class` separates the small stateless completion (`query` — a step's ask) from a full
@@ -21,28 +21,34 @@ public struct SZModelCall: Sendable {
     public var `class`: Class
     /// The agent (type) on whose behalf the call runs.
     public var agent: String
-    /// The graph node whose evaluation (or turn) is asking.
-    public var step: String?
+    /// The work-kind word the turn's graph node declares; nil = the node declares none
+    /// (the call routes by its agent alone). Never a node id — positions drift, words travel.
+    public var duty: String?
 
-    public init(class: Class, agent: String, step: String? = nil) {
+    public init(class: Class, agent: String, duty: String? = nil) {
         self.class = `class`
         self.agent = agent
-        self.step = step
+        self.duty = duty
     }
 }
 
 /// A routing verdict: which provider serves the call, and optionally which model and effort.
 /// `model`/`reasoningEffort` are the same opaque pass-through tokens the provider seam
 /// already speaks (`SZAgentRunRequest`) — nil defers to the provider's own default.
+/// `fastMode` is concrete (the clamp resolved it); the query lane never reads it — a query
+/// request carries no fast flag at all.
 public struct SZModelChoice: Sendable {
     public var providerID: String
     public var model: String?
     public var reasoningEffort: String?
+    public var fastMode: Bool
 
-    public init(providerID: String, model: String? = nil, reasoningEffort: String? = nil) {
+    public init(providerID: String, model: String? = nil, reasoningEffort: String? = nil,
+                fastMode: Bool = false) {
         self.providerID = providerID
         self.model = model
         self.reasoningEffort = reasoningEffort
+        self.fastMode = fastMode
     }
 }
 

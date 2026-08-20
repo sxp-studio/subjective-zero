@@ -248,23 +248,22 @@ extension SZHost {
         flushTranscript(scope)
     }
 
-    /// Run one Director Agent turn — the active provider with the MCP server attached and the
-    /// rendered brief, streamed live into the Director tab. `session: .resume` continues the
-    /// director's own session (the graph's reconcile turn declares it); `.spawn` cold-starts.
+    /// Run one Director Agent turn — the routed choice's provider with the MCP server attached
+    /// and the rendered brief, streamed live into the Director tab. `session: .resume` continues
+    /// the director's own session (the graph's reconcile turn declares it); `.spawn` cold-starts.
     @MainActor
     func runDirectorTurn(
-        prompt: String, session: SZAgentGraph.Turn.Session, providerID: String,
+        prompt: String, session: SZAgentGraph.Turn.Session, choice: SZModelChoice,
         mcpPort: UInt16, projectURL: URL, cacheDirectory: URL,
         claim: SZClaimToken? = nil
     ) async throws -> SZAgentRunResult {
         let run = activeRun(for: claim)
-        guard let provider = SZProviderRegistry.shared.provider(id: providerID) else {
-            throw SZMCPError.message("unknown provider: \(providerID)")
+        guard let provider = SZProviderRegistry.shared.provider(id: choice.providerID) else {
+            throw SZMCPError.message("unknown provider: \(choice.providerID)")
         }
         let scope = SZChatScope.director
         let workingDirectory = cacheDirectory.appending(path: "agent/director")
         try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
-        let generation = resolvedGenerationSettings(for: providerID)
         let request = SZAgentRunRequest(
             prompt: prompt, workingDirectory: workingDirectory, packageDirectory: projectURL,
             cacheDirectory: cacheDirectory, mcpServerPort: mcpPort,
@@ -275,8 +274,8 @@ extension SZHost {
             resumeSessionID: session == .resume
                 ? (run.map { $0.directorSession?.sessionID } ?? agentSessions[scope.key]?.sessionID)
                 : nil,
-            model: generation.model, reasoningEffort: generation.reasoningEffort,
-            fastMode: generation.fastMode ?? false,
+            model: choice.model, reasoningEffort: choice.reasoningEffort,
+            fastMode: choice.fastMode,
             timeout: SZAgentTurnBudgets.codingTimeout,
             inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
         // The Director transcript is claimed for THIS TURN, not for the run's life — that is what
@@ -686,10 +685,7 @@ extension SZHost {
         let codingAttachments = try await Self.attachments(of: codingPack, graph: codingGraph, steps: steps)
 
         let renderer = SZBriefRenderer(packRoot: packsRoot)
-        let generation = resolvedGenerationSettings(for: providerID)
-        let router = SZIdentityRouter(choice: SZModelChoice(
-            providerID: providerID, model: generation.model,
-            reasoningEffort: generation.reasoningEffort))
+        let router = makeRouter(providerID: providerID)
         // ONE query service per run: every delivery's asks funnel through it.
         let queries = SZQueryService(renderer: renderer, router: router,
                                     cacheDirectory: cacheDirectory)
@@ -725,7 +721,7 @@ extension SZHost {
                 state.mutationCursor = self.mutationJournal.count
                 do {
                     let result = try await self.runDirectorTurn(
-                        prompt: order.brief, session: order.session, providerID: providerID,
+                        prompt: order.brief, session: order.session, choice: order.choice,
                         mcpPort: mcpPort, projectURL: projectURL, cacheDirectory: cacheDirectory,
                         claim: claim)
                     return SZTurnReport(failed: result.outcome.failed, detail: result.outcome.message)
@@ -811,7 +807,7 @@ extension SZHost {
         claim: SZClaimToken,
         coding: (id: String, graph: SZAgentGraph, attachments: [String: SZStepAttachment]),
         renderer: SZBriefRenderer, queries: SZQueryService, steps: SZHostStepRunning,
-        router: SZIdentityRouter, providerID: String, mcpPort: UInt16,
+        router: any SZModelRouting, providerID: String, mcpPort: UInt16,
         projectURL: URL, cacheDirectory: URL
     ) async -> SZSettledSummary? {
         // The Director's authored notes drained AT THE SEND, so a note authored during
@@ -843,7 +839,6 @@ extension SZHost {
             await runtime?.requestDeclaredPermissions(for: project)
         }
 
-        let generation = resolvedGenerationSettings(for: providerID)
         var deliveries: [(order: SZDispatchOrder, engine: SZGraphEngine?, sighting: UUID)] = []
         for order in orders {
             let sighting = UUID()
@@ -886,7 +881,7 @@ extension SZHost {
                             ? self.agentSessions[scopeKey]?.sessionID : nil,
                         model: turnOrder.choice.model,
                         reasoningEffort: turnOrder.choice.reasoningEffort,
-                        fastMode: generation.fastMode ?? false,
+                        fastMode: turnOrder.choice.fastMode,
                         timeout: SZAgentTurnBudgets.codingTimeout,
                         inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
                     guard let provider = SZProviderRegistry.shared.provider(id: turnOrder.choice.providerID) else {

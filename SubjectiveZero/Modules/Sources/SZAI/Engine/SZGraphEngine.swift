@@ -164,7 +164,7 @@ public struct SZGraphEngine {
                     continue
                 }
                 let choice = router.resolve(SZModelCall(
-                    class: .turn, agent: agent, step: id))
+                    class: .turn, agent: agent))
                 let report = await host.runTurn(SZTurnOrder(
                     agent: agent, brief: rendered, session: turn.session,
                     tools: turn.tools, choice: choice))

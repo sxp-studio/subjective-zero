@@ -116,7 +116,7 @@ public final class SZQueryService {
             ])
         }
 
-        let choice = router.resolve(SZModelCall(class: .query, agent: agent, step: step))
+        let choice = router.resolve(SZModelCall(class: .query, agent: agent))
         guard let provider = registry.provider(id: choice.providerID) else {
             throw SZQueryError.unknownProvider(choice.providerID)
         }
