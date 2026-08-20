@@ -42,19 +42,15 @@ public struct SZAgentGraphFace: Equatable, Sendable {
     /// drawn dimmed so the ending is visible instead of the port simply vanishing.
     public var unwired: Set<String>
     public var source: Source?
-    /// A turn's work-kind word ("plan", "build") — worn as a chip in the fixed-height
-    /// header, so it never enters `size(of:)`. nil on the other forms and unlabelled turns.
-    public var duty: String?
 
     public init(form: Form, title: String, symbol: String, outcomes: [String],
-                unwired: Set<String> = [], source: Source? = nil, duty: String? = nil) {
+                unwired: Set<String> = [], source: Source? = nil) {
         self.form = form
         self.title = title
         self.symbol = symbol
         self.outcomes = outcomes
         self.unwired = unwired
         self.source = source
-        self.duty = duty
     }
 
     /// The face with `outcome` guaranteed a row — a Run entry may produce an outcome the
@@ -123,8 +119,7 @@ public enum SZAgentGraphLayout {
             // brief is a stem; the pill opens its prompts file.
             return SZAgentGraphFace(form: .turn, title: node.title ?? turn.brief,
                                     symbol: "text.bubble", outcomes: ["ok", "error"],
-                                    source: .brief(path: "prompts/\(turn.brief).md.mustache"),
-                                    duty: turn.duty)
+                                    source: .brief(path: "prompts/\(turn.brief).md.mustache"))
         case .dispatch(let dispatch):
             // Fan out and WAIT; `settled` routes onward — dimmed when nothing is wired,
             // the honest "its first settlement concludes".

@@ -239,16 +239,15 @@ Graph panel.
   model / effort / fast per provider — the global default envelope; the old composer pill and HUD
   picker are both deleted). **Routing** edits the named routing profiles
   ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing-shipped)): an Off row plus one row per saved
-  profile (the active one checked), each profile mapping agents, their duty words, the Director's
-  light/standard/heavy grades, and step queries to envelopes. Activating or editing a profile
+  profile (the active one checked), each profile mapping agents, the Director's
+  light/standard/heavy task grades, and the app's quick sorting questions to envelopes. Activating or editing a profile
   affects NEW conversations only, and switching is refused while a run is in flight. The
   unhealthy-provider **warning dot** lost its composer home: it lives on the sheet's surfaces (the
   provider card / sidebar badge) — runs and new chats on an unhealthy provider still refuse and
   open the sheet instead of failing silently.
 - **Envelopes are visible where work is**: each finished reply's receipt caption in the
   transcript; the RUNS panel's cards show `duration · envelope` per turn plus the node's grade
-  tag on fleet work; turn cards wear their duty-word chip. The receipts are the ground truth a
-  routing profile is judged against.
+  tag on fleet work. The receipts are the ground truth a routing profile is judged against.
 - **macOS permissions dashboard (future)** - camera, microphone, etc.: current status + a way to
   request, reflecting what the runtime holds ([RUNTIME.md](RUNTIME.md)).
 

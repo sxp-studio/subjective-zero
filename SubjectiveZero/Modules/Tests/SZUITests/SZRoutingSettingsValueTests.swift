@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Contracts for the Routing pane's value structs: option ids join provider and model (the
-// menu's stable identity, "provider/" for a catalog-less provider), row ids ARE the host's
-// position tokens, and the effort labels keep unknown tokens legible instead of hiding them.
+// menu's stable identity, "provider/" for a catalog-less provider), rows are keyed by the
+// typed position, and the effort labels keep unknown tokens legible instead of hiding them.
 import Testing
 @testable import SZUI
 
@@ -14,10 +14,11 @@ import Testing
     #expect(bare.id == "pi/")
 }
 
-@Test func positionRowIdentityIsTheHostToken() {
-    let row = SZRoutingPositionRow(id: "duty:director/plan", label: "Plan",
+@Test func positionRowIdentityIsItsTypedPosition() {
+    let row = SZRoutingPositionRow(position: .agent(id: "director"), label: "Director",
                                    selectionLabel: "Default", isSet: false)
-    #expect(row.id == "duty:director/plan")
+    #expect(row.id == .agent(id: "director"))
+    #expect(SZRoutingPosition.grade("light") != SZRoutingPosition.grade("heavy"))
     // Defaults keep the unset row honest: no options preselected, no effort/fast surface.
     #expect(row.effortOptions.isEmpty && !row.supportsFastMode && !row.fastModeEnabled)
 }

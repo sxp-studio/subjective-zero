@@ -21,14 +21,10 @@ public struct SZModelCall: Sendable {
     public var `class`: Class
     /// The agent (type) on whose behalf the call runs.
     public var agent: String
-    /// The work-kind word the turn's graph node declares; nil = the node declares none
-    /// (the call routes by its agent alone). Never a node id — positions drift, words travel.
-    public var duty: String?
 
-    public init(class: Class, agent: String, duty: String? = nil) {
+    public init(class: Class, agent: String) {
         self.class = `class`
         self.agent = agent
-        self.duty = duty
     }
 }
 

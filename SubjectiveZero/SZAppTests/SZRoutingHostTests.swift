@@ -26,8 +26,8 @@ struct SZRoutingHostTests {
     private var fastFleet: SZRoutingProfile {
         SZRoutingProfile(
             name: "fast-fleet",
-            agents: ["director": .init(all: SZRouteEnvelope(providerID: "claude")),
-                     "coding": .init(all: SZRouteEnvelope(providerID: "codex"))])
+            agents: ["director": SZRouteEnvelope(providerID: "claude"),
+                     "coding": SZRouteEnvelope(providerID: "codex")])
     }
 
     // MARK: - Selection
@@ -93,7 +93,7 @@ struct SZRoutingHostTests {
 
     @Test func anUnknownProviderDropsItsRungWithASentence() throws {
         var profile = fastFleet
-        profile.agents["coding"] = .init(all: SZRouteEnvelope(providerID: "no-such-cli"))
+        profile.agents["coding"] = SZRouteEnvelope(providerID: "no-such-cli")
         let host = bareHost(profiles: [profile], active: "fast-fleet")
         let (router, notes) = try host.makeRouter(providerID: "claude")
         // The rung is gone — coding falls to the default — and the drop is a sentence.
@@ -105,7 +105,7 @@ struct SZRoutingHostTests {
 
     @Test func anOffCatalogModelRunsTheClampWithASentence() throws {
         var profile = fastFleet
-        profile.agents["coding"] = .init(all: SZRouteEnvelope(providerID: "codex", model: "gpt-imaginary"))
+        profile.agents["coding"] = SZRouteEnvelope(providerID: "codex", model: "gpt-imaginary")
         let host = bareHost(profiles: [profile], active: "fast-fleet")
         let (router, notes) = try host.makeRouter(providerID: "claude")
         // The provider still serves the turn — on a model it actually lists.
@@ -118,7 +118,7 @@ struct SZRoutingHostTests {
 
     @Test func aSentenceIsSaidOncePerProfileState() throws {
         var profile = fastFleet
-        profile.agents["coding"] = .init(all: SZRouteEnvelope(providerID: "no-such-cli"))
+        profile.agents["coding"] = SZRouteEnvelope(providerID: "no-such-cli")
         let host = bareHost(profiles: [profile], active: "fast-fleet")
         #expect(try host.makeRouter(providerID: "claude").notes.count == 1)
         // The next delivery resolves the same drop silently — the user already read it.

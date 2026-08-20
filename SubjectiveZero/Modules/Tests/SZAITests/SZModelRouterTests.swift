@@ -38,7 +38,7 @@ struct SZModelRouterTests {
         let router: any SZModelRouting = SZIdentityRouter(choice: SZModelChoice(
             providerID: "provider-c", model: "model-y", fastMode: true))
 
-        let turn = router.resolve(SZModelCall(class: .turn, agent: "director", duty: "plan"))
+        let turn = router.resolve(SZModelCall(class: .turn, agent: "director"))
         #expect(turn.fastMode)
         #expect(turn.providerID == "provider-c")
     }

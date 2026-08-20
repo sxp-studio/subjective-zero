@@ -114,16 +114,15 @@ For each, we wrap and surface to the UI:
 
 On top of the global default, named **routing profiles** map graph positions to generation
 envelopes (`{providerID, model?, reasoningEffort?, fastMode?}` — `SZRoutingProfile`, edited in
-the AI Settings sheet's Routing pane, [UI.md](UI.md)). The positions are the agent graphs' own
-vocabulary, so a profile survives every rename and rewire: per-**agent** floors, finer
-per-**duty-word** routes (the work-kind label a turn node declares), the Director's three
-per-task **grades** (light / standard / heavy) for dispatched fleet work, and one **queries**
-envelope for step asks. The old composer picker is gone: the forward-looking selection lives in
+the AI Settings sheet's Routing pane, [UI.md](UI.md)). The positions are stable app vocabulary,
+so a profile survives every graph rename and rewire: one route per **agent**, the Director's
+three per-task **grades** (light / standard / heavy) for dispatched fleet work, and one
+**queries** envelope for step asks. The old composer picker is gone: the forward-looking selection lives in
 AI Settings, and the backward-looking truth is the **per-turn receipt** each finished reply
 carries in the transcript — the envelope the turn *actually* ran, with the routing rule that
 chose it (`via`). Semantics:
 
-- **Resolution ladder**, most specific first: session pin > grade > duty > agent > default;
+- **Resolution ladder**, most specific first: session pin > grade > agent > default;
   queries take the one queries envelope or the default. Anything a profile doesn't map falls one
   rung — coarser, never wrong ([AGENT_ORCHESTRATION.md](AGENT_ORCHESTRATION.md#model-routing)).
 - **Session affinity**: a live thread keeps the envelope that opened it; activating, editing, or

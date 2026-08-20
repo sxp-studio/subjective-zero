@@ -104,29 +104,10 @@ struct SZAgentGraphCardView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            dutyChip
             finishedGlyph
         }
         .padding(.horizontal, 12)
         .frame(height: SZNodeLayout.headerHeight)
-    }
-
-    /// A turn's work-kind word, worn as a quiet chip at the header's trailing edge — a
-    /// routing FACT off the graph, not a status. Inside the fixed-height header on purpose,
-    /// so a dutied card measures exactly like a plain one.
-    @ViewBuilder private var dutyChip: some View {
-        if let duty = face.duty {
-            Text(duty)
-                .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.55))
-                .lineLimit(1)
-                // A duty word is short; it shows whole and the TITLE ellipsizes, never
-                // a half-truncated chip.
-                .fixedSize()
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(Color.white.opacity(0.08)))
-        }
     }
 
     /// The implementation door, tucked just BELOW the card like the node editor's action

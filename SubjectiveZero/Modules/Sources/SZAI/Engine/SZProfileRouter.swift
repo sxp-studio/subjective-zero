@@ -5,10 +5,10 @@
 // looks up, so resolution is pure, synchronous, and table-testable.
 import SZCore
 
-/// Resolution, most specific first. Turns: this delivery's grade pick, then the turn's
-/// duty word, then the agent's floor, then the app default. Queries: the profile's one
-/// queries envelope, else the default — grades and duties never touch a query (a triage
-/// ask under a heavy node is still a triage ask).
+/// Resolution, most specific first. Turns: this delivery's grade pick, then the agent's
+/// row, then the app default. Queries: the profile's one queries envelope, else the
+/// default — grades never touch a query (a triage ask under a heavy task is still a
+/// triage ask).
 public struct SZProfileRouter: SZModelRouting {
     /// The app default — today's provider + clamped settings, the cascade's floor.
     public var fallback: SZModelChoice
@@ -16,8 +16,6 @@ public struct SZProfileRouter: SZModelRouting {
     public var queries: SZModelChoice?
     /// Agent id → its every-turn choice.
     public var agents: [String: SZModelChoice]
-    /// "agent/duty-word" → choice.
-    public var duties: [String: SZModelChoice]
     /// Grade word → choice, for priming fleet children.
     public var grades: [String: SZModelChoice]
     /// THIS delivery's grade-selected choice — set only on a fleet child's copy, frozen at
@@ -25,12 +23,11 @@ public struct SZProfileRouter: SZModelRouting {
     public var graded: SZModelChoice?
 
     public init(fallback: SZModelChoice, queries: SZModelChoice? = nil,
-                agents: [String: SZModelChoice] = [:], duties: [String: SZModelChoice] = [:],
+                agents: [String: SZModelChoice] = [:],
                 grades: [String: SZModelChoice] = [:], graded: SZModelChoice? = nil) {
         self.fallback = fallback
         self.queries = queries
         self.agents = agents
-        self.duties = duties
         self.grades = grades
         self.graded = graded
     }
@@ -41,7 +38,6 @@ public struct SZProfileRouter: SZModelRouting {
             return queries ?? fallback
         case .turn:
             if let graded { return graded }
-            if let duty = call.duty, let hit = duties["\(call.agent)/\(duty)"] { return hit }
             return agents[call.agent] ?? fallback
         }
     }

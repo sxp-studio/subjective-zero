@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The profile router's cascade, as a table: turns resolve grade > duty > agent floor > the
-// app default; queries resolve the one queries envelope or the default; an empty table is
+// The profile router's cascade, as a table: turns resolve grade > agent row > the app
+// default; queries resolve the one queries envelope or the default; an empty table is
 // indistinguishable from the identity router. Session affinity is the choice's own rule
 // (`honoringSession`): pinned threads keep their envelope unless the route still names the
 // same provider·model — and unrouted choices always pass through untouched.
@@ -16,7 +16,7 @@ struct SZProfileRouterTests {
 
     @Test func anEmptyTableAnswersEveryCallWithTheFallback() {
         let router = SZProfileRouter(fallback: fallback)
-        for call in [SZModelCall(class: .turn, agent: "director", duty: "plan"),
+        for call in [SZModelCall(class: .turn, agent: "director"),
                      SZModelCall(class: .turn, agent: "coding"),
                      SZModelCall(class: .query, agent: "director")] {
             let choice = router.resolve(call)
@@ -26,66 +26,43 @@ struct SZProfileRouterTests {
         }
     }
 
-    @Test func anAgentFloorCatchesEveryTurnOfThatAgent() {
+    @Test func anAgentRowCatchesEveryTurnOfThatAgent() {
         let codex = SZModelChoice(providerID: "codex", via: "fast-fleet · coding")
         let router = SZProfileRouter(fallback: fallback, agents: ["coding": codex])
 
         #expect(router.resolve(SZModelCall(class: .turn, agent: "coding")).providerID == "codex")
-        #expect(router.resolve(SZModelCall(class: .turn, agent: "coding", duty: "build")).providerID == "codex")
         // Another agent's turns stay on the default.
         #expect(router.resolve(SZModelCall(class: .turn, agent: "director")).providerID == "claude")
     }
 
-    @Test func aDutyRouteBeatsTheAgentFloor() {
-        let floor = SZModelChoice(providerID: "claude", via: "p · director")
-        let plan = SZModelChoice(providerID: "claude", model: "claude-opus-5",
-                                 reasoningEffort: "max", via: "p · director/plan")
-        let router = SZProfileRouter(fallback: fallback,
-                                     agents: ["director": floor],
-                                     duties: ["director/plan": plan])
-
-        #expect(router.resolve(SZModelCall(class: .turn, agent: "director", duty: "plan"))
-                    .reasoningEffort == "max")
-        // A duty word the table doesn't map falls to the floor — coarser, never wrong.
-        #expect(router.resolve(SZModelCall(class: .turn, agent: "director", duty: "chat"))
-                    .via == "p · director")
-        // The same word under another agent is a different position.
-        #expect(router.resolve(SZModelCall(class: .turn, agent: "coding", duty: "plan"))
-                    .via == nil)
-    }
-
-    @Test func aPrimedGradeBeatsEveryStaticRung() {
+    @Test func aPrimedGradeBeatsTheAgentRow() {
         let heavy = SZModelChoice(providerID: "claude", model: "claude-opus-5",
                                   fastMode: true, via: "p · heavy")
         let router = SZProfileRouter(
             fallback: fallback,
             agents: ["coding": SZModelChoice(providerID: "codex", via: "p · coding")],
-            duties: ["coding/build": SZModelChoice(providerID: "grok", via: "p · coding/build")],
             grades: ["heavy": heavy])
 
-        // Unprimed: the duty rung wins as usual.
-        #expect(router.resolve(SZModelCall(class: .turn, agent: "coding", duty: "build"))
-                    .providerID == "grok")
-        // Primed for this delivery (a fleet child whose node the Director graded heavy).
+        // Unprimed: the agent row wins as usual.
+        #expect(router.resolve(SZModelCall(class: .turn, agent: "coding")).providerID == "codex")
+        // Primed for this delivery (a fleet child whose task the Director graded heavy).
         let primed = router.primed(grade: "heavy")
-        #expect(primed.resolve(SZModelCall(class: .turn, agent: "coding", duty: "build"))
-                    .fastMode == true)
+        #expect(primed.resolve(SZModelCall(class: .turn, agent: "coding")).fastMode == true)
         // Priming with an unmapped grade changes nothing — the rung simply doesn't match.
         #expect(router.primed(grade: "light")
-                    .resolve(SZModelCall(class: .turn, agent: "coding", duty: "build"))
-                    .providerID == "grok")
+                    .resolve(SZModelCall(class: .turn, agent: "coding")).providerID == "codex")
     }
 
-    @Test func gradesAndDutiesNeverTouchAQuery() {
+    @Test func gradesNeverTouchAQuery() {
         let small = SZModelChoice(providerID: "claude", model: "claude-haiku-4-5", via: "p · queries")
         let router = SZProfileRouter(
             fallback: fallback, queries: small,
             agents: ["director": SZModelChoice(providerID: "codex", via: "p · director")],
             grades: ["heavy": SZModelChoice(providerID: "grok", via: "p · heavy")])
 
-        // A triage ask under a heavy node is still a triage ask.
+        // A triage ask under a heavy task is still a triage ask.
         #expect(router.primed(grade: "heavy")
-                    .resolve(SZModelCall(class: .query, agent: "director", duty: "plan"))
+                    .resolve(SZModelCall(class: .query, agent: "director"))
                     .model == "claude-haiku-4-5")
         // No queries envelope → the default, not the agent's turn route.
         let bare = SZProfileRouter(fallback: fallback,

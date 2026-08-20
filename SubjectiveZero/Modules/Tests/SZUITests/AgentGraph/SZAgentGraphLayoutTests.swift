@@ -78,21 +78,6 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     #expect(turnFace.source == .brief(path: "prompts/implement.md.mustache"))
 }
 
-@Test func aTurnFaceCarriesItsDutyWordInsideTheFixedHeader() {
-    // The pack author's work-kind word rides the face; only turns carry one.
-    let planTurn = SZAgentGraph.Node(id: "plan", form: .turn(.init(brief: "plan", duty: "plan")))
-    let face = SZAgentGraphLayout.face(of: planTurn, in: graph)
-    #expect(face.duty == "plan")
-    #expect(turnFace.duty == nil)              // an unlabelled turn shows nothing
-    #expect(stepFace.duty == nil)
-    #expect(dispatchFace.duty == nil)
-    // The chip lives in the fixed-height header — a dutied card measures exactly like a
-    // plain one, so no sizing predicate exists to drift from the pixels.
-    #expect(SZAgentGraphLayout.size(of: face) == SZAgentGraphLayout.size(of: turnFace))
-    #expect(SZAgentGraphLayout.size(of: face, subheader: true, stats: true)
-        == SZAgentGraphLayout.size(of: turnFace, subheader: true, stats: true))
-}
-
 @Test func aDispatchFaceWaitsForItsSettlement() {
     #expect(dispatchFace.form == .dispatch)
     #expect(dispatchFace.outcomes == ["settled"])

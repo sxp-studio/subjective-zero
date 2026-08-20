@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Named routing profiles — the data half of model routing (docs/AI_PROVIDERS.md). A profile
-// maps graph positions to generation envelopes: an optional envelope per agent, finer ones
-// per duty word (the work-kind label a turn node declares), three grade envelopes for
-// dispatched fleet work, and one for step queries. Pure data, stored raw in app-state.json
-// and validated at resolution time like every preference — never a node id, never a
-// capability fact (those live in Providers/).
+// maps an optional envelope per agent, three grade envelopes for the Director's task
+// grading, and one for step queries. Pure data, stored raw in app-state.json and validated
+// at resolution time like every preference — never a graph internal, never a capability
+// fact (those live in Providers/).
 
 /// One route's generation envelope. Every field but the provider inherits when nil, so an
 /// envelope can say as little as "codex" or as much as a full tune. Extensible: a future
@@ -26,9 +25,8 @@ public struct SZRouteEnvelope: Codable, Equatable, Sendable {
     }
 }
 
-/// A named, complete routing table. Positions are the agent graphs' own vocabulary — agent
-/// ids and duty words — so a profile survives every graph rename and rewire; anything it
-/// doesn't map falls back one rung (duty → agent → the app default): coarser, never wrong.
+/// A named, complete routing table: agent id → envelope, plus grades and queries. Anything
+/// unmapped falls one rung down (grade → agent → the app default): coarser, never wrong.
 public struct SZRoutingProfile: Codable, Equatable, Sendable, Identifiable {
     /// The profile's identity — what AI Settings lists and SZ_MODEL_ROUTING names.
     public var name: String
@@ -40,29 +38,40 @@ public struct SZRoutingProfile: Codable, Equatable, Sendable, Identifiable {
     public var standard: SZRouteEnvelope?
     public var heavy: SZRouteEnvelope?
     /// Per-agent routes, keyed by agent (pack) id.
-    public var agents: [String: AgentRoutes]
-
-    public struct AgentRoutes: Codable, Equatable, Sendable {
-        /// Every turn of this agent — the floor its duties refine.
-        public var all: SZRouteEnvelope?
-        /// Finer grain, keyed by the duty words the agent's graph declares.
-        public var duties: [String: SZRouteEnvelope]?
-
-        public init(all: SZRouteEnvelope? = nil, duties: [String: SZRouteEnvelope]? = nil) {
-            self.all = all
-            self.duties = duties
-        }
-    }
+    public var agents: [String: SZRouteEnvelope]
 
     public init(name: String, queries: SZRouteEnvelope? = nil, light: SZRouteEnvelope? = nil,
                 standard: SZRouteEnvelope? = nil, heavy: SZRouteEnvelope? = nil,
-                agents: [String: AgentRoutes] = [:]) {
+                agents: [String: SZRouteEnvelope] = [:]) {
         self.name = name
         self.queries = queries
         self.light = light
         self.standard = standard
         self.heavy = heavy
         self.agents = agents
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        queries = try c.decodeIfPresent(SZRouteEnvelope.self, forKey: .queries)
+        light = try c.decodeIfPresent(SZRouteEnvelope.self, forKey: .light)
+        standard = try c.decodeIfPresent(SZRouteEnvelope.self, forKey: .standard)
+        heavy = try c.decodeIfPresent(SZRouteEnvelope.self, forKey: .heavy)
+        // Agents decode the flat shape, tolerating the short-lived nested one
+        // ({"all": envelope, "duties": …}) so an early profile keeps its routes.
+        if let flat = try? c.decodeIfPresent([String: SZRouteEnvelope].self, forKey: .agents) {
+            agents = flat
+        } else {
+            let legacy = try c.decodeIfPresent([String: LegacyAgentRoutes].self, forKey: .agents)
+            agents = (legacy ?? [:]).compactMapValues(\.all)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, queries, light, standard, heavy, agents }
+
+    private struct LegacyAgentRoutes: Codable {
+        var all: SZRouteEnvelope?
     }
 
     /// The grade vocabulary, fixed: the Director's assessment can only say these three words.

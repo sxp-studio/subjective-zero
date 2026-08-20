@@ -27,8 +27,8 @@ struct SZMCPRoutingToolTests {
     private var fastFleet: SZRoutingProfile {
         SZRoutingProfile(
             name: "fast-fleet",
-            agents: ["director": .init(all: SZRouteEnvelope(providerID: "claude")),
-                     "coding": .init(all: SZRouteEnvelope(providerID: "codex"))])
+            agents: ["director": SZRouteEnvelope(providerID: "claude"),
+                     "coding": SZRouteEnvelope(providerID: "codex")])
     }
 
     private func json(_ result: SZMCPToolResult) throws -> [String: Any] {
@@ -151,7 +151,7 @@ struct SZMCPRoutingToolTests {
         // A broken route produces a fallback sentence; the debug read must report it WITHOUT
         // eating it — the user's next delivery is still owed the narration.
         var profile = fastFleet
-        profile.agents["coding"] = .init(all: SZRouteEnvelope(providerID: "no-such-cli"))
+        profile.agents["coding"] = SZRouteEnvelope(providerID: "no-such-cli")
         let pair = bare(profiles: [profile], active: "fast-fleet")
         let state = try json(try pair.bridge.callTool(name: "debug_routing_state", arguments: [:]))
         let notes = try #require((state["resolved"] as? [String: Any])?["notes"] as? [String])

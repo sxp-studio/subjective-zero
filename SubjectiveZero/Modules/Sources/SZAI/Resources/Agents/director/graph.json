@@ -2,13 +2,13 @@
   "label": "Director",
   "nodes": [
     { "id": "door", "title": "On message", "step": "door" },
-    { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose", "duty": "plan" } },
+    { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose" } },
     { "id": "implement", "title": "Implement", "dispatch": { "to": "coding" } },
     { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
-    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume", "duty": "reconcile" } },
-    { "id": "amend", "title": "Amend scheduled work", "turn": { "brief": "amend", "duty": "plan" } },
-    { "id": "chat", "title": "Cold turn", "turn": { "brief": "chat", "duty": "chat" } },
-    { "id": "chat-resumed", "title": "Resumed turn", "turn": { "brief": "chat-resumed", "session": "resume", "duty": "chat" } }
+    { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume" } },
+    { "id": "amend", "title": "Amend scheduled work", "turn": { "brief": "amend" } },
+    { "id": "chat", "title": "Cold turn", "turn": { "brief": "chat" } },
+    { "id": "chat-resumed", "title": "Resumed turn", "turn": { "brief": "chat-resumed", "session": "resume" } }
   ],
   "edges": [
     { "from": "door", "outcome": "build", "to": "decompose" },

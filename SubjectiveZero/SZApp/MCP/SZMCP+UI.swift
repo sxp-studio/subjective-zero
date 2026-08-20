@@ -82,7 +82,7 @@ extension SZHostBridge {
                     "reasoning_effort": ["type": "string", "description": "one of the provider's supported efforts (omit = keep/default; unsupported on claude)"],
                     "fast_mode": ["type": "boolean", "description": "toggle the provider's fast tier (omit = keep/default)"],
                  ], agentCallable: false),   // user-level setting; resets all sessions — not an agent action
-            tool("ui_set_routing_profile", "Activate a saved model-routing profile by name, or turn routing off (omit `profile`, or send \"\"). A profile maps graph positions — agents, their duty words, the Director's task grades, step queries — to provider/model envelopes, overriding the default selection per position. Switches govern NEW conversations only: a live thread keeps the envelope that opened it. Refused while a run is in flight, and for a name that isn't a saved profile (the error lists the saved names). Echoes {active_profile}.",
+            tool("ui_set_routing_profile", "Activate a saved model-routing profile by name, or turn routing off (omit `profile`, or send \"\"). A profile maps agents, the Director's task grades, and the app's quick sorting questions to provider/model choices, overriding the default selection per position. Switches govern NEW conversations only: a live thread keeps the envelope that opened it. Refused while a run is in flight, and for a name that isn't a saved profile (the error lists the saved names). Echoes {active_profile}.",
                  properties: [
                     "profile": ["type": "string", "description": "a saved profile name; null/\"\"/omitted = Off"],
                  ]),

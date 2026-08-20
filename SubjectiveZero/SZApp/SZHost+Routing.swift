@@ -89,15 +89,9 @@ extension SZHost {
         }
 
         var agents: [String: SZModelChoice] = [:]
-        var duties: [String: SZModelChoice] = [:]
-        for (agentID, routes) in profile.agents {
-            if let all = routes.all, let choice = resolved(all, position: agentID) {
+        for (agentID, envelope) in profile.agents {
+            if let choice = resolved(envelope, position: agentID) {
                 agents[agentID] = choice
-            }
-            for (word, envelope) in routes.duties ?? [:] {
-                if let choice = resolved(envelope, position: "\(agentID)/\(word)") {
-                    duties["\(agentID)/\(word)"] = choice
-                }
             }
         }
         var grades: [String: SZModelChoice] = [:]
@@ -109,7 +103,7 @@ extension SZHost {
         }
         let queries = profile.queries.flatMap { resolved($0, position: "queries") }
         return (SZProfileRouter(fallback: fallback, queries: queries, agents: agents,
-                                duties: duties, grades: grades),
+                                grades: grades),
                 dedupedRoutingNotes(notes))
     }
 

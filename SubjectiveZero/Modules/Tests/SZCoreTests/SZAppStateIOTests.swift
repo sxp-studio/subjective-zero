@@ -198,10 +198,8 @@ private func temporaryURL() -> URL {
         queries: SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5"),
         heavy: SZRouteEnvelope(providerID: "claude", model: "claude-opus-5", fastMode: true),
         agents: [
-            "director": SZRoutingProfile.AgentRoutes(
-                all: SZRouteEnvelope(providerID: "claude"),
-                duties: ["plan": SZRouteEnvelope(providerID: "claude", reasoningEffort: "max")]),
-            "coding": SZRoutingProfile.AgentRoutes(all: SZRouteEnvelope(providerID: "codex")),
+            "director": SZRouteEnvelope(providerID: "claude", reasoningEffort: "max"),
+            "coding": SZRouteEnvelope(providerID: "codex"),
         ])
     try SZAppStateIO.save(SZAppState(routingProfiles: [fastFleet],
                                      activeRoutingProfileName: "fast-fleet"), to: url)
@@ -221,6 +219,14 @@ private func temporaryURL() -> URL {
     #expect(loaded != nil)
     #expect(loaded?.routingProfiles == nil)
     #expect(loaded?.activeRoutingProfileName == nil)
+}
+
+@Test func aNestedLegacyAgentsShapeStillDecodesItsRoutes() throws {
+    // The short-lived nested shape ({"agents": {"coding": {"all": envelope}}}) reads back
+    // as the flat one — an early profile keeps its routes.
+    let json = #"{"name": "p", "agents": {"coding": {"all": {"providerID": "codex"}}}}"#
+    let profile = try JSONDecoder().decode(SZRoutingProfile.self, from: Data(json.utf8))
+    #expect(profile.agents["coding"]?.providerID == "codex")
 }
 
 @Test func anEnvelopeWithUnknownKeysDecodesItsKnownFields() throws {

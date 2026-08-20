@@ -45,17 +45,10 @@ public struct SZAgentGraph: Sendable, Equatable {
         public var session: Session
         /// Tool narrowing for this turn. nil = the agent's default surface.
         public var tools: [String]?
-        /// The work-kind word routing profiles may map ("plan", "build", "chat"…) — a
-        /// pack-author label for what kind of model work this turn is. It travels with the
-        /// node through every rename and rewire; never a model name, never wiring. nil =
-        /// the turn routes by its agent alone.
-        public var duty: String?
-        public init(brief: String, session: Session = .spawn, tools: [String]? = nil,
-                    duty: String? = nil) {
+        public init(brief: String, session: Session = .spawn, tools: [String]? = nil) {
             self.brief = brief
             self.session = session
             self.tools = tools
-            self.duty = duty
         }
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -63,7 +56,6 @@ public struct SZAgentGraph: Sendable, Equatable {
             // An omitted session means spawn — the wire default matches the init's.
             session = try container.decodeIfPresent(Session.self, forKey: .session) ?? .spawn
             tools = try container.decodeIfPresent([String].self, forKey: .tools)
-            duty = try container.decodeIfPresent(String.self, forKey: .duty)
         }
         public enum Session: String, Codable, Sendable {
             /// Fresh conversation — the brief re-renders the world every time.
@@ -219,9 +211,6 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
     case undeclaredOutcome(node: String, outcome: String)
     case nonPositiveBound(from: String, outcome: String)
     case unboundedCycle(nodes: [String])
-    /// A turn's duty word off the wire grammar — profiles key on these, so a stray space
-    /// or capital would make a mapping silently unmatchable.
-    case malformedDuty(node: String, duty: String)
 
     public var description: String {
         switch self {
@@ -248,8 +237,6 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
             "edge \(from) on '\(outcome)' declares a bound below 1"
         case .unboundedCycle(let nodes):
             "cycle \(nodes.joined(separator: " → ")) never crosses a bounded edge"
-        case .malformedDuty(let node, let duty):
-            "turn '\(node)' declares duty \"\(duty)\" — duty words are lowercase [a-z0-9-]"
         }
     }
 }
@@ -264,14 +251,6 @@ extension SZAgentGraph {
         for node in nodes {
             if !seen.insert(node.id).inserted {
                 defects.append(.duplicateNode(id: node.id))
-            }
-            // Duty words are routing keys — off-grammar ones would make a profile mapping
-            // silently unmatchable, so the gate refuses them where every shape defect lives.
-            if case .turn(let turn) = node.form, let duty = turn.duty,
-               duty.isEmpty || duty.contains(where: {
-                   !($0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-"))
-               }) {
-                defects.append(.malformedDuty(node: node.id, duty: duty))
             }
         }
         let ids = Set(nodes.map(\.id))

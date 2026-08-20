@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The AI Settings Routing pane — named profiles mapping graph positions (agents, duty words,
+// The AI Settings Routing pane — named profiles mapping positions (agents,
 // grades, queries) to generation envelopes. Top: the ACTIVE-profile menu (Off = the identity
 // world) + profile management; below: the mapping form for the profile being edited, a grouped
 // divider-separated list (the Xcode Components shape). SZUI can't import SZAI: rows arrive
-// host-mapped (SZHost+RoutingSettings) and position tokens stay host vocabulary — the view
-// reads their prefixes for LAYOUT only (indent, section headers), never for meaning.
+// host-mapped (SZHost+RoutingSettings), keyed by the typed SZRoutingPosition — the view
+// switches on its cases for layout (indent, section headers) and echoes it back in closures.
 import AppKit
 import SwiftUI
 
@@ -57,14 +57,22 @@ public struct SZRoutingEnvelopeOption: Identifiable, Equatable, Sendable {
     }
 }
 
-/// One mappable position in the form — a pure view-model keyed by the host's position token
-/// ("agent:director", "duty:director/plan", "queries", "grade:light"). Effort/fast props are
+/// One mappable position in a profile — typed, so the SZUI↔host seam is a switch on
+/// cases, never string matching.
+public enum SZRoutingPosition: Hashable, Sendable {
+    case agent(id: String)
+    case queries
+    case grade(String)
+}
+
+/// One mappable position's row — a pure view-model. Effort/fast props are
 /// resolved against the ROUTED model host-side; empty/false hides those controls.
 public struct SZRoutingPositionRow: Identifiable, Equatable, Sendable {
-    public var id: String              // position token, host vocabulary
+    public var position: SZRoutingPosition
+    public var id: SZRoutingPosition { position }
     public var label: String
     public var symbol: String?         // agent header rows carry the agent's glyph
-    public var caption: String?        // "used by: Decompose, Amend"
+    public var caption: String?        // the row's one explanatory line
     public var selectionLabel: String  // "Default" (unset) or "codex · GPT-5.6 Terra"
     public var isSet: Bool
     public var options: [SZRoutingEnvelopeOption]
@@ -73,12 +81,12 @@ public struct SZRoutingPositionRow: Identifiable, Equatable, Sendable {
     public var supportsFastMode: Bool
     public var fastModeEnabled: Bool
 
-    public init(id: String, label: String, symbol: String? = nil, caption: String? = nil,
+    public init(position: SZRoutingPosition, label: String, symbol: String? = nil, caption: String? = nil,
                 selectionLabel: String, isSet: Bool,
                 options: [SZRoutingEnvelopeOption] = [],
                 effortOptions: [String] = [], selectedEffort: String? = nil,
                 supportsFastMode: Bool = false, fastModeEnabled: Bool = false) {
-        self.id = id
+        self.position = position
         self.label = label
         self.symbol = symbol
         self.caption = caption
@@ -106,9 +114,9 @@ public struct SZRoutingSettingsView: View {
     private let onDuplicateProfile: (String) -> Void
     private let onDeleteProfile: (String) -> Void
     private let onEditProfile: (String) -> Void
-    private let onAssignEnvelope: (String, String?, String?) -> Void   // (position, providerID, modelID); (p, nil, nil) = Default
-    private let onSetPositionEffort: (String, String?) -> Void
-    private let onSetPositionFastMode: (String, Bool) -> Void
+    private let onAssignEnvelope: (SZRoutingPosition, String?, String?) -> Void   // (position, providerID, modelID); (p, nil, nil) = Default
+    private let onSetPositionEffort: (SZRoutingPosition, String?) -> Void
+    private let onSetPositionFastMode: (SZRoutingPosition, Bool) -> Void
 
     // The rename alert's target + draft (view-local; committed via onRenameProfile).
     @State private var renameTarget: String?
@@ -124,9 +132,9 @@ public struct SZRoutingSettingsView: View {
                 onDuplicateProfile: @escaping (String) -> Void = { _ in },
                 onDeleteProfile: @escaping (String) -> Void = { _ in },
                 onEditProfile: @escaping (String) -> Void = { _ in },
-                onAssignEnvelope: @escaping (String, String?, String?) -> Void = { _, _, _ in },
-                onSetPositionEffort: @escaping (String, String?) -> Void = { _, _ in },
-                onSetPositionFastMode: @escaping (String, Bool) -> Void = { _, _ in }) {
+                onAssignEnvelope: @escaping (SZRoutingPosition, String?, String?) -> Void = { _, _, _ in },
+                onSetPositionEffort: @escaping (SZRoutingPosition, String?) -> Void = { _, _ in },
+                onSetPositionFastMode: @escaping (SZRoutingPosition, Bool) -> Void = { _, _ in }) {
         self.profiles = profiles
         self.editedProfileName = editedProfileName
         self.positions = positions
@@ -190,7 +198,7 @@ public struct SZRoutingSettingsView: View {
                 Spacer()
                 Button("New Profile") { onCreateProfile() }
                     .controlSize(.small)
-                    .help("Create an empty profile — every position starts at Default")
+                    .help("Create an empty profile — everything starts on the default model")
             }
             if let pinned = envPinnedProfileName {
                 Text("Pinned to \"\(pinned)\" by the launch environment — relaunch without SZ_MODEL_ROUTING to change it.")
@@ -272,11 +280,11 @@ public struct SZRoutingSettingsView: View {
         }
     }
 
-    // MARK: - The mapping form (one grouped list: agents + duties, queries, grades)
+    // MARK: - The mapping form (one grouped list: agents, queries, grades)
 
-    /// Where the "Director assessment" header slots in — before the first grade row.
-    private var firstGradeID: String? {
-        positions.first { $0.id.hasPrefix("grade:") }?.id
+    /// Where the "Task Grading" header slots in — before the first grade row.
+    private var firstGradeID: SZRoutingPosition? {
+        positions.first { if case .grade = $0.position { true } else { false } }?.id
     }
 
     private var mappingForm: some View {
@@ -293,9 +301,9 @@ public struct SZRoutingSettingsView: View {
 
     private var assessmentHeader: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Director assessment")
+            Text("Task Grading")
                 .font(.system(size: 13, weight: .semibold))
-            Text("During a run the Director grades each dispatched task; grades pick among these envelopes.")
+            Text("During a run the Director grades each task it hands out; the grade picks which model implements it.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
@@ -304,8 +312,8 @@ public struct SZRoutingSettingsView: View {
     }
 
     private func positionRow(_ row: SZRoutingPositionRow) -> some View {
-        // Layout-only prefix read: duty and grade rows indent under their section header.
-        let indented = row.id.hasPrefix("duty:") || row.id.hasPrefix("grade:")
+        // Grade rows indent under their section header.
+        let indented = if case .grade = row.position { true } else { false }
         return HStack(spacing: 10) {
             if let symbol = row.symbol {
                 Image(systemName: symbol)
@@ -338,7 +346,7 @@ public struct SZRoutingSettingsView: View {
     private func envelopeMenu(_ row: SZRoutingPositionRow) -> some View {
         Menu {
             Button {
-                onAssignEnvelope(row.id, nil, nil)
+                onAssignEnvelope(row.position, nil, nil)
             } label: {
                 if !row.isSet { Label("Default", systemImage: "checkmark") }
                 else { Text("Default") }
@@ -346,7 +354,7 @@ public struct SZRoutingSettingsView: View {
             Divider()
             ForEach(row.options) { option in
                 Button {
-                    onAssignEnvelope(row.id, option.providerID, option.modelID)
+                    onAssignEnvelope(row.position, option.providerID, option.modelID)
                 } label: {
                     if option.isSelected { Label(option.label, systemImage: "checkmark") }
                     else { Text(option.label) }
@@ -363,7 +371,7 @@ public struct SZRoutingSettingsView: View {
         }
         .menuStyle(.button)
         .controlSize(.small)
-        .help("Pick the provider and model this position runs on — Default falls back one rung")
+        .help("Pick the provider and model this runs on — Default inherits from the level above")
     }
 
     /// Only when the routed model has an effort concept — an absent menu is the honest render.
@@ -372,7 +380,7 @@ public struct SZRoutingSettingsView: View {
         if !row.effortOptions.isEmpty {
             Menu {
                 Button {
-                    onSetPositionEffort(row.id, nil)
+                    onSetPositionEffort(row.position, nil)
                 } label: {
                     if row.selectedEffort == nil { Label("Default", systemImage: "checkmark") }
                     else { Text("Default") }
@@ -380,7 +388,7 @@ public struct SZRoutingSettingsView: View {
                 Divider()
                 ForEach(row.effortOptions, id: \.self) { token in
                     Button {
-                        onSetPositionEffort(row.id, token)
+                        onSetPositionEffort(row.position, token)
                     } label: {
                         if token == row.selectedEffort {
                             Label(SZGenerationLabels.effort(token), systemImage: "checkmark")
@@ -396,7 +404,7 @@ public struct SZRoutingSettingsView: View {
             }
             .menuStyle(.button)
             .controlSize(.small)
-            .help("Reasoning effort for this position's model")
+            .help("Reasoning effort for this model")
         }
     }
 
@@ -405,13 +413,13 @@ public struct SZRoutingSettingsView: View {
     private func fastToggle(_ row: SZRoutingPositionRow) -> some View {
         if row.supportsFastMode {
             Button {
-                onSetPositionFastMode(row.id, !row.fastModeEnabled)
+                onSetPositionFastMode(row.position, !row.fastModeEnabled)
             } label: {
                 Image(systemName: "bolt.fill")
                     .foregroundStyle(row.fastModeEnabled ? Color.yellow : Color.secondary.opacity(0.5))
             }
             .controlSize(.small)
-            .help(row.fastModeEnabled ? "Fast mode is on for this position" : "Turn on fast mode for this position")
+            .help(row.fastModeEnabled ? "Fast mode is on" : "Turn on fast mode")
         }
     }
 }
