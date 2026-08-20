@@ -170,6 +170,10 @@ extension SZHost {
     @discardableResult
     func deleteRoutingProfile(named name: String) -> Bool {
         guard routingProfiles.contains(where: { $0.name == name }) else { return false }
+        guard name != Self.routingStarterName else {
+            status = "\"\(name)\" ships with the app and can't be deleted"
+            return false
+        }
         if activeRoutingProfileName == name, isRunning {
             status = "profile not deleted: a run is in flight"
             return false

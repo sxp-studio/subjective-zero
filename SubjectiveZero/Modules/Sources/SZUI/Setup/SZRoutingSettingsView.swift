@@ -25,14 +25,17 @@ public enum SZGenerationLabels {
 }
 
 /// One saved profile in the pane's list; `isActive` marks the row that runs (= selected).
+/// `isProtected` = it ships with the app: the minus refuses it (renaming makes it yours).
 public struct SZRoutingProfileRow: Identifiable, Equatable, Sendable {
     public var name: String
     public var isActive: Bool
+    public var isProtected: Bool
     public var id: String { name }
 
-    public init(name: String, isActive: Bool = false) {
+    public init(name: String, isActive: Bool = false, isProtected: Bool = false) {
         self.name = name
         self.isActive = isActive
+        self.isProtected = isProtected
     }
 }
 
@@ -217,6 +220,9 @@ public struct SZRoutingSettingsView: View {
     }
 
     private var routingEnabled: Bool { selectedProfileName != nil && !envKilled }
+    private var selectedRowProtected: Bool {
+        profiles.first { $0.name == selectedProfileName }?.isProtected == true
+    }
     /// The launch env owns routing this session (=0 kill or a name pin): the toggle and
     /// the list render the pinned truth, locked.
     private var envLocked: Bool { envKilled || envPinnedProfileName != nil }
@@ -225,10 +231,15 @@ public struct SZRoutingSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Routing").font(.system(size: 17, weight: .semibold))
 
-            Text("Each agent lists the kinds of work it needs a model for. A profile picks a model for each; anything left on Default runs on the active provider.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+            // The explainer earns its lines only while there's nothing else to look at;
+            // once routing is on, the list and the Default menus say the same thing in
+            // place, and the sentence retreats into the toggle's tooltip.
+            if !routingEnabled {
+                Text("Each agent lists the kinds of work it needs a model for. A profile picks a model for each; anything left on Default runs on the active provider.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Toggle("Enable Model Routing",
@@ -237,6 +248,7 @@ public struct SZRoutingSettingsView: View {
                     .controlSize(.small)
                     .font(.system(size: 13, weight: .medium))
                     .disabled(envLocked)
+                    .help("Each agent lists the kinds of work it needs a model for. A profile picks a model for each; anything left on Default runs on the active provider")
                 toggleHelper
             }
 
@@ -331,8 +343,11 @@ public struct SZRoutingSettingsView: View {
         HStack(spacing: 4) {
             SZListGadget(symbol: "plus", disabled: envLocked,
                          help: "New empty profile") { onCreateProfile() }
-            SZListGadget(symbol: "minus", disabled: envLocked || selectedProfileName == nil,
-                         help: "Delete the selected profile") {
+            SZListGadget(symbol: "minus",
+                         disabled: envLocked || selectedProfileName == nil || selectedRowProtected,
+                         help: selectedRowProtected
+                            ? "This profile ships with the app. Rename it to make it yours"
+                            : "Delete the selected profile") {
                 if let selected = selectedProfileName { onDeleteProfile(selected) }
             }
             SZListGadget(symbol: "plus.square.on.square",

@@ -13,7 +13,10 @@ extension SZHost {
     // MARK: - What the pane reads
 
     var routingProfileRows: [SZRoutingProfileRow] {
-        routingProfiles.map { SZRoutingProfileRow(name: $0.name, isActive: $0.name == activeRoutingProfileName) }
+        routingProfiles.map {
+            SZRoutingProfileRow(name: $0.name, isActive: $0.name == activeRoutingProfileName,
+                                isProtected: $0.name == Self.routingStarterName)
+        }
     }
 
     /// The env pin, pre-mapped for the sheet: nil unless SZ_MODEL_ROUTING names a profile
@@ -231,7 +234,7 @@ extension SZHost {
     /// refused and the profile stays created, unselected.
     @discardableResult
     func createRoutingProfile() -> String {
-        let name = routingUniqueName("Profile")
+        let name = routingUniqueName("New Profile")
         upsertRoutingProfile(SZRoutingProfile(name: name))
         _ = setActiveRoutingProfile(name)
         return name
@@ -259,14 +262,18 @@ extension SZHost {
     /// the pane's toggle renders (and locks on) this truth.
     var routingEnvKilled: Bool { Self.modelRoutingEnv == "0" }
 
-    /// The Claude Ladder starter: Haiku sorts, Sonnet builds and answers, Opus takes the
+    /// The shipped starter's name — the row wearing it can't be deleted (renaming it makes
+    /// it the user's own, protection and all).
+    nonisolated static let routingStarterName = "Claude Routing (sxp.studio)"
+
+    /// The Claude Routing starter: Haiku sorts, Sonnet builds and answers, Opus takes the
     /// planning and the heavy work. Fills only the built-in agents; builder-light stays
     /// unfilled on purpose (its Default follows the Builder row).
     private static func claudeLadderProfile() -> SZRoutingProfile {
         let opus = SZRouteEnvelope(providerID: "claude", model: "claude-opus-5")
         let sonnet = SZRouteEnvelope(providerID: "claude", model: "claude-sonnet-5")
         let haiku = SZRouteEnvelope(providerID: "claude", model: "claude-haiku-4-5")
-        return SZRoutingProfile(name: "Claude Ladder", agents: [
+        return SZRoutingProfile(name: routingStarterName, agents: [
             "director": ["planner": opus, "assistant": sonnet, "sorter": haiku],
             "coding": ["builder-default": sonnet, "builder-heavy": opus,
                        "assistant": sonnet, "sorter": haiku],
@@ -274,14 +281,14 @@ extension SZHost {
         ])
     }
 
-    /// Seed the Claude Ladder starter as a real row in the profiles list — once, when the
+    /// Seed the Claude Routing starter as a real row in the profiles list — once, when the
     /// pane can first show it with a usable claude provider. NEVER activated: seeding must
-    /// not flip routing on behind the user's back. Deleting it stays deleted (the flag).
+    /// not flip routing on behind the user's back.
     func seedRoutingStarterIfNeeded() {
         guard !routingStarterSeeded,
               SZProviderRegistry.shared.provider(id: "claude") != nil,
               routingProviderUsable("claude"),
-              !routingProfiles.contains(where: { $0.name == "Claude Ladder" }) else { return }
+              !routingProfiles.contains(where: { $0.name == Self.routingStarterName }) else { return }
         routingStarterSeeded = true
         upsertRoutingProfile(Self.claudeLadderProfile())
     }
