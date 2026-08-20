@@ -149,7 +149,8 @@ extension SZHost {
         // The turn core, driven by the graph's own ORDER: `tools` and `session` are what
         // the turn node declares (so tool-free-ness is the debug pack's `"tools": []`
         // rather than a scope branch here), and `choice` is the router's verdict.
-        func runDeliveredTurn(_ order: SZTurnOrder, prompt: String) async throws -> SZAgentRunResult {
+        func runDeliveredTurn(_ order: SZTurnOrder, prompt: String) async throws
+            -> (result: SZAgentRunResult, generation: String) {
             // Session affinity: a resumed conversation keeps the envelope that opened it.
             // Inert while routing is off.
             let effective = order.session == .resume
@@ -170,8 +171,12 @@ extension SZHost {
                 fastMode: effective.fastMode,
                 timeout: SZAgentTurnBudgets.codingTimeout,
                 inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
-            return try await deliver(scope: scope, request: request, provider: turnProvider,
-                                     existingAssistantID: assistantID, claim: claim).result
+            let result = try await deliver(scope: scope, request: request, provider: turnProvider,
+                                           existingAssistantID: assistantID, claim: claim,
+                                           via: effective.via).result
+            return (result, SZTurnGeneration(
+                providerID: turnProvider.id, model: request.model,
+                reasoningEffort: request.reasoningEffort, fastMode: request.fastMode).label)
         }
         do {
             // EVERY delivery flows through its agent's graph: the door decides what the
@@ -303,7 +308,8 @@ extension SZHost {
     func runProseDelivery(
         scope: SZChatScope, message: String, existing: SZAgentSession?, providerID: String,
         extras: SZBriefExtras,
-        turn: @escaping @MainActor (SZTurnOrder) async throws -> SZAgentRunResult
+        turn: @escaping @MainActor (SZTurnOrder) async throws
+            -> (result: SZAgentRunResult, generation: String)
     ) async throws -> (result: SZAgentRunResult, ack: String?, scheduled: [UUID]) {
         guard let packsRoot = Self.graphAgentPacksRoot() else {
             throw SZChatTraversalFailure(detail: "no agent packs — the bundled packs did not "
@@ -382,10 +388,11 @@ extension SZHost {
             },
             turn: { order in
                 do {
-                    let result = try await turn(order)
+                    let (result, generation) = try await turn(order)
                     capture.result = result
                     return SZTurnReport(failed: result.outcome.failed,
-                                        detail: result.outcome.message)
+                                        detail: result.outcome.message,
+                                        generation: generation)
                 } catch {
                     capture.error = error
                     return SZTurnReport(failed: true, detail: String(describing: error))

@@ -26,7 +26,7 @@ extension SZHost {
     func deliver(
         scope: SZChatScope, request: SZAgentRunRequest, provider: any SZProvider,
         persistSession: Bool = true, existingAssistantID: UUID? = nil,
-        claim: SZClaimToken? = nil
+        claim: SZClaimToken? = nil, via: String? = nil
     ) async throws -> (result: SZAgentRunResult, assistantID: UUID) {
         let turnResources = Self.turnResources(for: scope)
         var selfClaim: SZClaimToken?
@@ -75,12 +75,19 @@ extension SZHost {
             if inFlightAssistantIDs[scope.key] == assistantID { inFlightAssistantIDs[scope.key] = nil }
             let wall = (ContinuousClock.now - startedMono).szSeconds
             store.setChatDuration(wall, assistantID, in: scope)
+            // The receipt: what this turn ACTUALLY ran, from the request it ran with.
+            // Unconditional — release data, never trace-gated.
+            store.setChatGeneration(SZTurnGeneration(
+                providerID: provider.id, model: request.model,
+                reasoningEffort: request.reasoningEffort, fastMode: request.fastMode,
+                via: via), assistantID, in: scope)
             // Breakdown lands before the flush below so it persists with the turn. Run-owned turns
             // (dispatched under the run's claim) also log themselves for the run-complete rollup.
             // (Runs OUTSIDE the context binding below — finalizeTurn keys by explicit turnID.)
             finalizeTurn(assistantID: assistantID, scope: scope, started: started,
                          ended: started.addingTimeInterval(wall), runID: turnRunID,
-                         generation: [request.model ?? provider.id,
+                         // Provider-led, so a cross-provider run's breakdown reads correctly.
+                         generation: [provider.id, request.model,
                                       request.reasoningEffort,
                                       request.fastMode ? "fast" : nil]
                             .compactMap(\.self).joined(separator: " · "))
@@ -152,7 +159,7 @@ extension SZHost {
     @MainActor
     func streamCodingAgent(
         node: SZNodeID, request: SZAgentRunRequest, provider: any SZProvider,
-        claim: SZClaimToken? = nil
+        claim: SZClaimToken? = nil, via: String? = nil
     ) async throws -> SZAgentRunResult {
         let scope = SZChatScope.node(node)
         // Debug test affordance: force this node to fail its first dispatch once — report `needsInput`
@@ -178,7 +185,7 @@ extension SZHost {
         // A cancelled run's zombie dispatch presents its released token; deliver detects that and
         // bows out instead of double-streaming into a scope someone else now owns.
         let result = try await deliver(scope: scope, request: request, provider: provider,
-                                       claim: claim).result
+                                       claim: claim, via: via).result
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
         // (timeout, CLI error) is invisible and the node reads as a silent Draft.
         switch await turnFailure(result, provider: provider) {
@@ -262,7 +269,7 @@ extension SZHost {
         prompt: String, session: SZAgentGraph.Turn.Session, choice: SZModelChoice,
         mcpPort: UInt16, projectURL: URL, cacheDirectory: URL,
         claim: SZClaimToken? = nil
-    ) async throws -> SZAgentRunResult {
+    ) async throws -> (result: SZAgentRunResult, generation: String) {
         let run = activeRun(for: claim)
         let scope = SZChatScope.director
         // A RUN resumes its OWN Director thread. The host's slot is keyed by scope, so two
@@ -302,7 +309,8 @@ extension SZHost {
         }
         defer { if let claim { ledger.release([.transcript(scope)], by: claim) } }
         let result = try await deliver(scope: scope, request: request, provider: provider,
-                                       persistSession: run == nil, claim: claim).result
+                                       persistSession: run == nil, claim: claim,
+                                       via: effective.via).result
         // A run keeps its Director thread on ITS OWN state, not the host's scope slot. The
         // pin carries the envelope the thread OPENED with — what affinity re-runs above.
         if let run, !result.outcome.failed, let sessionID = result.outcome.sessionID {
@@ -322,7 +330,10 @@ extension SZHost {
         case .agent, .preempted, nil: break
         }
         ensureRenderEndpointFromDisplay()   // safety net: a Director that declared a displayed output but
-        return result                       // forgot ui_toggle_display still renders (mirrors the draft path)
+                                            // forgot ui_toggle_display still renders (mirrors the draft path)
+        return (result, SZTurnGeneration(
+            providerID: provider.id, model: request.model,
+            reasoningEffort: request.reasoningEffort, fastMode: request.fastMode).label)
     }
 
     /// Point the viewport at what this run just built — unless the Director's own
@@ -749,11 +760,13 @@ extension SZHost {
                 // Director brief lists what lands from here on (this turn's own edits included).
                 state.mutationCursor = self.mutationJournal.count
                 do {
-                    let result = try await self.runDirectorTurn(
+                    let turn = try await self.runDirectorTurn(
                         prompt: order.brief, session: order.session, choice: order.choice,
                         mcpPort: mcpPort, projectURL: projectURL, cacheDirectory: cacheDirectory,
                         claim: claim)
-                    return SZTurnReport(failed: result.outcome.failed, detail: result.outcome.message)
+                    return SZTurnReport(failed: turn.result.outcome.failed,
+                                        detail: turn.result.outcome.message,
+                                        generation: turn.generation)
                 } catch {
                     return SZTurnReport(failed: true, detail: String(describing: error))
                 }
@@ -765,7 +778,8 @@ extension SZHost {
                     "note": ["traversal": thread.uuidString, "ordinal": note.ordinal,
                              "node": note.node, "phase": "\(note.phase)",
                              "outcome": note.outcome ?? "",
-                             "detail": note.detail ?? ""] as [String: Any],
+                             "detail": note.detail ?? "",
+                             "generation": note.generation ?? ""] as [String: Any],
                 ])
             })
         delivery.fleet = { [weak self] orders, seat, progress in
@@ -922,12 +936,19 @@ extension SZHost {
                         return SZTurnReport(failed: true,
                                             detail: "unknown provider: \(effective.providerID)")
                     }
+                    let ranGeneration = SZTurnGeneration(
+                        providerID: effective.providerID, model: effective.model,
+                        reasoningEffort: effective.reasoningEffort,
+                        fastMode: effective.fastMode).label
                     do {
                         let result = try await self.streamCodingAgent(
-                            node: nodeID, request: request, provider: provider, claim: claim)
-                        return SZTurnReport(failed: result.outcome.failed, detail: result.outcome.message)
+                            node: nodeID, request: request, provider: provider, claim: claim,
+                            via: effective.via)
+                        return SZTurnReport(failed: result.outcome.failed, detail: result.outcome.message,
+                                            generation: ranGeneration)
                     } catch {
-                        return SZTurnReport(failed: true, detail: String(describing: error))
+                        return SZTurnReport(failed: true, detail: String(describing: error),
+                                            generation: ranGeneration)
                     }
                 },
                 effect: { [weak self] effect in await self?.perform(effect: effect) },
@@ -974,7 +995,8 @@ extension SZHost {
             absorb(state.supervisor.handle(.workDelivered(node: node, setID: setID)))
             if let engine = delivery.engine {
                 beginAgentGraphRun(
-                    SZTraversalSighting(id: delivery.sighting, agent: coding.id, work: node),
+                    SZTraversalSighting(id: delivery.sighting, agent: coding.id, work: node,
+                                        grade: SZNodeID(uuidString: node).flatMap { nodeGrades[$0] }),
                     thread: thread)
                 runnable.append((node, delivery.sighting, engine))
             } else {

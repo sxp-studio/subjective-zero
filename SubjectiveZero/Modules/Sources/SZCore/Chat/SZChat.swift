@@ -177,6 +177,33 @@ public struct SZTokenUsage: Sendable, Equatable, Codable {
     }
 }
 
+/// The generation envelope a finished turn ACTUALLY ran — the transcript's per-turn record
+/// of which model served it. Stamped unconditionally at turn end (release data, never
+/// trace-gated); `via` names the routing rule that picked it ("fast-fleet · coding",
+/// "session", nil = the default). Display truth, never parsed.
+public struct SZTurnGeneration: Codable, Equatable, Sendable {
+    public var providerID: String
+    public var model: String?
+    public var reasoningEffort: String?
+    public var fastMode: Bool
+    public var via: String?
+
+    public init(providerID: String, model: String? = nil, reasoningEffort: String? = nil,
+                fastMode: Bool = false, via: String? = nil) {
+        self.providerID = providerID
+        self.model = model
+        self.reasoningEffort = reasoningEffort
+        self.fastMode = fastMode
+        self.via = via
+    }
+
+    /// "codex · gpt-5.6-terra · high · fast" — empty parts drop out.
+    public var label: String {
+        ([providerID, model, reasoningEffort].compactMap { $0 }
+            + (fastMode ? ["fast"] : [])).joined(separator: " · ")
+    }
+}
+
 public struct SZChatMessage: Identifiable, Equatable, Sendable {
     public let id: UUID
     public var role: SZChatRole
@@ -206,11 +233,15 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
     /// the Agent Graph panel. Stamped on the run's own narrations; nil on everything else. NOT the
     /// Profiler's `SZTurnEvent.runID`: that is the trace identity, and the two are different ids.
     public var graphRunID: UUID?
+    /// The envelope the turn ran (assistant turns) — nil while in flight and on records that
+    /// predate receipts; shown beside the duration.
+    public var generation: SZTurnGeneration?
 
     public init(id: UUID = UUID(), role: SZChatRole, text: String, thinking: String = "",
                 timestamp: Date = Date(), duration: TimeInterval? = nil, usage: SZTokenUsage? = nil,
                 breakdown: [SZTurnEvent]? = nil, attachments: [SZChatAttachment] = [],
-                transient: Bool = false, graphRunID: UUID? = nil) {
+                transient: Bool = false, graphRunID: UUID? = nil,
+                generation: SZTurnGeneration? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -222,13 +253,14 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
         self.attachments = attachments
         self.transient = transient
         self.graphRunID = graphRunID
+        self.generation = generation
     }
 }
 
 extension SZChatMessage: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, role, text, thinking, timestamp, duration, usage, breakdown, attachments, transient
-        case graphRunID
+        case graphRunID, generation
     }
 
     // Hand-written for append tolerance (see header).
@@ -245,6 +277,7 @@ extension SZChatMessage: Codable {
         attachments = try c.decodeIfPresent([SZChatAttachment].self, forKey: .attachments) ?? []
         transient = try c.decodeIfPresent(Bool.self, forKey: .transient) ?? false
         graphRunID = try c.decodeIfPresent(UUID.self, forKey: .graphRunID)
+        generation = try c.decodeIfPresent(SZTurnGeneration.self, forKey: .generation)
     }
 
     // Hand-written to keep the common case clean: `duration` and `transient` are omitted rather
@@ -263,5 +296,6 @@ extension SZChatMessage: Codable {
         try c.encode(attachments, forKey: .attachments)
         if transient { try c.encode(true, forKey: .transient) }
         try c.encodeIfPresent(graphRunID, forKey: .graphRunID)
+        try c.encodeIfPresent(generation, forKey: .generation)
     }
 }

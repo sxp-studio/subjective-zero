@@ -18,12 +18,18 @@ public struct SZQueryRecord: Sendable, Equatable {
     public var promptHash: String
     /// The raw reply text handed back to the step.
     public var reply: String
+    /// The routed provider/model that served the completion — query-lane attribution.
+    public var providerID: String?
+    public var model: String?
 
-    public init(step: String, attempt: Int, template: String, promptHash: String, reply: String) {
+    public init(step: String, attempt: Int, template: String, promptHash: String, reply: String,
+                providerID: String? = nil, model: String? = nil) {
         self.step = step
         self.attempt = attempt
         self.template = template
         self.promptHash = promptHash
         self.reply = reply
+        self.providerID = providerID
+        self.model = model
     }
 }

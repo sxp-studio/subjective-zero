@@ -37,6 +37,12 @@ extension SZStore {
         mutateMessage(messageID, in: scope) { $0.usage = usage }
     }
 
+    /// Record the envelope a turn ran (set when it finishes) — shown beside the duration.
+    /// Release data, unconditional — never gated on tracing.
+    public func setChatGeneration(_ generation: SZTurnGeneration, _ messageID: UUID, in scope: SZChatScope) {
+        mutateMessage(messageID, in: scope) { $0.generation = generation }
+    }
+
     /// Record a turn's debug breakdown (set when it finishes, tracing on) — the disclosure under
     /// the duration line. Empty in, no-op: absence stays absence.
     public func setChatBreakdown(_ events: [SZTurnEvent], _ messageID: UUID, in scope: SZChatScope) {

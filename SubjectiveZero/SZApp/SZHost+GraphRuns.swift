@@ -19,7 +19,8 @@ extension SZHost {
     /// the thread's leader); a conversation passes nil and never joins a thread.
     func beginAgentGraphRun(_ sighting: SZTraversalSighting, thread: UUID?) {
         let record = SZAgentGraphRun(id: sighting.id, agent: sighting.agent,
-                                     thread: thread, work: sighting.work)
+                                     thread: thread, work: sighting.work,
+                                     grade: sighting.grade)
         agentGraphRuns = SZAgentGraphRun.ordered(agentGraphRuns + [record])
         persistAgentGraphRuns()
     }
@@ -223,6 +224,7 @@ private extension SZAgentGraphRun.Entry {
         case .failed: .failed
         }
         self.init(ordinal: note.ordinal, node: note.node, phase: phase,
-                  outcome: note.outcome, detail: note.detail, tally: note.tally)
+                  outcome: note.outcome, detail: note.detail, tally: note.tally,
+                  generation: note.generation)
     }
 }

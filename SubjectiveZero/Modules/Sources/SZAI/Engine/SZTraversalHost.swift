@@ -28,13 +28,17 @@ public struct SZTurnOrder: Sendable {
 }
 
 /// What came back from a turn: process truth only (`ok`/`error` is derived from `failed`),
-/// plus the detail a failed turn carries into the trace.
+/// plus the detail a failed turn carries into the trace and the envelope it actually ran
+/// (session affinity resolves host-side, so only the host can say it truthfully).
 public struct SZTurnReport: Sendable {
     public var failed: Bool
     public var detail: String?
-    public init(failed: Bool, detail: String? = nil) {
+    /// "codex · gpt-5.6-terra · fast" — the run trace's receipt text. nil = unreported.
+    public var generation: String?
+    public init(failed: Bool, detail: String? = nil, generation: String? = nil) {
         self.failed = failed
         self.detail = detail
+        self.generation = generation
     }
 }
 
@@ -76,10 +80,14 @@ public struct SZTraversalSighting: Sendable, Equatable {
     public var agent: String
     /// The dispatched node id for a work child; nil otherwise.
     public var work: String?
-    public init(id: UUID, agent: String, work: String? = nil) {
+    /// The Director's grade for a work child's task ("light"/"standard"/"heavy"), frozen at
+    /// dispatch; nil = ungraded (or not a work child).
+    public var grade: String?
+    public init(id: UUID, agent: String, work: String? = nil, grade: String? = nil) {
         self.id = id
         self.agent = agent
         self.work = work
+        self.grade = grade
     }
 }
 
@@ -94,14 +102,19 @@ public struct SZTraversalNote: Sendable, Equatable {
     public var outcome: String?
     public var detail: String?
     public var tally: SZAgentGraphRun.Tally?
+    /// A settled turn visit's envelope receipt ("codex · gpt-5.6-terra · fast"); nil on
+    /// every other visit and on turns that predate receipts.
+    public var generation: String?
     public init(ordinal: Int, node: String, phase: Phase, outcome: String? = nil,
-                detail: String? = nil, tally: SZAgentGraphRun.Tally? = nil) {
+                detail: String? = nil, tally: SZAgentGraphRun.Tally? = nil,
+                generation: String? = nil) {
         self.ordinal = ordinal
         self.node = node
         self.phase = phase
         self.outcome = outcome
         self.detail = detail
         self.tally = tally
+        self.generation = generation
     }
 }
 

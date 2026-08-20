@@ -138,7 +138,8 @@ public final class SZQueryService {
 
         let record = SZQueryRecord(step: step, attempt: request.attempt,
                                    template: request.template,
-                                   promptHash: Self.hash(prompt), reply: reply)
+                                   promptHash: Self.hash(prompt), reply: reply,
+                                   providerID: choice.providerID, model: choice.model)
         journal.append(record)
         onRecord(record)
         return reply
