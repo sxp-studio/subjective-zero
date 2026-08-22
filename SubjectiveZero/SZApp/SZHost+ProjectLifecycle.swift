@@ -18,8 +18,13 @@ extension SZHost {
     /// physical stream (its in-flight marker) is still writing, and tearing the project down under
     /// it would land its output in the NEXT project's store. Queued-but-undelivered messages
     /// deliberately do NOT block (they persist and redeliver on reopen).
+    /// An open counts too, so a second project op can't start on top of one. It does NOT gate edits.
     /// Menu items disable on this; the methods guard on it too (the MCP surface can race a click).
-    var isBusyForProjectOps: Bool { isRunning || ledger.anyHeld || !chatInFlight.isEmpty }
+    var isBusyForProjectOps: Bool { agentsOwnProject || openingProject != nil }
+
+    /// The agent half alone: what `switchProject` re-checks across its own suspensions, where the
+    /// opening flag is its own and must not read as someone else's claim.
+    var agentsOwnProject: Bool { isRunning || ledger.anyHeld || !chatInFlight.isEmpty }
 
     /// The `.subz` package content type for the save/open panels. Prefers the app's exported UTI
     /// (`studio.sxp.subz`, declared in Info.plist as a `com.apple.package`); falls back to a plain

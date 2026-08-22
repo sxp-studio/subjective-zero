@@ -204,6 +204,10 @@ final class SZHost {
     var profilerFocusRequest: UUID?
     /// True for the duration of `switchProject` — the pump must not start a turn mid-swap.
     var pumpSuspended = false
+    /// The project currently opening, by display name; nil when idle. Names the wait for the UI, and
+    /// refuses a second project op via `isBusyForProjectOps`. It does NOT gate graph edits: those land
+    /// on the outgoing project and are persisted before the swap.
+    var openingProject: String?
     /// The persistable queue content of the last `flushMessageQueue` write (id:state lines) — the
     /// skip-if-unchanged signature. Reset on project switch so the new project always flushes.
     var lastFlushedQueueSignature: [String]?
@@ -572,6 +576,8 @@ final class SZHost {
         // App-level services — deliberately outside the project chain: a project that failed to
         // load must not take the MCP bus down with it.
         startMCPServer()
+        // Artifacts for nodes long gone are garbage; sweep once, off-main.
+        Task.detached(priority: .background) { SZRuntime.pruneBuildCache() }
         // Only now can a task start (startRun needs the bus): the restore above pumped into a
         // host with no MCP server, so every restored ask answered `.waiting` and nothing was
         // left to wake it.
@@ -606,7 +612,8 @@ final class SZHost {
         // Refusals, not errors: a run/chat in flight owns the graph (menu items are disabled, but
         // the MCP surface can race a click), and re-opening the open project is a no-op.
         guard !isBusyForProjectOps else {
-            status = "busy — stop the run / wait for chat before switching projects"
+            status = openingProject.map { "busy — \($0) is still opening" }
+                ?? "busy — stop the run / wait for chat before switching projects"
             return false
         }
         // Resolve symlinks too (e.g. /tmp vs /private/tmp): reopening the SAME bundle through a
@@ -618,6 +625,18 @@ final class SZHost {
             status = "already open: \(newURL.lastPathComponent)"
             return false
         }
+        // From here the open is under way: the flag names it for the UI and closes the door behind us.
+        // The defer clears it on every exit, throws included.
+        openingProject = newURL.deletingPathExtension().lastPathComponent
+        let openClock = ContinuousClock()
+        let openStarted = openClock.now
+        defer {
+            openingProject = nil
+            if SZTrace.isEnabled {
+                print(String(format: "[SZHost] opened %@ in %.2fs", newURL.lastPathComponent,
+                             openStarted.duration(to: openClock.now).szSeconds))
+            }
+        }
 
         // 1. Validate first — a corrupt bundle must fail before the old project is touched. A
         //    persisted data cycle (a hand edit, an external writer) is repaired here — newest
@@ -625,18 +644,22 @@ final class SZHost {
         //    which used to forget the project and boot the sample. Saved back to disk in step 4.
         var project = try SZProjectIO.load(from: newURL)
         let repairedEdges = project.graph.repairDataCycles()
-        // 2. The only await: permissions (camera…) before the camera node's setup runs.
-        try await runtime.requestDeclaredPermissions(at: newURL)
-        // Re-check after the await: the busy guard above passed, but an event-driven delivery (the
-        // mailbox pump fires on ledger releases) can start a turn inside that one suspension —
-        // and everything below tears the project down under it. The pump is also suspended for the
-        // rest of the swap (resumed by the defer installed here, on every exit path).
+        // 2. Suspend the pump BEFORE the awaits, not after. The window below is now a whole project's
+        // compile, and a delivery starting inside it takes a ledger hold, which makes the re-check
+        // discard an open the user already waited through.
         pumpSuspended = true
         defer {
             pumpSuspended = false
             pumpMailboxes()
         }
-        guard !isBusyForProjectOps else {
+        // The two awaits are adjacent on purpose: one interleaving window, covered by one re-check.
+        // Permissions first, then the new project's nodes built off-main. Preparing touches nothing
+        // live, so the old project keeps rendering and an abandoned prepare is just dropped.
+        try await runtime.requestDeclaredPermissions(at: newURL)
+        let prepared = try await runtime.prepareProject(project, at: newURL)
+        // The pump is suspended, but a user send or an MCP call can still start a turn in that window.
+        // Re-check before tearing the old project down under one.
+        guard !agentsOwnProject else {
             status = "busy — a turn started while opening; try again"
             return false
         }
@@ -655,12 +678,12 @@ final class SZHost {
             persistAgentSessions()
             persistProject()
         }
-        // 4. Last fallible step: the runtime swap. On failure, drop the lock we just took (the old
-        // project keeps rendering, its lock untouched). The runtime reads from disk, so a repaired
-        // graph must land there first.
+        // 4. Last fallible step: install what step 2 prepared, synchronously and atomically. On failure
+        // drop the lock we took, leaving the old project rendering. The repaired graph is already in
+        // `prepared`; the save is for everything downstream that reads disk.
         do {
             if !repairedEdges.isEmpty { try SZProjectIO.save(project, to: newURL) }
-            try runtime.loadProject(at: newURL)
+            try runtime.commit(prepared)
         } catch {
             newLock.release()
             throw error
@@ -1598,6 +1621,9 @@ final class SZHost {
         // (isChatting). The agent's own compile→promote path reloads it and drives its pill; reloading
         // here would clobber that. Leave it to the agent (its promote write fires the watcher while guarded).
         guard !isRunning, nodeAgentState[id]?.isChatting != true else { return }
+        // Nor while a project opens: the swap would discard this reload, and the fallback below is a
+        // synchronous whole-graph compile, the freeze the off-main open exists to remove.
+        guard openingProject == nil else { return }
         Task { @MainActor in
             // Re-check across every suspension: the watcher may have fired for a node that is deleted
             // before this Task starts, or during the yield below. Writing its pill then would resurrect
