@@ -7,10 +7,14 @@
 // host-owned RuntimeSupport beside the node, `swiftc -emit-library`, then `codesign -s -` (ad-hoc
 // signing is REQUIRED for `dlopen` on macOS). This compiles ONE node's source; the graph wiring lives
 // elsewhere (topo order in `SZScheduler`, per-node loaders in `SZRuntime.loadGraph`). Still not
-// built — added only when earned: a `CompileRequest`/file manifest, runtime contract validation (the
-// node touches only its declared ports), and rebuild-staleness (we recompile all nodes on reload,
-// fine for the current graph sizes).
+// built — added only when earned: a `CompileRequest`/file manifest and runtime contract validation
+// (the node touches only its declared ports).
+//
+// Node artifacts are content-addressed per node dir, so an unchanged node never runs swiftc twice,
+// across launches included. That is what makes opening a project fast.
+import CryptoKit
 import Foundation
+import Synchronization
 
 public struct SZToolchain {
     public init() {}
@@ -45,7 +49,7 @@ public struct SZToolchain {
     func compile(nodeSource: URL, into buildDir: URL) throws -> URL {
         try compile(source: nodeSource, into: buildDir,
                     supportFileName: SZNodeKit.fileName, supportSource: SZNodeKit.source,
-                    modulePrefix: "SZNode_", product: "Node.dylib")
+                    modulePrefix: "SZNode_", product: "Node.dylib", cached: true)
     }
 
     /// Compile a decision step's `Step.swift` into `Step.dylib` — same pipeline, SZStepKit
@@ -53,7 +57,7 @@ public struct SZToolchain {
     public func compile(stepSource: URL, into buildDir: URL) throws -> URL {
         try compile(source: stepSource, into: buildDir,
                     supportFileName: SZStepKit.fileName, supportSource: SZStepKit.source,
-                    modulePrefix: "SZStep_", product: "Step.dylib")
+                    modulePrefix: "SZStep_", product: "Step.dylib", cached: false)
     }
 
     /// Compile a node's `Card.swift` into `Card.dylib` — same pipeline, SZCardKit as the support
@@ -61,43 +65,105 @@ public struct SZToolchain {
     public func compile(cardSource: URL, into buildDir: URL) throws -> URL {
         try compile(source: cardSource, into: buildDir,
                     supportFileName: SZCardKit.fileName, supportSource: SZCardKit.source,
-                    modulePrefix: "SZCard_", product: "Card.dylib")
+                    modulePrefix: "SZCard_", product: "Card.dylib", cached: false)
     }
 
     /// The one pipeline all tiers share: write the host-owned support source beside the
     /// authored file, `swiftc -emit-library`, then `codesign -s -` (ad-hoc signing is
-    /// REQUIRED for `dlopen` on macOS). Returns the dylib URL. A fresh, unique Swift module
-    /// name per build keeps mangled type metadata from colliding when an old + new dylib are
-    /// briefly co-resident during hot reload.
+    /// REQUIRED for `dlopen` on macOS). Returns the dylib URL.
+    ///
+    /// `cached` is the NODE tier only, and two rules keep it safe:
+    ///   - `buildDir` is per node, so the module name stays a fresh `UUID` per build and two nodes with
+    ///     identical source never share mangled type metadata while co-resident.
+    ///   - Steps and cards are NOT cached: neither ever `dlclose`s, so re-mapping one artifact would put
+    ///     two images with one module name in the process.
+    /// A cached build is staged and moved into place only once signed, so an interrupted compile leaves
+    /// nothing half-built to be trusted later.
     private func compile(source: URL, into buildDir: URL, supportFileName: String,
-                         supportSource: String, modulePrefix: String, product: String) throws -> URL {
+                         supportSource: String, modulePrefix: String, product: String,
+                         cached: Bool) throws -> URL {
         let fm = FileManager.default
-        try fm.createDirectory(at: buildDir, withIntermediateDirectories: true)
+        let key = cached ? try buildKey(source: source, supportSource: supportSource, product: product)
+                         : ""
+        let entry = cached ? buildDir.appending(path: key) : buildDir
+        if cached, fm.fileExists(atPath: entry.appending(path: product).path) {
+            return entry.appending(path: product)
+        }
 
-        let supportURL = buildDir.appending(path: supportFileName)
+        // Stage: a build in progress must not be reachable under its final name.
+        let staging = cached ? buildDir.appending(path: ".building-\(UUID().uuidString)") : buildDir
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { if cached { try? fm.removeItem(at: staging) } }
+        let supportURL = staging.appending(path: supportFileName)
         try supportSource.write(to: supportURL, atomically: true, encoding: .utf8)
 
-        let sdk = try sdkPath()
-        let dylib = buildDir.appending(path: product)
+        let sdk = try Self.sdk()
         let moduleName = modulePrefix + UUID().uuidString.prefix(8)
 
+        let staged = staging.appending(path: product)
         let build = try run("/usr/bin/xcrun", [
             "swiftc", "-emit-library",
             "-module-name", String(moduleName),
             "-sdk", sdk,
-            "-o", dylib.path,
+            "-o", staged.path,
             supportURL.path, source.path,
         ])
         guard build.status == 0 else { throw CompileError.compileFailed(log: build.combined) }
 
         // Ad-hoc sign in place (-f overwrites any stale signature). Required before dlopen.
-        let sign = try run("/usr/bin/codesign", ["-s", "-", "-f", dylib.path])
+        let sign = try run("/usr/bin/codesign", ["-s", "-", "-f", staged.path])
         guard sign.status == 0 else { throw CompileError.signFailed(log: sign.combined) }
+        guard cached else { return staged }
 
-        return dylib
+        // Publish in one atomic move. Losing the race to another process is success: same key, same
+        // bytes.
+        try? fm.removeItem(at: entry)
+        do { try fm.moveItem(at: staging, to: entry) } catch {
+            guard fm.fileExists(atPath: entry.appending(path: product).path) else { throw error }
+        }
+        // One live artifact per node: the key that just built is the only one worth keeping.
+        for stale in (try? fm.contentsOfDirectory(at: buildDir, includingPropertiesForKeys: nil)) ?? []
+        where stale.lastPathComponent != key {
+            try? fm.removeItem(at: stale)
+        }
+        return entry.appending(path: product)
     }
 
-    private func sdkPath() throws -> String {
+    /// The content key an artifact is filed under: everything that changes what swiftc would emit.
+    private func buildKey(source: URL, supportSource: String, product: String) throws -> String {
+        var hasher = SHA256()
+        hasher.update(data: try Data(contentsOf: source))
+        let toolchain = try Self.toolchain()
+        for part in [supportSource, product, toolchain.sdk, toolchain.compiler, Self.formatSalt] {
+            hasher.update(data: Data(part.utf8))
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Bump by hand when the pipeline itself changes shape (flags, signing, layout) in a way the
+    /// hashed inputs can't see. An ABI change rides the support source and needs no bump.
+    private static let formatSalt = "1"
+
+    /// Resolved once per process; `xcrun` was being spawned per node. A FAILURE is never memoized, or
+    /// one transient `xcrun` would kill every compile until relaunch.
+    private static let resolved = Mutex<(sdk: String, compiler: String)?>(nil)
+    private static func toolchain() throws -> (sdk: String, compiler: String) {
+        if let known = resolved.withLock({ $0 }) { return known }
+        let probe = SZToolchain()
+        let found = (sdk: try probe.resolveSDKPath(), compiler: probe.resolveCompilerVersion())
+        resolved.withLock { $0 = found }
+        return found
+    }
+    private static func sdk() throws -> String { try toolchain().sdk }
+
+    /// In the key because the SDK path alone doesn't move for an Xcode point release or a `TOOLCHAINS`
+    /// switch, which emit different code. Unreadable is its own key, not a failure.
+    private func resolveCompilerVersion() -> String {
+        ((try? run("/usr/bin/xcrun", ["swiftc", "--version"]))?.stdout ?? "unknown")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resolveSDKPath() throws -> String {
         let result = try run("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-path"])
         // Read stdout ONLY for the path. On macOS 26+, subprocesses launched from an Xcode-run app
         // inherit an environment that makes them spew `objc[...]: Class USK... implemented in both`

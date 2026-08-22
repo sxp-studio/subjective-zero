@@ -15,6 +15,14 @@ import SZCore
 
 /// Result of a compile-check (`compileNodeSource`). `.failed` carries the swiftc log for the agent's
 /// fix loop / `debug_get_build_errors`.
+/// Something loaded between prepare and commit, so the prepared modules no longer cover the graph.
+/// Nothing retries: it surfaces to the user, hence the readable sentence.
+public enum SZLoadError: Error, LocalizedError, CustomStringConvertible {
+    case staleLoad
+    public var description: String { "the graph changed while this load was being prepared" }
+    public var errorDescription: String? { description }
+}
+
 public enum SZBuildResult: Sendable, Equatable {
     case ok
     case failed(String)
@@ -36,14 +44,19 @@ public enum SZBuildResult: Sendable, Equatable {
 ///   Presentation is a separate blit buffer after `nextDrawable()` (a capture landing in between can
 ///   show a one-frame-newer endpoint — whole frames, monotonic).
 /// - The engine lock never calls into the loop or a surface queue.
+/// - COMPILES: `prepareLoad` runs on whatever thread the caller gives it (`prepareProject` gives it a
+///   detached one). Only `commit` must run on the thread that owns the graph.
 ///
-/// `@unchecked Sendable`: `assets`' pool is touched only under the lock; `toolchain`/compile paths
-/// are main-thread by convention; the rest is Mutex-guarded or immutable.
+/// `@unchecked Sendable`: `assets`' pool is touched only under the lock; the toolchain is a value type
+/// writing to per-node dirs; the rest is Mutex-guarded or immutable.
 public final class SZRuntime: @unchecked Sendable {
     /// Everything a frame encode reads or a load/reload swaps — guarded by `engine`.
     private struct EngineState {
         var scheduler: SZScheduler?
         var loaders: [SZNodeID: SZLoader] = [:]
+        /// The artifact each live loader came from. Content-addressed, so an unchanged source resolves
+        /// to the same URL: that is how `reloadNode` spots a save that changed nothing.
+        var loaderDylibs: [SZNodeID: URL] = [:]
         /// Live scalar input values per node/port (the v3 ABI channel): seeded from contract input
         /// defaults on load, overridable via `setInputValue` — read every frame, no recompile.
         var inputValues: [SZNodeID: [String: [Float]]] = [:]
@@ -76,6 +89,9 @@ public final class SZRuntime: @unchecked Sendable {
     private let assets: SZAssetManager
     private let toolchain = SZToolchain()
     private let workspace: URL
+    /// Built node dylibs, keyed by node id then content key. Deliberately outside `workspace`, which is
+    /// per-launch scratch: a cache in there would miss on every cold open.
+    private let buildCache: URL
     /// The aspect-fit scaler behind size-mismatched presents (mirror viewports at their own size,
     /// resize races). Its own kernel — NOT the preview stream's — and its own mutex: scaleTransform/
     /// clipRect are mutated per encode, and mirrors present from independent display-link threads.
@@ -107,17 +123,46 @@ public final class SZRuntime: @unchecked Sendable {
     /// The owned Metal device — vended to the viewport's layer by the host.
     public var device: any MTLDevice { assets.device }
 
-    public init?(renderSize: (width: Int, height: Int) = (1280, 800), workspace: URL? = nil) {
+    /// `~/Library/Caches/SubjectiveZero/NodeBuilds` — machine-local, rebuildable, and safe to delete.
+    public static var defaultBuildCache: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appending(path: "SubjectiveZero").appending(path: "NodeBuilds")
+    }
+
+    /// Drop build dirs untouched for `days`. Node ids are per INSTANCE, so without this every deleted
+    /// node leaves ~190 KB behind forever. Once per launch, off-main; failing is fine, it's a cache.
+    public static func pruneBuildCache(_ root: URL? = nil, olderThan days: Int = 30) {
+        let fm = FileManager.default
+        let dir = root ?? defaultBuildCache
+        let cutoff = Date(timeIntervalSinceNow: -Double(days) * 86_400)
+        for entry in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {
+            let touched = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let touched, touched < cutoff { try? fm.removeItem(at: entry) }
+        }
+    }
+
+    public init?(renderSize: (width: Int, height: Int) = (1280, 800), workspace: URL? = nil,
+                 buildCache: URL? = nil) {
         guard let assets = SZAssetManager() else { return nil }
         self.assets = assets
         self.engine = Mutex(EngineState(renderSize: renderSize))
         self.workspace = workspace
             ?? FileManager.default.temporaryDirectory.appending(path: "SZRuntime-\(UUID().uuidString)")
+        self.buildCache = buildCache ?? Self.defaultBuildCache
         loop = SZRenderLoop { [weak self] in self?.tick() }
     }
 
     deinit {
         loop.stop()
+    }
+
+    /// Compiled and dlopened but not installed: no `setup()` has run, so dropping one just frees its
+    /// mappings. `commit` re-derives its own diff and only needs these loaders to COVER it.
+    public struct SZPreparedLoad: Sendable {
+        let graph: SZGraph
+        let schedule: SZScheduler
+        let loaders: [SZNodeID: SZLoader]
+        let dylibs: [SZNodeID: URL]
     }
 
     /// Load a whole project from its `.subz` directory: read the model, compile each node's `Node.swift`,
@@ -129,6 +174,17 @@ public final class SZRuntime: @unchecked Sendable {
         // graph with un-implemented (dirty) prompt nodes load — the agent loop starts from exactly that,
         // and the node becomes renderable once its coding agent's source is promoted (kind → generated).
         try loadGraph(Self.renderableSubgraph(project.graph)) { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0) }
+    }
+
+    /// Compile + dlopen a project's new nodes off the caller's thread, touching nothing live: the cold
+    /// open, where every node is new. By value so the caller's repaired graph is the one prepared.
+    /// Install with `commit`, or drop it to abandon the load.
+    public func prepareProject(_ project: SZProject, at url: URL) async throws -> SZPreparedLoad {
+        let graph = Self.renderableSubgraph(project.graph)
+        return try await Task.detached(priority: .userInitiated) { [self] in
+            try prepareLoad(graph, sourceURL: { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0) },
+                            offMain: true)
+        }.value
     }
 
     /// The subgraph the runtime can actually render: `generated` nodes, the connections among them, and
@@ -186,7 +242,11 @@ public final class SZRuntime: @unchecked Sendable {
     public func reloadNode(id: SZNodeID, source: URL) throws {
         guard let loader = engine.withLock({ $0.loaders[id] }) else { return }
         let dylib = try toolchain.compile(
-            nodeSource: source, into: workspace.appending(path: "build/\(id.uuidString)"))
+            nodeSource: source, into: buildCache.appending(path: id.uuidString))
+        // A save that changed nothing resolves to the artifact already live. Reloading it would map a
+        // second copy of the same module (the collision the per-build module name prevents) and
+        // re-acquire exclusive devices, restarting a camera for nothing.
+        guard engine.withLock({ $0.loaderDylibs[id] }) != dylib else { return }
         // The in-place module swap must not interleave a live-viewport frame encode.
         try engine.withLock { state in
             var ctx = SZRuntimeContextRaw()
@@ -203,6 +263,7 @@ public final class SZRuntime: @unchecked Sendable {
                     dylib: dylib,
                     runtimeLoadsDir: workspace.appending(path: "runtime-loads/\(id.uuidString)"),
                     setupContext: UnsafeMutableRawPointer(pointer))
+                state.loaderDylibs[id] = dylib
             }
         }
     }
@@ -246,28 +307,83 @@ public final class SZRuntime: @unchecked Sendable {
     /// sessions contend and the new feed freezes (e.g. after a camera merge). Retained nodes are never
     /// torn down, so an unchanged camera node keeps running across the edit.
     private func loadGraph(_ graph: SZGraph, sourceURL: (SZNodeID) -> URL) throws {
+        try commit(prepareLoad(graph, sourceURL: sourceURL, offMain: false))
+    }
+
+    /// Phase 1: schedule, diff, compile + `open` (no `setup()`) the added nodes. The slow half, and the
+    /// only half touching the toolchain. `offMain` means the caller is a detached thread, so compiles may
+    /// run at once and park on the swiftc gate: neither is allowed on the main thread.
+    private func prepareLoad(_ graph: SZGraph, sourceURL: (SZNodeID) -> URL,
+                             offMain: Bool) throws -> SZPreparedLoad {
         let schedule = try SZScheduler(graph: graph)
 
         // Diff old vs new node sets. `added` compile; `removed` tear down; the rest are reused untouched.
         let oldIDs = engine.withLock { Set($0.loaders.keys) }
-        let newIDs = Set(graph.nodes.map(\.id))
-        let added = newIDs.subtracting(oldIDs)
-        let removed = oldIDs.subtracting(newIDs)
-        let retained = newIDs.intersection(oldIDs)
+        // Order is irrelevant here: each node builds into its own dir and nothing is activated yet.
+        let added = schedule.order.filter { !oldIDs.contains($0) }
 
-        // Phase 1 — compile + open only the added nodes (no setup yet), strictly OUTSIDE the lock (slow).
         // Throws leave the live graph untouched. Empty for a pure wiring edit ⇒ zero compiles.
+        let clock = ContinuousClock()
+        let started = clock.now
+        let built = try offMain ? buildConcurrently(added, sourceURL: sourceURL)
+                                : added.map { ($0, try buildOne($0, source: sourceURL($0), gated: false)) }
         var newLoaders: [SZNodeID: SZLoader] = [:]
-        for nodeID in schedule.order where added.contains(nodeID) {
-            let dylib = try toolchain.compile(
-                nodeSource: sourceURL(nodeID),
-                into: workspace.appending(path: "build/\(nodeID.uuidString)"))
+        var dylibs: [SZNodeID: URL] = [:]
+        for (nodeID, dylib) in built {
             let loader = SZLoader()
             try loader.open(
                 dylib: dylib,
                 runtimeLoadsDir: workspace.appending(path: "runtime-loads/\(nodeID.uuidString)"))
             newLoaders[nodeID] = loader
+            dylibs[nodeID] = dylib
         }
+        if SZTrace.isEnabled, !newLoaders.isEmpty {
+            print(String(format: "[SZRuntime] built %d node(s) in %.2fs",
+                         newLoaders.count, started.duration(to: clock.now).szSeconds))
+        }
+        return SZPreparedLoad(graph: graph, schedule: schedule, loaders: newLoaders, dylibs: dylibs)
+    }
+
+    private func buildOne(_ id: SZNodeID, source: URL, gated: Bool) throws -> URL {
+        let dir = buildCache.appending(path: id.uuidString)
+        return gated ? try toolchain.gated { try toolchain.compile(nodeSource: source, into: dir) }.get()
+                     : try toolchain.compile(nodeSource: source, into: dir)
+    }
+
+    /// Build the added nodes at once, so a project costs about its slowest node rather than their sum.
+    /// GCD, not a task group: the swiftc gate and `waitUntilExit` block a real thread, and blocking
+    /// cooperative-pool threads starves the concurrency runtime.
+    private func buildConcurrently(_ ids: [SZNodeID],
+                                   sourceURL: (SZNodeID) -> URL) throws -> [(SZNodeID, URL)] {
+        guard ids.count > 1 else {
+            return try ids.map { ($0, try buildOne($0, source: sourceURL($0), gated: true)) }
+        }
+        let sources = ids.map { sourceURL($0) }
+        let results = Mutex<[SZNodeID: Result<URL, Error>]>([:])
+        DispatchQueue.concurrentPerform(iterations: ids.count) { i in
+            let built = Result { try buildOne(ids[i], source: sources[i], gated: true) }
+            results.withLock { $0[ids[i]] = built }
+        }
+        return try results.withLock { $0 }.sorted { a, b in
+            ids.firstIndex(of: a.key)! < ids.firstIndex(of: b.key)!
+        }.map { ($0.key, try $0.value.get()) }
+    }
+
+    /// Phases 2+3: swap `prepared` in, synchronously and atomically.
+    ///
+    /// The diff is re-derived here rather than trusted from prepare, because seconds of compiling sit
+    /// between the two and a hot reload in that window moves the live node set. A surplus prepared
+    /// loader is dropped unused; a shortfall refuses before anything is mutated.
+    public func commit(_ prepared: SZPreparedLoad) throws {
+        let graph = prepared.graph
+        let schedule = prepared.schedule
+        let newLoaders = prepared.loaders
+        let newIDs = Set(graph.nodes.map(\.id))
+        let oldIDs = engine.withLock { Set($0.loaders.keys) }
+        let added = newIDs.subtracting(oldIDs)
+        guard added.isSubset(of: newLoaders.keys) else { throw SZLoadError.staleLoad }
+        let removed = oldIDs.subtracting(newIDs)
+        let retained = newIDs.intersection(oldIDs)
 
         // Phases 2+3 hold the engine lock: a live-viewport frame must never interleave the teardown →
         // activate window (it would encode against unloaded modules), and the state swap is atomic
@@ -297,8 +413,11 @@ public final class SZRuntime: @unchecked Sendable {
             }
 
             // Commit: drop removed loaders, splice in the added ones, leave retained in place.
-            for id in removed { state.loaders[id] = nil }
-            for (id, loader) in newLoaders { state.loaders[id] = loader }
+            for id in removed { state.loaders[id] = nil; state.loaderDylibs[id] = nil }
+            for id in added {                                        // `added` only: a surplus is dropped
+                state.loaders[id] = newLoaders[id]
+                state.loaderDylibs[id] = prepared.dylibs[id]
+            }
             state.scheduler = schedule
             // Inputs: reconcile each live node's overrides against its (possibly edited) contract, so ANY
             // contract change — add / remove / rename / retype a port — self-applies with no cold reopen,

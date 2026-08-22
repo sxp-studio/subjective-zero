@@ -24,9 +24,14 @@ enum SZGPU {
 
 /// A runtime for a test that has already passed the `.enabled(if: SZGPU.isAvailable)` gate. If the device
 /// is there and this still returns nil, the command queue failed — fail, don't skip.
+/// Never the user's cache: a test must not read artifacts the app built, or leave any for it.
 func requireRuntime(renderSize: (width: Int, height: Int),
                     sourceLocation: SourceLocation = #_sourceLocation) throws -> SZRuntime {
-    try #require(SZRuntime(renderSize: renderSize),
+    try #require(SZRuntime(renderSize: renderSize, buildCache: testBuildCache),
                  "a Metal device is present but SZRuntime.init returned nil — makeCommandQueue() failed",
                  sourceLocation: sourceLocation)
 }
+
+/// Stable, not per-run: a fresh dir each run leaked ~11 MB and never hit.
+let testBuildCache = FileManager.default.temporaryDirectory
+    .appending(path: "szruntime-tests-buildcache")
