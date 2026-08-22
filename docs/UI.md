@@ -158,6 +158,11 @@ Graph panel.
   implementation turns into node transcripts with nothing marking them as fleet work, so without
   the epoch an old project's first open would fill the conversation with every coding turn it ever
   ran.
+- **An empty transcript asks a question.** "What are we making?" over a quieter line about nodes
+  getting created, wired and coded for you — centred in the panel, outside the ScrollView, since a
+  placeholder has nothing to scroll. While a project opens (its nodes compile off the main thread,
+  see RUNTIME's build & hot reload) that slot shows a spinner and "Loading conversation" instead;
+  a feed that already has messages keeps showing them rather than blanking.
 - The panel has NO header row. One conversation had nothing to name, so its actions —
   **AI Settings…** (the provider + routing sheet) and **Clear Transcript & Reset Agent**, which
   clears every scope the feed is made of — moved into a ⋯ menu beside the composer's +.

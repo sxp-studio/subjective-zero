@@ -166,6 +166,18 @@ small value types passed by the scheduler.
   schedule. On failure: staging is discarded/kept for inspection; the live graph keeps running
   the previous good module; the error is surfaced as status.
 - Hot reload is **per node** - recompiling one node does not rebuild the whole graph.
+- Built modules are **content-addressed**: an artifact is filed under a per-node build dir by a key
+  covering the source, the kit, the product and the machine's toolchain, in
+  `~/Library/Caches/SubjectiveZero/NodeBuilds`. An unchanged node is a lookup, so reopening a
+  project runs no swiftc at all, and a save that changed nothing does not reload the live module
+  (which would restart whatever exclusive device it holds). The module name stays a fresh UUID per
+  build on purpose: two nodes authored from identical source must not share mangled type metadata
+  while co-resident. A toolchain upgrade changes the key, so everything rebuilds once.
+- **Opening a project prepares off the main thread.** `prepareProject` compiles and dlopens the new
+  nodes on a detached task under the shared swiftc gate, touching nothing live; `commit` installs
+  the result synchronously and atomically, re-deriving the diff against the live graph so a reload
+  landing in between cannot corrupt it. The previous project keeps rendering throughout. The
+  synchronous `loadProject` stays for incremental edits, which compile at most one node.
 
 ## Custom cards
 
