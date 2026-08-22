@@ -715,6 +715,7 @@ struct SZApp: App {
             shareUsageData: host.telemetryEnabled,
             githubIcon: Image("github"),      // symbolsets live in the app bundle, not SZUI's
             discordIcon: Image("discord"),
+            opening: host.openingProject,
             onOpenRecent: { host.openProject(at: URL(filePath: $0)) },
             onNewProject: { host.newProject() },
             onOpenProject: { host.openProjectViaPanel() },
@@ -831,7 +832,8 @@ struct SZApp: App {
                         project: host.store.project,
                         streaming: !host.chatInFlight.isEmpty,
                         streamingIDs: Set(host.inFlightAssistantIDs.values),
-                        isRunning: host.isRunning, showTokenCounts: host.showTokenCounts,
+                        isRunning: host.isRunning, isLoading: host.openingProject != nil,
+                        showTokenCounts: host.showTokenCounts,
                         showTurnBreakdown: host.showTurnBreakdown,
                         agentAccents: host.chatAgentAccents,
                         workingScopes: host.chatInFlight,

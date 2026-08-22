@@ -53,6 +53,7 @@ public struct SZWelcomeOverlay: View {
     private let shareUsageData: Bool
     private let githubIcon: Image
     private let discordIcon: Image
+    private let opening: String?                   // a project is being opened → this panel is waiting
     private let onOpenRecent: (String) -> Void
     private let onNewProject: () -> Void
     private let onOpenProject: () -> Void
@@ -72,6 +73,7 @@ public struct SZWelcomeOverlay: View {
                 shareUsageData: Bool,
                 githubIcon: Image,
                 discordIcon: Image,
+                opening: String? = nil,
                 onOpenRecent: @escaping (String) -> Void,
                 onNewProject: @escaping () -> Void,
                 onOpenProject: @escaping () -> Void,
@@ -90,6 +92,7 @@ public struct SZWelcomeOverlay: View {
         self.shareUsageData = shareUsageData
         self.githubIcon = githubIcon
         self.discordIcon = discordIcon
+        self.opening = opening
         self.onOpenRecent = onOpenRecent
         self.onNewProject = onNewProject
         self.onOpenProject = onOpenProject
@@ -192,12 +195,22 @@ public struct SZWelcomeOverlay: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("What's collected and why — anonymous events only, never project content or prompts.")
+                    .help("What's collected and why: anonymous events only, never project content or prompts.")
                 }
             }
             .toggleStyle(.checkbox)
             .tint(SZWelcomeStyle.accent)
         }
+    }
+
+    private func openingRow(_ name: String) -> some View {
+        HStack(spacing: 9) {
+            ProgressView().controlSize(.small)
+            Text("Opening \(name)")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(SZWelcomeStyle.text)
+        }
+        .frame(height: 34)
     }
 
     // MARK: - Right panel (plain dark, recents + actions)
@@ -214,7 +227,7 @@ public struct SZWelcomeOverlay: View {
                         .tracking(1.5)
                         .foregroundStyle(Color.white.opacity(0.42))
                     Spacer()
-                    if !recents.isEmpty {
+                    if !recents.isEmpty, opening == nil {
                         SZWelcomePill(title: "Clear", action: onClearRecents)
                     }
                 }
@@ -230,14 +243,21 @@ public struct SZWelcomeOverlay: View {
                             SZWelcomeRecentRow(recent: recent) { onOpenRecent(recent.id) }
                         }
                     }
-                    HStack(spacing: 9) {
-                        SZWelcomeButton(title: "New Project", icon: Image(systemName: "plus"),
-                                        primary: true, attention: true, action: onNewProject)
-                        SZWelcomeButton(title: "Open…", icon: Image(systemName: "folder"),
-                                        action: onOpenProject)
+                    // Only the action row swaps: replacing the whole block collapsed the panel and
+                    // snapped its header toward centre.
+                    if let opening {
+                        openingRow(opening)
+                    } else {
+                        HStack(spacing: 9) {
+                            SZWelcomeButton(title: "New Project", icon: Image(systemName: "plus"),
+                                            primary: true, attention: true, action: onNewProject)
+                            SZWelcomeButton(title: "Open…", icon: Image(systemName: "folder"),
+                                            action: onOpenProject)
+                        }
+                        .padding(.top, 2)
                     }
-                    .padding(.top, 2)
                 }
+                .disabled(opening != nil)
             }
             .frame(width: 340, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)

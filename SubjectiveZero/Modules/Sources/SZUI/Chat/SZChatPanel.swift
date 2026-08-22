@@ -23,6 +23,7 @@ public struct SZChatPanel: View {
     private let streaming: Bool                    // any turn is in flight → the composer's Stop slot
     private let streamingIDs: Set<UUID>            // the messages actually being written right now
     private let isRunning: Bool                    // a build is in flight → the strip shows it
+    private let isLoading: Bool                    // a project is opening → the transcript's spinner
     private let showTokenCounts: Bool              // View ▸ Show Token Counts — the usage caption under replies
     private let showTurnBreakdown: Bool            // Debug ▸ Show Turn Breakdown — expandable phase rows under replies
     private let agentAccents: SZChatAgentAccents   // pack-declared speaker symbols/tints; empty = the built-in palette
@@ -131,6 +132,7 @@ public struct SZChatPanel: View {
     public init(store: SZStore, scope: SZChatScope = .director, feed: [SZChatFeedItem], project: SZProject?,
                 streaming: Bool, streamingIDs: Set<UUID> = [],
                 isRunning: Bool = false,
+                isLoading: Bool = false,
                 showTokenCounts: Bool = false,
                 showTurnBreakdown: Bool = false,
                 agentAccents: SZChatAgentAccents = SZChatAgentAccents(),
@@ -158,6 +160,7 @@ public struct SZChatPanel: View {
         self.streaming = streaming
         self.streamingIDs = streamingIDs
         self.isRunning = isRunning
+        self.isLoading = isLoading
         self.showTokenCounts = showTokenCounts
         self.showTurnBreakdown = showTurnBreakdown
         self.agentAccents = agentAccents
@@ -306,25 +309,38 @@ public struct SZChatPanel: View {
         return nil
     }
 
+    /// Placeholders render OUTSIDE the ScrollView so they can centre. A feed that already has messages
+    /// keeps showing them while the next project opens.
+    @ViewBuilder
     private func transcript(_ items: [SZChatFeedItem]) -> some View {
+        if items.isEmpty {
+            // The geometry reader leaves with the ScrollView, so clear the fade the last transcript
+            // may have armed (Clear Transcript while scrolled up).
+            (isLoading ? AnyView(loadingState) : AnyView(emptyState))
+                .onAppear { transcriptHasMoreBelow = false }
+        } else {
+            transcriptScroll(items)
+        }
+    }
+
+    private func transcriptScroll(_ items: [SZChatFeedItem]) -> some View {
         // Computed once per transcript render, shared by every row's tombstone check — it changes
         // only on graph edits, which is exactly when mention tombstones must re-render.
         let liveNodeIDs = Set(project?.graph.nodes.map(\.id) ?? [])
         return ScrollViewReader { proxy in
             ScrollView {
-                if items.isEmpty {
-                    emptyState
-                } else {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(items) { item in
-                            turn(for: item.message, isLast: item.id == items.last?.id,
-                                 liveNodeIDs: liveNodeIDs, from: item.scope)
-                        }
-                        Color.clear.frame(height: 1).id(Self.bottomID)   // scroll anchor
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(items) { item in
+                        turn(for: item.message, isLast: item.id == items.last?.id,
+                             liveNodeIDs: liveNodeIDs, from: item.scope)
                     }
-                    .padding(14)
+                    Color.clear.frame(height: 1).id(Self.bottomID)   // scroll anchor
                 }
+                .padding(14)
             }
+            // The first message CREATES this view, and `onChange` skips the value a view is born with,
+            // so pin once here or a long first message sits cut off.
+            .onAppear { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             .onChange(of: items.last?.id) { scrollToBottom(proxy) }
             // Streaming growth: compare the cheap count (not the whole string) and pin WITHOUT
             // animation — at flush cadence a hard bottom-pin reads as ticker tape, steadier than
@@ -365,23 +381,37 @@ public struct SZChatPanel: View {
                    onStopRun: onStopOneRun)
     }
 
+    /// The invitation. One conversation and one recipient, so it names no scope.
     private var emptyState: some View {
-        VStack(spacing: 6) {
+        placeholder {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .font(.system(size: 22))
                 .foregroundStyle(.tertiary)
-            Text(isDebug
-                 ? "Debug chat — message a plain provider-backed agent. Attach files to test attachments."
-                 : (node == nil
-                    ? "Message the Director Agent to plan or adjust the graph."
-                    : "Ask \(scopeName)'s Coding Agent to change this node."))
+            Text("What are we making?")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("Say it in plain words. Nodes get created, wired and coded for you.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// A project is opening, so its conversation isn't readable yet.
+    private var loadingState: some View {
+        placeholder {
+            ProgressView().controlSize(.small)
+            Text("Loading conversation")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 28)
-        .padding(.top, 48)
+    }
+
+    /// The frame both placeholders sit in: centred, never scrolling.
+    private func placeholder<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 6) { content() }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 28)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// One transcript row, packaged into value-only props for an `.equatable()` skip (the
@@ -623,7 +653,7 @@ public struct SZChatPanel: View {
     /// because a composer button cannot say which of several builds it means.
     private var activeStop: (action: () -> Void, help: String)? {
         if canStopTurn, streaming {
-            return ({ onCancelChatTurn(scope) }, "Stop this turn — the agent keeps its session; partial reply stays")
+            return ({ onCancelChatTurn(scope) }, "Stop this turn. The agent keeps its session; the partial reply stays")
         }
         return nil
     }
