@@ -28,6 +28,10 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
   prompt said until it is regenerated. Wiring an edge into a port the node already declares
   (`ui_connect`) needs none — its code already reads that port, and the incoming value simply replaces the
   unconnected default at runtime. Prefer driving an existing input over declaring a new one.
+- `ui_set_input_default { "node": "<id>", "port": "<name>", "value": <v> }` — the VALUE an unconnected
+  input holds. A knob turn, not a contract edit: no rebuild, and the live render changes at once. The
+  value is coerced to the port's type and clamped to its slider range, so the response's `value` is the
+  APPLIED one. Use it whenever the ask is only a value the node already exposes.
 - `ui_update_node { "node": "<id>", "title": "...", "sfSymbol": "...", "summary": "...", "prompt": "...",
   "permissions": ["camera"] }` — a node's identity and intent. It **cannot** change ports; use `ui_edit_ports`.
   Sending a new `prompt` to an implemented node marks it **needs rebuild** (the response echoes

@@ -34,6 +34,10 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
   prompt said until it is regenerated. Wiring an edge into a port the node already declares
   (`ui_connect`) needs none — its code already reads that port, and the incoming value simply replaces the
   unconnected default at runtime. Prefer driving an existing input over declaring a new one.
+- `ui_set_input_default { "node": "<id>", "port": "<name>", "value": <v> }` — the VALUE an unconnected
+  input holds. A knob turn, not a contract edit: no rebuild, and the live render changes at once. The
+  value is coerced to the port's type and clamped to its slider range, so the response's `value` is the
+  APPLIED one. Use it whenever the ask is only a value the node already exposes.
 - `ui_update_node { "node": "<id>", "title": "...", "sfSymbol": "...", "summary": "...", "prompt": "...",
   "permissions": ["camera"] }` — a node's identity and intent. It **cannot** change ports; use `ui_edit_ports`.
   Sending a new `prompt` to an implemented node marks it **needs rebuild** (the response echoes
@@ -124,6 +128,10 @@ Agent ships one only when the prompt asks. Never call for a card just to restyle
 mapping / corner-pin already exists as the built-in `corner-pin` library node (card included) — name it
 in the prompt so the Coding Agent reuses it instead of re-inventing it.
 
+
+When the ask is only a **value** a node already exposes as an input, set it with
+`ui_set_input_default` and brief NO rebuild — the picture changes at once and the node's code is
+already right. Reach for a rebuild only when the ask needs code the node does not have.
 
 When the graph's contracts + wiring express the user's intent, **stop** — say one short line about what you
 set up. The Coding Agents implement each node next; you do not write or compile any `Node.swift`.
