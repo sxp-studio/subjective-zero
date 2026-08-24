@@ -81,6 +81,23 @@ private extension Array where Element == String {
     #expect(reg.provider(id: "opencode")?.defaultModel == "")
 }
 
+@Test func claudePartialMessageEventsAreInert() {
+    // `--include-partial-messages` adds `stream_event` lines purely so the process keeps making
+    // noise while it thinks. They must not reach the transcript, and must not disturb the reply
+    // the aggregate `assistant` event carries.
+    let consumer = SZClaudeStreamConsumer()
+    let partials = [
+        #"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"par"}}}"#,
+        #"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hm"}}}"#,
+        #"{"type":"stream_event","event":{"type":"message_stop"}}"#,
+    ]
+    #expect(partials.flatMap { consumer.consume($0) }.isEmpty)
+
+    let aggregate = #"{"type":"assistant","message":{"content":[{"type":"text","text":"partial"}]}}"#
+    #expect(consumer.consume(aggregate).isEmpty)   // held as the reply candidate
+    #expect(consumer.finish() == [.reply("partial")])
+}
+
 @Test func claudeLaunchBuildsArgvAndMintsSession() async throws {
     let claude = SZClaudeProvider()
     let stub = StubRunner()
@@ -90,6 +107,9 @@ private extension Array where Element == String {
     #expect(call.launchPath == "/usr/bin/env")
     #expect(call.arguments.value(after: "--model") == "claude-opus-5")
     #expect(call.arguments.contains("--mcp-config"))
+    // The silence budget's working bound: without this the CLI is mute for the whole of a
+    // generation, and writing a large node reads as a wedge.
+    #expect(call.arguments.contains("--include-partial-messages"))
     #expect(call.arguments.joined().contains(#"["127.0.0.1","42100"]"#))
     // claude takes a host-minted UUID, echoed back as the session id.
     let sessionID = try #require(result.outcome.sessionID)

@@ -100,6 +100,11 @@ public struct SZClaudeProvider: SZProvider {
             "--allowedTools", Self.allowedTools(request.allowedMCPTools),
             "--permission-mode", "acceptEdits",
             "--output-format", "stream-json", "--verbose",
+            // Liveness for the silence budget: without partials the CLI emits nothing while an
+            // assistant message generates, and a node's source is generated as tool_use arguments —
+            // so a big node is one silent window long enough to look wedged. The aggregate
+            // `assistant`/`result` events still arrive; `stream_event` is ignored by the consumer.
+            "--include-partial-messages",
         ]
         if let resume = request.resumeSessionID {
             args += ["--resume", resume]   // continue the existing conversation (chat turn)
