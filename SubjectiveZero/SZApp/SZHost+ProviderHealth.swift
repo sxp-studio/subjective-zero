@@ -29,6 +29,9 @@ extension SZHost {
         }
         Task { @MainActor in
             await refreshProviderHealthOnce()
+            // Starters gate on provider health, so seed as soon as it is known: a launch pin names
+            // a profile that has to exist before any UI has opened.
+            seedRoutingStarterIfNeeded()
             autoPresentProviderSetupIfNeeded()
         }
     }

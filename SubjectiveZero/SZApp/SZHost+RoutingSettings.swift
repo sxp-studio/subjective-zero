@@ -260,16 +260,24 @@ extension SZHost {
         for starter in Self.routingStarters { seedRoutingStarter(starter) }
     }
 
+    /// Seed once, then keep the stored copy in step with the shipped one. A starter is read-only,
+    /// so nothing of the user's can be lost by refreshing it — and without the refresh a slot added
+    /// in a later version would never reach an install that seeded before it existed. Deleting a
+    /// starter still sticks: the seeded name is what remembers the deletion.
     private func seedRoutingStarter(_ starter: SZRoutingStarter) {
-        guard !routingSeededStarterNames.contains(starter.profile.name),
-              SZProviderRegistry.shared.provider(id: starter.requiresProvider) != nil,
+        guard SZProviderRegistry.shared.provider(id: starter.requiresProvider) != nil,
               routingProviderUsable(starter.requiresProvider) else { return }
-        routingSeededStarterNames.append(starter.profile.name)
-        if routingProfiles.contains(where: { $0.name == starter.profile.name }) {
-            persistAppState()
-        } else {
+        let seeded = routingSeededStarterNames.contains(starter.profile.name)
+        guard let index = routingProfiles.firstIndex(where: { $0.name == starter.profile.name }) else {
+            guard !seeded else { return }   // the user deleted it — leave it deleted
+            routingSeededStarterNames.append(starter.profile.name)
             upsertRoutingProfile(starter.profile)
+            return
         }
+        guard !seeded || routingProfiles[index] != starter.profile else { return }
+        if !seeded { routingSeededStarterNames.append(starter.profile.name) }
+        routingProfiles[index] = starter.profile
+        persistAppState()
     }
 
     /// Copy a profile's whole table under a fresh name; nil when the source vanished.
