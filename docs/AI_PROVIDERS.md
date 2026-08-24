@@ -108,9 +108,10 @@ Named **routing profiles** fill them: `(agent, slot) → envelope`
 (`{providerID, model?, reasoningEffort?, fastMode?}` — `SZRoutingProfile`, edited in the AI
 Settings sheet's Routing pane, [UI.md](UI.md)). Slots are the packs' own stable vocabulary,
 so a profile survives every node rename and rewire; the built-ins declare planner /
-assistant / sorter (director), builder-default / builder-light / builder-heavy / assistant /
-sorter (coding, with `grades` mapping the Director's light / standard / heavy task grades to
-the builder slots), and assistant (debug). The forward-looking selection lives in AI
+assistant / sorter (director), builder-default / builder-light / builder-heavy / editor /
+assistant / sorter (coding, with `grades` mapping the Director's light / standard / heavy task
+grades to the builder slots — `editor`, the lane a user's change request to a built node takes,
+is chosen by the graph rather than by a grade), and assistant (debug). The forward-looking selection lives in AI
 Settings, and the backward-looking truth is the
 **per-turn receipt** each finished reply carries in the transcript — the envelope the turn
 *actually* ran, with the routing rule that chose it (`via`). Semantics:

@@ -266,7 +266,8 @@ Graph panel.
   Codex Routing, both "(sxp.studio)"): locked rows, no edit or rename or delete — Duplicate
   births an editable copy. Below, one tinted card per agent, one row per declared slot with
   the pack author's caption (the built-ins: the Director's Plan/Chat/Sort, Coding's Build
-  rows the task grades pick among, Debug's Assistant). Switching governs NEW conversations
+  rows the task grades pick among plus Edit for a change asked of a built node, Debug's
+  Assistant). Switching governs NEW conversations
   only and is refused while a run is in flight. The
   unhealthy-provider **warning dot** lost its composer home: it lives on the sheet's surfaces (the
   provider card / sidebar badge) — runs and new chats on an unhealthy provider still refuse and

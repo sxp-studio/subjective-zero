@@ -13,6 +13,7 @@
           "builder-default": { "providerID": "claude", "model": "claude-sonnet-5" },
           "builder-light": { "providerID": "claude", "model": "claude-haiku-4-5" },
           "builder-heavy": { "providerID": "claude", "model": "claude-opus-5" },
+          "editor": { "providerID": "claude", "model": "claude-haiku-4-5" },
           "assistant": { "providerID": "claude", "model": "claude-sonnet-5" },
           "sorter": { "providerID": "claude", "model": "claude-haiku-4-5" }
         },
@@ -36,6 +37,7 @@
           "builder-default": { "providerID": "codex", "model": "gpt-5.6-terra" },
           "builder-light": { "providerID": "codex", "model": "gpt-5.6-luna" },
           "builder-heavy": { "providerID": "codex", "model": "gpt-5.6-sol" },
+          "editor": { "providerID": "codex", "model": "gpt-5.6-luna" },
           "assistant": { "providerID": "codex", "model": "gpt-5.6-terra" },
           "sorter": { "providerID": "codex", "model": "gpt-5.6-luna" }
         },

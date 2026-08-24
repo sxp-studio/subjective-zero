@@ -117,11 +117,13 @@ extension SZHost {
             flushTranscript(scope)
         }
 
-        // Catch-up recap for a session-less delivery — computed now, excluding this envelope's own
-        // bubble and every still-queued bubble behind it (they are NOT prior conversation).
+        // Recap exclusions: this envelope's own bubble and every still-queued bubble behind it
+        // are NOT prior conversation.
         var recapExclusions = Set(mailbox.pending(for: scope.key).compactMap(\.transcriptMessageID))
         for part in folded { if let own = part.transcriptMessageID { recapExclusions.insert(own) } }
-        let recap = existing == nil ? transcriptRecap(for: scope, excluding: recapExclusions) : nil
+        // Built only for a turn that does NOT resume: it starts on an empty conversation and needs
+        // the catch-up, even when the scope has a session that other lanes resume.
+        let recapForColdTurn = { [self] in transcriptRecap(for: scope, excluding: recapExclusions) }
 
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
         let workingDirectory = cacheDirectory.appending(path: "agent/\(scope.key)")
@@ -171,7 +173,12 @@ extension SZHost {
                 fastMode: effective.fastMode,
                 timeout: SZAgentTurnBudgets.codingTimeout,
                 inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
+            // A scope keeps ONE session, and every lane of the node shares it. A resume turn owns
+            // it; a spawn turn may only ESTABLISH it, never replace it — otherwise a side lane
+            // (an edit, routed to its own slot) would repin the scope to its model and drag the
+            // chat and reconcile lanes onto that model for good.
             let result = try await deliver(scope: scope, request: request, provider: turnProvider,
+                                           persistSession: order.session == .resume || existing == nil,
                                            existingAssistantID: assistantID, claim: claim,
                                            via: effective.via).result
             return (result, SZTurnGeneration(
@@ -212,7 +219,9 @@ extension SZHost {
                 scope: scope, message: expanded, existing: existing, providerID: providerID,
                 extras: extras) { order in
                     var prompt = order.brief
-                    if let recap { prompt = recap + "\n\n" + prompt }
+                    if order.session != .resume, let recap = recapForColdTurn() {
+                        prompt = recap + "\n\n" + prompt
+                    }
                     if !messageAttachments.isEmpty { prompt += Self.attachmentManifest(messageAttachments) }
                     return try await runDeliveredTurn(order, prompt: prompt)
                 }
