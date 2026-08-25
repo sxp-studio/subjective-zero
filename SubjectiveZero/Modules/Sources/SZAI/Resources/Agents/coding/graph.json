@@ -22,8 +22,8 @@
     { "id": "door", "title": "On message", "step": "door", "ask": "sorter" },
     { "id": "implement", "title": "Implement", "turn": { "brief": "node-compile", "slot": "builder-default" } },
     { "id": "continue", "title": "Continue", "turn": { "brief": "node-reconcile", "session": "resume", "slot": "builder-default" } },
-    { "id": "edit", "title": "Edit the node", "turn": { "brief": "edit", "slot": "editor" } },
-    { "id": "chat", "title": "Chat turn", "turn": { "brief": "node-chat", "slot": "assistant" } },
+    { "id": "edit", "title": "Edit the node", "turn": { "brief": "edit", "slot": "editor", "context": "conversation" } },
+    { "id": "chat", "title": "Chat turn", "turn": { "brief": "node-chat", "slot": "assistant", "context": "conversation" } },
     { "id": "chat-resumed", "title": "Resumed chat", "turn": { "brief": "node-chat-resumed", "session": "resume", "slot": "assistant" } }
   ],
   "edges": [

@@ -4,9 +4,10 @@
 import Foundation
 import SZCore
 
-/// One full agent turn as the engine orders it: the brief is ALREADY RENDERED — the host
-/// transports it to a provider session and reports process truth back. Content routing
-/// never rides a turn; that is what steps are for.
+/// One full agent turn as the engine orders it: the brief is ALREADY COMPOSED (rendered,
+/// with the conversation above it when the node declares `context`) — the host transports
+/// it to a provider session and reports process truth back. Content routing never rides a
+/// turn; that is what steps are for.
 public struct SZTurnOrder: Sendable {
     public var agent: String
     public var brief: String
@@ -125,9 +126,11 @@ public protocol SZTraversalServing: AnyObject, Sendable {
     /// The delivery's facts, rebuilt fresh from the live world at every read — the engine
     /// pins one per node visit (a step and its asks see one snapshot).
     func facts() -> SZFacts
-    /// Render a turn or ask brief (a template stem) against the current world. The bytes
-    /// returned are the prompt the turn sends.
+    /// Render a turn or ask brief (a template stem) against the current world.
     func render(template: String) throws -> String
+    /// The scope's prior conversation, formatted for a cold turn; nil = nothing to catch up
+    /// on. Read fresh like `render`. Only a turn declaring `context: conversation` receives it.
+    func conversation() -> String?
     /// Run one full agent turn (session, tools, streaming — all host business).
     func runTurn(_ order: SZTurnOrder) async -> SZTurnReport
     /// Deliver one dispatch set and WAIT for it: send `orders` to the seat, report the

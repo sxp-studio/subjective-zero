@@ -165,10 +165,17 @@ public struct SZGraphEngine {
                     conclusion = .defect(node: id, detail: detail)
                     continue
                 }
+                // The ONE place a prompt is composed: a spawned turn whose node declares
+                // `context: conversation` reads the conversation above its brief. A resumed session
+                // already holds it, and an ask never gets it (asks render, they don't compose).
+                var prompt = rendered
+                if turn.context == .conversation, turn.session == .spawn, let prior = host.conversation() {
+                    prompt = prior + "\n\n" + prompt
+                }
                 let choice = router.resolve(SZModelCall(
                     class: .turn, agent: agent, slot: turn.slot))
                 let report = await host.runTurn(SZTurnOrder(
-                    agent: agent, brief: rendered, session: turn.session,
+                    agent: agent, brief: prompt, session: turn.session,
                     tools: turn.tools, choice: choice))
                 if Task.isCancelled {
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done))

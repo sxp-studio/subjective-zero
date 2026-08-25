@@ -49,6 +49,37 @@ struct SZAgentGraphTests {
         #expect(turn.session == .spawn)
     }
 
+    @Test func aTurnDeclaresItsStartingContext() throws {
+        let json = #"{"nodes": [{"id": "a", "turn": {"brief": "b", "context": "conversation"}}, {"id": "c", "turn": {"brief": "d"}}]}"#
+        let graph = try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
+        guard case .turn(let declared) = graph.nodes[0].form,
+              case .turn(let omitted) = graph.nodes[1].form else {
+            Issue.record("expected turn nodes")
+            return
+        }
+        #expect(declared.context == .conversation)
+        #expect(omitted.context == .none)
+        let data = try JSONEncoder().encode(graph)
+        #expect(try JSONDecoder().decode(SZAgentGraph.self, from: data) == graph)
+    }
+
+    @Test func anUnknownContextIsUnrepresentable() {
+        let json = #"{"nodes": [{"id": "a", "turn": {"brief": "b", "context": "everything"}}]}"#
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(SZAgentGraph.self, from: Data(json.utf8))
+        }
+    }
+
+    @Test func contextOnAResumedTurnIsADefect() {
+        // A resumed session already holds its conversation; the declaration could never apply.
+        var graph = makeGraph()
+        graph.nodes[1] = .init(id: "plan", form: .turn(.init(brief: "decompose", session: .resume,
+                                                              context: .conversation)))
+        #expect(graph.defects() == [.contextOnResume(node: "plan")])
+        graph.nodes[1] = .init(id: "plan", form: .turn(.init(brief: "decompose", context: .conversation)))
+        #expect(graph.defects().isEmpty)
+    }
+
     @Test func aGraphDeclaresSlotsAndReferencesResolveAgainstThem() throws {
         let json = #"""
         {"slots": [{"id": "planner", "label": "Planner", "description": "Plans the work"},

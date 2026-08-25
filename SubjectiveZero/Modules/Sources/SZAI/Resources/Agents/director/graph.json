@@ -13,12 +13,12 @@
   "asks": "sorter",
   "nodes": [
     { "id": "door", "title": "On message", "step": "door", "ask": "sorter" },
-    { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose", "slot": "planner" } },
+    { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose", "slot": "planner", "context": "conversation" } },
     { "id": "implement", "title": "Implement", "dispatch": { "to": "coding" } },
     { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
     { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume", "slot": "planner" } },
-    { "id": "amend", "title": "Amend scheduled work", "turn": { "brief": "amend", "slot": "planner" } },
-    { "id": "chat", "title": "Cold turn", "turn": { "brief": "chat", "slot": "assistant" } },
+    { "id": "amend", "title": "Amend scheduled work", "turn": { "brief": "amend", "slot": "planner", "context": "conversation" } },
+    { "id": "chat", "title": "Cold turn", "turn": { "brief": "chat", "slot": "assistant", "context": "conversation" } },
     { "id": "chat-resumed", "title": "Resumed turn", "turn": { "brief": "chat-resumed", "session": "resume", "slot": "assistant" } }
   ],
   "edges": [

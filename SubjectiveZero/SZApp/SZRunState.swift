@@ -22,6 +22,8 @@ import SZCore
     let thread = UUID()
     /// The standing instruction every brief carries ("" = none given).
     let instruction: String
+    /// The transcript bubbles that scheduled this run — not prior conversation to it.
+    let origin: Set<UUID>
     /// Does this run own the staged split/merge? Then it narrates at commit, owns the
     /// hidden-piece UX, and is the ONLY run whose ending may settle it. Set at admission when the
     /// run was started FOR an op, and by `startOrJoinRun` when a run's own turn stages one —
@@ -47,11 +49,12 @@ import SZCore
     /// would resume whatever the other run last said.
     var directorSession: SZAgentSession?
 
-    init(taskID: UUID, claim: SZClaimToken, instruction: String,
+    init(taskID: UUID, claim: SZClaimToken, instruction: String, origin: Set<UUID> = [],
          ownsGraphOp: Bool, workSet: Set<SZNodeID>) {
         self.taskID = taskID
         self.claim = claim
         self.instruction = instruction
+        self.origin = origin
         self.ownsGraphOp = ownsGraphOp
         self.workSet = workSet
     }

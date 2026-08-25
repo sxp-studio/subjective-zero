@@ -24,11 +24,15 @@ public struct SZWorld: Sendable {
     /// Graph edits since this scope's previous turn, with their actors — the reconcile brief's
     /// `{{mutations}}`. Host-side like the graph; never crosses the step ABI.
     public var mutations: [SZGraphMutation]
+    /// The scope's prior conversation, oldest first, strictly before the message being served
+    /// (not the delivered bubble, not bubbles queued behind it, not the ones that scheduled a
+    /// run). Read by a turn declaring `context: conversation`. Host-side like the graph.
+    public var conversation: [SZChatMessage]
 
     public init(graph: SZGraph? = nil, statuses: [SZNodeID: String] = [:],
                 node: SZNodeID? = nil, resuming: Bool = false, run: SZRun? = nil,
                 assignment: SZAssignment? = nil, pendingTasks: [SZTask] = [],
-                mutations: [SZGraphMutation] = []) {
+                mutations: [SZGraphMutation] = [], conversation: [SZChatMessage] = []) {
         self.graph = graph
         self.statuses = statuses
         self.node = node
@@ -37,6 +41,7 @@ public struct SZWorld: Sendable {
         self.assignment = assignment
         self.pendingTasks = pendingTasks
         self.mutations = mutations
+        self.conversation = conversation
     }
 
     /// The step-visible slice: the wire document an evaluation (and its asks) is pinned to.

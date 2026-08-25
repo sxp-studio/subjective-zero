@@ -29,8 +29,12 @@ private final class StubHost: SZTraversalServing {
     /// edge-routing (a perform must land before the next node's turn).
     var events: [String] = []
 
+    /// The scope's conversation as the delivery projects it; nil = nothing to catch up on.
+    var conversationValue: String?
+
     func facts() -> SZFacts { factsValue }
     func render(template: String) throws -> String { "rendered:" + template }
+    func conversation() -> String? { conversationValue }
     func runTurn(_ order: SZTurnOrder) async -> SZTurnReport {
         turnsSeen.append(order)
         events.append("turn:\(order.brief)")
@@ -377,12 +381,43 @@ struct SZGraphEngineTests {
         #expect(result.conclusion == .declined(node: "gate", reason: nil))
     }
 
+    @Test func aTurnDeclaringContextReadsTheConversationAboveItsBriefOnlyWhenSpawned() async throws {
+        // door → cold(conversation, spawn) → warm(conversation, resume) → bare(none, spawn). The conversation
+        // rides above exactly the spawned turn that declares it; a resumed session already
+        // holds it, and an undeclared turn never sees it.
+        let graph = SZAgentGraph(
+            nodes: [
+                .init(id: SZAgentGraph.doorID, form: .step(name: "door")),
+                .init(id: "cold", form: .turn(.init(brief: "a", context: .conversation))),
+                .init(id: "warm", form: .turn(.init(brief: "b", session: .resume, context: .conversation))),
+                .init(id: "bare", form: .turn(.init(brief: "c"))),
+            ],
+            edges: [
+                .init(from: SZAgentGraph.doorID, outcome: "build", to: "cold"),
+                .init(from: "cold", outcome: "ok", to: "warm"),
+                .init(from: "warm", outcome: "ok", to: "bare"),
+            ])
+        let host = StubHost()
+        host.conversationValue = "PRIOR"
+        let engine = makeEngine(graph: graph, host: host,
+                                steps: StubSteps(scripts: buildScripts()))
+        _ = await engine.run()
+        #expect(host.turnsSeen.map(\.brief) == ["PRIOR\n\nrendered:a", "rendered:b", "rendered:c"])
+
+        // Nothing to catch up on: the brief alone, no separator.
+        let quiet = StubHost()
+        _ = await makeEngine(graph: graph, host: quiet,
+                             steps: StubSteps(scripts: buildScripts())).run()
+        #expect(quiet.turnsSeen.map(\.brief) == ["rendered:a", "rendered:b", "rendered:c"])
+    }
+
     @Test func anUnrenderableBriefIsADefectNamingTheTemplate() async throws {
         @MainActor
         final class ThrowingHost: SZTraversalServing {
             struct Broken: Error {}
             func facts() -> SZFacts { SZFacts(message: "") }
             func render(template: String) throws -> String { throw Broken() }
+            func conversation() -> String? { nil }
             func runTurn(_ order: SZTurnOrder) async -> SZTurnReport { SZTurnReport(failed: false) }
             func serveAsk(step: String, slot: String?, requestJSON: String) async throws -> String {
                 throw CancellationError()

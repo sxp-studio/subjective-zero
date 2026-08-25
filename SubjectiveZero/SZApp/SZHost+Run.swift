@@ -371,8 +371,11 @@ extension SZHost {
     /// caller that minted it can withdraw it again (a stopped Director turn discards its own).
     @discardableResult
     func mintRun(instruction: String, title: String? = nil, nodes: Set<SZNodeID> = []) -> UUID {
+        // Scheduled from inside a Director turn (the door's ruling, or the agent's own ui_run):
+        // that delivery's bubbles are the ask, not conversation prior to it.
         let task = SZTask(title: title ?? SZTask.title(fromInstruction: instruction, nodeCount: 0),
-                          instruction: instruction, workSet: nodes)
+                          instruction: instruction, workSet: nodes,
+                          origin: deliveringBubbles[SZChatScope.director.key] ?? [])
         pendingTasks.append(task)
         admissionSuspended = false   // a new ask is the user acting again
         flushTaskQueue()
@@ -408,6 +411,7 @@ extension SZHost {
         } else {
             pendingTasks[index].instruction += "\n\n" + trimmed
         }
+        pendingTasks[index].origin.formUnion(deliveringBubbles[SZChatScope.director.key] ?? [])
         flushTaskQueue()
         return true
     }
@@ -592,7 +596,7 @@ extension SZHost {
         // traversal's own record id (its children share it), minted here so the run's closing
         // RECEIPT can carry it — that stamp is the transcript's durable way back once it scrolls away.
         let run = SZRunState(taskID: taskID, claim: claim, instruction: instruction,
-                             ownsGraphOp: startedForGraphOp, workSet: workSet)
+                             origin: task.origin, ownsGraphOp: startedForGraphOp, workSet: workSet)
         activeRuns[taskID] = run
         let thread = run.thread
         // A grade is one briefing's read: this run's nodes start ungraded (its own Director
@@ -759,12 +763,19 @@ extension SZHost {
                 // not ours to dispatch to, and delivering to one would present a claim we do not
                 // hold (deliver's holder guard would trip).
                 let scoped = candidates.filter(run.workSet.contains)
+                // The chat that led here, minus the delivery that scheduled this run (its words
+                // are the instruction), one mid-delivery now, and whatever is queued behind it.
+                let director = SZChatScope.director.key
+                let notPrior = run.origin
+                    .union(self.deliveringBubbles[director] ?? [])
+                    .union(self.mailbox.pending(for: director).compactMap(\.transcriptMessageID))
                 return SZWorld(
                     graph: graph, statuses: self.nodeStatusLines, node: nil,
                     resuming: self.agentSessions[SZChatScope.director.key] != nil,
                     run: SZRun(workSet: scoped, round: state.round, roundCap: roundCap,
                                steers: state.steers, instruction: instruction),
-                    mutations: self.mutationJournal.entries(since: state.mutationCursor))
+                    mutations: self.mutationJournal.entries(since: state.mutationCursor),
+                    conversation: self.conversation(for: .director, excluding: notPrior))
             },
             turn: { [weak self] order in
                 guard let self else { return SZTurnReport(failed: true, detail: "the host is gone") }
@@ -916,7 +927,8 @@ extension SZHost {
                     return SZWorld(
                         graph: self.store.project?.graph, statuses: self.nodeStatusLines,
                         node: nodeID, resuming: self.agentSessions[scopeKey] != nil,
-                        assignment: SZAssignment(attempt: order.attempt, note: order.senderNote))
+                        assignment: SZAssignment(attempt: order.attempt, note: order.senderNote),
+                        conversation: self.conversation(for: .node(nodeID)))
                 },
                 turn: { [weak self] turnOrder in
                     guard let self else { return SZTurnReport(failed: true, detail: "the host is gone") }

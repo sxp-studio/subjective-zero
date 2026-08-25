@@ -60,7 +60,7 @@ And here is the shipped director's build lane — the heart of `director/graph.j
 {
   "nodes": [
     { "id": "door", "title": "On message", "step": "door" },
-    { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose" } },
+    { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose", "context": "conversation" } },
     { "id": "implement", "title": "Implement", "dispatch": { "to": "coding" } },
     { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
     { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume" } }

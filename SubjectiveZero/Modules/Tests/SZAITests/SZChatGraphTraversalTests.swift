@@ -113,6 +113,7 @@ private final class DirectorDelivery: SZTraversalServing {
         try renderer.render(agent: "director", template: template,
                             message: message, world: world)
     }
+    func conversation() -> String? { SZConversationRecap.render(world.conversation, nodes: []) }
     func runTurn(_ order: SZTurnOrder) async -> SZTurnReport {
         turns.append((order.brief, order.session))
         return SZTurnReport(failed: false)
@@ -152,10 +153,14 @@ private func makeEngine(_ delivery: DirectorDelivery) throws -> SZGraphEngine {
 @MainActor
 struct SZDirectorGraphTraversalTests {
 
+    /// Every world carries one prior exchange, so each test can say whether its turn saw it.
+    private let prior = [SZChatMessage(role: .user, text: "what effects could we add?"),
+                         SZChatMessage(role: .assistant, text: "1. Bloom 2. Ripple 3. Vignette")]
+
     private func world(resuming: Bool = false, run: SZRun? = nil) -> SZWorld {
         SZWorld(graph: SZGraph(nodes: [fixtureNode("Camera", kind: .generated),
                                        fixtureNode("Glow", kind: .prompt)]),
-                resuming: resuming, run: run)
+                resuming: resuming, run: run, conversation: prior)
     }
 
     @Test func anAnswerRulingRunsTheColdTurn() async throws {
@@ -169,12 +174,17 @@ struct SZDirectorGraphTraversalTests {
         #expect(turns.count == 1)
         #expect(turns.first?.session == .spawn)
         #expect(turns.first?.brief.contains("make it warmer") == true)
+        // The shipped cold turn declares `context: conversation`: it starts on the conversation.
+        #expect(turns.first?.brief.hasPrefix("Prior conversation") == true)
+        #expect(turns.first?.brief.contains("assistant: 1. Bloom 2. Ripple 3. Vignette") == true)
         #expect(delivery.effects.values.isEmpty)
-        // The triage completion carried the user's prose into the pack's own template.
+        // The triage completion carried the user's prose into the pack's own template — and
+        // never the conversation: an ask renders, it does not compose.
         let prompts = delivery.queryPrompts.values
         #expect(prompts.count == 1)
         #expect(prompts.first?.contains("make it warmer") == true)
         #expect(prompts.first?.contains(#"{"outcome": "answer"}"#) == true)
+        #expect(prompts.first?.contains("Prior conversation") == false)
     }
 
     @Test func anAnswerRulingResumesTheSessionWhenTheScopeKnowsUs() async throws {
@@ -184,6 +194,8 @@ struct SZDirectorGraphTraversalTests {
         let result = try await makeEngine(delivery).run()
         #expect(result.conclusion == .ended(node: "chat-resumed", outcome: "ok"))
         #expect(delivery.turns.values.first?.session == .resume)
+        // A resumed session already holds the conversation; nothing rides above the brief.
+        #expect(delivery.turns.values.first?.brief.contains("Prior conversation") == false)
     }
 
     @Test func anImplementRulingFiresTheBuildAndRunsNoTurn() async throws {
@@ -216,6 +228,10 @@ struct SZDirectorGraphTraversalTests {
         // Decompose ran as the lane's one turn; NOTHING asked a model.
         #expect(delivery.turns.values.count == 1)
         #expect(delivery.turns.values.first?.session == .spawn)
+        // The run's Director starts a session of its own: the chat that led here rides above
+        // its brief ("add one for each of these" needs the list it points at).
+        #expect(delivery.turns.values.first?.brief.hasPrefix("Prior conversation") == true)
+        #expect(delivery.turns.values.first?.brief.contains("make it gray") == true)
         #expect(delivery.queryPrompts.values.isEmpty)
         #expect(delivery.effects.values.isEmpty)
     }

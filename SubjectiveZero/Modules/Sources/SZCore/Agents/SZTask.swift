@@ -25,10 +25,13 @@ public struct SZTask: Identifiable, Sendable, Equatable, Codable {
     /// The agent-graph thread this task became, once admitted — what a strip row links to.
     public var thread: UUID?
     public var createdAt: Date
+    /// The transcript bubbles that scheduled it (the words and their ack). They are not prior
+    /// conversation to the run they became: `instruction` already carries the words.
+    public var origin: Set<UUID>
 
     public init(id: UUID = UUID(), title: String, instruction: String,
                 state: State = .pending, workSet: Set<SZNodeID> = [],
-                thread: UUID? = nil, createdAt: Date = Date()) {
+                thread: UUID? = nil, createdAt: Date = Date(), origin: Set<UUID> = []) {
         self.id = id
         self.title = title
         self.instruction = instruction
@@ -36,6 +39,20 @@ public struct SZTask: Identifiable, Sendable, Equatable, Codable {
         self.workSet = workSet
         self.thread = thread
         self.createdAt = createdAt
+        self.origin = origin
+    }
+
+    /// Tolerant of task files written before `origin` existed.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        instruction = try c.decode(String.self, forKey: .instruction)
+        state = try c.decode(State.self, forKey: .state)
+        workSet = try c.decode(Set<SZNodeID>.self, forKey: .workSet)
+        thread = try c.decodeIfPresent(UUID.self, forKey: .thread)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        origin = try c.decodeIfPresent(Set<UUID>.self, forKey: .origin) ?? []
     }
 }
 

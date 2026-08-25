@@ -79,12 +79,15 @@ public struct SZAgentGraph: Sendable, Equatable {
         public var tools: [String]?
         /// The declared slot this turn's model comes from. nil = the app default.
         public var slot: String?
+        /// What conversation a spawned turn starts with. Default none.
+        public var context: Context
         public init(brief: String, session: Session = .spawn, tools: [String]? = nil,
-                    slot: String? = nil) {
+                    slot: String? = nil, context: Context = .none) {
             self.brief = brief
             self.session = session
             self.tools = tools
             self.slot = slot
+            self.context = context
         }
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -93,12 +96,22 @@ public struct SZAgentGraph: Sendable, Equatable {
             session = try container.decodeIfPresent(Session.self, forKey: .session) ?? .spawn
             tools = try container.decodeIfPresent([String].self, forKey: .tools)
             slot = try container.decodeIfPresent(String.self, forKey: .slot)
+            context = try container.decodeIfPresent(Context.self, forKey: .context) ?? .none
         }
         public enum Session: String, Codable, Sendable {
             /// Fresh conversation — the brief re-renders the world every time.
             case spawn
             /// Continue the scope's existing session (spawning when none exists).
             case resume
+        }
+        /// The starting context of a spawned turn — what the engine puts ABOVE the brief.
+        /// A resumed session already holds its conversation, so `context` is a spawn-only
+        /// declaration (shape-gated). Open for later values (an origin scope, a limit).
+        public enum Context: String, Codable, Sendable {
+            /// The brief alone.
+            case none
+            /// The scope's prior conversation, as the host projects it (`SZWorld.conversation`).
+            case conversation
         }
         /// A turn reports process truth and nothing else; content routing belongs to steps.
         public static let outcomes: Set<String> = ["ok", "error"]
@@ -284,6 +297,9 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
     case duplicateSlot(id: String)
     /// A grades key outside light/standard/heavy — the Director can only say those three.
     case unknownGrade(String)
+    /// `context` declared on a `session: resume` turn — a resumed session already holds its
+    /// conversation; the declaration would never apply.
+    case contextOnResume(node: String)
 
     public var description: String {
         switch self {
@@ -318,6 +334,8 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
             "two slots share the id '\(id)'"
         case .unknownGrade(let grade):
             "grades key \"\(grade)\": the Director's grades are light, standard, heavy"
+        case .contextOnResume(let node):
+            "turn '\(node)' declares context on a resumed session — a resume already has it"
         }
     }
 }
@@ -363,6 +381,9 @@ extension SZAgentGraph {
             requireDeclared(node.ask, at: "node '\(node.id)' ask")
             if case .turn(let turn) = node.form {
                 requireDeclared(turn.slot, at: "turn '\(node.id)'")
+                if turn.context != .none, turn.session == .resume {
+                    defects.append(.contextOnResume(node: node.id))
+                }
             }
         }
         let ids = Set(nodes.map(\.id))

@@ -117,13 +117,10 @@ extension SZHost {
             flushTranscript(scope)
         }
 
-        // Recap exclusions: this envelope's own bubble and every still-queued bubble behind it
-        // are NOT prior conversation.
-        var recapExclusions = Set(mailbox.pending(for: scope.key).compactMap(\.transcriptMessageID))
-        for part in folded { if let own = part.transcriptMessageID { recapExclusions.insert(own) } }
-        // Built only for a turn that does NOT resume: it starts on an empty conversation and needs
-        // the catch-up, even when the scope has a session that other lanes resume.
-        let recapForColdTurn = { [self] in transcriptRecap(for: scope, excluding: recapExclusions) }
+        // This envelope's own bubbles and every still-queued bubble behind it are NOT prior
+        // conversation; they are what is being delivered (or is still to be).
+        var ownBubbles = Set(folded.compactMap(\.transcriptMessageID))
+        let queuedBubbles = Set(mailbox.pending(for: scope.key).compactMap(\.transcriptMessageID))
 
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
         let workingDirectory = cacheDirectory.appending(path: "agent/\(scope.key)")
@@ -135,6 +132,9 @@ extension SZHost {
         defer { if let workingNodeID { setNodeChatting(workingNodeID, false) } }
 
         let assistantID = store.appendChatMessage(SZChatMessage(role: .assistant, text: ""), to: scope)
+        ownBubbles.insert(assistantID)
+        deliveringBubbles[scope.key] = ownBubbles
+        defer { deliveringBubbles[scope.key] = nil }
         @discardableResult
         func reply(_ note: String) -> Void {
             store.appendChatText(note, to: assistantID, in: scope)
@@ -187,9 +187,9 @@ extension SZHost {
         }
         do {
             // EVERY delivery flows through its agent's graph: the door decides what the
-            // message is, the pack decides which brief a turn gets, and the turn streams
-            // through `runDeliveredTurn` unchanged (recap + attachments wrap the brief
-            // HERE — delivery context that never enters the pack render).
+            // message is, the pack decides which brief a turn gets (and whether the
+            // conversation rides above it), and the turn streams through `runDeliveredTurn`
+            // unchanged. Only THIS message's attachments are appended here.
             let expanded = SZMentionExpansion.agentText(
                 text, nodes: (store.project?.graph.nodes ?? []).map { (id: $0.id, title: $0.title) })
             // Every folded part's attachments ride along — one turn sees all of them.
@@ -217,11 +217,8 @@ extension SZHost {
             }
             let (result, ack, mintedTaskIDs) = try await runProseDelivery(
                 scope: scope, message: expanded, existing: existing, providerID: providerID,
-                extras: extras) { order in
+                extras: extras, priorConversationExcluding: ownBubbles.union(queuedBubbles)) { order in
                     var prompt = order.brief
-                    if order.session != .resume, let recap = recapForColdTurn() {
-                        prompt = recap + "\n\n" + prompt
-                    }
                     if !messageAttachments.isEmpty { prompt += Self.attachmentManifest(messageAttachments) }
                     return try await runDeliveredTurn(order, prompt: prompt)
                 }
@@ -311,12 +308,14 @@ extension SZHost {
     /// (all delivery machinery rides inside that closure), and a `requestBuild` effect
     /// mints the run with the user's words as its instruction.
     ///
+    /// `priorConversationExcluding` keeps the projected conversation strictly prior: this
+    /// delivery's own bubbles and the ones still queued behind it are not history.
     /// Returns the turn's own run result so `performChatTurn`'s post-processing stays as
     /// it was. A traversal that never reached its turn throws instead — except the honest
     /// turn-less ending after `requestBuild` fired, which returns the ack line.
     func runProseDelivery(
         scope: SZChatScope, message: String, existing: SZAgentSession?, providerID: String,
-        extras: SZBriefExtras,
+        extras: SZBriefExtras, priorConversationExcluding: Set<UUID> = [],
         turn: @escaping @MainActor (SZTurnOrder) async throws
             -> (result: SZAgentRunResult, generation: String)
     ) async throws -> (result: SZAgentRunResult, ack: String?, scheduled: [UUID]) {
@@ -390,7 +389,9 @@ extension SZHost {
                                statuses: self.nodeStatusLines,
                                node: scope.nodeID,
                                resuming: existing != nil,
-                               pendingTasks: self.pendingTasks)
+                               pendingTasks: self.pendingTasks,
+                               conversation: self.conversation(for: scope,
+                                                               excluding: priorConversationExcluding))
             },
             turn: { order in
                 do {
@@ -409,8 +410,8 @@ extension SZHost {
                 switch effect {
                 case .requestBuild:
                     // The door ruled the prose a build: mint the run with the user's words
-                    // as its standing instruction. The pump admits it the moment this
-                    // delivery's claim frees.
+                    // as its standing instruction (and this delivery's bubbles as its origin).
+                    // The pump admits it the moment this delivery's claim frees.
                     capture.mintedTasks.append(self.mintRun(instruction: message))
                 }
             },

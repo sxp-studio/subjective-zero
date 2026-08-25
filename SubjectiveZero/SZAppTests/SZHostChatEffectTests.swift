@@ -31,6 +31,38 @@ struct SZHostChatEffectTests {
         #expect(host.pendingTasks.map(\.instruction) == ["make it warmer", "something else"])
     }
 
+    @Test func aTaskMintedOrAmendedMidTurnTakesThatDeliverysBubblesAsOrigin() {
+        let host = SZHost()
+        let ask: Set<UUID> = [UUID(), UUID()]
+        host.deliveringBubbles[SZChatScope.director.key] = ask
+        let id = host.mintRun(instruction: "make it warmer")
+        #expect(host.pendingTasks.first?.origin == ask)
+        // A later amend, delivered in its own turn, joins its bubbles to the same task.
+        let amend: Set<UUID> = [UUID()]
+        host.deliveringBubbles[SZChatScope.director.key] = amend
+        #expect(host.amendTask(id, with: "blue, not red"))
+        #expect(host.pendingTasks.first?.origin == ask.union(amend))
+        // Outside any turn (the Build button), nothing scheduled it.
+        host.deliveringBubbles = [:]
+        host.mintRun(instruction: "")
+        #expect(host.pendingTasks.last?.origin.isEmpty == true)
+    }
+
+    @Test func theProjectedConversationIsCompletedMessagesMinusTheExcluded() {
+        let host = SZHost()
+        let first = host.store.appendChatMessage(SZChatMessage(role: .user, text: "A"), to: .director)
+        host.store.appendChatMessage(SZChatMessage(role: .assistant, text: "reply"), to: .director)
+        let own = host.store.appendChatMessage(SZChatMessage(role: .user, text: "B"), to: .director)
+        host.store.appendChatMessage(SZChatMessage(role: .assistant, text: "(busy)", transient: true),
+                                     to: .director)
+        let placeholder = host.store.appendChatMessage(SZChatMessage(role: .assistant, text: ""),
+                                                       to: .director)
+        #expect(host.conversation(for: .director, excluding: [own, placeholder]).map(\.text)
+                == ["A", "reply"])
+        #expect(host.conversation(for: .director).map(\.id).contains(first))
+        #expect(host.conversation(for: .debug).isEmpty)
+    }
+
     @Test func aScheduledTaskCanBeWithdrawnUntilItStarts() {
         let host = SZHost()
         let id = host.mintRun(instruction: "never mind")

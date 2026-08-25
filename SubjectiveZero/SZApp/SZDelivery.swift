@@ -56,6 +56,13 @@ final class SZDelivery: SZTraversalServing {
                             world: world(), extras: extras)
     }
 
+    func conversation() -> String? {
+        let snapshot = world()
+        return SZConversationRecap.render(
+            snapshot.conversation,
+            nodes: (snapshot.graph?.nodes ?? []).map { (id: $0.id, title: $0.title) })
+    }
+
     func runTurn(_ order: SZTurnOrder) async -> SZTurnReport {
         await turn(order)
     }

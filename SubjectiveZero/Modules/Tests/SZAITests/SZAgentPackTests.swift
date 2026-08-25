@@ -258,6 +258,36 @@ private func cleanup(_ root: URL) {
                                           defect: .unreachable(nodes: ["island"]))))
 }
 
+@Test func aTurnContextOffTheGrammarMakesTheGraphUnreadable() async throws {
+    let graph = """
+    {"nodes": [{"id": "door", "step": "door"},
+               {"id": "plan", "turn": {"brief": "plan", "context": "everything"}}],
+     "edges": [{"from": "door", "outcome": "go", "to": "plan"}]}
+    """
+    let root = try makeRoot([directorPack(graph: graph), codingPack()])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    guard case .unreadable(let file, _) = try #require(loaded.defects.first) else {
+        Issue.record("expected .unreadable, got \(loaded.defects)")
+        return
+    }
+    #expect(file == "director-a/graph.json")
+}
+
+@Test func contextOnAResumedTurnIsAShapeDefect() async throws {
+    let graph = """
+    {"nodes": [{"id": "door", "step": "door"},
+               {"id": "plan", "turn": {"brief": "plan", "session": "resume", "context": "conversation"}}],
+     "edges": [{"from": "door", "outcome": "go", "to": "plan"}]}
+    """
+    let root = try makeRoot([directorPack(graph: graph), codingPack()])
+    defer { cleanup(root) }
+    let loaded = SZAgentPackLoader.load(root: root)
+    let defects = await SZAgentPackLoader.validate(packs: loaded.packs, steps: healthySteps)
+    #expect(defects.contains(.graphShape(agent: "director-a",
+                                         defect: .contextOnResume(node: "plan"))))
+}
+
 @Test func turnBriefMustBeAmongThePackPrompts() async throws {
     let root = try makeRoot([directorPack(graph: runGraph(brief: "missing")), codingPack()])
     defer { cleanup(root) }

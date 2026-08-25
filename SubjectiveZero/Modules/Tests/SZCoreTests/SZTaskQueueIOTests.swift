@@ -82,3 +82,20 @@ import Testing
     try SZTaskQueueIO.save([task], suspended: false, projectURL: dir)
     #expect(!SZTaskQueueIO.load(projectURL: dir).suspended)
 }
+
+@Test func aTaskRemembersTheBubblesThatScheduledIt() throws {
+    let dir = FileManager.default.temporaryDirectory.appending(path: "sz-tasks-\(UUID()).subz")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let origin: Set<UUID> = [UUID(), UUID()]
+    try SZTaskQueueIO.save([SZTask(title: "t", instruction: "t", origin: origin)], projectURL: dir)
+    #expect(SZTaskQueueIO.load(projectURL: dir).tasks.first?.origin == origin)
+}
+
+@Test func aTaskFileWrittenBeforeOriginStillDecodes() throws {
+    let json = """
+    {"id": "\(UUID().uuidString)", "title": "t", "instruction": "t", "state": "pending",
+     "workSet": [], "createdAt": 0}
+    """
+    let task = try JSONDecoder().decode(SZTask.self, from: Data(json.utf8))
+    #expect(task.origin.isEmpty)
+}

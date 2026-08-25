@@ -247,61 +247,13 @@ extension SZHost {
         persistAgentSessions()
     }
 
-    /// A bounded, labeled replay of a scope's completed history — the portable catch-up for a chat
-    /// turn that cold-starts against an existing transcript (another machine, an expired session,
-    /// post-crash). nil when there's nothing to catch up on. Tail-bounded (last 20 messages / ~8 KB):
-    /// enough to hit the ground running without ballooning the prompt. Data only — the transcript IS
-    /// the context, no framing prose beyond the one-line header.
-    /// NOTE: this is the exact seam a future memory system replaces (TODO: distilled project/node
-    /// memory files instead of transcript replay).
-    /// `excluding` keeps the recap "strictly prior conversation" for a QUEUED delivery: the message
-    /// being delivered (and every still-queued bubble behind it) already sits in the store, and a
-    /// cold-start recap that replayed it would send the same words twice in one prompt.
-    func transcriptRecap(for scope: SZChatScope, excluding: Set<UUID> = []) -> String? {
-        guard scope != .debug else { return nil }
-        let messages = persistableMessages(for: scope).filter { !excluding.contains($0.id) }
-        guard !messages.isEmpty else { return nil }
-
-        let tail = messages.suffix(20)
-        var lines: [String] = []
-        if tail.count < messages.count { lines.append("(…\(messages.count - tail.count) earlier turns omitted)") }
-        for message in tail {
-            // A build's receipt is not something anyone SAID. Labelled by role it replays to a
-            // fresh session as `assistant: built Warm Orange` — a bare verb phrase with no subject,
-            // attributed to the agent as its own prior words. It is an event in the conversation,
-            // so it is labelled as one.
-            let label = if message.receipt != nil { "build" } else {
-                switch message.role {
-                case .user: "user"
-                case .assistant: "assistant"
-                case .director: "director agent"
-                }
-            }
-            // Mentions replay as readable `@display`; ONE aggregate manifest below re-expands them
-            // (per-message manifests would bloat a 20-message replay) — so a fresh session can act
-            // on a mention exactly like the live session that first received it.
-            lines.append("\(label): \(SZMentionMarkup.plainText(message.text))")
-            // Durable attachment copies are readable by absolute path on THIS machine (urls are
-            // fixed up against the project at restore) — name them once, here, so a fresh session
-            // can Read a previously-attached file. Staging-only attachments (nil bundlePath) are
-            // gone by now and stay unmentioned.
-            for attachment in message.attachments where attachment.bundlePath != nil {
-                lines.append("[attached: \(attachment.url.path)]")
-            }
-        }
-        let graphNodes = (store.project?.graph.nodes ?? []).map { (id: $0.id, title: $0.title) }
-        if let manifest = SZMentionExpansion.recapManifest(for: tail.map(\.text), nodes: graphNodes) {
-            lines.append("")
-            lines.append(manifest)
-        }
-        var body = lines.joined(separator: "\n")
-        if body.count > 8_000 { body = "(…truncated)\n" + String(body.suffix(8_000)) }
-        return """
-        Prior conversation restored from the project (you are a fresh session; catch up from this):
-        ---
-        \(body)
-        ---
-        """
+    /// The scope's prior conversation as `SZWorld.conversation` projects it: completed messages
+    /// only, minus `excluding` (the bubble being delivered, bubbles still queued behind it, the
+    /// ones that scheduled a run). Which turn reads it, and how, is the agent graph's call
+    /// (`context: conversation` → SZConversationRecap); this only says what counts as conversation.
+    func conversation(for scope: SZChatScope, excluding: Set<UUID> = []) -> [SZChatMessage] {
+        guard scope != .debug else { return [] }
+        return persistableMessages(for: scope).filter { !excluding.contains($0.id) }
     }
 
     /// Delete the durable bundle copies referenced by these messages — each attachment's

@@ -137,6 +137,9 @@ final class SZHost {
     /// Transcript flushes exclude it, so a sidecar only ever contains completed turns — a crash
     /// mid-stream restores up to the last finished message, never a half-reply.
     internal(set) var inFlightAssistantIDs: [String: UUID] = [:]
+    /// The bubbles a delivery in flight is made of, per scope (its fold + its reply). Not prior
+    /// conversation to anything they schedule: a run minted or amended mid-turn takes them as origin.
+    var deliveringBubbles: [String: Set<UUID>] = [:]
     /// Chat scopes (node uuid / "director") with a turn in flight — drives the "working" dots for the
     /// WHOLE turn, regardless of whether partial reply text has arrived (codex emits a preamble message
     /// before its tool work, so "text empty" alone would hide the dots too early). Derived from the
@@ -838,6 +841,7 @@ final class SZHost {
         agentSessions = [:]
         restoredSessions = [:]
         inFlightAssistantIDs = [:]
+        deliveringBubbles = [:]
         optionsCache = [:]
         lastBuildErrors = nil
         // A freshly opened project starts playing from t=0 — reset the render clock and clear any pause
