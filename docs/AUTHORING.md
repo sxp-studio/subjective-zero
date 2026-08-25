@@ -22,9 +22,11 @@ helper, seatless). An agent takes a **seat** by declaring it; whoever holds `cod
 receives dispatches, whoever holds `director` owns build threads. Replace either folder
 and the app does not notice.
 
-The app copies its bundled packs to `~/Library/Application Support/SubjectiveZero/agents/`
-at launch — that copy is yours to edit, and it wins until an app update ships a newer
-file. Or point `SZ_AGENT_PACKS` at a pack root of your own.
+The app copies its bundled packs to `~/Library/Application Support/SubjectiveZero/agents/<id>/`
+at launch, where `<id>` names the app the copy belongs to — so a build you are hacking on and
+an installed app never overwrite each other's packs. That copy is yours to edit, and it wins
+until that same app ships a newer file. Or point `SZ_AGENT_PACKS` at a pack root of your own,
+which the app then only reads.
 
 ## A message is words, and the door decides
 

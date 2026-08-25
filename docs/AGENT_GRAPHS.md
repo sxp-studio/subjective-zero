@@ -277,8 +277,9 @@ traversal concludes `cancelled`.
 ## Hot reload and the source pills
 
 Bundled resources are sealed inside a signed .app, so at start the host **materializes**
-the pack tree into `~/Library/Application Support/SubjectiveZero/agents/` — the writable
-copy everything reads (`SZ_AGENT_PACKS` overrides the root wholesale). Ours-or-theirs is
+the pack tree into `~/Library/Application Support/SubjectiveZero/agents/<id>/` — the writable
+copy everything reads, one per app so two builds can never drag one copy back and forth
+(`SZ_AGENT_PACKS` overrides the root wholesale, and is then only read). Ours-or-theirs is
 decided by content: a manifest beside the root hashes every byte the host wrote, so an
 unedited copy follows the bundle in either direction (update or downgrade) while a file
 you edited stays yours. Prompts need no
