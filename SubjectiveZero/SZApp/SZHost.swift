@@ -56,8 +56,9 @@ final class SZHost {
     private(set) var hostBridge: SZHostBridge?
     /// Most recent node build errors, surfaced by `debug_get_build_errors`.
     private(set) var lastBuildErrors: String?
-    /// The loaded project's `.subz` URL — the root for `.staging/` + live `nodes/`.
-    private(set) var loadedProjectURL: URL?
+    /// The loaded project's `.subz` URL — the root for `.staging/` + live `nodes/`. Two writers:
+    /// `switchProject` (a different document) and `relocateProject` (this one, moved).
+    internal(set) var loadedProjectURL: URL?
     /// The advisory lock held on the loaded project so a second running instance can't edit it too
     /// (SZProjectDirectoryLock). Retaken on every `switchProject` and released on switch-away / quit /
     /// discard; nil while nothing is loaded.
@@ -203,7 +204,7 @@ final class SZHost {
     /// True for the duration of `switchProject` — the pump must not start a turn mid-swap.
     var pumpSuspended = false
     /// The project currently opening, by display name; nil when idle. Names the wait for the UI, and
-    /// refuses a second project op via `isBusyForProjectOps`. It does NOT gate graph edits: those land
+    /// refuses a second project op via `isBusyForProjectSwitch`. It does NOT gate graph edits: those land
     /// on the outgoing project and are persisted before the swap.
     var openingProject: String?
     /// The persistable queue content of the last `flushMessageQueue` write (id:state lines) — the
@@ -609,7 +610,7 @@ final class SZHost {
         }
         // Refusals, not errors: a run/chat in flight owns the graph (menu items are disabled, but
         // the MCP surface can race a click), and re-opening the open project is a no-op.
-        guard !isBusyForProjectOps else {
+        guard !isBusyForProjectSwitch else {
             status = openingProject.map { "busy — \($0) is still opening" }
                 ?? "busy — stop the run / wait for chat before switching projects"
             return false
@@ -670,12 +671,10 @@ final class SZHost {
         } catch SZProjectLockError.alreadyLocked {
             throw SZProjectLifecycleError.alreadyOpenElsewhere
         }
-        // 3. Flush the old project's durable state (transcripts, sessions, graph).
-        if loadedProjectURL != nil {
-            flushAllTranscripts()
-            persistAgentSessions()
-            persistProject()
-        }
+        // 3. Freeze the old project: the WHOLE durable set, not a subset — a coalesced runs.json
+        //    write still sitting in its debounce is cancelled by the teardown below, so anything
+        //    left unflushed here is lost with the project.
+        if loadedProjectURL != nil { flushEverything() }
         // 4. Last fallible step: install what step 2 prepared, synchronously and atomically. On failure
         // drop the lock we took, leaving the old project rendering. The repaired graph is already in
         // `prepared`; the save is for everything downstream that reads disk.
@@ -726,6 +725,63 @@ final class SZHost {
         welcomePresented = false
         if leftWelcome { autoPresentProviderSetupIfNeeded() }   // SZHost+ProviderHealth
         return true
+    }
+
+    /// Re-point the live document at a new location without reloading it: runs, claims, transcripts
+    /// and the compiled runtime carry on untouched, only where the next write lands moves. That is
+    /// why Save As is safe mid-run where a switch is not. Synchronous to the end — every host write
+    /// into the bundle is MainActor, so an await here is the one place an agent write could
+    /// interleave. `recordInHistory: false` skips the MRU / reopen writes, like `switchProject`'s.
+    @discardableResult
+    func relocateProject(to newURL: URL, recordInHistory: Bool = true) throws -> Bool {
+        guard let oldURL = loadedProjectURL else { return false }
+        // Resolve symlinks too (/tmp vs /private/tmp): relocating onto our own path is a no-op, and
+        // without this the acquire below would EWOULDBLOCK on our own fd and misreport "open elsewhere".
+        guard oldURL.resolvingSymlinksInPath().standardizedFileURL
+                != newURL.resolvingSymlinksInPath().standardizedFileURL else { return false }
+        // The only fallible step, and it runs before anything live is disturbed: a contested
+        // destination leaves the project exactly where it was, still ours, still rendering.
+        let newLock: SZProjectDirectoryLock
+        do {
+            newLock = try SZProjectDirectoryLock.acquire(forProjectAt: newURL)
+        } catch SZProjectLockError.alreadyLocked {
+            throw SZProjectLifecycleError.alreadyOpenElsewhere
+        }
+        // Point of no return — synchronous to the end.
+        projectLock?.release()
+        projectLock = newLock
+        stopAllNodeSourceWatchers()
+        loadedProjectURL = newURL
+        rebindProjectPaths(from: oldURL, to: newURL)
+        watchNodeSources(in: newURL)
+        feedEpoch = Self.feedEpoch(projectURL: newURL)
+        // Drop the skip-an-unchanged-write signatures BEFORE flushing: the queues are unchanged by
+        // the move, so without this their first write at the new path is skipped and a crash a
+        // second later finds no queue file there at all.
+        lastFlushedQueueSignature = nil
+        lastFlushedTaskSignature = nil
+        flushEverything()
+        // History last, so a crash before this point still reopens the source (which the caller has
+        // not removed yet) rather than a location nothing has finished writing.
+        if recordInHistory {
+            let path = newURL.standardizedFileURL.path
+            lastOpenProjectPath = path
+            noteRecentProject(path)
+            persistAppState()
+        }
+        return true
+    }
+
+    /// Everything keyed by the project's PATH, re-derived after a relocation. Nothing reloads — the
+    /// values are unchanged, only their location moved. The session map follows the LIVE document
+    /// and is cleared at the abandoned path: a run's Director thread must survive the move, and the
+    /// bundle left behind must not resume the same CLI conversation if it is reopened.
+    private func rebindProjectPaths(from oldURL: URL, to newURL: URL) {
+        try? SZAgentSessionIO.save(agentSessions, projectURL: newURL)
+        try? SZAgentSessionIO.save([:], projectURL: oldURL)
+        store.rebaseAttachments(to: newURL)
+        mailbox.rebaseAttachments(to: newURL)
+        cardHostStorage?.rebindCardWatchers()
     }
 
     /// Release the current instance lock (quit path). Best-effort — `flock` also frees on process

@@ -255,6 +255,17 @@ public final class SZMessageQueue {
         onChange?()
     }
 
+    /// The project moved: re-point every undelivered envelope's attachments at the new bundle.
+    /// Silent (no `onChange`) — nothing about the QUEUE changed, only where its files live, and the
+    /// relocation flushes on its own.
+    public func rebaseAttachments(to projectURL: URL) {
+        for i in envelopes.indices where !envelopes[i].message.attachments.isEmpty {
+            for a in envelopes[i].message.attachments.indices {
+                envelopes[i].message.attachments[a].rebase(in: projectURL)
+            }
+        }
+    }
+
     /// Full in-memory reset (project switch/close). Never writes anything itself — the caller
     /// decides whether disk is touched (clearPerProjectState deliberately must NOT flush).
     public func reset() {

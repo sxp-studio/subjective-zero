@@ -73,6 +73,19 @@ extension SZStore {
         chat.removeValue(forKey: scopeKey)
     }
 
+    /// The project moved: re-point every attachment at the bundle's new location. Message ids,
+    /// text and order are untouched, so a turn streaming into a bubble right now is unaffected.
+    public func rebaseAttachments(to projectURL: URL) {
+        chat = chat.mapValues { messages in
+            messages.map { message in
+                guard !message.attachments.isEmpty else { return message }
+                var m = message
+                for i in m.attachments.indices { m.attachments[i].rebase(in: projectURL) }
+                return m
+            }
+        }
+    }
+
     private func mutateMessage(_ id: UUID, in scope: SZChatScope, _ transform: (inout SZChatMessage) -> Void) {
         guard var messages = chat[scope.key], let i = messages.firstIndex(where: { $0.id == id }) else { return }
         transform(&messages[i])

@@ -245,10 +245,14 @@ Graph panel.
 - **Open…** (⌘O) - picks a `.subz` directory (validated on confirm; no registered document type
   yet).
 - **Open Recent** - the MRU (cap 10), existence-filtered at menu build, plus Clear Menu.
-- **Save As…** (⇧⌘S) - duplicate-and-switch; there is deliberately **no Save** (it would imply
-  dirty state that doesn't exist). Replacing `.newItem` also drops "New Window" - intended
-  (single-window app).
-- All items disable while a run or chat turn is in flight (the methods are guarded too).
+- **Save…** (⌘S) - untitled projects only, and it opens the same panel Save As does. A placed
+  project has no Save item: it is written as it changes, so one would imply dirty state that
+  doesn't exist.
+- **Save As…** (⇧⌘S) - copies the bundle, then makes the copy the live project in place, reloading
+  nothing. Replacing `.newItem` also drops "New Window" - intended (single-window app).
+- New / Open / Open Recent disable while a run or chat turn is in flight; Save and Save As stay
+  live, because they write without swapping the project ([STATE.md](STATE.md)). Every method guards
+  too - the MCP surface can race a click.
 - The **window title** (project name, with a "not saved" suffix while untitled) draws as a dim
   non-hit-testing overlay in the titlebar safe-area strip - `.hiddenTitleBar` hides the native
   text, and the strip stays the window-drag zone.

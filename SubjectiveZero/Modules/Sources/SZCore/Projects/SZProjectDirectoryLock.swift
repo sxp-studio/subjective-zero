@@ -3,7 +3,9 @@
 // same `.subz` at once. It's `flock(LOCK_EX | LOCK_NB)` on `<Project>.subz/.staging/instance.lock`:
 // advisory, per-file, non-blocking, and released the moment the file descriptor closes (so a crash
 // or SIGKILL frees it too — no stale lock survives the owning process). The lock file lives under
-// `.staging` (per-machine scratch, stripped on Save As), so it never travels with the document.
+// `.staging` (per-machine scratch). A Save As copies `.staging` along with everything else, but the
+// copied lock file is inert: flock state lives on the open file description, not in the file, so
+// the copy is unlocked and `acquire` takes it fresh.
 //
 // It is NOT a coordination channel: it only ever conflicts when two instances open the exact same
 // project. In the normal "each window is a different project" flow every instance owns its own

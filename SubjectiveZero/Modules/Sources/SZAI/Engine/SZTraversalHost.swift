@@ -32,8 +32,11 @@ public struct SZTurnOrder: Sendable {
 
 extension SZAgentRunRequest {
     /// A resolved order as one request. `tools: []` attaches no MCP; nil takes `defaultTools`.
+    /// `packageDirectory` is optional so callers can hand it the host's LIVE project url without
+    /// unwrapping: nil falls back to the working directory, which is the right answer for a turn
+    /// spawned with no project loaded.
     public init(_ order: SZTurnOrder, prompt: String? = nil, workingDirectory: URL,
-                packageDirectory: URL, cacheDirectory: URL, mcpPort: UInt16, defaultTools: [String]) {
+                packageDirectory: URL? = nil, cacheDirectory: URL, mcpPort: UInt16, defaultTools: [String]) {
         self.init(
             prompt: prompt ?? order.brief,
             workingDirectory: workingDirectory,

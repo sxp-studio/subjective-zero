@@ -125,6 +125,12 @@ public struct SZChatAttachment: Identifiable, Equatable, Sendable {
         self.byteCount = byteCount
         self.isImage = isImage
     }
+
+    /// Re-derive the readable copy's absolute url from `bundlePath` against a project bundle. The
+    /// durable copy travels inside the `.subz`, so its location follows the bundle's.
+    public mutating func rebase(in projectURL: URL) {
+        if let bundlePath { url = projectURL.appending(path: bundlePath) }
+    }
 }
 
 extension SZChatAttachment: Codable {

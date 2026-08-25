@@ -23,9 +23,14 @@ extension SZHost {
     /// provider sheet so the two never stack). Going Home means leaving the current work, so an unsaved
     /// UNTITLED project is rescued NOW (Save… / Discard) rather than surprising the user with the prompt
     /// at quit; Cancel keeps them in the editor.
+    ///
+    /// The rescue is SKIPPED while agents own the project, even though Save… itself is now safe: the
+    /// prompt's other answer is Discard, which deletes the bundle and nils the project URL under a live
+    /// traversal. Home is a step away from the work, not a place to destroy it — the project stays
+    /// loaded behind the overlay, and Save As… is on the menu the whole time.
     func presentWelcome() {
         guard !providerSetupPresented else { return }
-        guard isUntitledProject, !isBusyForProjectOps else { welcomePresented = true; return }
+        guard isUntitledProject, !agentsOwnProject else { welcomePresented = true; return }
         Task { @MainActor in
             if await confirmSaveOrDiscardIfUnsaved(actionName: "returning to Home") {
                 welcomePresented = true

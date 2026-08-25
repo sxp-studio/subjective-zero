@@ -80,11 +80,23 @@ history) → `openProjectPath` if it still loads → a fresh copy of the bundled
 <Name>.subz` (`SZUntitledProjects` - not "workspace"/"temp": these projects persist, they're
 merely unplaced). "Untitled" is derived - a project is untitled iff its URL is under that
 directory - never a stored flag; the window title gains a "not saved" suffix, and Save As out of it
-deletes the source folder. There is no Save item: persistence is automatic (`persistProject` on
-every edit), so Save As… is duplicate-and-switch. All switching funnels through
-`SZHost.switchProject(to:)` - validate-first, one await (declared permissions) before any
-mutation, runtime swap as the last fallible step, so a failed open always leaves the current
-project live.
+deletes the source folder once the new location is written.
+
+**Save As moves the project; New and Open replace it.** Persistence is automatic (`persistProject`
+on every edit), so a placed project has no Save item; an untitled one shows Save… on ⌘S, which opens
+the Save As panel. Save As copies the bundle, then `SZHost.relocateProject(to:)` re-points
+`loadedProjectURL`, the instance lock, the node-source and card watchers, the session map and the
+attachment urls. Nothing reloads - the runtime takes a project URL per call and caches dylibs by
+content - so a move costs no compiles and leaves the render clock alone; `.staging` travels with the
+bundle, so queued messages, scheduled asks and staged node sources follow. Nothing is torn down, so
+Save As works mid-run, refusing only while an open is in flight. New / Open / Open Recent DO tear
+down (`clearPerProjectState` drops live runs, and the fleet's MCP listeners would then write into the
+new project), so they refuse while `agentsOwnProject`. All switching funnels through
+`SZHost.switchProject(to:)` - validate-first, one await (declared permissions) before any mutation,
+runtime swap as the last fallible step, so a failed open always leaves the current project live.
+`SZHost.flushEverything()` is the durable set named once (transcripts, both `.staging` queues,
+`runs.json`, sessions, graph): a switch freezes the outgoing project with it, quit writes it, and a
+Save As lands it at the new path.
 
 **Chat transcripts are project state; agent sessions are machine state.** Each scope's transcript
 persists as `transcripts/<scope.key>.json` inside the `.subz` (`SZChatTranscriptIO`) and durable

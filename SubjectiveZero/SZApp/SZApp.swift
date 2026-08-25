@@ -78,12 +78,12 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Quit gate: rescue an untitled project before its temp files are cleaned up (saved projects
-    /// autosave, so they quit silently). Skipped while a run/chat owns the graph — Save As can't run
-    /// then anyway, and the untitled project is already autosaved, so a mid-run quit loses nothing.
-    /// Also skipped for `debug_quit` (`quitSkipsUntitledRescue`): a drive has no human to answer
-    /// the prompt, and parking terminate on it wedges the automated session.
+    /// autosave, so they quit silently). Offered DURING a run too — Save As no longer needs the
+    /// graph quiet, and quitting mid-run was the one way to lose an untitled project outright.
+    /// Skipped for `debug_quit` (`quitSkipsUntitledRescue`): a drive has no human to answer the
+    /// prompt, and parking terminate on it wedges the automated session.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let host, host.isUntitledProject, !host.isBusyForProjectOps,
+        guard let host, host.isUntitledProject,
               !host.quitSkipsUntitledRescue else { return .terminateNow }
         Task { @MainActor in
             let proceed = await host.confirmSaveOrDiscardIfUnsaved(actionName: "quitting")
@@ -95,11 +95,7 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     /// Last-chance flush — the quit-path counterpart of the per-message/run-end flush points. A
     /// SIGKILL/crash skips this and loses only messages since the last completion flush (bounded).
     func applicationWillTerminate(_ notification: Notification) {
-        host?.flushAllTranscripts()
-        host?.flushMessageQueue()   // a queued-not-delivered message redelivers next launch
-        host?.flushTaskQueue()      // and an ask that never started is still wanted next launch
-        host?.persistAgentSessions()
-        host?.persistAgentGraphRuns()   // a live record lands on disk; it restores as interrupted
+        host?.flushEverything()   // the same set ⌘S writes: queues redeliver, a live run restores as interrupted
         // Pop-out frame moves persist behind a debounce — a quit inside that window must not
         // restore a stale frame next launch (the in-memory record is already authoritative).
         host?.popoutFramePersistDebounce?.cancel()
@@ -143,7 +139,7 @@ final class SZWindowCloseGuard: NSObject, NSWindowDelegate {
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         MainActor.assumeIsolated {
-            guard let host, host.isUntitledProject, !host.isBusyForProjectOps else { return true }
+            guard let host, host.isUntitledProject else { return true }
             // Defer the close: prompt, and only close (→ terminate) if the user didn't cancel. After
             // a Save/Discard the project is no longer untitled, so a re-entrant close won't re-prompt.
             Task { @MainActor in
@@ -377,17 +373,17 @@ struct SZApp: App {
                 SZCheckForUpdatesView(updater: updaterController.updater)
             }
             // File — the document lifecycle (roadmap Task 1). Replacing .newItem also drops
-            // "New Window" — intended (single-window app). Persistence is automatic, so ⌘S "Save"
-            // is a force-flush for a saved project (reassurance, not a state change) and routes to
-            // Save As… for an untitled one (rescue to a chosen location). All items sit out a run /
-            // in-flight chat (the methods are guarded too — MCP can race a click).
+            // "New Window" — intended (single-window app). Persistence is automatic, so only an
+            // UNTITLED project gets a ⌘S item, and it opens the Save As panel. New / Open / Open
+            // Recent sit out a run or in-flight chat; Save As does not, because it never swaps the
+            // project (the methods are guarded too — MCP can race a click).
             CommandGroup(replacing: .newItem) {
                 Button("New Project") { host.newProject() }
                     .keyboardShortcut("n", modifiers: .command)
-                    .disabled(host.isBusyForProjectOps)
+                    .disabled(host.isBusyForProjectSwitch)
                 Button("Open…") { host.openProjectViaPanel() }
                     .keyboardShortcut("o", modifiers: .command)
-                    .disabled(host.isBusyForProjectOps)
+                    .disabled(host.isBusyForProjectSwitch)
                 // The busy disable sits on the ITEMS: .disabled on the Menu itself doesn't render
                 // on macOS (verified live 2026-07-04 — siblings grayed, the submenu didn't).
                 Menu("Open Recent") {
@@ -395,22 +391,25 @@ struct SZApp: App {
                         Button(URL(filePath: path).deletingPathExtension().lastPathComponent) {
                             host.openProject(at: URL(filePath: path))
                         }
-                        .disabled(host.isBusyForProjectOps)
+                        .disabled(host.isBusyForProjectSwitch)
                     }
                     Divider()
                     Button("Clear Menu") { host.clearRecentProjects() }
-                        .disabled(host.recentProjectPaths.isEmpty || host.isBusyForProjectOps)
+                        .disabled(host.recentProjectPaths.isEmpty || host.isBusyForProjectSwitch)
                 }
                 Divider()
-                // Untitled → "Save…" opens the Save As panel (there's nowhere to save yet); a saved
-                // project → "Save" force-flushes to disk. The label tracks isUntitledProject (derived,
-                // observable), so it flips after a Save As.
-                Button(host.isUntitledProject ? "Save…" : "Save") { host.saveProject() }
-                    .keyboardShortcut("s", modifiers: .command)
-                    .disabled(host.isBusyForProjectOps || host.store.project == nil)
+                // No Save item for a PLACED project: it is written as it changes, so an item saying
+                // "Save" would imply dirty state that doesn't exist. An untitled one has nowhere to
+                // save yet, and ⌘S is the reflex for exactly that, so it keeps the shortcut and opens
+                // the same panel Save As does.
+                if host.isUntitledProject {
+                    Button("Save…") { host.saveProjectAs() }
+                        .keyboardShortcut("s", modifiers: .command)
+                        .disabled(host.isOpeningProject || host.store.project == nil)
+                }
                 Button("Save As…") { host.saveProjectAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
-                    .disabled(host.isBusyForProjectOps || host.store.project == nil)
+                    .disabled(host.isOpeningProject || host.store.project == nil)
             }
             // ⌘, — the app's only settings surface today; graduates into a real Settings window
             // once more prefs earn one (docs/UI.md).
@@ -595,25 +594,27 @@ struct SZApp: App {
         Divider()
         Menu("Project") {
             Button("New Project") { host.newProject() }
-                .disabled(host.isBusyForProjectOps)
+                .disabled(host.isBusyForProjectSwitch)
             Button("Open…") { host.openProjectViaPanel() }
-                .disabled(host.isBusyForProjectOps)
+                .disabled(host.isBusyForProjectSwitch)
             Menu("Open Recent") {
                 ForEach(host.existingRecentProjectPaths, id: \.self) { path in
                     Button(URL(filePath: path).deletingPathExtension().lastPathComponent) {
                         host.openProject(at: URL(filePath: path))
                     }
-                    .disabled(host.isBusyForProjectOps)
+                    .disabled(host.isBusyForProjectSwitch)
                 }
                 Divider()
                 Button("Clear Menu") { host.clearRecentProjects() }
-                    .disabled(host.recentProjectPaths.isEmpty || host.isBusyForProjectOps)
+                    .disabled(host.recentProjectPaths.isEmpty || host.isBusyForProjectSwitch)
             }
             Divider()
-            Button(host.isUntitledProject ? "Save…" : "Save") { host.saveProject() }
-                .disabled(host.isBusyForProjectOps || host.store.project == nil)
+            if host.isUntitledProject {
+                Button("Save…") { host.saveProjectAs() }
+                    .disabled(host.isOpeningProject || host.store.project == nil)
+            }
             Button("Save As…") { host.saveProjectAs() }
-                .disabled(host.isBusyForProjectOps || host.store.project == nil)
+                .disabled(host.isOpeningProject || host.store.project == nil)
         }
         Menu("View") {
             // availableCases, like the menu bar — the Profiler toggle must not surface in a

@@ -86,6 +86,19 @@ extension SZHost {
         }
     }
 
+    /// EVERYTHING durable, on disk, now. This is the crash-recovery contract in one place: what ⌘S
+    /// means, what a project switch freezes before the swap, what a Save As re-lands at the new
+    /// path, and what quit writes. Named once so those four can never drift on what "saved" covers.
+    /// Each member is idempotent and skips an unchanged write, so calling it often costs nothing.
+    func flushEverything() {
+        flushAllTranscripts()
+        flushMessageQueue()
+        flushTaskQueue()
+        persistAgentSessions()
+        persistAgentGraphRuns()   // also cancels the pending coalesce, so nothing is left in flight
+        persistProject()
+    }
+
     /// Persist the resumable-session map to the machine-local store, wherever `agentSessions`
     /// changes (deliver's pin, a run's receipt, a failed resume, purge/clear, provider resets).
     func persistAgentSessions() {
@@ -147,11 +160,7 @@ extension SZHost {
             guard envelope.intent == .chat, live.contains(envelope.recipient),
                   let scope = SZChatScope(key: envelope.recipient) else { continue }
             var restored = envelope
-            restored.message.attachments = restored.message.attachments.map { attachment in
-                var a = attachment
-                if let path = a.bundlePath { a.url = url.appending(path: path) }
-                return a
-            }
+            for i in restored.message.attachments.indices { restored.message.attachments[i].rebase(in: url) }
             if let bubbleID = restored.transcriptMessageID {
                 // Deliveries are FIFO per scope, so only the FIRST pending envelope can have been
                 // mid-delivery at the crash — later envelopes' bubbles are followed by EARLIER
@@ -273,11 +282,7 @@ extension SZHost {
             .filter { !($0.role == .assistant && $0.text.isEmpty && $0.thinking.isEmpty && $0.duration == nil) }
             .map { message in
                 var m = message
-                m.attachments = m.attachments.map { attachment in
-                    var a = attachment
-                    if let path = a.bundlePath { a.url = projectURL.appending(path: path) }
-                    return a
-                }
+                for i in m.attachments.indices { m.attachments[i].rebase(in: projectURL) }
                 return m
             }
     }

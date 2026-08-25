@@ -132,3 +132,27 @@ private func existingProject(_ name: String, beside url: URL) throws -> URL {
     try SZAgentSessionIO.save(["d": SZAgentSession(providerID: "claude", sessionID: "2")], projectURL: here, to: url)
     #expect(SZAgentSessionIO.load(projectURL: away, from: url)["d"]?.sessionID == "1")
 }
+
+@Test func sessionsRekeyToAMovedProjectAndLeaveOthersAlone() throws {
+    // A relocation writes the live map at the new path and clears the old one, so the bundle left
+    // behind cold-starts from its transcripts instead of resuming the same CLI conversation.
+    let url = FileManager.default.temporaryDirectory
+        .appending(path: "sz-sessions-\(UUID().uuidString)").appending(path: "agent-sessions.json")
+    let from = try existingProject("A.subz", beside: url)
+    let to = try existingProject("B.subz", beside: url)
+    let bystander = try existingProject("C.subz", beside: url)
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+    let live = ["director": SZAgentSession(providerID: "claude", sessionID: "live")]
+    try SZAgentSessionIO.save(live, projectURL: from, to: url)
+    try SZAgentSessionIO.save(["director": SZAgentSession(providerID: "claude", sessionID: "other")],
+                              projectURL: bystander, to: url)
+
+    try SZAgentSessionIO.save(live, projectURL: to, to: url)
+    try SZAgentSessionIO.save([:], projectURL: from, to: url)
+
+    #expect(SZAgentSessionIO.load(projectURL: to, from: url)["director"]?.sessionID == "live")
+    #expect(SZAgentSessionIO.load(projectURL: from, from: url).isEmpty)
+    #expect(SZAgentSessionIO.load(projectURL: bystander, from: url)["director"]?.sessionID == "other")
+}
+

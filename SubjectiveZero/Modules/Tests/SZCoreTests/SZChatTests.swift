@@ -169,3 +169,42 @@ import Testing
     // Dangling placeholder until host fixup — just needs to be derived from bundlePath.
     #expect(decoded.url.path.hasSuffix("attachments/DEF/clip.wav"))
 }
+
+@Test func chatAttachmentRebasesOntoAMovedBundle() {
+    // The project moved: the durable copy travels inside the `.subz`, so `url` follows the bundle.
+    var attachment = SZChatAttachment(
+        filename: "clip.wav", url: URL(fileURLWithPath: "/old/A.subz/attachments/DEF/clip.wav"),
+        bundlePath: "attachments/DEF/clip.wav", byteCount: 9, isImage: false)
+    attachment.rebase(in: URL(fileURLWithPath: "/new/B.subz"))
+    #expect(attachment.url.path == "/new/B.subz/attachments/DEF/clip.wav")
+
+    // No durable copy (debug scope, or the bundle copy failed): nothing to re-derive from, so the
+    // machine-local path it already has is left alone rather than pointed at a file that isn't there.
+    var loose = SZChatAttachment(filename: "clip.wav", url: URL(fileURLWithPath: "/tmp/staged/clip.wav"),
+                                 byteCount: 9, isImage: false)
+    loose.rebase(in: URL(fileURLWithPath: "/new/B.subz"))
+    #expect(loose.url.path == "/tmp/staged/clip.wav")
+}
+
+@MainActor
+@Test func storeRebasesEveryAttachmentAndLeavesTheRestOfTheTranscriptAlone() {
+    let store = SZStore()
+    store.setProject(SZProject(name: "Moved"))
+    let relative = "attachments/DEF/clip.wav"
+    let carrier = SZChatMessage(
+        role: .user, text: "listen",
+        attachments: [SZChatAttachment(filename: "clip.wav",
+                                       url: URL(fileURLWithPath: "/old/A.subz/" + relative),
+                                       bundlePath: relative, byteCount: 9, isImage: false)])
+    let plain = SZChatMessage(role: .assistant, text: "on it")
+    store.appendChatMessage(carrier, to: .director)
+    store.appendChatMessage(plain, to: .director)
+
+    store.rebaseAttachments(to: URL(fileURLWithPath: "/new/B.subz"))
+
+    let messages = store.messages(for: .director)
+    #expect(messages.map(\.id) == [carrier.id, plain.id], "ids and order are untouched")
+    #expect(messages[0].attachments.first?.url.path == "/new/B.subz/" + relative)
+    #expect(messages[1].text == "on it")
+}
+

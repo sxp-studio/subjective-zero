@@ -95,7 +95,7 @@ extension SZHost {
             markFailed("the recipient no longer exists")
             return
         }
-        guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {
+        guard let mcpPort = agentMCPServer?.port, loadedProjectURL != nil else {
             return fail("(host not ready — message not delivered)")
         }
         let provider: any SZProvider
@@ -163,7 +163,9 @@ extension SZHost {
                 throw SZMCPError.message("unknown provider: \(turn.choice.providerID)")
             }
             let request = SZAgentRunRequest(
-                turn, prompt: prompt, workingDirectory: workingDirectory, packageDirectory: projectURL,
+                // Live, never captured at the top of the delivery: a Save As can relocate the
+                // project while this turn awaits its CLI.
+                turn, prompt: prompt, workingDirectory: workingDirectory, packageDirectory: loadedProjectURL,
                 cacheDirectory: cacheDirectory, mcpPort: mcpPort,
                 defaultTools: SZHostBridge.agentCallableToolNames)
             resumedThisTurn = request.resumeSessionID != nil
@@ -200,7 +202,7 @@ extension SZHost {
             // The renderer computes only what a brief mentions, so lanes that don't ask
             // (the bare resumed chat) cost nothing beyond these two reads.
             var extras = SZBriefExtras()
-            if case .node(let nodeID) = scope {
+            if case .node(let nodeID) = scope, let projectURL = loadedProjectURL {
                 let nodeDir = projectURL.appending(path: "nodes/\(nodeID.uuidString)")
                 extras.nodeContract =
                     (try? String(contentsOf: nodeDir.appending(path: "node-contract.json"), encoding: .utf8))

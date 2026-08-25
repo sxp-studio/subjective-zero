@@ -19,7 +19,7 @@ extension SZHost {
     /// its synchronous guard replies; nil → `deliver` opens its own.
     /// `claim` is the ledger token that already holds this scope's resources (a run's coding/Director
     /// turns pass the run's claim); nil → the turn claims them itself for the stream's duration, a
-    /// real hold so `isBusyForProjectOps`' `anyHeld` covers chat turns and the fence sees mid-chat
+    /// real hold so `agentsOwnProject`'s `anyHeld` covers chat turns and the fence sees mid-chat
     /// nodes as held.
     @MainActor
     @discardableResult
@@ -262,7 +262,7 @@ extension SZHost {
     /// composed brief, streamed live into the Director tab.
     @MainActor
     func runDirectorTurn(
-        order: SZTurnOrder, mcpPort: UInt16, projectURL: URL, cacheDirectory: URL,
+        order: SZTurnOrder, mcpPort: UInt16, cacheDirectory: URL,
         claim: SZClaimToken? = nil
     ) async throws -> (result: SZAgentRunResult, generation: String) {
         let run = activeRun(for: claim)
@@ -276,7 +276,10 @@ extension SZHost {
         let workingDirectory = cacheDirectory.appending(path: "agent/director")
         try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
         let request = SZAgentRunRequest(
-            turn, workingDirectory: workingDirectory, packageDirectory: projectURL,
+            // Read LIVE, never captured at run start: a Save As relocates the project mid-run, and a
+            // grant handed out for the old path points at an abandoned (for an untitled rescue,
+            // deleted) directory for the rest of the traversal.
+            turn, workingDirectory: workingDirectory, packageDirectory: loadedProjectURL,
             cacheDirectory: cacheDirectory, mcpPort: mcpPort,
             defaultTools: SZHostBridge.agentCallableToolNames)
         // The Director transcript is claimed for THIS TURN, not for the run's life — that is what
@@ -482,7 +485,7 @@ extension SZHost {
         // inferring it from "nothing else is running" denied ownership to the very run
         // implementing the pieces, and nothing else drains an op.
         let startedForGraphOp = adoptStagedGraphOp && hasStagedGraphOp && graphOpClaim != nil
-        guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {
+        guard let mcpPort = agentMCPServer?.port, loadedProjectURL != nil else {
             // NOT-READY, not refused: print-only, and the slot survives — a mint that
             // raced project load fires when the pump next wakes with a project there.
             print("[SZHost] cannot run — MCP server or project not ready"); return .waiting
@@ -621,7 +624,7 @@ extension SZHost {
                 try await runBuildDelivery(
                     run: run, instruction: instruction, thread: thread, claim: claim,
                     packsRoot: packsRoot, providerID: providerID, mcpPort: mcpPort,
-                    projectURL: projectURL, cacheDirectory: cacheDirectory)
+                    cacheDirectory: cacheDirectory)
                 // Liveness-guarded as a whole: after a cancel-and-restart this task is a ZOMBIE,
                 // and every line below reads or paints the run's nodes — accounting for, repainting
                 // and narrating over work that is no longer this run's.
@@ -683,7 +686,7 @@ extension SZHost {
     /// served through `deliverFleet` while the dispatch node waits.
     private func runBuildDelivery(
         run: SZRunState, instruction: String, thread: UUID, claim: SZClaimToken, packsRoot: URL,
-        providerID: String, mcpPort: UInt16, projectURL: URL, cacheDirectory: URL
+        providerID: String, mcpPort: UInt16, cacheDirectory: URL
     ) async throws {
         let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
         let loaded = SZAgentPackLoader.load(root: packsRoot)
@@ -769,7 +772,7 @@ extension SZHost {
                 state.mutationCursor = self.mutationJournal.count
                 do {
                     let turn = try await self.runDirectorTurn(
-                        order: order, mcpPort: mcpPort, projectURL: projectURL,
+                        order: order, mcpPort: mcpPort,
                         cacheDirectory: cacheDirectory, claim: claim)
                     return SZTurnReport(failed: turn.result.outcome.failed,
                                         detail: turn.result.outcome.message,
@@ -798,7 +801,7 @@ extension SZHost {
                 coding: (codingID, codingGraph, codingAttachments),
                 renderer: renderer, queries: queries, steps: steps, router: router,
                 providerID: providerID, mcpPort: mcpPort,
-                projectURL: projectURL, cacheDirectory: cacheDirectory)
+                cacheDirectory: cacheDirectory)
         }
         let engine = SZGraphEngine(
             agent: directorID, graph: directorGraph, attachments: directorAttachments,
@@ -858,7 +861,7 @@ extension SZHost {
         coding: (id: String, graph: SZAgentGraph, attachments: [String: SZStepAttachment]),
         renderer: SZBriefRenderer, queries: SZQueryService, steps: SZHostStepRunning,
         router: any SZModelRouting, providerID: String, mcpPort: UInt16,
-        projectURL: URL, cacheDirectory: URL
+        cacheDirectory: URL
     ) async -> SZSettledSummary? {
         // The Director's authored notes drained AT THE SEND, so a note authored during
         // the traversal rides the orders it aimed at.
@@ -934,7 +937,7 @@ extension SZHost {
                     try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
                     let turn = turnOrder.resolved(against: self.agentSessions[scopeKey])
                     let request = SZAgentRunRequest(
-                        turn, workingDirectory: workingDirectory, packageDirectory: projectURL,
+                        turn, workingDirectory: workingDirectory, packageDirectory: self.loadedProjectURL,
                         cacheDirectory: cacheDirectory, mcpPort: mcpPort,
                         defaultTools: SZHostBridge.agentCallableToolNames)
                     guard let provider = SZProviderRegistry.shared.provider(id: turn.choice.providerID) else {

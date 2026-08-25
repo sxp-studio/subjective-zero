@@ -131,6 +131,20 @@ final class SZCardHostController: SZCustomCardProvider {
         syncTicker()
     }
 
+    /// Project relocation: re-point every mount's watcher at the bundle's new path. Deliberately
+    /// not unmount-and-remount, which would recompile every card and blink the canvas: the compiled
+    /// module and its live instance are path-independent, only the file being polled moved.
+    func rebindCardWatchers() {
+        for (id, mount) in mounts {
+            mount.watcher?.stop()
+            mount.watcher = nil
+            guard let source = cardSource(id) else { continue }
+            let watcher = SZSourceWatcher(watching: source)
+            watcher.start { [weak self] in self?.recompile(node: id) }
+            mount.watcher = watcher
+        }
+    }
+
     /// The card half of `agent_compile_node`: compile-check a staged Card.swift off-main.
     nonisolated func compileCheck(source: URL) -> SZBuildResult {
         SZCardModule.compileCheck(source: source, workspace: workspace)

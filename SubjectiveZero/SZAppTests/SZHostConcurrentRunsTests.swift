@@ -392,7 +392,7 @@ struct SZHostLifecycleScopingTests {
                              instruction: "make me something new", ownsGraphOp: false, workSet: [])
         host.activeRuns[run.taskID] = run
         #expect(!host.ledger.anyHeld)
-        #expect(host.isBusyForProjectOps)
+        #expect(host.isBusyForProjectSwitch)
     }
 
     @Test func aBuildPressReleasesAStopsHoldOnTheQueue() {
