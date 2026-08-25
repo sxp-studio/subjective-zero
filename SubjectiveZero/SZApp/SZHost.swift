@@ -78,6 +78,18 @@ final class SZHost {
     /// Every node any live run is implementing — dispatch, the editor lock/pill and the
     /// `ui_connect` guard all consult this. Empty when nothing is running.
     var runWorkSet: Set<SZNodeID> { activeRuns.values.reduce(into: []) { $0.formUnion($1.workSet) } }
+    /// The live runs as the tasks they are executing, oldest first — the running half of the
+    /// door's `amend` fork and of the `{{tasks}}` brief token. Synthesized because an admitted
+    /// task leaves `pendingTasks`, and its run already carries what a brief needs to name it.
+    var runningTasks: [SZTask] {
+        activeRuns.values
+            .sorted { $0.startedAt < $1.startedAt }
+            .map { run in
+                SZTask(id: run.taskID, title: run.title, instruction: run.instruction,
+                       state: .running, workSet: run.workSet, thread: run.thread,
+                       createdAt: run.startedAt)
+            }
+    }
     // Mid-run Director↔fleet messages live as `.steer` envelopes in `mailbox` (recorded — never a
     // nested turn inside a synchronous MCP handler; the reconcile loop drains them). See
     // `recordDirectorMessage` / `recordDirectorInboxMessage` / `takeDirectorMessages`.

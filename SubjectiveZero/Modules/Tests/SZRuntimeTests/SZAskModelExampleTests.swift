@@ -26,7 +26,7 @@ let step = SZStep(outcomes: ["retry", "park"]) { ctx in
 """
 
 private func facts() -> String {
-    #"{"message": "", "resuming": false, "pendingTasks": []}"#
+    #"{"message": "", "resuming": false, "pendingTasks": [], "runningTasks": []}"#
 }
 
 /// Serialized like the other step suites: each test drives a real swiftc.

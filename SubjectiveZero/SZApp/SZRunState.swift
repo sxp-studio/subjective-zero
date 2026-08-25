@@ -22,6 +22,9 @@ import SZCore
     let thread = UUID()
     /// The standing instruction every brief carries ("" = none given).
     let instruction: String
+    /// The title the task was SCHEDULED under — what a brief naming this run must call it. Kept
+    /// rather than re-derived: a derived one drifts as the work set grows.
+    let title: String
     /// The transcript bubbles that scheduled this run — not prior conversation to it.
     let origin: Set<UUID>
     /// Does this run own the staged split/merge? Then it narrates at commit, owns the
@@ -49,11 +52,12 @@ import SZCore
     /// would resume whatever the other run last said.
     var directorSession: SZAgentSession?
 
-    init(taskID: UUID, claim: SZClaimToken, instruction: String, origin: Set<UUID> = [],
-         ownsGraphOp: Bool, workSet: Set<SZNodeID>) {
+    init(taskID: UUID, claim: SZClaimToken, instruction: String, title: String = "",
+         origin: Set<UUID> = [], ownsGraphOp: Bool, workSet: Set<SZNodeID>) {
         self.taskID = taskID
         self.claim = claim
         self.instruction = instruction
+        self.title = title
         self.origin = origin
         self.ownsGraphOp = ownsGraphOp
         self.workSet = workSet

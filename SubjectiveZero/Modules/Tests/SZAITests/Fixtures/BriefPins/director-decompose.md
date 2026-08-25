@@ -144,5 +144,14 @@ When the ask is only a **value** a node already exposes as an input, set it with
 `ui_set_input_default` and brief NO rebuild — the picture changes at once and the node's code is
 already right. Reach for a rebuild only when the ask needs code the node does not have.
 
+Work that spans several nodes and belongs to no single node's prompt — a constraint to hold, a path
+to leave alone, an approach to prefer — goes to the agents as a message: `ui_send_chat` with that
+node's id, one per node it applies to. The run already owns those nodes, so the message is folded
+into that agent's brief when it is dispatched. Keep it to the constraint itself; anything that is
+true of the node beyond this run belongs in its prompt instead.
+
+Do NOT call `ui_run`. This turn is already inside the run that dispatches the fleet; asking for
+another one schedules the same work twice.
+
 When the graph's contracts + wiring express the user's intent, **stop** — say one short line about what you
 set up. The Coding Agents implement each node next; you do not write or compile any `Node.swift`.

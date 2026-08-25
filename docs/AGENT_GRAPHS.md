@@ -23,6 +23,7 @@ state that is true between messages, minted by the host, read by steps and brief
 |---|---|---|
 | `run` | a granted build is live — its work set, round, retry cap, steers, standing instruction | admitting a scheduled task |
 | `pendingTasks` | always — the asks scheduled and not yet started | the Build press, `ui_run`, or the door's `requestBuild` effect |
+| `runningTasks` | always — the asks being built right now | admitting a scheduled task |
 | `assignment` | work stands assigned to this scope — the attempt, the sender's note | a dispatch node's fleet delivery |
 | `graph`, `statuses` | always — the live project document and the agents' reported statuses | the app |
 | `node`, `resuming` | the delivery's binding: which node it is about, whether the scope's session is one the graph's resume turns would actually continue under the delivery's routes | the delivering host |
@@ -113,7 +114,8 @@ struct Ruling: Codable { let outcome: String }
 let step = SZStep(outcomes: ["build", "answer", "answer-resumed", "implement", "amend"]) { ctx in
     if ctx.run != nil { return "build" }        // a granted build arrives PRE-RULED
     let ruling = try await ctx.ask("triage", as: Ruling.self)
-    if ruling.outcome == "amend", !ctx.pendingTasks.isEmpty { return "amend" }
+    if ruling.outcome == "amend",
+       !ctx.pendingTasks.isEmpty || !ctx.runningTasks.isEmpty { return "amend" }
     if ruling.outcome == "implement" || ruling.outcome == "amend" {
         return .outcome("implement", effects: [.requestBuild])   // the task is the reply
     }

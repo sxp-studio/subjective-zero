@@ -25,7 +25,8 @@ private func specSource() throws -> String {
     // The wire document and its typed groups, in file order.
     let owners = Dictionary(grouping: spec.fields, by: \.owner)
     #expect(Set(owners.keys) == ["SZFacts", "SZRun", "SZAssignment"])
-    #expect(owners["SZFacts"]?.map(\.name) == ["message", "node", "resuming", "run", "assignment", "pendingTasks"])
+    #expect(owners["SZFacts"]?.map(\.name) == ["message", "node", "resuming", "run", "assignment",
+                                               "pendingTasks", "runningTasks"])
     #expect(owners["SZRun"]?.map(\.name) == ["workSet", "round", "roundCap", "steers", "instruction"])
     #expect(owners["SZAssignment"]?.map(\.name) == ["attempt", "note"])
     // Typed-group references and the plain whitelist, spot-checked.
@@ -36,6 +37,7 @@ private func specSource() throws -> String {
     #expect(field("assignment", "SZFacts")?.swiftType == "SZAssignment?")
     #expect(field("node", "SZFacts")?.swiftType == "UUID?")
     #expect(field("workSet", "SZRun")?.swiftType == "[UUID]")
+    #expect(field("runningTasks", "SZFacts")?.swiftType == "[UUID]")
     #expect(field("note", "SZAssignment")?.swiftType == "String?")
     // Every field carries a doc — the grammar makes doc-less vars unrepresentable, which
     // is where the consumer rule lives.

@@ -305,21 +305,51 @@ struct SZHostRunScopingTests {
         return envelope.id
     }
 
-    @Test func aRunDrainsOnlyTheSteersAimedAtItsOwnNodes() {
+    @Test func aRoundReadsOnlyTheSteersAimedAtTheNodesItIsDispatching() {
         let host = SZHost()
         let mine = SZNodeID(), theirs = SZNodeID()
-        let a = run(host, [mine], "run a")
+        _ = run(host, [mine], "run a")
         run(host, [theirs], "run b")
         _ = steer(host, to: mine, "for A")
         let other = steer(host, to: theirs, "for B")
 
-        let taken = host.takeDirectorMessages(for: a)
-        #expect(taken.keys.map(\.self) == [mine])
+        let peeked = host.pendingDirectorMessages(dispatching: [mine.uuidString])
+        #expect(peeked.keys.map(\.self) == [mine.uuidString])
         // B's steer is untouched and still deliverable — an unscoped drain consumed and discarded it.
         #expect(host.mailbox.envelope(for: other)?.state == .queued)
     }
 
-    @Test func aRunEndingSweepsOnlyItsOwnSteers() {
+    /// The drop this seam exists to prevent: a note is only settled once its node has an order.
+    /// Marking it delivered at the peek lost the words whenever the supervisor minted no order
+    /// for that node — it had already succeeded, the round was empty, the supervisor was busy —
+    /// while `ui_message_status` reported `processed` and the Director said it was passed on.
+    @Test func aSteerWhoseNodeGetsNoOrderStaysQueued() {
+        let host = SZHost()
+        let node = SZNodeID()
+        _ = run(host, [node], "run a")
+        let id = steer(host, to: node, "make it cooler")
+
+        let peeked = host.pendingDirectorMessages(dispatching: [node.uuidString])
+        host.consumeDirectorMessages(peeked, delivered: [])       // the round shipped nothing
+
+        #expect(host.mailbox.envelope(for: id)?.state == .queued)
+        #expect(host.pendingDirectorMessages(dispatching: [node.uuidString]).count == 1)
+    }
+
+    @Test func aSteerThatShipsIsSettled() {
+        let host = SZHost()
+        let node = SZNodeID()
+        _ = run(host, [node], "run a")
+        let id = steer(host, to: node, "make it cooler")
+
+        let peeked = host.pendingDirectorMessages(dispatching: [node.uuidString])
+        host.consumeDirectorMessages(peeked, delivered: [node.uuidString])
+
+        #expect(peeked[node.uuidString]?.text == "make it cooler")
+        #expect(host.mailbox.envelope(for: id)?.state == .processed)
+    }
+
+    @Test func aRunEndingTakesOnlyItsOwnSteers() {
         let host = SZHost()
         let mine = SZNodeID(), theirs = SZNodeID()
         let a = run(host, [mine], "run a")
@@ -327,7 +357,9 @@ struct SZHostRunScopingTests {
         let ours = steer(host, to: mine, "for A")
         let other = steer(host, to: theirs, "for B")
 
-        host.sweepUnconsumedSteers(for: a)
+        let orphaned = host.takeUnconsumedSteers(for: a)
+        // The words come back to the caller rather than dying with the run.
+        #expect(orphaned.map(\.text) == ["for A"])
         #expect(host.mailbox.envelope(for: ours)?.state == .failed)
         // One run ending must not destroy a concurrent run's pending steering.
         #expect(host.mailbox.envelope(for: other)?.state == .queued)

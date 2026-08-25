@@ -33,16 +33,19 @@ public struct SZFacts: Codable, Sendable {
     public var assignment: SZAssignment?
     /// Tasks scheduled but not yet started, oldest first. The director door's `amend`-vs-`schedule` fork — with none, there is nothing to fold into and the ruling cannot be `amend`. Their titles are the `{{tasks}}` brief token.
     public var pendingTasks: [UUID]
+    /// Tasks being built now, oldest first. The other half of the director door's `amend` fork: without it a message about work under way can only schedule a second run over the same nodes. Listed beside the scheduled ones in `{{tasks}}`.
+    public var runningTasks: [UUID]
 
     public init(message: String, node: UUID? = nil, resuming: Bool = false,
                 run: SZRun? = nil, assignment: SZAssignment? = nil,
-                pendingTasks: [UUID] = []) {
+                pendingTasks: [UUID] = [], runningTasks: [UUID] = []) {
         self.message = message
         self.node = node
         self.resuming = resuming
         self.run = run
         self.assignment = assignment
         self.pendingTasks = pendingTasks
+        self.runningTasks = runningTasks
     }
 }
 

@@ -209,7 +209,10 @@ is one traversal of an agent graph, recorded (`SZAgentGraphRun`). A task is *sch
 
 - A second ask is **queued, never dropped**. `SZHost.pendingTasks` is the FIFO;
   `admitPendingTasks` runs at the head of every mailbox pump pass, so a task always beats queued
-  prose to a freed resource.
+  prose to a freed resource. One exception, and it still does not drop the words: an ask whose
+  named nodes are ALL inside a live run folds into that run as a steer instead of queueing behind
+  it (`foldIntoLiveWork`), because queueing meant admitting it the moment the run released, finding
+  the nodes clean, and refusing it with a line that contradicted the run's own receipt.
 - **Runs are scoped by their work set, not serialized.** A run claims its work set's node +
   transcript pairs through `SZResourceLedger`; disjoint runs are live together, overlapping ones
   wait on the holder. The Director transcript is claimed **per turn**, not per run, so two runs'
@@ -242,8 +245,14 @@ has the profile format and env semantics). The parts that live in orchestration:
 ## Cross-agent messaging
 
 - Director Agent → a node's Coding Agent DURING a run: `ui_send_chat` is recorded as a `.steer`
-  envelope and folded into that node's reconcile retry — never a nested turn inside a synchronous
+  envelope and folded into that node's next dispatch — never a nested turn inside a synchronous
   MCP handler. The note also lands in the node's transcript as a `.director`-role message.
+- **A steer is settled only once it ships.** A dispatch round PEEKS the steers for the nodes it is
+  about to send (`pendingDirectorMessages`) and marks them processed only for the nodes that got an
+  order (`consumeDirectorMessages`); anything else stays queued for the next round. When the run
+  ends, what it never delivered comes back as an ordinary scheduled ask over that node
+  (`takeUnconsumedSteers`), so words are never consumed and thrown away. A run the user STOPPED
+  drops its steers instead: stopping means stop.
 - A coding agent reports back via `agent_report_status`; the reconcile loop reads those statuses,
   and its messages to the Director are rendered into the reconcile prompt's `{{inbox}}`.
 - **A mid-run user message is a steer; a message about work not yet started is an amend.** Both

@@ -278,16 +278,24 @@ struct SZBriefPinTests {
                    title: "add a soft glow", instruction: "add a soft glow",
                    createdAt: Date(timeIntervalSinceReferenceDate: 1)),
         ]
+        // And one being built: the door folds a message about live work into it rather than
+        // scheduling the same build twice, so the two states must render differently.
+        let building = [
+            SZTask(id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+                   title: "sharpen the edges", instruction: "sharpen the edges",
+                   state: .running, workSet: [cameraID],
+                   createdAt: Date(timeIntervalSinceReferenceDate: 2)),
+        ]
         out["director-triage.md"] = try renderer.render(
             agent: "director", template: "triage",
             message: "make it warmer and add a soft glow",
-            world: SZWorld(graph: base, pendingTasks: scheduled))
+            world: SZWorld(graph: base, pendingTasks: scheduled, runningTasks: building))
 
-        // — the amend lane: what the user just said, against work still waiting to start —
+        // — the amend lane: what the user just said, against work waiting to start or under way —
         out["director-amend.md"] = try renderer.render(
             agent: "director", template: "amend",
             message: "actually make it cooler, not warmer",
-            world: SZWorld(graph: base, pendingTasks: scheduled))
+            world: SZWorld(graph: base, pendingTasks: scheduled, runningTasks: building))
         out["coding-triage.md"] = try renderer.render(
             agent: "coding", template: "triage",
             message: "add a strength slider",

@@ -472,6 +472,21 @@ extension SZHost {
         mintRun(instruction: "", title: SZTask.title(fromInstruction: "", nodeCount: pendingNodeCount))
     }
 
+    /// Send an ask's words to the agents already building `held`, and drop the ask. A wordless
+    /// ask is satisfied by the run in flight, so it sends nothing.
+    func foldIntoLiveWork(instruction: String, held: Set<SZNodeID>) {
+        showChat()
+        let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            for node in held { recordDirectorMessage(node: node, message: trimmed) }
+        }
+        narrateDirector(trimmed.isEmpty
+            ? "That is already being built."
+            : "That is already being built. Your note goes to its agents, or comes back as its "
+                + "own build if it lands too late.")
+        status = trimmed.isEmpty ? "already building" : "folded into the work already building"
+    }
+
     /// Admit a SCHEDULED task: claim its work set and run it. The task carries the identity every
     /// per-run write is keyed by.
     @discardableResult
@@ -485,6 +500,14 @@ extension SZHost {
         // inferring it from "nothing else is running" denied ownership to the very run
         // implementing the pieces, and nothing else drains an op.
         let startedForGraphOp = adoptStagedGraphOp && hasStagedGraphOp && graphOpClaim != nil
+        // Every node this ask named is inside a live run, so it duplicates work under way.
+        // Waiting for the holder used to admit it the moment that run released, find the nodes
+        // clean, and refuse with "Nothing to build there" beside the run's own receipt. Needs
+        // nothing from the graph, so it is decided before the graph is read.
+        if !task.workSet.isEmpty, task.workSet.isSubset(of: runWorkSet) {
+            foldIntoLiveWork(instruction: instruction, held: task.workSet)
+            return .refused
+        }
         guard let mcpPort = agentMCPServer?.port, loadedProjectURL != nil else {
             // NOT-READY, not refused: print-only, and the slot survives — a mint that
             // raced project load fires when the pump next wakes with a project there.
@@ -508,17 +531,25 @@ extension SZHost {
         // floor. Two different situations, two different answers.
         if !task.workSet.isEmpty, implementable.isEmpty {
             if !candidates.taken.isEmpty {
-                // The work exists and is being built right now — WAIT for the holder. The task
-                // stays queued and the holder's release re-fires the pump.
+                // Only SOME of the named nodes are in a live run; the rest are clean or blank, and
+                // the blank ones still deserve the line below. Wait for the holder rather than
+                // folding a set the fold cannot speak for.
                 status = "waiting for \(candidates.taken.count) node(s) another task is building"
                 return .waiting
             }
-            showChat()
-            narrateDirector(blankIDs.isEmpty
-                ? "Nothing to build there — that node is already built and current. Say what should change and I'll take it to its agent."
-                : "That node has no prompt yet — describe what it should do, then build.")
-            status = "nothing to build for that ask"
-            return .refused
+            // Words are not nothing to do. "Nothing to build there — say what should change" used
+            // to answer an ask that had just said, and it is what a steer coming back as its own
+            // ask hits once its node is built and clean. A run with an instruction goes through:
+            // the Director's turn can set a default, re-brief, or retype a port, and the work it
+            // creates joins the run. Only a WORDLESS ask over nothing buildable is a dead end.
+            if instruction.isEmpty {
+                showChat()
+                narrateDirector(blankIDs.isEmpty
+                    ? "Nothing to build there — that node is already built and current. Say what should change and I'll take it to its agent."
+                    : "That node has no prompt yet — describe what it should do, then build.")
+                status = "nothing to build for that ask"
+                return .refused
+            }
         }
         let dirty = candidates.work.union(candidates.blank).union(candidates.taken)
         // Nothing to implement, nothing asked → skip the run entirely (a full run would burn
@@ -583,7 +614,8 @@ extension SZHost {
         // traversal's own record id (its children share it), minted here so the run's closing
         // RECEIPT can carry it — that stamp is the transcript's durable way back once it scrolls away.
         let run = SZRunState(taskID: taskID, claim: claim, instruction: instruction,
-                             origin: task.origin, ownsGraphOp: startedForGraphOp, workSet: workSet)
+                             title: task.title, origin: task.origin,
+                             ownsGraphOp: startedForGraphOp, workSet: workSet)
         activeRuns[taskID] = run
         let thread = run.thread
         // A grade is one briefing's read: this run's nodes start ungraded (its own Director
@@ -602,7 +634,7 @@ extension SZHost {
             defer {
                 // The CAPTURED run, never a live lookup — after an eager `cancelRun` this is the
                 // zombie task's idempotent second settle, and the slot may hold a newer run.
-                if isLive(run) { sweepUnconsumedSteers(for: run) }
+                let orphanedSteers = isLive(run) ? takeUnconsumedSteers(for: run) : []
                 ledger.releaseAll(of: claim)
                 if isLive(run) {
                     activeRuns[taskID] = nil
@@ -619,6 +651,14 @@ extension SZHost {
                 sealLeakedAgentGraphRuns(thread: thread)
                 flushAllTranscripts()      // run end = flush point (success, throw, or cancel)
                 persistAgentSessions()
+                // A steer this run never delivered becomes an ordinary scheduled ask over its
+                // node. Last in the defer so the claim is gone and the run deregistered: minting
+                // re-enters the pump, and a task whose node still read as held would fold itself
+                // straight back into the run that is dying. Queueing is a strip row, not a line.
+                for (node, text) in orphanedSteers {
+                    mintRun(instruction: text, title: SZTask.title(fromInstruction: text,
+                                                                   nodeCount: 1), nodes: [node])
+                }
             }
             do {
                 try await runBuildDelivery(
@@ -863,14 +903,12 @@ extension SZHost {
         router: any SZModelRouting, providerID: String, mcpPort: UInt16,
         cacheDirectory: URL
     ) async -> SZSettledSummary? {
-        // The Director's authored notes drained AT THE SEND, so a note authored during
-        // the traversal rides the orders it aimed at.
-        var notes: [String: String] = [:]
-        for (node, text) in takeDirectorMessages(for: run) {
-            notes[node.uuidString] = text
-        }
+        // The Director's authored notes ride the orders they aimed at. Peeked, not drained: the
+        // supervisor decides which items become orders, and a note whose node got none must stay
+        // queued rather than be marked delivered and thrown away.
+        let peeked = pendingDirectorMessages(dispatching: Set(workOrders.map(\.node)))
         let minted = state.supervisor.handle(.dispatched(SZDispatchIntent(
-            target: seat, items: workOrders.map(\.node), notes: notes)))
+            target: seat, items: workOrders.map(\.node), notes: peeked.mapValues(\.text))))
         var orders: [SZDispatchOrder] = []
         var deadline: Duration?
         var setID: Int?
@@ -881,6 +919,7 @@ extension SZHost {
             default: break
             }
         }
+        consumeDirectorMessages(peeked, delivered: Set(orders.map(\.node)))
         guard let setID else {
             // An empty dispatch settles instantly and honestly rather than parking the run.
             return SZSettledSummary(setID: 0, from: seat, outcomes: [:],
@@ -1162,7 +1201,7 @@ extension SZHost {
         // CLI agents finally die. The zombie task's deferred releaseAll of the same token is
         // an idempotent no-op; its still-streaming turns stay safe because the pump's
         // delivery precondition also checks the scope's in-flight marker.
-        sweepUnconsumedSteers(for: run)
+        takeUnconsumedSteers(for: run)   // dropped, not rescheduled: the user stopped this work
         // DEREGISTER FIRST: releasing a claim re-enters the pump synchronously, and a run still
         // in `activeRuns` makes its own freed nodes read as taken to the task waiting on them.
         activeRuns[run.taskID] = nil
@@ -1295,21 +1334,37 @@ extension SZHost {
         return "chat turn '\(scope.key)'"
     }
 
-    /// Drain the queued `.steer` envelopes aimed at THIS RUN's nodes (mark processed) — folded
-    /// into each node's retry order. Multiple steers to one node fold in FIFO order.
+    /// The queued steers aimed at the nodes a round is about to dispatch, WITHOUT consuming them.
+    /// Multiple steers to one node fold in FIFO order; each node's envelope ids ride along so
+    /// `consumeDirectorMessages` can settle them once the words have actually shipped.
     ///
-    /// Scoped to the run's work set because the mailbox is host-wide: an unscoped drain let the
-    /// first run to dispatch consume and silently discard steers addressed to a concurrent run's
-    /// nodes, which then never reached the agent they were written for.
-    func takeDirectorMessages(for run: SZRunState) -> [SZNodeID: String] {
-        var taken: [SZNodeID: [String]] = [:]
+    /// Peeked rather than drained because a note only reaches an agent through an ORDER, and
+    /// three things downstream can decide there is no order: the node left the round's items, the
+    /// supervisor was not idle, the item list was empty. Draining first marked the envelope
+    /// processed on all three, so the words were gone and `ui_message_status` said delivered.
+    ///
+    /// Scoped by `dispatching`, which is one run's own orders, so a concurrent run's steers are
+    /// never touched.
+    func pendingDirectorMessages(dispatching: Set<String>) -> [String: (text: String, ids: [UUID])] {
+        var folded: [String: (texts: [String], ids: [UUID])] = [:]
         for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued {
             guard let node = SZChatScope(key: envelope.recipient)?.nodeID,
-                  run.workSet.contains(node) else { continue }
-            taken[node, default: []].append(envelope.message.text)
-            mailbox.markProcessed(envelope.id)
+                  dispatching.contains(node.uuidString) else { continue }
+            var entry = folded[node.uuidString] ?? (texts: [], ids: [])
+            entry.texts.append(envelope.message.text)
+            entry.ids.append(envelope.id)
+            folded[node.uuidString] = entry
         }
-        return taken.mapValues { $0.joined(separator: "\n\n") }
+        return folded.mapValues { (text: $0.texts.joined(separator: "\n\n"), ids: $0.ids) }
+    }
+
+    /// Settle the peeked steers whose node actually got an order. What did not ship stays queued:
+    /// it rides the next round, or comes back as its own ask when the run ends.
+    func consumeDirectorMessages(_ peeked: [String: (text: String, ids: [UUID])],
+                                 delivered: Set<String>) {
+        for (node, entry) in peeked where delivered.contains(node) {
+            for id in entry.ids { mailbox.markProcessed(id) }
+        }
     }
 
     /// Drain the coding agents' queued `.steer` envelopes TO the Director — rendered into
@@ -1324,18 +1379,27 @@ extension SZHost {
         return taken
     }
 
-    /// Fail the `.steer` envelopes still queued for THIS RUN when it ends (run-task defer AND
-    /// eager cancel) — a steer is run-scoped: leaving it queued would leak a dead run's steering
-    /// into an unrelated next run, and any `awaitProcessed` waiter must resume, not park forever.
+    /// Take the `.steer` envelopes still queued for this run's nodes when it ends, marking each
+    /// terminal so an `awaitProcessed` waiter resumes rather than parking forever, and hand the
+    /// words back. A steer is run-scoped: leaving one queued would leak a dead run's steering
+    /// into an unrelated next run.
+    ///
+    /// The caller decides what the words are worth. A run that ENDED never gave its agent the
+    /// note, so the ask comes back scheduled (the defer); a run the user STOPPED should not
+    /// resurrect the work they stopped, so its notes are dropped with it.
     ///
     /// Scoped to the run's own nodes for the same reason the drain is: sweeping the host-wide
     /// mailbox meant one run ending destroyed every concurrent run's pending steering.
-    func sweepUnconsumedSteers(for run: SZRunState) {
+    @discardableResult
+    func takeUnconsumedSteers(for run: SZRunState) -> [(node: SZNodeID, text: String)] {
+        var orphaned: [(node: SZNodeID, text: String)] = []
         for envelope in mailbox.envelopes where envelope.intent == .steer && envelope.state == .queued {
             guard let node = SZChatScope(key: envelope.recipient)?.nodeID,
                   run.workSet.contains(node) else { continue }
-            mailbox.markFailed(envelope.id, reason: "run ended before the steer was consumed")
+            orphaned.append((node, envelope.message.text))
+            mailbox.markFailed(envelope.id, reason: "the run ended before the steer was consumed")
         }
+        return orphaned
     }
 }
 

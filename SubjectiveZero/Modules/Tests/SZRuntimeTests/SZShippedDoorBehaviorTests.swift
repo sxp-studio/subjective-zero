@@ -46,7 +46,7 @@ struct SZShippedDoorBehaviorTests {
     @Test func aGrantedRunEntersTheBuildLaneWithoutSpendingAToken() async throws {
         let (loader, dir) = try compiled("director", "door")
         defer { try? FileManager.default.removeItem(at: dir) }
-        let facts = #"{"message": "build it", "resuming": true, "pendingTasks": [], "run": {"workSet": ["\#(UUID().uuidString)"], "round": 1, "roundCap": 2, "steers": [], "instruction": "build it"}}"#
+        let facts = #"{"message": "build it", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": ["\#(UUID().uuidString)"], "round": 1, "roundCap": 2, "steers": [], "instruction": "build it"}}"#
         let (outcome, asks) = await decide(loader, facts: facts)
         #expect(outcome == .outcome("build"))
         // The fleet path spends ZERO model calls: a granted run is pre-ruled, never re-triaged.
@@ -57,7 +57,7 @@ struct SZShippedDoorBehaviorTests {
         let (loader, dir) = try compiled("director", "door")
         defer { try? FileManager.default.removeItem(at: dir) }
         let (outcome, asks) = await decide(
-            loader, facts: #"{"message": "make it warmer", "resuming": false, "pendingTasks": []}"#,
+            loader, facts: #"{"message": "make it warmer", "resuming": false, "pendingTasks": [], "runningTasks": []}"#,
             reply: #"{"outcome": "implement"}"#)
         #expect(outcome == .outcome(#"{"effects":["requestBuild"],"outcome":"implement"}"#))
         #expect(asks.count == 1)
@@ -73,25 +73,34 @@ struct SZShippedDoorBehaviorTests {
         // With work waiting, the follow-up takes the amend lane and spends nothing on a build.
         let (folds, _) = await decide(
             loader,
-            facts: #"{"message": "actually blue", "resuming": false, "pendingTasks": ["\#(scheduled)"]}"#,
+            facts: #"{"message": "actually blue", "resuming": false, "pendingTasks": ["\#(scheduled)"], "runningTasks": []}"#,
             reply: ruling)
         #expect(folds == .outcome("amend"))
 
         // With NOTHING scheduled the same ruling cannot stand — there is no task to fold into, so
         // the ask becomes a fresh one rather than routing to a turn with no work to do.
         let (fresh, _) = await decide(
-            loader, facts: #"{"message": "actually blue", "resuming": false, "pendingTasks": []}"#,
+            loader, facts: #"{"message": "actually blue", "resuming": false, "pendingTasks": [], "runningTasks": []}"#,
             reply: ruling)
         #expect(fresh == .outcome(#"{"effects":["requestBuild"],"outcome":"implement"}"#))
+
+        // Work already building is just as foldable, and it is the case that matters: without it
+        // a repeat of a live ask schedules the same build twice, and the two runs contradict each
+        // other in the transcript.
+        let (steer, _) = await decide(
+            loader,
+            facts: #"{"message": "actually blue", "resuming": false, "pendingTasks": [], "runningTasks": ["\#(UUID().uuidString)"]}"#,
+            reply: ruling)
+        #expect(steer == .outcome("amend"))
     }
 
     @Test func proseIsAnsweredColdOrResumedOnTheScopesSession() async throws {
         let (loader, dir) = try compiled("director", "door")
         defer { try? FileManager.default.removeItem(at: dir) }
         let answer = #"{"outcome": "answer"}"#
-        let cold = await decide(loader, facts: #"{"message": "hi", "resuming": false, "pendingTasks": []}"#, reply: answer)
+        let cold = await decide(loader, facts: #"{"message": "hi", "resuming": false, "pendingTasks": [], "runningTasks": []}"#, reply: answer)
         #expect(cold.outcome == .outcome("answer"))
-        let resumed = await decide(loader, facts: #"{"message": "hi again", "resuming": true, "pendingTasks": []}"#, reply: answer)
+        let resumed = await decide(loader, facts: #"{"message": "hi again", "resuming": true, "pendingTasks": [], "runningTasks": []}"#, reply: answer)
         #expect(resumed.outcome == .outcome("answer-resumed"))
     }
 
@@ -101,14 +110,14 @@ struct SZShippedDoorBehaviorTests {
         let (loader, dir) = try compiled("coding", "door")
         defer { try? FileManager.default.removeItem(at: dir) }
         let first = await decide(loader,
-            facts: #"{"message": "", "resuming": false, "pendingTasks": [], "assignment": {"attempt": 1}}"#)
+            facts: #"{"message": "", "resuming": false, "pendingTasks": [], "runningTasks": [], "assignment": {"attempt": 1}}"#)
         #expect(first.outcome == .outcome("implement"))
         let retry = await decide(loader,
-            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "assignment": {"attempt": 2, "note": "port math was off"}}"#)
+            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "runningTasks": [], "assignment": {"attempt": 2, "note": "port math was off"}}"#)
         #expect(retry.outcome == .outcome("continue"))
         // A retry with no session to continue (the first attempt never pinned one) starts over.
         let coldRetry = await decide(loader,
-            facts: #"{"message": "", "resuming": false, "pendingTasks": [], "assignment": {"attempt": 2}}"#)
+            facts: #"{"message": "", "resuming": false, "pendingTasks": [], "runningTasks": [], "assignment": {"attempt": 2}}"#)
         #expect(coldRetry.outcome == .outcome("implement"))
         // The whole coding surface is deterministic — not one model call.
         #expect(first.asks.isEmpty && retry.asks.isEmpty && coldRetry.asks.isEmpty)
@@ -118,10 +127,10 @@ struct SZShippedDoorBehaviorTests {
         let (loader, dir) = try compiled("coding", "door")
         defer { try? FileManager.default.removeItem(at: dir) }
         let chat = #"{"outcome": "chat"}"#
-        let cold = await decide(loader, facts: #"{"message": "what does this node do?", "resuming": false, "pendingTasks": []}"#,
+        let cold = await decide(loader, facts: #"{"message": "what does this node do?", "resuming": false, "pendingTasks": [], "runningTasks": []}"#,
                                 reply: chat)
         #expect(cold.outcome == .outcome("chat"))
-        let resumed = await decide(loader, facts: #"{"message": "and now?", "resuming": true, "pendingTasks": []}"#,
+        let resumed = await decide(loader, facts: #"{"message": "and now?", "resuming": true, "pendingTasks": [], "runningTasks": []}"#,
                                    reply: chat)
         #expect(resumed.outcome == .outcome("chat-resumed"))
         // One triage ask each — the model judges prose; the session fork is mechanical.
@@ -133,13 +142,13 @@ struct SZShippedDoorBehaviorTests {
         let (loader, dir) = try compiled("coding", "door")
         defer { try? FileManager.default.removeItem(at: dir) }
         let (outcome, asks) = await decide(
-            loader, facts: #"{"message": "add a toggle between the two effects", "resuming": true, "pendingTasks": []}"#,
+            loader, facts: #"{"message": "add a toggle between the two effects", "resuming": true, "pendingTasks": [], "runningTasks": []}"#,
             reply: #"{"outcome": "edit"}"#)
         #expect(outcome == .outcome("edit"))
         #expect(asks.count == 1)
         // The ruling ignores the session fork — a first-contact change request edits too.
         let cold = await decide(
-            loader, facts: #"{"message": "make it twice as slow", "resuming": false, "pendingTasks": []}"#,
+            loader, facts: #"{"message": "make it twice as slow", "resuming": false, "pendingTasks": [], "runningTasks": []}"#,
             reply: #"{"outcome": "edit"}"#)
         #expect(cold.outcome == .outcome("edit"))
     }
@@ -149,7 +158,7 @@ struct SZShippedDoorBehaviorTests {
     @Test func theDebugDoorAnswersEverythingWithoutAsking() async throws {
         let (loader, dir) = try compiled("debug", "door")
         defer { try? FileManager.default.removeItem(at: dir) }
-        let (outcome, asks) = await decide(loader, facts: #"{"message": "why is it black?", "resuming": false, "pendingTasks": []}"#)
+        let (outcome, asks) = await decide(loader, facts: #"{"message": "why is it black?", "resuming": false, "pendingTasks": [], "runningTasks": []}"#)
         #expect(outcome == .outcome("answer"))
         #expect(asks.isEmpty)
     }
@@ -158,10 +167,10 @@ struct SZShippedDoorBehaviorTests {
         let (loader, dir) = try compiled("director", "work-left")
         defer { try? FileManager.default.removeItem(at: dir) }
         let owing = await decide(loader,
-            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "run": {"workSet": ["\#(UUID().uuidString)"], "round": 2, "roundCap": 2, "steers": [], "instruction": ""}}"#)
+            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": ["\#(UUID().uuidString)"], "round": 2, "roundCap": 2, "steers": [], "instruction": ""}}"#)
         #expect(owing.outcome == SZStepEvalResult.outcome("yes"))
         let settled = await decide(loader,
-            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "run": {"workSet": [], "round": 2, "roundCap": 2, "steers": [], "instruction": ""}}"#)
+            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": [], "round": 2, "roundCap": 2, "steers": [], "instruction": ""}}"#)
         #expect(settled.outcome == SZStepEvalResult.outcome("no"))
     }
 }

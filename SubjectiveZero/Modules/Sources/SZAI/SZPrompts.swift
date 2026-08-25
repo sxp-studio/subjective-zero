@@ -161,14 +161,25 @@ public enum SZDirectorPrompt {
         inbox.isEmpty ? "- (none)" : inbox.map { "- \($0)" }.joined(separator: "\n")
     }
 
-    /// The triage/amend briefs' `{{tasks}}` value — the scheduled work not yet started, oldest
-    /// first, each line led by the id an amend or cancel names.
+    /// The triage/amend briefs' `{{tasks}}` value — the work in hand, oldest first, each line led
+    /// by the id an amend or cancel names and marked with its state. Running work is listed too, or
+    /// a message about what is being built can only schedule that same work a second time.
     static func taskLines(_ tasks: [SZTask]) -> String {
-        guard !tasks.isEmpty else { return "- (nothing scheduled)" }
+        guard !tasks.isEmpty else { return "- (nothing scheduled or running)" }
         return tasks.map { task in
-            let nodes = task.workSet.isEmpty ? "" : " — \(task.workSet.count) node"
-                + (task.workSet.count == 1 ? "" : "s")
-            return "- `\(task.id.uuidString)` \"\(task.title)\"\(nodes)\n  asked: \(task.instruction)"
+            let nodes: String
+            if task.workSet.isEmpty {
+                nodes = ""
+            } else if task.state == .running {
+                // Running work is steered node by node, so the amend turn needs the ids: a
+                // count says there is something to message, not where to send it.
+                nodes = " — on " + task.workSet.map { "`\($0.uuidString)`" }
+                    .sorted().joined(separator: ", ")
+            } else {
+                nodes = " — \(task.workSet.count) node" + (task.workSet.count == 1 ? "" : "s")
+            }
+            let state = task.state == .running ? " [BUILDING NOW]" : " [scheduled]"
+            return "- `\(task.id.uuidString)`\(state) \"\(task.title)\"\(nodes)\n  asked: \(task.instruction)"
         }.joined(separator: "\n")
     }
 

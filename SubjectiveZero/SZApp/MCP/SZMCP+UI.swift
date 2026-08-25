@@ -89,7 +89,7 @@ extension SZHostBridge {
                     "profile": ["type": "string", "description": "a saved profile name; null/\"\"/omitted = Off"],
                  ]),
             tool("ui_routing_profiles", "The saved model-routing profiles: {profiles: [names], active_profile, env_pinned}. `env_pinned` is the profile SZ_MODEL_ROUTING pinned at launch (null when the variable is unset or is only the 0/1 switch); while pinned, the pin — not `active_profile` — governs new work."),
-            tool("ui_run", "Start the implementation run over the current graph — a Coding Agent per pending node, with the active provider. `instruction` (optional) steers the run. Called from your own chat turn, the task is QUEUED and starts when your turn ends (finish your reply; do not wait for it). A task asked for while another is running is queued too — never refused — and starts when the work it needs is free.",
+            tool("ui_run", "Schedule an implementation run over the current graph — a Coding Agent per pending node, with the active provider. `instruction` (optional) steers the run. Only a conversation turn may start work: a turn that is itself part of a run is refused, because that run already dispatches its own agents. To change work that is under way, message the node's agent with `ui_send_chat` instead. The task is scheduled, never started inline: it begins once your turn ends and once the nodes it needs are free, so finish your reply rather than waiting on it.",
                  properties: [
                     "instruction": ["type": "string", "description": "optional free-text steer for the run"],
                     "nodes": ["type": "array", "items": ["type": "string"],
@@ -669,6 +669,20 @@ extension SZHostBridge {
         // Naming nodes SCOPES the task to them — the only way two asks can be concurrent.
         let nodes = Set((arguments["nodes"] as? [Any] ?? [])
             .compactMap { ($0 as? String).flatMap(UUID.init(uuidString:)) })
+        // A turn inside a run may not schedule another: its run already dispatches a fleet off
+        // its own edges, so this asks for work under way. Keyed on the caller's claim, so it
+        // covers every agent on every provider without naming one. Blind spot, shared with the
+        // mutation fence: a turn that fell back to the standing agent bus (no free port for its
+        // own listener) carries no claim, and is not caught here.
+        if let run = host.activeRun(for: SZToolCaller.claim) {
+            let held = run.workSet.count
+            return SZJSONRPC.encode([
+                "status": "refused",
+                "reason": "your turn is already inside a run over \(held) node(s), which dispatches "
+                    + "its own agents. To steer that work, send the node's agent a message with "
+                    + "ui_send_chat.",
+            ])
+        }
         // NOT gated on "something is already running" — that is the whole point: an ask over
         // other nodes starts alongside. Only a claim it cannot get makes it wait, and that is
         // `startRun`'s own verdict below.

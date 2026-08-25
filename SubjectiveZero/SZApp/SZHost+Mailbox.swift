@@ -391,6 +391,7 @@ extension SZHost {
                                node: scope.nodeID,
                                resuming: graph.resumes(existing, agent: pack.id, router: router),
                                pendingTasks: self.pendingTasks,
+                               runningTasks: self.runningTasks,
                                conversation: self.conversation(for: scope,
                                                                excluding: priorConversationExcluding))
             },
