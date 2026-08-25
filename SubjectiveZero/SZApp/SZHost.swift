@@ -1397,6 +1397,27 @@ final class SZHost {
         return value
     }
 
+    /// Push the values a port edit moved into the runtime — the tail of `ui_edit_ports`, and the same duty
+    /// `setInputDefault` discharges for a single knob.
+    ///
+    /// The contract is where a value persists; the runtime holds the override the node reads each frame, and
+    /// `loadProject`'s reconcile keeps that override on purpose (a slider drag survives a structural edit).
+    /// Without this, an edit that rebound or cleared a value leaves the card showing one number and the node
+    /// rendering another until the app relaunches. Ports the edit left alone are untouched, so a card gesture
+    /// or a controller binding driving an input live is never interrupted.
+    func applyPortValueChanges(node: SZNodeID, _ changes: [SZStore.SZPortValueChange]) {
+        guard !changes.isEmpty else { return }
+        let inputs = store.project?.graph.node(id: node)?.contract?.inputs ?? []
+        for change in changes where inputs.contains(where: { $0.name == change.port }) {
+            guard let value = change.value else {
+                runtime?.clearInput(node: node, port: change.port)
+                continue
+            }
+            if let floats = value.floats { runtime?.setInputValue(node: node, port: change.port, floats: floats) }
+            if let string = value.string { runtime?.setInputString(node: node, port: change.port, string: string) }
+        }
+    }
+
     /// A prompt the user is mid-typing, held live but not yet persisted (the field commits only on blur).
     /// `startRun` flushes it before it claims the node, so a Build hit while the field is still focused
     /// runs against the typed text, not the stale model value (a later blur would drop it behind the fence).

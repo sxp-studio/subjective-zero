@@ -26,7 +26,11 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
 - `ui_edit_ports { "node": "<id>", "inputs": { "upsert": [<Port>], "remove": ["<name>"] }, "outputs": {…} }` —
   declare a node's typed I/O. **This is your main job.** Ports you don't mention are left alone, so you can add
   one input without knowing the rest; to delete or rename a port you must say so explicitly via `remove`.
-  Re-sending a port by name replaces it (that is how you change its type).
+  Re-sending a port by name rewrites its declaration: that is how you retype it, or move a slider's
+  range. It keeps the value the port already holds, and any control hint you leave out. That value is
+  the user's knob, and `ui_set_input_default` is the only way to change it. A retype, or withdrawing an
+  `enum` option that is in use, drops the value, and the response lists what it dropped in
+  `droppedValues`.
   Editing the ports of a node that is already implemented marks it **needs rebuild** — it keeps rendering its
   old code until a Coding Agent regenerates it against the new contract. That is expected: declare the ports
   you want, then let the run (or a node chat) implement them. Never assume a port you just declared is live.
@@ -37,7 +41,8 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
 - `ui_set_input_default { "node": "<id>", "port": "<name>", "value": <v> }` — the VALUE an unconnected
   input holds. A knob turn, not a contract edit: no rebuild, and the live render changes at once. The
   value is coerced to the port's type and clamped to its slider range, so the response's `value` is the
-  APPLIED one. Use it whenever the ask is only a value the node already exposes.
+  APPLIED one. Use it whenever the ask is only a value the node already exposes. Re-declaring the port
+  through `ui_edit_ports` will not change its value; only this tool does.
 - `ui_update_node { "node": "<id>", "title": "...", "sfSymbol": "...", "summary": "...", "prompt": "...",
   "permissions": ["camera"] }` — a node's identity and intent. It **cannot** change ports; use `ui_edit_ports`.
   Sending a new `prompt` to an implemented node marks it **needs rebuild** (the response echoes

@@ -220,12 +220,34 @@ extension SZStore {
         public var droppedConnections: [SZConnectionID]
         /// The render endpoint named a port that no longer exists (or stopped being a texture output).
         public var clearedRenderEndpoint: Bool
+        /// Every port whose stored value this edit moved. The host pushes these into the runtime.
+        public var changedValues: [SZPortValueChange]
+
+        /// One line per port whose value this edit could not carry: a type it no longer fits, or an `enum`
+        /// option withdrawn while it was in use. Every other re-declared port keeps the value it held.
+        public var droppedValues: [String] { changedValues.compactMap(\.note) }
+    }
+
+    /// One input whose stored value a port edit moved: rebound into a control that changed under it, cleared
+    /// where it could no longer stand, or seeded onto a port that held none.
+    ///
+    /// Reported because the contract is only where a value PERSISTS: the runtime holds the live override the
+    /// node actually reads, and a reload deliberately keeps that override (a slider drag must survive a
+    /// structural edit). So a value this edit moved reaches the render only if the host pushes it.
+    public struct SZPortValueChange: Equatable, Sendable {
+        /// The port, on the edited node.
+        public var port: String
+        /// What it holds now — nil where the edit cleared it.
+        public var value: SZPortValue?
+        /// The line for the agent, where the value was lost rather than rebound.
+        public var note: String?
     }
 
     /// Apply a port delta to a node's contract and prune whatever the new surface invalidated. On a node that
     /// already has a build, `needsRebuild` follows from the surface moving off the build stamp (derived).
     ///
-    /// `upsert` matches by name (replacing that port wholesale, so a retype lands here); `remove` deletes by name.
+    /// `upsert` matches by name, rewriting that port's declaration (a retype lands here) but never the value it
+    /// holds — see `apply`. `remove` deletes by name.
     /// A node with no contract yet gets one synthesized from its identity — this is how the Director declares a
     /// fresh prompt node's typed I/O.
     ///
@@ -235,8 +257,8 @@ extension SZStore {
     @discardableResult
     public func editPorts(node id: SZNodeID, _ edit: SZPortEdit) -> SZPortEditResult {
         assertFenceCleared([id])
-        var result = SZPortEditResult(found: false, raisedRebuild: false,
-                                      droppedConnections: [], clearedRenderEndpoint: false)
+        var result = SZPortEditResult(found: false, raisedRebuild: false, droppedConnections: [],
+                                      clearedRenderEndpoint: false, changedValues: [])
         mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
             result.found = true
@@ -245,8 +267,10 @@ extension SZStore {
             var contract = node.contract ?? SZNodeContract(
                 title: node.title, sfSymbol: node.sfSymbol, summary: node.prompt ?? node.title)
 
-            Self.apply(edit.removeInputs, edit.upsertInputs, to: &contract.inputs)
-            Self.apply(edit.removeOutputs, edit.upsertOutputs, to: &contract.outputs)
+            Self.apply(edit.removeInputs, edit.upsertInputs, to: &contract.inputs,
+                       side: "input", changed: &result.changedValues)
+            Self.apply(edit.removeOutputs, edit.upsertOutputs, to: &contract.outputs,
+                       side: "output", changed: &result.changedValues)
 
             project.graph.nodes[i].contract = contract
 
@@ -361,20 +385,79 @@ extension SZStore {
         return s
     }
 
-    /// Remove by name, then upsert by name (append if new, replace in place if it exists — so a port keeps its
+    /// Remove by name, then upsert by name (append if new, merge in place if it exists — so a port keeps its
     /// position in the list across a retype).
-    private static func apply(_ removals: [String], _ upserts: [SZPort], to ports: inout [SZPort]) {
+    ///
+    /// The declaration is the caller's, the value is the user's. An upsert's `type` and every facet it states
+    /// land; a facet it omits (`ui`, `options`, `display`) is kept, and the `def` the port already holds
+    /// outranks the incoming one — that is where `setInputDefault` writes the user's knob, and
+    /// `setInputDefault` is the one way to change it. Same polarity as the promote merge's
+    /// `live.def ?? staged.def`. A port holding no value still takes the caller's, so a first declaration
+    /// lands verbatim. `side` only names the direction in the reported lines.
+    private static func apply(_ removals: [String], _ upserts: [SZPort], to ports: inout [SZPort],
+                              side: String, changed: inout [SZPortValueChange]) {
         if !removals.isEmpty {
             let drop = Set(removals)
             ports.removeAll { drop.contains($0.name) }
         }
         for port in upserts {
-            if let existing = ports.firstIndex(where: { $0.name == port.name }) {
-                ports[existing] = port
-            } else {
+            guard let existing = ports.firstIndex(where: { $0.name == port.name }) else {
                 ports.append(port)
+                continue
+            }
+            let live = ports[existing]
+            var merged = port
+            // Only at the same type: a retype's facets described the old type, so a stale option list or a
+            // slider's bounds must not survive onto the new one.
+            if port.type == live.type {
+                merged.ui = port.ui ?? live.ui
+                merged.options = port.options ?? live.options
+                merged.display = port.display ?? live.display
+            }
+            // Last, and against the merged port: a value is judged by the declaration this edit leaves behind.
+            let carried = carriedDefault(live.def, into: merged, side: side)
+            merged.def = carried.value
+            ports[existing] = merged
+            // Only a value that actually moved: an edit that leaves one alone must not disturb the live
+            // override the node is reading (a card gesture or a controller binding drives that, not `def`).
+            if carried.value != live.def {
+                changed.append(SZPortValueChange(port: merged.name, value: carried.value, note: carried.note))
             }
         }
+    }
+
+    /// The value a re-declared port keeps, re-snapped into its new declaration by `clampedDefault`. Dropped
+    /// only where it cannot stand — a type it no longer fits, or an `enum` whose options no longer offer it —
+    /// and each drop names the port in `dropped`, so the agent hears which knob it just reset instead of the
+    /// user finding it in the render.
+    ///
+    /// The caller's own `def` then applies, on the same terms: nothing reaches a contract through here that
+    /// the port's own control could not produce, which is the invariant `setInputDefault` documents.
+    private static func carriedDefault(_ value: SZPortValue?, into port: SZPort,
+                                       side: String) -> (value: SZPortValue?, note: String?) {
+        var note: String?
+        if let value {
+            if value.type != port.type {
+                note = "\(side) '\(port.name)': dropped its value"
+                    + " (\(value.type.rawValue) does not fit the \(port.type.rawValue) you declared)"
+            } else if !offers(port, value) {
+                note = "\(side) '\(port.name)': dropped its value (not among the options you declared)"
+            } else {
+                return (port.clampedDefault(value), nil)
+            }
+        }
+        guard let stated = port.def, stated.type == port.type, offers(port, stated) else { return (nil, note) }
+        return (port.clampedDefault(stated), note)
+    }
+
+    /// Whether `port` declares `value` as one of its choices. An `enum` with no `options` is dynamic (the node
+    /// supplies them at runtime, like `camera`), so it vouches for nothing and the value stands. Kept out of
+    /// `SZPort.clampedDefault`: that snaps onto a nearest legal value, this rejects with none to land on, and
+    /// a live node's option list may exceed the contract's, so `setInputDefault` must not consult it.
+    private static func offers(_ port: SZPort, _ value: SZPortValue) -> Bool {
+        guard port.type == .enumeration, case .enumeration(let choice) = value,
+              let options = port.options, !options.isEmpty else { return true }
+        return options.contains { $0.value == choice }
     }
 
     /// Whether a data edge touching `editedNode` survives that node's new port surface.

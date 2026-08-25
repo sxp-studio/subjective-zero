@@ -292,6 +292,9 @@ private func loadedStore() -> SZStore {
 // The regression these pin: a Director added one input to the Kaleidoscope by re-sending a whole contract that
 // omitted the node's seven knobs, which deleted them; and because nothing marked the node for rebuild, its
 // compiled source kept running against a contract it no longer matched.
+//
+// And the one below it (#54): re-sending a port the user had already filled in wiped the value with it — a
+// picked model file back to empty, a dragged slider back to the authored default, nothing said.
 
 @MainActor
 private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZPort] = []) -> SZNodeID {
@@ -448,11 +451,13 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
     #expect(store.setRenderEndpoint(SZPortRef(node: id, port: "output")) == true)
     #expect(store.project!.graph.node(id: id)!.needsRebuild == false)
 
-    // re-upserting a port with a new ui/default but the same (name, type)
+    // re-upserting a port with a new ui but the same (name, type) — the value it holds is kept, not the
+    // authored one (see the value tests below)
     let r = store.editPorts(node: id, .init(upsertInputs: [
         SZPort(name: "amount", type: .float, ui: SZPortUI(kind: .field), def: .float(0.9))]))
     #expect(r.raisedRebuild == false)
     #expect(store.project!.graph.node(id: id)!.needsRebuild == false)
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == .float(0.5))
 }
 
 @MainActor
@@ -535,4 +540,278 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
     #expect(contract.summary == "live mic")
     #expect(contract.outputs.map(\.name) == ["samples"])
     #expect(store.project!.graph.node(id: id)!.needsRebuild == false)   // never built → nothing to rebuild
+}
+
+// MARK: - A re-declared port keeps the value the user set (#54)
+//
+// The declaration is the caller's, the value is the user's. `setInputDefault` is the one path that changes a
+// value; `editPorts` rewrites everything else around it.
+
+@MainActor
+@Test func reDeclaringAPortKeepsTheValueTheUserSet() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "amount", type: .float,
+                                                  ui: SZPortUI(kind: .slider, min: 0, max: 1))])
+    #expect(store.setInputDefault(node: id, port: "amount", value: .float(0.75)) == true)
+
+    // The agent re-sends the port carrying the default it authored. The user's value outranks it.
+    let result = store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "amount", type: .float, ui: SZPortUI(kind: .slider, min: 0, max: 1), def: .float(0.2))]))
+
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == .float(0.75))
+    #expect(result.droppedValues.isEmpty)
+    #expect(result.raisedRebuild == false)   // a value is not part of the port surface
+}
+
+/// The file-picker case from the repro: a `string` input whose value is a path the user chose, re-declared by
+/// an agent that says nothing about values at all.
+@MainActor
+@Test func reDeclaringAPortKeepsItsControlHintAndItsPickedFile() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "modelPath", type: .string,
+                                                  ui: SZPortUI(kind: .filePicker))])
+    #expect(store.setInputDefault(node: id, port: "modelPath",
+                                  value: .string("/Users/x/Downloads/Depth.mlpackage")) == true)
+
+    store.editPorts(node: id, .init(upsertInputs: [SZPort(name: "modelPath", type: .string)]))
+
+    let port = store.project!.graph.node(id: id)!.contract!.inputs.first!
+    #expect(port.def == .string("/Users/x/Downloads/Depth.mlpackage"))
+    #expect(port.ui?.kind == .filePicker)   // the control hint is kept too, not just the value
+}
+
+/// A facet the caller does state still lands: the fill is for omissions only, or `editPorts` would stop
+/// being the editorial path.
+@MainActor
+@Test func aStatedControlHintReplacesTheOneAlreadyThere() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "amount", type: .float,
+                                                  ui: SZPortUI(kind: .slider, min: 0, max: 1))])
+    store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "amount", type: .float, ui: SZPortUI(kind: .field))]))
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.ui?.kind == .field)
+}
+
+@MainActor
+@Test func upsertingOntoAPortWithNoValueYetSeedsTheDeclaredOne() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "gain", type: .float)])
+    store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "gain", type: .float, ui: SZPortUI(kind: .slider, min: 0, max: 4), def: .float(2))]))
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == .float(2))
+}
+
+/// A kept value is bound to the declaration this edit leaves behind, the same way `setInputDefault` binds one
+/// someone writes. Applied twice because `clampedDefault` must stay a fixed point on its own output.
+@MainActor
+@Test func aReDeclaredSliderRebindsTheKeptValueToItsNewRange() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "amount", type: .float,
+                                                  ui: SZPortUI(kind: .slider, min: 0, max: 1))])
+    #expect(store.setInputDefault(node: id, port: "amount", value: .float(0.9)) == true)
+
+    let narrowed = SZPort(name: "amount", type: .float, ui: SZPortUI(kind: .slider, min: 0, max: 0.5, step: 0.1))
+    let first = store.editPorts(node: id, .init(upsertInputs: [narrowed]))
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == .float(0.5))
+    #expect(first.droppedValues.isEmpty)   // rebound, not dropped
+
+    store.editPorts(node: id, .init(upsertInputs: [narrowed]))
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == .float(0.5))
+}
+
+@MainActor
+@Test func retypingAPortDropsItsValueAndSaysSo() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "amount", type: .float, def: .float(0.5))])
+
+    let result = store.editPorts(node: id, .init(upsertInputs: [SZPort(name: "amount", type: .texture)]))
+
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == nil)
+    #expect(result.droppedValues == ["input 'amount': dropped its value (float does not fit the texture you declared)"])
+    #expect(result.raisedRebuild)
+}
+
+/// A retype of a port holding nothing has nothing to report — the note must track a real loss, not the shape
+/// of the edit.
+@MainActor
+@Test func retypingAPortThatHeldNoValueSaysNothing() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "amount", type: .float)])
+    let result = store.editPorts(node: id, .init(upsertInputs: [SZPort(name: "amount", type: .texture)]))
+    #expect(result.droppedValues.isEmpty)
+}
+
+@MainActor
+@Test func anEnumValueTheNewOptionsWithdrawIsDropped() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [
+        SZPort(name: "mode", type: .enumeration, ui: SZPortUI(kind: .dropdown), def: .enumeration("average"),
+               options: [SZEnumOption(value: "luma"), SZEnumOption(value: "average")])])
+
+    let result = store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "mode", type: .enumeration, options: [SZEnumOption(value: "luma"),
+                                                           SZEnumOption(value: "sepia")])]))
+
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == nil)
+    #expect(result.droppedValues == ["input 'mode': dropped its value (not among the options you declared)"])
+    #expect(result.raisedRebuild == false)   // options are not part of the port surface
+}
+
+@MainActor
+@Test func anEnumValueTheNewOptionsStillOfferSurvives() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [
+        SZPort(name: "mode", type: .enumeration, def: .enumeration("average"),
+               options: [SZEnumOption(value: "luma"), SZEnumOption(value: "average")])])
+
+    let result = store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "mode", type: .enumeration, options: [SZEnumOption(value: "luma"),
+                                                           SZEnumOption(value: "average"),
+                                                           SZEnumOption(value: "sepia")])]))
+
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == .enumeration("average"))
+    #expect(result.droppedValues.isEmpty)
+}
+
+/// A dynamic enum (`camera`) lists no options: the node supplies them at runtime, so the contract vouches for
+/// nothing and a value it never declared must survive.
+@MainActor
+@Test func aDynamicEnumKeepsItsValueWhenTheDeclarationListsNoOptions() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [
+        SZPort(name: "camera", type: .enumeration, def: .enumeration("FaceTime HD"))])
+
+    let result = store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "camera", type: .enumeration, ui: SZPortUI(kind: .dropdown))]))
+
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == .enumeration("FaceTime HD"))
+    #expect(result.droppedValues.isEmpty)
+}
+
+/// One rule, both sides. Outputs carry no user knob today, but a branch here would exist only to format a
+/// string, and the promote merge already treats the two alike.
+@MainActor
+@Test func anOutputPortKeepsItsValueOnTheSameTerms() {
+    let store = loadedStore()
+    let id = generatedNode(store, outputs: [SZPort(name: "level", type: .float, def: .float(1))])
+    store.editPorts(node: id, .init(upsertOutputs: [
+        SZPort(name: "level", type: .float, ui: SZPortUI(kind: .field))]))
+    #expect(store.project!.graph.node(id: id)!.contract!.outputs.first!.def == .float(1))
+}
+
+/// A re-declared output keeps the `display` flag a draft wrote, so a later draft still reads the same
+/// endpoint candidate.
+@MainActor
+@Test func aReDeclaredOutputKeepsItsDisplayFlag() {
+    let store = loadedStore()
+    let id = generatedNode(store, outputs: [SZPort(name: "output", type: .texture, display: true)])
+    store.editPorts(node: id, .init(upsertOutputs: [SZPort(name: "output", type: .texture)]))
+    #expect(store.project!.graph.node(id: id)!.contract!.outputs.first!.display == true)
+}
+
+/// The round trip the issue asks for: a value the user set survives a contract edit and the promote that
+/// follows it, so the two contract-merge paths agree on who owns a value.
+@MainActor
+@Test func aValueSurvivesAReDeclareThenAPromote() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "amount", type: .float,
+                                                  ui: SZPortUI(kind: .slider, min: 0, max: 1))])
+    #expect(store.setInputDefault(node: id, port: "amount", value: .float(0.75)) == true)
+    store.editPorts(node: id, .init(upsertInputs: [SZPort(name: "amount", type: .float)]))
+
+    // What a Coding Agent would stage next: the same port, its own authored default.
+    let authored = SZNodeContract(title: "T", sfSymbol: "star", summary: "s",
+                                  inputs: [SZPort(name: "amount", type: .float, def: .float(0.2))])
+    let merged = SZNodeContract.mergingAuthored(authored, intoNode: store.project!.graph.node(id: id)!)
+
+    #expect(merged.contract.inputs.first!.def == .float(0.75))
+    #expect(merged.conflicts.isEmpty)
+}
+
+/// A value the caller states is bound the same way a kept one is: nothing reaches a contract through
+/// `editPorts` that the port's own control could not produce.
+@MainActor
+@Test func aDeclaredDefaultIsBoundToTheControlItIsDeclaredWith() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "gain", type: .float)])
+    store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "gain", type: .float, ui: SZPortUI(kind: .slider, min: 0, max: 1), def: .float(100))]))
+    #expect(store.project!.graph.node(id: id)!.contract!.inputs.first!.def == .float(1))
+}
+
+/// A retype's facets described the old type. Carrying them forward would leave a stale option list, or a
+/// slider's bounds, on a port that can no longer use them.
+@MainActor
+@Test func aRetypeDoesNotCarryTheOldTypesFacetsForward() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [
+        SZPort(name: "mode", type: .enumeration, ui: SZPortUI(kind: .dropdown),
+               options: [SZEnumOption(value: "luma")])])
+
+    store.editPorts(node: id, .init(upsertInputs: [SZPort(name: "mode", type: .float)]))
+
+    let port = store.project!.graph.node(id: id)!.contract!.inputs.first!
+    #expect(port.options == nil)
+    #expect(port.ui == nil)
+}
+
+// MARK: - What a port edit tells the host to push
+//
+// The contract is only where a value persists. The runtime holds the override the node reads, and a reload
+// keeps it on purpose — so an edit that moves a value has to say which ones moved, or the card and the render
+// disagree until the app relaunches.
+
+@MainActor
+@Test func aReboundValueIsReportedForThePush() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "amount", type: .float,
+                                                  ui: SZPortUI(kind: .slider, min: 0, max: 1))])
+    #expect(store.setInputDefault(node: id, port: "amount", value: .float(0.9)) == true)
+
+    let result = store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "amount", type: .float, ui: SZPortUI(kind: .slider, min: 0, max: 0.5, step: 0.1))]))
+
+    #expect(result.changedValues == [.init(port: "amount", value: .float(0.5), note: nil)])
+    #expect(result.droppedValues.isEmpty)   // rebound, so nothing to tell the agent
+}
+
+@MainActor
+@Test func aClearedValueIsReportedAsNilSoTheOverrideGoes() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [
+        SZPort(name: "mode", type: .enumeration, def: .enumeration("average"),
+               options: [SZEnumOption(value: "luma"), SZEnumOption(value: "average")])])
+
+    let result = store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "mode", type: .enumeration, options: [SZEnumOption(value: "luma")])]))
+
+    #expect(result.changedValues.count == 1)
+    #expect(result.changedValues.first!.port == "mode")
+    #expect(result.changedValues.first!.value == nil)
+    #expect(result.changedValues.first!.note != nil)   // and the agent hears about this one
+}
+
+/// The preservation half: an edit that leaves a value alone must report nothing, or the host would push over
+/// a card gesture or a controller binding driving that input live.
+@MainActor
+@Test func anEditThatLeavesAValueAloneReportsNoChange() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "amount", type: .float,
+                                                  ui: SZPortUI(kind: .slider, min: 0, max: 1))])
+    #expect(store.setInputDefault(node: id, port: "amount", value: .float(0.75)) == true)
+
+    let result = store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "amount", type: .float, def: .float(0.2))]))
+
+    #expect(result.changedValues.isEmpty)
+}
+
+/// A value seeded onto a port that held none is a move too: the node has never been told it.
+@MainActor
+@Test func aSeededValueIsReportedForThePush() {
+    let store = loadedStore()
+    let id = generatedNode(store, inputs: [SZPort(name: "gain", type: .float)])
+    let result = store.editPorts(node: id, .init(upsertInputs: [
+        SZPort(name: "gain", type: .float, def: .float(2))]))
+    #expect(result.changedValues == [.init(port: "gain", value: .float(2), note: nil)])
 }

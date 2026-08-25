@@ -457,3 +457,45 @@ private func oneNodeProject(_ id: SZNodeID, inputs: [SZPort],
     #expect(Int(v2.g) >= 250 && Int(v2.r) <= 5,
             "an arity-mismatched override must drop, seeding the float3 default (green), got r=\(v2.r) g=\(v2.g)")
 }
+
+/// CLEAR: `clearInput` is what a port edit uses to let go of a value the contract no longer holds. The
+/// reconcile keeps an override on purpose, so nothing else drops one — without this the node keeps reading
+/// the old value while the card shows none.
+///
+/// Letting go means the node reads NOTHING, not the contract default: the default seeds this map at load and
+/// is never consulted per frame. That is what a port edit wants, because it clears a value only when the
+/// contract no longer holds one either. A later reload re-seeds from whatever the contract says by then.
+/// Same `twoInputSource` (level→R, boost→G).
+@MainActor
+@Test(.enabled(if: SZGPU.isAvailable)) func clearingAnInputLetsGoOfTheOverrideAcrossAReload() throws {
+    let runtime = try requireRuntime(renderSize: (width: 16, height: 16))
+
+    let id = SZNodeID()
+    let inputs = [SZPort(name: "level", type: .float, def: .float(0.25)),   // R ≈ 64
+                  SZPort(name: "boost", type: .float, def: .float(0.25))]   // G ≈ 64
+    let dir = FileManager.default.temporaryDirectory
+        .appending(path: "szruntime-clear-\(UUID().uuidString)").appending(path: "g.subz")
+    defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+    try SZProjectIO.save(oneNodeProject(id, inputs: inputs), to: dir)
+    try writeTwoInputSource(id, in: dir)
+
+    try runtime.loadProject(at: dir)
+    runtime.setInputValue(node: id, port: "level", floats: [0.75])   // R ≈ 191
+    runtime.setInputValue(node: id, port: "boost", floats: [0.75])   // G ≈ 191
+    let overridden = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))
+    #expect(abs(Int(overridden.r) - 191) <= 2)
+    #expect(abs(Int(overridden.g) - 191) <= 2)
+
+    // Let go of `level` only: the node reads nothing for it. `boost` keeps the user's 0.75.
+    runtime.clearInput(node: id, port: "level")
+    let cleared = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))
+    #expect(Int(cleared.r) <= 2, "a cleared input must read as absent, got \(cleared.r)")
+    #expect(abs(Int(cleared.g) - 191) <= 2, "clearing one input must not touch another, got \(cleared.g)")
+
+    // The stale 0.75 is gone for good: the reload re-seeds `level` from the contract, not from the override
+    // the reconcile would otherwise have kept.
+    try runtime.loadProject(at: dir)
+    let reloaded = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))
+    #expect(abs(Int(reloaded.r) - 64) <= 2, "the reload must re-seed from the contract, got \(reloaded.r)")
+    #expect(abs(Int(reloaded.g) - 191) <= 2)
+}

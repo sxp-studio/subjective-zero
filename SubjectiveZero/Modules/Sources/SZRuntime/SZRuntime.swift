@@ -484,6 +484,17 @@ public final class SZRuntime: @unchecked Sendable {
         engine.withLock { $0.inputStrings[node, default: [:]][port] = string }
     }
 
+    /// Drop a node's live override for one input, so the node reads whatever its contract seeds instead. The
+    /// counterpart of the two setters above, for a port edit that cleared a value: `loadProject`'s reconcile
+    /// keeps an override on purpose, so nothing else would let go of it before a relaunch. A port rides one
+    /// channel, and clearing the other is a no-op.
+    public func clearInput(node: SZNodeID, port: String) {
+        engine.withLock {
+            $0.inputValues[node]?[port] = nil
+            $0.inputStrings[node]?[port] = nil
+        }
+    }
+
     /// Ask a node, live, for a port's dynamic enum options (the v4 `SZNodeEnumerateOptions` channel) — the
     /// camera list etc. Empty for a static/non-enum port. The host throttles + falls back to the contract's
     /// static `options`, so this is called on demand (≈ when the dropdown opens), not per frame.

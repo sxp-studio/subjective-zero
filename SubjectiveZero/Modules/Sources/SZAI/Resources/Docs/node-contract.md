@@ -93,6 +93,11 @@ ports you add are appended; ports you omit are kept (removing a port is `ui_edit
 sensible `ui`/`default` for every scalar you add, and never worry about matching a range you were not shown —
 you cannot overwrite the user's.
 
+The same rule holds for `ui_edit_ports`: re-declaring a port rewrites its declaration and keeps the value the
+port already holds, so widening a slider or adding an option never resets the render. Only
+`ui_set_input_default` changes a value, and only a retype (or withdrawing an `enum` option that is in use)
+drops one.
+
 ## What makes a built node "outdated" — the port audit and the build stamp
 
 A built node reads **outdated / needs rebuild** for exactly one of three reasons — none of them authored state

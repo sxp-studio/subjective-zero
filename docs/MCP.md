@@ -72,7 +72,11 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
                                             // of the node's implementation task — run-scoped routing state the
                                             // dispatch reads, not node data; frozen once a coding turn ran
 - `ui_edit_ports`                           // the ONLY way to add/retype/remove ports; omission preserves,
-                                            // removal is explicit. Editing a built node's ports marks it
+                                            // removal is explicit. A re-declared port keeps the value it
+                                            // holds and any control hint left out (`ui_set_input_default`
+                                            // is the only way to change a value); a retype or a withdrawn
+                                            // `enum` option drops it, and the reply lists it in
+                                            // `droppedValues`. Editing a built node's ports marks it
                                             // `needsRebuild` (it keeps rendering its old code until a Coding
                                             // Agent regenerates it) and joins it to any run in flight.
 - `ui_set_input_default`                    // value for an unconnected input

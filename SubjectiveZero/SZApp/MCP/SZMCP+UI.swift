@@ -47,7 +47,7 @@ extension SZHostBridge {
                     "permissions": ["type": "array", "items": ["type": "string"],
                                     "description": "entitlements the node needs (camera, microphone)"],
                  ]),
-            tool("ui_edit_ports", "Change a node's typed I/O. The ONLY way to add, retype, or remove a port — `ui_update_node` cannot touch the port surface. Omitted ports are left alone; removal is explicit, so you can never drop a control by forgetting to re-send it. `upsert` matches by name (re-sending a port replaces it, which is how you retype). Editing the surface of an already-implemented node marks it for rebuild (`needsRebuild`) and joins it to any run in flight — it keeps rendering its old build until its Coding Agent regenerates it. Data edges and the render endpoint that name a removed or retyped port are dropped.",
+            tool("ui_edit_ports", "Change a node's typed I/O. The ONLY way to add, retype, or remove a port — `ui_update_node` cannot touch the port surface. Omitted ports are left alone; removal is explicit, so you can never drop a control by forgetting to re-send it. `upsert` matches by name: re-sending a port rewrites its declaration (that is how you retype it, or move a slider's range) and keeps the value the port already holds, along with any control hint you leave out. `ui_set_input_default` is the only way to change a value. A retype, or withdrawing an `enum` option that is in use, drops the value and the reply lists it in `droppedValues`. Editing the surface of an already-implemented node marks it for rebuild (`needsRebuild`) and joins it to any run in flight — it keeps rendering its old build until its Coding Agent regenerates it. Data edges and the render endpoint that name a removed or retyped port are dropped.",
                  properties: [
                     "node": ["type": "string"],
                     "inputs": ["type": "object", "description": "{ upsert: [Port], remove: [String] }"],
@@ -497,6 +497,9 @@ extension SZHostBridge {
         // runtime — otherwise a crash before the next run loses both. Safe because `kind` is untouched: a
         // reload re-renders the node rather than dropping it from `renderableSubgraph`.
         host.persistGraphEditAndReload(action: "edit ports")
+        // After the reload, whose reconcile deliberately keeps a live override: any value this edit moved has
+        // to be pushed, or the node keeps rendering the one the card no longer shows.
+        host.applyPortValueChanges(node: id, result.changedValues)
 
         // Report the node's STATE, not what this call changed: a node that was already awaiting a rebuild is
         // still awaiting one, and answering `needsRebuild: false` because *this* edit didn't raise the flag
@@ -508,6 +511,8 @@ extension SZHostBridge {
             response["droppedConnections"] = result.droppedConnections.map(\.uuidString)
         }
         if result.clearedRenderEndpoint { response["clearedRenderEndpoint"] = true }
+        // What the edit could not carry, said out loud: the agent can put the user's setting back, or say so.
+        if !result.droppedValues.isEmpty { response["droppedValues"] = result.droppedValues }
         return SZJSONRPC.encode(response)
     }
 
