@@ -25,11 +25,16 @@ especially `docs/ARCHITECTURE.md` (incl. the host seam) and `docs/BUILD_SPEC.md`
    migrations, or "old format" support. The schemas (JSON state, node ABI) are **not frozen** — change
    them in place and update call sites; never maintain a migration path.
 
-4. **Least code, no speculative abstraction.** Build only what the current milestone needs, and
+4. **Comments: short, plain, lower-case.** A file header is at most ~15 lines and says what the
+   file is for; a member doc is one or two lines. No shouting — write "every node", not "EVERY
+   node" — and no long narrative retelling of a bug. Say the mechanism, not the story: one clause
+   of history earns its place only when it stops someone reverting the fix.
+
+5. **Least code, no speculative abstraction.** Build only what the current milestone needs, and
    defer anything the roadmap marks deferred — the behavior-tree engine, MCP record/replay.
    Don't add third-party dependencies without asking.
 
-5. **Build + verify, small commits.** Every change must `swift build` clean; render-affecting changes
+6. **Build + verify, small commits.** Every change must `swift build` clean; render-affecting changes
    must be visually or closed-loop checkable. Commit in small, reviewable steps with clear messages.
 
    The suites are two, and a full verify runs both:
@@ -44,7 +49,7 @@ especially `docs/ARCHITECTURE.md` (incl. the host seam) and `docs/BUILD_SPEC.md`
    and pin what lives inside the app target (the MCP tool surface, argument coercions, host helpers).
    It is test-only: nothing depends on it, so a `build` — Release included — never produces it.
 
-6. Do not be lazy, do not punt things to a 'v2' unless explicitly agreed upon.
+7. Do not be lazy, do not punt things to a 'v2' unless explicitly agreed upon.
 
 ## Worktrees & landing
 
@@ -59,7 +64,7 @@ Never create a new sibling directory at the parent level for a worktree or check
 **Landing on `main`:**
 
 1. Rebase the branch on `main`.
-2. Run the full verify from guideline 5 — **both** suites green (`swift test` from
+2. Run the full verify from guideline 6 — **both** suites green (`swift test` from
    `SubjectiveZero/Modules`, and the `SubjectiveZero` scheme's `xcodebuild … test` for `SZAppTests`).
 3. Fast-forward-only merge to `main` (`git merge --ff-only <branch>`), then push.
 4. Commits are DCO-signed-off as "Clem" (`git commit -s`). No AI-attribution trailers
