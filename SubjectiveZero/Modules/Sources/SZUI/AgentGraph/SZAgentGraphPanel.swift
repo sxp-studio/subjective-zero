@@ -94,6 +94,11 @@ public struct SZAgentGraphPanel: View {
     /// follow then honours.
     @State private var following = true
 
+    /// A focus request that landed on a SEALED run: there is no head to chase, so the camera
+    /// goes to the last thing that agent did instead of the start of its graph. Deferred because
+    /// the record has to be laid out before its final frame exists.
+    @State private var landOnFinalEntry = false
+
     @State private var camera = SZCanvasCamera(zoom: 1, offset: CGSize(width: 60, height: 0))
     @State private var pinchAnchor: SZCanvasCamera?
     @State private var viewSize: CGSize = .zero
@@ -258,8 +263,13 @@ public struct SZAgentGraphPanel: View {
         guard let focusRequest else { return }
         selectedRunID = focusRequest
         mode = .run
-        following = runs.first { $0.id == focusRequest }?.isLive ?? false
+        let live = runs.first { $0.id == focusRequest }?.isLive ?? false
+        following = live
+        // Asked for a run that is over: show what it ENDED on. Landing on the start of the graph
+        // answers nothing, and every traversal starts the same way, so it reads as a dead click.
+        landOnFinalEntry = !live
         onConsumeFocus()
+        landFinalEntryIfNeeded()
     }
 
     /// The Routing pane's "View Graph" landing — `navigate(toSeat:)`'s move, asked for from
@@ -327,7 +337,9 @@ public struct SZAgentGraphPanel: View {
                 // and this onAppear must not race the consume back into Run.
                 if planFocusRequest == nil, !runs.isEmpty { mode = .run; followActiveEntry() }
             }
-            .onChange(of: proxy.size) { _, new in viewSize = new; centreIfNeeded() }
+            .onChange(of: proxy.size) { _, new in
+                viewSize = new; centreIfNeeded(); landFinalEntryIfNeeded()
+            }
             // A different run, or a different plan graph, is a different canvas: drop the
             // nudges with it, and re-frame rather than leaving the camera parked over where
             // the old one happened to be.
@@ -335,6 +347,7 @@ public struct SZAgentGraphPanel: View {
                 nudges = [:]
                 centred = false; centreIfNeeded()
                 followActiveEntry()
+                landFinalEntryIfNeeded()
             }
             // The shown record GROWING is the traversal moving — chase its head. Keyed on
             // COUNT rather than a flag: a record swapped under the selection can land at
@@ -485,13 +498,31 @@ public struct SZAgentGraphPanel: View {
     /// is actually showing (a user reading the Plan mid-traversal must not have the camera
     /// yanked), and the shown run is LIVE — an archive has no head to chase.
     private func followActiveEntry() {
-        guard following, effectiveMode == .run, shown?.isLive == true, viewSize.height > 0,
-              let displayed, let record = displayed.record,
-              let frame = SZAgentGraphLayout.runFrames(for: record, graph: displayed.graph,
-                                                       stepOutcomes: displayed.stepOutcomes).last
-        else { return }
+        guard following, effectiveMode == .run, shown?.isLive == true,
+              let frame = finalEntryFrame() else { return }
+        centre(on: frame)
+    }
+
+    /// The same move for a run that is OVER: the camera goes to its last entry once, when the
+    /// transcript or the run strip asked for that run by name.
+    private func landFinalEntryIfNeeded() {
+        guard landOnFinalEntry, effectiveMode == .run, let frame = finalEntryFrame() else { return }
+        landOnFinalEntry = false
+        centre(on: frame)
+    }
+
+    /// The chain's last card, in world points — nil until the record is laid out.
+    private func finalEntryFrame() -> CGRect? {
+        guard viewSize.height > 0, let displayed, let record = displayed.record else { return nil }
+        return SZAgentGraphLayout.runFrames(for: record, graph: displayed.graph,
+                                            stepOutcomes: displayed.stepOutcomes).last
+    }
+
+    /// Centre one entry's card at the current zoom, biased right by the outcome stub's reach so
+    /// the card AND what it ended on are both in view.
+    private func centre(on frame: CGRect) {
         withAnimation(.easeInOut(duration: 0.3)) {
-            camera.offset = CGSize(width: viewSize.width / 2 - camera.zoom * frame.midX,
+            camera.offset = CGSize(width: viewSize.width / 2 - camera.zoom * (frame.midX + 50),
                                    height: viewSize.height / 2 - camera.zoom * frame.midY)
         }
     }
