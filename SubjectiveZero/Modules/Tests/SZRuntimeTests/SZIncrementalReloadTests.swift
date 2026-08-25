@@ -498,6 +498,8 @@ private func oneNodeProject(_ id: SZNodeID, inputs: [SZPort],
     let reloaded = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))
     #expect(abs(Int(reloaded.r) - 64) <= 2, "the reload must re-seed from the contract, got \(reloaded.r)")
     #expect(abs(Int(reloaded.g) - 191) <= 2)
+}
+
 /// A FILE port's stored value is bundle-relative (`media/<uuid>/<name>`), because that is what makes a
 /// `.subz` portable — but a node opens files by absolute path and knows nothing about bundles. The
 /// runtime is where the two meet: `loadProject` resolves every `filePicker` default against the project

@@ -169,3 +169,41 @@ struct SZHostMediaImportTests {
         #expect(!FileManager.default.fileExists(atPath: url.appending(path: "media").path))
     }
 }
+
+/// What the RUNTIME is handed for a string value. Both push sites go through this one rule —
+/// `setInputDefault` for a single knob, `applyPortValueChanges` for the values a port edit moved —
+/// so a file port can never reach a node as the bundle-relative form it is stored as. A node opens
+/// what it is handed, and a relative path is relative to nothing inside the render loop.
+@MainActor
+struct SZHostRuntimeStringTests {
+
+    private static func host(project url: URL) -> SZHost {
+        let host = SZHost()
+        host.loadedProjectURL = url
+        return host
+    }
+
+    private static func filePort(_ value: String) -> SZPort {
+        SZPort(name: "path", type: .string, ui: SZPortUI(kind: .filePicker), def: .string(value))
+    }
+
+    @Test func aFilePortIsResolvedAgainstTheBundle() {
+        let host = Self.host(project: URL(fileURLWithPath: "/tmp/Patch.subz"))
+        #expect(host.runtimeString("media/ABC/clip.mov", port: Self.filePort(""))
+                == "/tmp/Patch.subz/media/ABC/clip.mov")
+    }
+
+    @Test func anAbsoluteFilePortIsHandedOverUnchanged() {
+        let host = Self.host(project: URL(fileURLWithPath: "/tmp/Patch.subz"))
+        #expect(host.runtimeString("/Users/c/Downloads/IMG.MOV", port: Self.filePort(""))
+                == "/Users/c/Downloads/IMG.MOV")
+    }
+
+    /// A plain string port carrying path-shaped text is NOT a path, and must not be rewritten.
+    @Test func aNonFilePortIsNeverRewritten() {
+        let host = Self.host(project: URL(fileURLWithPath: "/tmp/Patch.subz"))
+        let text = SZPort(name: "label", type: .string, ui: SZPortUI(kind: .field), def: .string(""))
+        #expect(host.runtimeString("media/ABC/clip.mov", port: text) == "media/ABC/clip.mov")
+        #expect(host.runtimeString("media/ABC/clip.mov", port: nil) == "media/ABC/clip.mov")
+    }
+}
