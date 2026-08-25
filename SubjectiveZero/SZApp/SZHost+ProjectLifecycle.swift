@@ -211,10 +211,9 @@ extension SZHost {
     @MainActor
     @discardableResult
     func saveProjectAsInteractively() -> Bool {
-        // `loadedProjectURL` is checked HERE as well as after the panel: a discarded untitled
-        // project leaves `store.project` set with no URL, and showing a whole save panel that can
-        // only end in silence is worse than refusing up front.
-        guard !isOpeningProject, let project = store.project, loadedProjectURL != nil else { return false }
+        // Checked up front as well as after the panel: showing a whole save panel that can only end
+        // in silence is worse than refusing. Same fact the menu items grey out on.
+        guard !isOpeningProject, hasSavableProject, let project = store.project else { return false }
         let panel = NSSavePanel()
         // The package content type appends `.subz`, so the name field is the bare project name.
         panel.nameFieldStringValue = project.name

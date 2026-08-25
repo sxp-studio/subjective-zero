@@ -199,6 +199,20 @@ struct SZHostProjectRelocateTests {
         #expect(request.packageDirectory == dest)
     }
 
+    /// A Discard on the way to Home drops the url and leaves the project in memory. The save items
+    /// must grey out on the same fact the method refuses on, or Save As… sits enabled and inert.
+    @Test func theSaveItemsAndTheSaveMethodAgreeOnWhatIsSavable() throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let host = try Self.host(at: try Self.makeBundle("A", in: dir))
+        #expect(host.hasSavableProject)
+
+        host.loadedProjectURL = nil            // as a discard leaves it
+        #expect(host.store.project != nil, "the stale document is still in memory")
+        #expect(!host.hasSavableProject, "but there is nowhere to put it, so the items grey out")
+        #expect(host.saveProjectAsInteractively() == false, "and the method refuses without a panel")
+    }
+
     // MARK: - Refusals
 
     /// Relocating onto our own path is a no-op, not a self-conflict on our own lock file. Covers the

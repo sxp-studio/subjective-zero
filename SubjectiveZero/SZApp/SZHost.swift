@@ -341,6 +341,10 @@ final class SZHost {
     /// (SZUntitledProjects). Drives the window title's "not saved" suffix and Save As's source cleanup.
     var isUntitledProject: Bool { loadedProjectURL.map(SZUntitledProjects.contains) ?? false }
 
+    /// Both halves a save needs: a document in memory AND a place on disk to put it. The two part
+    /// company after a Discard on the way to Home, which drops the url and leaves the project.
+    var hasSavableProject: Bool { store.project != nil && loadedProjectURL != nil }
+
     /// Set by `debug_quit` before it terminates: the untitled-rescue prompt waits for a
     /// human an automated drive doesn't have (the untitled project is autosaved anyway).
     var quitSkipsUntitledRescue = false
@@ -796,13 +800,14 @@ final class SZHost {
     /// Releases its lock, stops the node-source watchers (their `nodes/` files are about to vanish,
     /// so they mustn't fire on the delete), nils the loaded URL so the terminate-time flush can't
     /// resurrect the folder, then deletes its `Projects/<uuid>/` home and prunes its recents/session
-    /// entries. Both callers close/terminate immediately after, so the now-stale in-memory
-    /// `store.project` is torn down before it's rendered again.
+    /// entries. The quit/close callers terminate right after; the Home caller doesn't, and there the
+    /// now-stale `store.project` is replaced by `continueFromWelcome`, which opens the last/sample
+    /// project precisely because the url is nil.
     func discardUntitledProject() {
         guard isUntitledProject, let url = loadedProjectURL else { return }
         releaseProjectLock()
         stopAllNodeSourceWatchers()
-        loadedProjectURL = nil
+        loadedProjectURL = nil   // `hasSavableProject` goes false with it: the save items grey out
         let fm = FileManager.default
         try? fm.removeItem(at: url.deletingLastPathComponent())   // the Projects/<uuid>/ layer
         pruneRecentProject(url.standardizedFileURL.path)

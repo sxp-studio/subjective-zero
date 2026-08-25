@@ -405,11 +405,11 @@ struct SZApp: App {
                 if host.isUntitledProject {
                     Button("Save…") { host.saveProjectAs() }
                         .keyboardShortcut("s", modifiers: .command)
-                        .disabled(host.isOpeningProject || host.store.project == nil)
+                        .disabled(host.isOpeningProject || !host.hasSavableProject)
                 }
                 Button("Save As…") { host.saveProjectAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
-                    .disabled(host.isOpeningProject || host.store.project == nil)
+                    .disabled(host.isOpeningProject || !host.hasSavableProject)
             }
             // ⌘, — the app's only settings surface today; graduates into a real Settings window
             // once more prefs earn one (docs/UI.md).
@@ -611,10 +611,10 @@ struct SZApp: App {
             Divider()
             if host.isUntitledProject {
                 Button("Save…") { host.saveProjectAs() }
-                    .disabled(host.isOpeningProject || host.store.project == nil)
+                    .disabled(host.isOpeningProject || !host.hasSavableProject)
             }
             Button("Save As…") { host.saveProjectAs() }
-                .disabled(host.isOpeningProject || host.store.project == nil)
+                .disabled(host.isOpeningProject || !host.hasSavableProject)
         }
         Menu("View") {
             // availableCases, like the menu bar — the Profiler toggle must not surface in a
