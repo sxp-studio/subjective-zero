@@ -110,6 +110,10 @@ enum SZBoundaryPrompt {
     private static func portMeta(_ p: SZPort) -> String {
         var bits: [String] = []
         if let ui = p.ui { bits.append(ui.kind.rawValue) }
+        // What a file port accepts is part of its boundary: an agent editing the node must carry the
+        // list forward, and one adding a file port needs to see the shape.
+        let accepted = p.ui?.acceptedExtensions ?? []
+        if !accepted.isEmpty { bits.append("accepts \(accepted.map { ".\($0)" }.joined(separator: "/"))") }
         if let def = p.def, let s = defaultString(def) { bits.append("default \(s)") }
         return bits.isEmpty ? "" : " (\(bits.joined(separator: ", ")))"
     }

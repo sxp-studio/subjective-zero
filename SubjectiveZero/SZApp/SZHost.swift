@@ -786,6 +786,24 @@ final class SZHost {
         store.rebaseAttachments(to: newURL)
         mailbox.rebaseAttachments(to: newURL)
         cardHostStorage?.rebindCardWatchers()
+        repushMediaPaths(to: newURL)
+    }
+
+    /// A move leaves the runtime holding file-port paths resolved against the OLD bundle, and nothing
+    /// reloads (the runtime takes a project URL per call). For an untitled project that directory is
+    /// then deleted, so a live video node would keep an fd on a path that no longer exists until the
+    /// next launch. Re-push every file port resolved against the new home: nodes reload on a changed
+    /// path string, which costs a re-seek and is the honest price of moving the file. The stored value
+    /// is untouched — it is relative, so it already followed the bundle.
+    private func repushMediaPaths(to newURL: URL) {
+        guard let graph = store.project?.graph else { return }
+        for node in graph.nodes {
+            for port in node.contract?.inputs ?? [] where port.ui?.kind == .filePicker {
+                guard case .string(let value)? = port.def, !value.isEmpty else { continue }
+                runtime?.setInputString(node: node.id, port: port.name,
+                                        string: SZProjectMedia.resolve(value, in: newURL))
+            }
+        }
     }
 
     /// Release the current instance lock (quit path). Best-effort — `flock` also frees on process
@@ -1179,6 +1197,14 @@ final class SZHost {
                 print("[SZHost] media drop failed for \(spawn.libraryID): \(error)")
             }
         }
+        // Instantiation pins `path` straight into the contract, so it never passes `setInputDefault`
+        // — bring each dropped file in from here instead.
+        for id in created {
+            guard let def = store.project?.graph.node(id: id)?.contract?.inputs
+                    .first(where: { $0.name == "path" })?.def else { continue }
+            importMediaIfExternal(node: id, port: "path", value: def, origin: origin)
+            classifyInputFiles(node: id)
+        }
         if let lastID = created.last {
             let ref = SZPortRef(node: lastID, port: "output")
             if store.setRenderEndpoint(ref) {
@@ -1386,13 +1412,22 @@ final class SZHost {
         let portModel = store.project?.graph.node(id: node)?.contract?.inputs.first { $0.name == port }
         let value = portModel?.clampedDefault(rawValue) ?? rawValue
         if let floats = value.floats { runtime?.setInputValue(node: node, port: port, floats: floats) }     // live (v3)
-        if let string = value.string { runtime?.setInputString(node: node, port: port, string: string) }   // live (v4)
+        // A file port holds the bundle-relative form; the runtime always gets a machine path, exactly as
+        // `loadProject` seeds it, so an override and a seeded default are the same kind of value.
+        if let string = value.string {
+            runtime?.setInputString(node: node, port: port, string: runtimeString(string, port: portModel))
+        }
         guard store.setInputDefault(node: node, port: port, value: value) else { return value }
         // Journaled on the committed write only — a slider drag's live ticks are not decisions yet.
         if persist {
             noteMutation("set default", ["\(mutationTitle(node)).\(port) = \(Self.mutationValue(value))"],
                          origin: origin)
             persistProject()
+            // A file the user picked belongs to the project, not to wherever they happened to keep it.
+            // Committed writes only: a live drag tick is not a decision. No-op for every other port.
+            importMediaIfExternal(node: node, port: port, value: value, origin: origin)
+            // …and say so on the node if that file can't be used, rather than letting it render black.
+            if portModel?.ui?.kind == .filePicker { classifyInputFiles(node: node) }
         }
         return value
     }
@@ -1414,7 +1449,12 @@ final class SZHost {
                 continue
             }
             if let floats = value.floats { runtime?.setInputValue(node: node, port: change.port, floats: floats) }
-            if let string = value.string { runtime?.setInputString(node: node, port: change.port, string: string) }
+            // Resolved, like `setInputDefault` does: a file port's kept value is bundle-relative, and a node
+            // opens what it is handed. Pushing it raw would leave the node with a path relative to nothing.
+            if let string = value.string {
+                runtime?.setInputString(node: node, port: change.port,
+                                        string: runtimeString(string, port: inputs.first { $0.name == change.port }))
+            }
         }
     }
 

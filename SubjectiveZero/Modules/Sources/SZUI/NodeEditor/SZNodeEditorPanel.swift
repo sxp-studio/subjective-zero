@@ -906,7 +906,7 @@ public struct SZNodeEditorPanel: View {
             isSelected: isSelected(node.id),
             locked: isLocked(node.id),
             isRunning: isRunning,
-            errorDetail: nodeAgentState[node.id]?.errorDetail,
+            diagnostic: SZNodeCanvasContentView.nodeDiagnostic(for: node, agentState: nodeAgentState[node.id]),
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputs,
             previewsEnabled: livePreviews,

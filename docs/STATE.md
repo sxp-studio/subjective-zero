@@ -111,6 +111,15 @@ on resume ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)); records without on
 files) decode untouched. The `.debug` scratch transcript stays ephemeral. Sidecars load
 forgivingly: a missing or corrupt file means an empty transcript, never a project-open error.
 
+**A picked file becomes project state.** Choosing or dropping a file for a `filePicker` port copies
+it into `media/<uuid>/<filename>` inside the `.subz` and stores the bundle-relative path, so the
+project renders on another machine and after a move; an absolute path written before this still
+resolves to itself, which is why there is no migration ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md)).
+The copy is a clone where the filesystem allows it, runs off the main thread, and the node renders
+the original file until it lands. A file that has gone missing, become unreadable, or is the wrong
+kind for its port is recorded on the node as `unreadableInputs` - host state, recomputed at load,
+on every committed write and when the app returns to the front, never written to disk.
+
 **Undelivered work is machine-local, deliberately.** Two queues persist under `.subz/.staging/`:
 undelivered chat envelopes (`message-queue.json`, `SZMessageQueueIO`) and SCHEDULED-not-yet-started
 tasks (`tasks.json`, `SZTaskQueueIO`). Both spend tokens the moment they are acted on, so neither

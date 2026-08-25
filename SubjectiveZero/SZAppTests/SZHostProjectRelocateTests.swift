@@ -173,6 +173,46 @@ struct SZHostProjectRelocateTests {
         #expect(moved?.url == dest.appending(path: relative))
     }
 
+    /// Media travels INSIDE the bundle, so the stored value follows a move by itself — but the runtime
+    /// is still holding the path it resolved against the OLD bundle, and nothing reloads on a move. For
+    /// an untitled rescue that directory is then deleted, so a playing video would keep an fd on a path
+    /// that no longer exists until the next launch. The relocation must re-push every file port.
+    @Test func relocationRepointsMediaAtTheNewBundle() throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let id = SZNodeID()
+        let source = dir.appending(path: "A.subz")
+        let relative = "media/ABCD/clip.mov"
+        var project = SZProject(name: "A")
+        project.graph.nodes = [SZNode(
+            id: id, kind: .generated, title: "Video File",
+            contract: SZNodeContract(title: "Video File", sfSymbol: "film", summary: "",
+                                     inputs: [SZPort(name: "path", type: .string,
+                                                     ui: SZPortUI(kind: .filePicker), def: .string(relative))]),
+            position: SZPoint(x: 0, y: 0))]
+        try SZProjectIO.save(project, to: source)
+        try FileManager.default.createDirectory(at: source.appending(path: "media/ABCD"),
+                                                withIntermediateDirectories: true)
+        try Data("frames".utf8).write(to: source.appending(path: relative))
+        let host = try Self.host(at: source)
+
+        let dest = dir.appending(path: "B.subz")
+        try FileManager.default.copyItem(at: source, to: dest)
+        try host.relocateProject(to: dest, recordInHistory: false)
+
+        // The stored value is untouched — it is relative, so it already followed the bundle…
+        guard case .string(let stored)? = host.store.project?.graph.node(id: id)?
+            .contract?.inputs.first?.def else {
+            Issue.record("the media port lost its value")
+            return
+        }
+        #expect(stored == relative)
+        // …and it now resolves to a file that is really there at the new home.
+        let resolved = SZProjectMedia.resolve(stored, in: dest)
+        #expect(resolved == dest.appending(path: relative).path)
+        #expect(FileManager.default.fileExists(atPath: resolved))
+    }
+
     /// A run must not keep handing agents the path it started at. `startRun` used to capture
     /// `loadedProjectURL` once and thread it into every turn's grant, so after an untitled rescue
     /// every agent for the rest of the traversal was pointed at a directory that had been deleted.

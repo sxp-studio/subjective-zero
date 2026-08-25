@@ -271,7 +271,7 @@ the card shows). Omit the block entirely for a node without a `Card.swift`. See 
   port carries (`frequencyBuckets`, `tintColor`, `base`/`overlay`), never a generic `input2`. Plain
   `input`/`output` is fine only for a single-texture pass-through.
 - **`type`** ∈ `texture · floatArray · float · float2 · float3 · float4 · float3x3 · float4x4 · colorRGB · colorRGBA · bool · enum · string · event`.
-- **`ui`** is an **OBJECT**, never a string. `kind` ∈ `slider · field · colorWell · toggle · dropdown · filePicker` — **there is no `knob`**. `min` / `max` / `step` live **inside `ui`**, and only make sense for numeric kinds.
+- **`ui`** is an **OBJECT**, never a string. `kind` ∈ `slider · field · colorWell · toggle · dropdown · filePicker` — **there is no `knob`**. `min` / `max` / `step` live **inside `ui`**, and only make sense for numeric kinds. `fileTypes` lives there too, for `filePicker` alone: the filename extensions the port accepts, lowercased, no dot — `"ui": {"kind":"filePicker","fileTypes":["mlpackage","mlmodelc"]}`. **Declare them whenever you know them.** They drive the chooser, they let a *package* (a folder macOS shows as one file, like `.mlpackage`) be picked at all, and they let the host tell the user "that is a `.mlmodel`, this port takes `.mlpackage`" instead of your node quietly rendering black. Leaving `fileTypes` out means any file.
 - **`default`** (JSON key `"default"`) is a **tagged OBJECT** `{ "type", "value" }`, matching the port's type:
   - `float` → `{"type":"float","value":0.5}`; `bool` → `{"type":"bool","value":true}`
   - vectors / colors / matrices → a flat array: `{"type":"colorRGB","value":[1,0,0]}` (counts: float2→2 … float4x4→16, colorRGBA→4)
@@ -315,6 +315,14 @@ the card shows). Omit the block entirely for a node without a `Card.swift`. See 
 Notes: `min`/`max`/`step` (inside `ui`) only apply to `slider`/numeric kinds. `colorRGB/RGBA` are distinct
 from `float3/4` purely by their color-well UI. **Never hardcode an input you declared** — read it live each
 frame, or the user's control is a dead knob. Full runtime ABI: `agent_docs_read { "topic": "node-abi" }`.
+
+**A `filePicker` port and the file it names.** The picked file is copied INTO the project, and the
+contract stores a path relative to it (`media/<uuid>/IMG_2479.MOV`) so the project still works on
+another machine. None of that changes your code: `ctx.inputString` hands you an **absolute** path,
+every frame, exactly as before. Open it with `URL(fileURLWithPath:)` and never build a path yourself.
+The default you write is a value, not a promise the file exists — if it cannot be read, the host says
+so on the node, and `agent_read_node` reports it as `inputFileErrors`. To check a path before you
+rely on it, use `agent_check_path`.
 
 ## What a promote keeps — the live contract merges with yours
 

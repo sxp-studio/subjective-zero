@@ -11,8 +11,8 @@ import SZRuntime
 extension SZHostBridge {
     nonisolated static var agentToolDefinitions: [[String: Any]] {
         [
-            tool("agent_read_graph", "Return the full project graph (nodes with contracts, connections, render endpoint) as JSON. A built node that needs a rebuild carries `rebuildReason` (contractChanged | intentChanged | sourceMismatch) and, for the first and third, `rebuildDetail` (the audit's offending lines, or the ports off the build stamp)."),
-            tool("agent_read_node", "Return one node (title, kind, prompt, contract, hasCard) as JSON, plus `rebuildReason` when it needs a rebuild and `rebuildDetail` when there is evidence to name (an intentChanged node has none — its prompt is the evidence).",
+            tool("agent_read_graph", "Return the full project graph (nodes with contracts, connections, render endpoint) as JSON. A built node that needs a rebuild carries `rebuildReason` (contractChanged | intentChanged | sourceMismatch) and, for the first and third, `rebuildDetail` (the audit's offending lines, or the ports off the build stamp). A node whose file input can't be read carries `inputFileErrors` (port → why) — that node is built and broken for a reason no rebuild fixes."),
+            tool("agent_read_node", "Return one node (title, kind, prompt, contract, hasCard) as JSON, plus `rebuildReason` when it needs a rebuild, `rebuildDetail` when there is evidence to name (an intentChanged node has none — its prompt is the evidence), and `inputFileErrors` (port → why) when a file input can't be read. Check that BEFORE assuming a black node needs code.",
                  properties: ["node": ["type": "string", "description": "node id (UUID)"]]),
             tool("agent_library_index", "The built-in node library, grouped by category: one line per node saying what it does. Cheap — read it whole and decide for yourself whether any node does YOUR node's job. Nothing is ranked or filtered; a similar name is not a match. Fetch at most once per turn (it does not change), and not at all if your brief already includes it."),
             tool("agent_library_card", "Read one library node's card (CARD.md) — reuse guidance, gotchas, and setup notes — to confirm or reject it as a reference without fetching full source. When the node is already the likely reference, request its card and source together in one round.",
@@ -32,6 +32,12 @@ extension SZHostBridge {
             tool("agent_report_status", "Report a node's observable status (queued/coding/ok/needsInput/error + message).",
                  properties: [
                     "node": ["type": "string"], "status": ["type": "string"], "message": ["type": "string"],
+                 ]),
+            tool("agent_check_path", "Ask whether a path on this machine exists and can be read, before you rely on it. Returns {path, exists, readable, kind: file|directory|package|null, extension, bytes, modified} and, when it can't be used, `reason` — the same sentence the user sees on the node. `kind: \"package\"` means a folder macOS treats as a single file (a .mlpackage, an .app): that IS the file, don't look inside for one. Your working directory is a scratch dir, so this is the only way you can check a path elsewhere. Pass `accepting` (extensions, no dot) to also check the file is the right kind.",
+                 properties: [
+                    "path": ["type": "string"],
+                    "accepting": ["type": "array", "items": ["type": "string"],
+                                  "description": "optional: filename extensions the caller accepts, no dot"],
                  ]),
             tool("agent_docs_index", "List the reference docs you can fetch (id, title, summary) — the canonical contract schema, the runtime ABI, etc. Cheap; read a topic's body only when you need it (e.g. before authoring a node-contract.json)."),
             tool("agent_docs_read", "Fetch one reference doc's full markdown by topic id (from agent_docs_index) — e.g. \"node-contract\" for the contract/ui/default schema, \"node-abi\" for the runtime ABI, \"card-abi\" for authoring a node's Card.swift. Use this instead of guessing the schema — but skip any doc your brief already embeds, and batch it with your other reads (e.g. the library index) rather than spending a round on it alone.",
@@ -102,6 +108,57 @@ extension SZHostBridge {
         }
     }
 
+    /// Answer "does this path exist and can I read it" for an agent, which otherwise cannot: its
+    /// working directory is a scratch dir and its tool allowlist has no shell. `nonisolated` and
+    /// `static` because it touches no host state at all — that is what lets it run off the main actor.
+    ///
+    /// The `reason` string comes from the SAME audit behind the node's pill, so an agent and the user
+    /// never describe one fault in two vocabularies.
+    nonisolated static func agentCheckPath(_ arguments: [String: Any]) throws -> String {
+        guard let raw = arguments.string("path"), !raw.isEmpty else {
+            throw SZMCPError.message("agent_check_path needs `path`")
+        }
+        let path = (raw as NSString).expandingTildeInPath
+        // There is no working directory to be relative TO: nodes run inside the render loop, and this
+        // tool deliberately reads no project state. Say that rather than answering about some path the
+        // caller did not mean.
+        guard path.hasPrefix("/") else {
+            return SZJSONRPC.encode([
+                "path": path, "exists": false, "readable": false, "kind": NSNull(),
+                "reason": "not an absolute path: \"\(raw)\" — pass a full path",
+            ])
+        }
+        let url = URL(fileURLWithPath: path)
+        let accepting = arguments.stringList("accepting").map { $0.lowercased() }
+        var out: [String: Any] = ["path": path, "extension": url.pathExtension.lowercased()]
+
+        let keys: Set<URLResourceKey> = [.isReadableKey, .isDirectoryKey, .isPackageKey, .fileSizeKey,
+                                         .contentModificationDateKey, .totalFileAllocatedSizeKey]
+        guard let values = try? url.resourceValues(forKeys: keys) else {
+            out["exists"] = false
+            out["readable"] = false
+            out["kind"] = NSNull()
+            out["reason"] = "no file at \(path)"
+            return SZJSONRPC.encode(out)
+        }
+        out["exists"] = true
+        out["readable"] = values.isReadable == true
+        // A package is a folder macOS presents as one file. Agents need that distinction: told
+        // "directory", an agent goes hunting inside for the real file, and there isn't one.
+        out["kind"] = values.isPackage == true ? "package" : (values.isDirectory == true ? "directory" : "file")
+        if let bytes = values.fileSize ?? values.totalFileAllocatedSize { out["bytes"] = bytes }
+        if let modified = values.contentModificationDate {
+            out["modified"] = ISO8601DateFormatter().string(from: modified)
+        }
+        // The project URL is main-actor state this tool deliberately does not read, so an already
+        // absolute path is all it can judge — which is exactly what an agent asks about.
+        if let reason = SZFileInputAudit.fault(path: path, accepting: accepting,
+                                               in: URL(fileURLWithPath: "/")) {
+            out["reason"] = reason
+        }
+        return SZJSONRPC.encode(out)
+    }
+
     private func agentDocsIndex() -> String {
         SZJSONRPC.encode(SZAgentDocs.topics.map { ["id": $0.id, "title": $0.title, "summary": $0.summary] })
     }
@@ -149,7 +206,11 @@ extension SZHostBridge {
     private func annotatingRebuild(_ json: [String: Any], id: SZNodeID) -> [String: Any] {
         var json = json
         json.removeValue(forKey: "buildStamp")
-        guard let reason = host.store.project?.graph.node(id: id)?.rebuildReason else { return json }
+        guard let node = host.store.project?.graph.node(id: id) else { return json }
+        // A node can be perfectly built and still render black because a file input points at nothing.
+        // Say so here: it is the first thing anyone asks when a node looks dead, and it is not a rebuild.
+        if !node.unreadableInputs.isEmpty { json["inputFileErrors"] = node.unreadableInputs }
+        guard let reason = node.rebuildReason else { return json }
         json["rebuildReason"] = reason.rawValue
         if let detail = host.rebuildDetail(node: id) { json["rebuildDetail"] = detail }
         return json

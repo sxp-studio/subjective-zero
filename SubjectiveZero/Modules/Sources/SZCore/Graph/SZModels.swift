@@ -250,6 +250,12 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// encoded; recomputed from `SZPortBindingAudit` at load, after a promote and after a hot reload.
     public var sourceMismatch: Bool = false
 
+    /// The host's other audit verdict: file inputs whose file cannot be used right now, port name →
+    /// one sentence saying why (`SZFileInputAudit`). Ephemeral — never encoded; recomputed at load,
+    /// on every committed input write, after a contract change, and when the app returns to the front.
+    /// Kept on the NODE rather than on the transient status state, which every agent report clears.
+    public var unreadableInputs: [String: String] = [:]
+
     /// What the card renders between header and rows (preview thumbnail / the node's custom card / nothing).
     /// `nil` = unset; the editor applies its legacy auto-preview fallback. Presentation-only: never affects
     /// the render graph or a rebuild.
@@ -290,6 +296,7 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         position: SZPoint,
         buildStamp: SZBuildStamp? = nil,
         sourceMismatch: Bool = false,
+        unreadableInputs: [String: String] = [:],
         body: SZNodeBody? = nil
     ) {
         self.id = id
@@ -301,10 +308,12 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         self.position = position
         self.buildStamp = buildStamp
         self.sourceMismatch = sourceMismatch
+        self.unreadableInputs = unreadableInputs
         self.body = body
     }
 
-    /// `sourceMismatch` is host state, not document state: it stays out of `project.json`. A legacy stored
+    /// `sourceMismatch` and `unreadableInputs` are host state, not document state: both stay out of
+    /// `project.json` (a file missing on THIS machine is not a fact about the project). A legacy stored
     /// `rebuildReason` key is ignored on decode — the reason is derived now.
     private enum CodingKeys: String, CodingKey {
         case id, kind, title, sfSymbol, prompt, contract, position, buildStamp, body

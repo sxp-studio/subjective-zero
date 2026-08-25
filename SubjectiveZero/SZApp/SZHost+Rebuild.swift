@@ -23,6 +23,8 @@ extension SZHost {
     /// cleared when it is clean. Called after a port edit, a promote, a hot reload, and for every
     /// flagged node when a project opens. Never persisted: `SZProjectIO.load` re-derives it.
     func classifyRebuild(node id: SZNodeID) {
+        // A contract change may have added, removed or re-typed a file port, so re-audit its files too.
+        classifyInputFiles(node: id)
         guard let node = store.project?.graph.node(id: id), let errors = auditErrors(node) else { return }
         let mismatch = !errors.isEmpty
         if mismatch != node.sourceMismatch {
@@ -85,6 +87,33 @@ extension SZHost {
     func classifyRebuildsAfterLoad() {
         for node in store.project?.graph.nodes ?? [] where node.sourceMismatch {
             classifyRebuild(node: node.id)
+        }
+        // Files are a separate question and every node is a candidate — a node with a perfectly good
+        // build renders black when its file has gone. Kept OUT of the loop above deliberately: that one
+        // reads each `Node.swift` off disk, this one is a stat per file port.
+        auditInputFiles()
+    }
+
+    /// Re-audit every node's file inputs — project open, and whenever the app comes back to the front
+    /// (a file can be moved or deleted in the Finder while we are in the background, which is exactly
+    /// what the session behind this feature did).
+    func auditInputFiles() {
+        for node in store.project?.graph.nodes ?? [] { classifyInputFiles(node: node.id) }
+    }
+
+    /// Re-audit ONE node's file inputs and store the verdict — the file-side sibling of `classifyRebuild`.
+    /// One `stat` per file port holding an unconnected, non-empty value; nothing here reads a node source
+    /// or touches the GPU. Writes only on a real change, so a clean node costs a comparison.
+    func classifyInputFiles(node id: SZNodeID) {
+        guard let projectURL = loadedProjectURL,
+              let graph = store.project?.graph, let node = graph.node(id: id) else { return }
+        let faults = SZFileInputAudit.faults(in: node,
+                                             connected: SZFileInputAudit.connectedInputs(of: id, in: graph),
+                                             projectURL: projectURL)
+        guard faults != node.unreadableInputs else { return }
+        store.mutate { project in
+            guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
+            project.graph.nodes[i].unreadableInputs = faults
         }
     }
 

@@ -14,7 +14,8 @@ struct SZNodeView: View, Equatable {
     var isSelected: Bool = false
     var locked: Bool = false
     var showPill: Bool = true
-    var errorDetail: String? = nil   // full build diagnostic → clickable error pill
+    var errorDetail: String? = nil   // full diagnostic → clickable error pill
+    var errorTitle: String = ""      // what that pill's popover calls it (SZNodeCanvasContentView.nodeDiagnostic)
     let renderEndpoint: SZPortRef?
     /// Mirrors `SZNodeLayout.previewsEnabled` (the host writes both together). The body derives its
     /// preview region from SZNodeLayout — this prop exists so `==` sees a gate flip and reflows the card.
@@ -58,7 +59,7 @@ struct SZNodeView: View, Equatable {
             && lhs.isSelected == rhs.isSelected
             && lhs.locked == rhs.locked
             && lhs.showPill == rhs.showPill
-            && lhs.errorDetail == rhs.errorDetail
+            && lhs.errorDetail == rhs.errorDetail && lhs.errorTitle == rhs.errorTitle
             && lhs.renderEndpoint == rhs.renderEndpoint
             && lhs.previewsEnabled == rhs.previewsEnabled
             && lhs.tier == rhs.tier
@@ -123,9 +124,7 @@ struct SZNodeView: View, Equatable {
         .trackingHover($cardHover, duration: 0.12)
         .overlay(alignment: .top) {
             SZNodeBadges(status: status, showPill: showPill, locked: locked, errorDetail: errorDetail,
-                         // This node compiled; what's wrong is that its source and its contract disagree.
-                         errorTitle: node.rebuildReason == .sourceMismatch ? "Contract mismatch" : "Build error",
-                         onFix: onFix)
+                         errorTitle: errorTitle, onFix: onFix)
                 .offset(y: -(SZNodeLayout.statusPillHeight + 4))
         }
         .graphOpGlow(status, cornerRadius: SZNodeLayout.cornerRadius)
@@ -214,6 +213,9 @@ struct SZNodeView: View, Equatable {
             Spacer(minLength: 0)
             if !connectedInputs.contains(port.name) {
                 SZPortControl(port: port, locked: locked,
+                              // Why this port's file can't be used, if it can't — the chip says which
+                              // port is at fault, so a node with two file inputs isn't a guessing game.
+                              fault: node.unreadableInputs[port.name],
                               fieldWidth: fieldWidth,
                               options: effectiveOptions(port),
                               // Same dynamic-??-static resolution as the snapshot above, re-run at

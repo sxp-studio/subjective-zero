@@ -498,4 +498,80 @@ private func oneNodeProject(_ id: SZNodeID, inputs: [SZPort],
     let reloaded = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))
     #expect(abs(Int(reloaded.r) - 64) <= 2, "the reload must re-seed from the contract, got \(reloaded.r)")
     #expect(abs(Int(reloaded.g) - 191) <= 2)
+/// A FILE port's stored value is bundle-relative (`media/<uuid>/<name>`), because that is what makes a
+/// `.subz` portable — but a node opens files by absolute path and knows nothing about bundles. The
+/// runtime is where the two meet: `loadProject` resolves every `filePicker` default against the project
+/// URL on the way in, so `ctx.inputString` hands the node a real path. Proven by the node comparing what
+/// it reads against the path the test knows the file to be at.
+@MainActor
+@Test(.enabled(if: SZGPU.isAvailable)) func aRelativeFilePortReachesTheNodeAsAnAbsolutePath() throws {
+    let runtime = try requireRuntime(renderSize: (width: 16, height: 16))
+
+    let id = SZNodeID()
+    let relative = "media/ABCD/clip.mov"
+    let dir = FileManager.default.temporaryDirectory
+        .appending(path: "szruntime-media-\(UUID().uuidString)").appending(path: "g.subz")
+    defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+
+    let port = [SZPort(name: "path", type: .string, ui: SZPortUI(kind: .filePicker), def: .string(relative))]
+    try SZProjectIO.save(oneNodeProject(id, inputs: port), to: dir)
+    // G=255 iff the node was handed the file's ABSOLUTE path; anything else (the relative string, nil)
+    // leaves it black — which is exactly how an unresolved path fails in the real app.
+    let expected = dir.appending(path: relative).path
+    try """
+    import Metal
+    final class Node: SZNode {
+        func update(_ ctx: SZFrameContext) {
+            guard let out = ctx.outputTexture("color") else { return }
+            let g = (ctx.inputString("path") == "\(expected)") ? 1.0 : 0.0
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = out
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: g, blue: 0, alpha: 1.0)
+            pass.colorAttachments[0].storeAction = .store
+            ctx.commandBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        }
+    }
+    enum SZNodeMain { static func make() -> SZNode { Node() } }
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id), atomically: true, encoding: .utf8)
+
+    try runtime.loadProject(at: dir)
+    let pixel = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))
+    #expect(Int(pixel.g) >= 250, "a file port must reach the node resolved against the bundle, got \(pixel.g)")
+}
+
+/// The other half: a path that is ALREADY absolute is handed over untouched, never joined to the bundle.
+/// That branch is what keeps a project written before media moved in-bundle rendering, with no fixup pass.
+@MainActor
+@Test(.enabled(if: SZGPU.isAvailable)) func anAbsoluteFilePortIsHandedToTheNodeUnchanged() throws {
+    let runtime = try requireRuntime(renderSize: (width: 16, height: 16))
+
+    let id = SZNodeID()
+    let outside = "/Users/someone/Downloads/IMG_2479.MOV"
+    let dir = FileManager.default.temporaryDirectory
+        .appending(path: "szruntime-media-abs-\(UUID().uuidString)").appending(path: "g.subz")
+    defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+
+    let port = [SZPort(name: "path", type: .string, ui: SZPortUI(kind: .filePicker), def: .string(outside))]
+    try SZProjectIO.save(oneNodeProject(id, inputs: port), to: dir)
+    try """
+    import Metal
+    final class Node: SZNode {
+        func update(_ ctx: SZFrameContext) {
+            guard let out = ctx.outputTexture("color") else { return }
+            let g = (ctx.inputString("path") == "\(outside)") ? 1.0 : 0.0
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = out
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: g, blue: 0, alpha: 1.0)
+            pass.colorAttachments[0].storeAction = .store
+            ctx.commandBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        }
+    }
+    enum SZNodeMain { static func make() -> SZNode { Node() } }
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id), atomically: true, encoding: .utf8)
+
+    try runtime.loadProject(at: dir)
+    let pixel = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))
+    #expect(Int(pixel.g) >= 250, "an absolute file port must not be joined to the bundle, got \(pixel.g)")
 }

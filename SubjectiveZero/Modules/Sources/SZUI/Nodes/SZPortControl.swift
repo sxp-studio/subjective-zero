@@ -14,6 +14,9 @@ import SZCore
 struct SZPortControl: View {
     let port: SZPort
     var locked: Bool = false
+    /// Set when the host's audit says this port's file can't be read (`SZNode.unreadableInputs`): the
+    /// file chip turns red and carries the reason as its tooltip. nil for every healthy port.
+    var fault: String? = nil
     /// The card-wide numeric-cell width (SZNodeLayout.numericFieldWidth(of:)) — injected by SZNodeView
     /// so cells line up in one column grid across rows of different arity.
     let fieldWidth: CGFloat
@@ -244,24 +247,40 @@ struct SZPortControl: View {
         // The filename is a meaningful identifier (unlike a slider readout), so it reads at the row-label
         // size rather than the smallest value size — see SZNodeLayout.controlWidth's matching filePicker case.
         HStack(spacing: 3) {
-            Image(systemName: "folder").font(SZNodeCardStyle.valueFont)
+            Image(systemName: fault == nil ? "folder" : "exclamationmark.triangle.fill")
+                .font(SZNodeCardStyle.valueFont)
             Text(stringValue.isEmpty ? "Choose…" : lastPathComponent(stringValue)).lineLimit(1)
         }
         .font(SZNodeCardStyle.labelFont)
-        .foregroundStyle(SZNodeCardStyle.valueColor)
+        .foregroundStyle(fault == nil ? SZNodeCardStyle.valueColor : Color.red)
         .padding(.horizontal, SZNodeLayout.chipHorizontalPadding).padding(.vertical, 2)
         .background(Capsule().fill(SZNodeCardStyle.chipFill))
+        .help(fault ?? "")
     }
 
     /// Present a file open panel and commit the chosen path. A pick has no meaningful live-preview state
-    /// (unlike a slider drag), so it commits once with `persist: true`. Any file — the `.filePicker` kind
-    /// carries no per-port content-type today.
+    /// (unlike a slider drag), so it commits once with `persist: true`.
+    ///
+    /// The port says what it accepts through `ui.fileTypes`, and the filter matches on the FILENAME
+    /// EXTENSION rather than on `allowedContentTypes`. That is deliberate:
+    /// `UTType(filenameExtension: "mlpackage")` is nil on a Mac where nothing registered that type, so a
+    /// content-type filter silently drops exactly the types worth declaring. Matching the extension needs
+    /// no type to exist anywhere, and nothing here knows what any particular extension means.
+    ///
+    /// Declaring types also allows DIRECTORIES: several formats are packages (a folder the Finder shows
+    /// as one file), and whether this Mac knows that depends on what is installed. `treatsFilePackages‑
+    /// AsDirectories = false` keeps a REGISTERED package selectable as a file either way.
     private func chooseFile() {
+        let types = port.ui?.acceptedExtensions ?? []
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = !types.isEmpty
+        panel.treatsFilePackagesAsDirectories = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
+        let filter = SZFileTypeFilter(extensions: types)
+        panel.delegate = filter   // NSOpenPanel holds its delegate weakly…
+        defer { withExtendedLifetime(filter) {} }   // …and runModal is synchronous, so pin it across the modal
         guard panel.runModal() == .OK, let url = panel.url else { return }
         onSet?(.string(url.path), true)
     }
@@ -309,4 +328,40 @@ struct SZPortControl: View {
         options.first { $0.value == stringValue }?.label ?? stringValue
     }
 
+}
+
+
+/// Restricts an open panel to a port's declared filename extensions. Two hooks, because they cover
+/// different ways of choosing: `shouldEnable` greys out non-matching files in the browser (while
+/// leaving folders walkable), and `validate` catches what greying cannot — a typed path, a file
+/// dragged into the panel, and "Choose" pressed on the folder currently open.
+///
+/// No declared extensions means no restriction, which is what every port that says nothing gets.
+final class SZFileTypeFilter: NSObject, NSOpenSavePanelDelegate {
+    private let extensions: [String]
+
+    init(extensions: [String]) { self.extensions = extensions }
+
+    private func matches(_ url: URL) -> Bool { extensions.contains(url.pathExtension.lowercased()) }
+
+    private func isPlainFolder(_ url: URL) -> Bool {
+        let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+        return values?.isDirectory == true && values?.isPackage != true
+    }
+
+    func panel(_ sender: Any, shouldEnable url: URL) -> Bool {
+        guard !extensions.isEmpty else { return true }
+        // A plain folder stays enabled so the user can still navigate into it; a package or file has to
+        // match. A package whose extension matches IS the thing being picked.
+        return matches(url) || isPlainFolder(url)
+    }
+
+    func panel(_ sender: Any, validate url: URL) throws {
+        guard !extensions.isEmpty, !matches(url) else { return }
+        let kinds = extensions.map { ".\($0)" }.joined(separator: " or ")
+        throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError, userInfo: [
+            NSLocalizedDescriptionKey: "\(url.lastPathComponent) is not the kind of file this port takes.",
+            NSLocalizedRecoverySuggestionErrorKey: "Choose a \(kinds) file.",
+        ])
+    }
 }

@@ -175,7 +175,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             isSelected: selectedNodeID == node.id || multiSelection.contains(node.id),
             locked: Self.isLocked(node.id, ops: graphOpStatus, lockedNodes: lockedNodes),
             isRunning: isRunning,
-            errorDetail: nodeAgentState[node.id]?.errorDetail,
+            diagnostic: Self.nodeDiagnostic(for: node, agentState: nodeAgentState[node.id]),
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputsByNode[node.id] ?? [],
             previewsEnabled: previewsEnabled,
@@ -210,7 +210,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     @ViewBuilder
     static func card(
         for node: SZNode, status: SZNodeStatus, isSelected: Bool, locked: Bool, isRunning: Bool,
-        errorDetail: String?, renderEndpoint: SZPortRef?, connectedInputs: Set<String>,
+        diagnostic: (detail: String, title: String)?, renderEndpoint: SZPortRef?, connectedInputs: Set<String>,
         previewsEnabled: Bool = true,
         tier: SZCardTier = .full,
         previewFrame: SZNodePreviewFrame? = nil,
@@ -233,14 +233,15 @@ struct SZNodeCanvasContentView: View, Equatable {
         case .prompt:
             SZPromptNodeView(
                 node: node, status: status, isSelected: isSelected, locked: locked,
-                showPill: showPill(status, isRunning: isRunning), errorDetail: errorDetail,
+                showPill: showPill(status, isRunning: isRunning), errorDetail: diagnostic?.detail,
                 autoFocus: autoFocus,
                 onCommit: onCommitPrompt, onEditingChanged: onPromptEditingChanged,
                 onLiveEdit: onLivePrompt)
                 .equatable()
         case .generated:
             SZNodeView(node: node, status: status, isSelected: isSelected, locked: locked,
-                       showPill: showPill(status, isRunning: isRunning), errorDetail: errorDetail,
+                       showPill: showPill(status, isRunning: isRunning),
+                       errorDetail: diagnostic?.detail, errorTitle: diagnostic?.title ?? "",
                        renderEndpoint: renderEndpoint,
                        previewsEnabled: previewsEnabled,
                        tier: tier,
@@ -258,6 +259,20 @@ struct SZNodeCanvasContentView: View, Equatable {
                        onFix: onFix)
                 .equatable()
         }
+    }
+
+    /// What the node's error pill should say, or nil when there is nothing wrong. One winner: a build or
+    /// agent report outranks a file fault, because a node that doesn't compile has no business opening
+    /// files yet. The file case names the port, so a node with two file inputs says which one.
+    static func nodeDiagnostic(for node: SZNode, agentState: SZNodeAgentState?) -> (detail: String, title: String)? {
+        if let detail = agentState?.errorDetail {
+            // It compiled; what's wrong is that its source and its contract disagree.
+            return (detail, node.rebuildReason == .sourceMismatch ? "Contract mismatch" : "Build error")
+        }
+        guard !node.unreadableInputs.isEmpty else { return nil }
+        let detail = node.unreadableInputs.sorted { $0.key < $1.key }
+            .map { "\($0.key) — \($0.value)" }.joined(separator: "\n")
+        return (detail, "Input file")
     }
 
     /// Show the status pill only when it's informative: any non-ready state, or any state while the run
@@ -296,6 +311,14 @@ struct SZNodeCanvasContentView: View, Equatable {
         }
         if state.isChatting { return .building }        // its Coding Agent is mid-chat-edit
         if node.kind == .generated {
+            // A file input that can't be read is a fault the build cannot fix — the node compiled fine,
+            // it just has nothing to open. Ahead of `rebuildReason` because `.contractChanged`'s amber
+            // would otherwise hide it, and ahead of `.ready` because `showPill` hides a ready node's
+            // pill entirely, which is how this failed silently in the first place. Unconditional: a
+            // built node with a clean stamp reads Ready even while its agent codes, so yielding to
+            // work-in-flight would put the node back to claiming Ready with a file it cannot open —
+            // the exact lie this exists to end. No rebuild fixes it; the repair is a different file.
+            if !node.unreadableInputs.isEmpty { return .error }
             // It has a build and still renders — but if its contract's ports moved, that build no longer honours
             // them, so "Ready" would be a lie. Which pill depends on HOW it fails to honour them: code that
             // names ports the contract dropped reads nil every frame (a fault, red), while a contract that

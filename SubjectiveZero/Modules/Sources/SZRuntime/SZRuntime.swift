@@ -173,14 +173,18 @@ public final class SZRuntime: @unchecked Sendable {
         // Render only IMPLEMENTED nodes: a prompt node has no Node.swift to compile. This is what lets a
         // graph with un-implemented (dirty) prompt nodes load — the agent loop starts from exactly that,
         // and the node becomes renderable once its coding agent's source is promoted (kind → generated).
-        try loadGraph(Self.renderableSubgraph(project.graph)) { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0) }
+        // …and resolve every file port against the bundle on the way in: the model holds the PORTABLE
+        // form (`media/<uuid>/<name>`), the runtime is the one place that needs a machine path,
+        // because it is the one place that hands a string to a node that will open it.
+        let graph = Self.renderableSubgraph(project.graph).resolvingFilePaths(in: url)
+        try loadGraph(graph) { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0) }
     }
 
     /// Compile + dlopen a project's new nodes off the caller's thread, touching nothing live: the cold
     /// open, where every node is new. By value so the caller's repaired graph is the one prepared.
     /// Install with `commit`, or drop it to abandon the load.
     public func prepareProject(_ project: SZProject, at url: URL) async throws -> SZPreparedLoad {
-        let graph = Self.renderableSubgraph(project.graph)
+        let graph = Self.renderableSubgraph(project.graph).resolvingFilePaths(in: url)   // see loadProject
         return try await Task.detached(priority: .userInitiated) { [self] in
             try prepareLoad(graph, sourceURL: { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0) },
                             offMain: true)

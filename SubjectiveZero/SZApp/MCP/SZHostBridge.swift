@@ -91,7 +91,7 @@ final class SZHostBridge {
     /// `SZMCPServer` dispatches these before its MainActor hop, so a long tool (a full
     /// pack compile pass) can never wedge the app. Membership is a promise: a listed
     /// tool may read only nonisolated statics and its own arguments.
-    nonisolated static let offMainToolNames: Set<String> = ["debug_check_pack"]
+    nonisolated static let offMainToolNames: Set<String> = ["debug_check_pack", "agent_check_path"]
 
     /// The off-main dispatch lane: the same withholding rails as `callTool`, then the
     /// tool as plain async work on the calling connection's task.
@@ -106,6 +106,8 @@ final class SZHostBridge {
         }
         switch name {
         case "debug_check_pack": return .text(await Self.debugCheckPack(arguments))
+        // A stat can block for seconds on a stalled network mount; off-main it can never wedge the app.
+        case "agent_check_path": return .text(try Self.agentCheckPath(arguments))
         default: throw SZMCPError.message("unknown off-main tool: \(name)")
         }
     }

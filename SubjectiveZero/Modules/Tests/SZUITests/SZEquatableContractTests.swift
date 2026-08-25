@@ -38,8 +38,8 @@ private func storedProperties(of subject: Any) -> Set<String> {
     let view = SZNodeView(node: node, status: .ready, renderEndpoint: nil)
     #expect(storedProperties(of: view) == [
         // compared in ==
-        "node", "status", "isSelected", "locked", "showPill", "errorDetail", "renderEndpoint",
-        "connectedInputs", "previewsEnabled", "tier",
+        "node", "status", "isSelected", "locked", "showPill", "errorDetail", "errorTitle",
+        "renderEndpoint", "connectedInputs", "previewsEnabled", "tier",
         // the app's card host — a stable ref like previewFrame, excluded from == (the card region
         // observes its per-node mount box directly)
         "cardProvider",
@@ -113,13 +113,14 @@ private let portRef = SZPortRef(node: node.id, port: "output")
 @MainActor
 private func nodeView(
     node n: SZNode = node, status: SZNodeStatus = .ready, isSelected: Bool = false, locked: Bool = false,
-    showPill: Bool = true, errorDetail: String? = nil, renderEndpoint: SZPortRef? = nil,
+    showPill: Bool = true, errorDetail: String? = nil, errorTitle: String = "",
+    renderEndpoint: SZPortRef? = nil,
     previewsEnabled: Bool = true, tier: SZCardTier = .full,
     connectedInputs: Set<String> = [], previewFrame: SZNodePreviewFrame? = nil,
     cardProvider: (any SZCustomCardProvider)? = nil
 ) -> SZNodeView {
     SZNodeView(node: n, status: status, isSelected: isSelected, locked: locked, showPill: showPill,
-               errorDetail: errorDetail, renderEndpoint: renderEndpoint,
+               errorDetail: errorDetail, errorTitle: errorTitle, renderEndpoint: renderEndpoint,
                previewsEnabled: previewsEnabled, tier: tier,
                connectedInputs: connectedInputs, previewFrame: previewFrame,
                cardProvider: cardProvider)
@@ -146,6 +147,8 @@ private final class StubCardProvider: SZCustomCardProvider {
     #expect(nodeView(locked: true) != nodeView())
     #expect(nodeView(showPill: false) != nodeView())
     #expect(nodeView(errorDetail: "boom") != nodeView())
+    // The pill's popover heading is chosen per fault kind (build vs input file), so it must invalidate.
+    #expect(nodeView(errorTitle: "Input file") != nodeView())
     #expect(nodeView(renderEndpoint: portRef) != nodeView())
     #expect(nodeView(previewsEnabled: false) != nodeView())                    // gate flip must reflow the card
     #expect(nodeView(tier: .tile) != nodeView())                               // LOD crossing re-renders once

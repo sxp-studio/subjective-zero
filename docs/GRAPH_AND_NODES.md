@@ -22,12 +22,26 @@ MyProject.subz/
 │     └─ Node.swift
 ├─ transcripts/            // chat transcript sidecars, one per scope (director.json / <node-id>.json) - see STATE.md
 ├─ attachments/            // durable chat-attachment copies (<attachment-id>/<filename>)
+├─ media/                  // files a file-picker port points at (<uuid>/<filename>)
 └─ .staging/               // staged agent/build writes, promoted on success (see STATE.md)
 ```
 
 `project.json` references nodes by id and owns the connection list. Each node folder owns its
 contract + source (+ an optional `Card.swift`). This "per-node `Node.swift` + `node-contract.json`"
 shape keeps each node a self-contained, inspectable unit on disk.
+
+**A picked file is copied in.** Choosing or dropping a file for a `filePicker` port brings it into
+`media/<uuid>/`, and the port stores the bundle-relative path (`media/<uuid>/IMG_2479.MOV`) rather
+than wherever the file happened to live. That is what makes a `.subz` work on another machine, or
+after being moved. The copy is a clone on APFS, so it is instant and costs no extra space on the
+same disk; it happens off the main thread, and the node renders the original file until it lands.
+
+**The rule for reading one** (`SZProjectMedia`): a file-picker value that is not absolute resolves
+against the bundle; an absolute one is used as itself. The second branch is not a compatibility
+shim - it is what lets a project written before this keep rendering, with no fixup pass. Resolution
+happens where the runtime loads a graph, so `ctx.inputString` always hands a node a real absolute
+path and node code never knows about any of it. Deleting a node leaves its media behind, like the
+node's own folder; both are collected when the checkpoint layer ships.
 
 ## Node kinds
 
@@ -64,7 +78,7 @@ enforcement. Illustrative shape:
 - `inputs`/`outputs` declare typed ports; the runtime enforces that the node reads/writes only
   these ([RUNTIME.md](RUNTIME.md)).
 - `display: true` on a texture output marks it as the current render endpoint candidate.
-- **`ui`** is an object `{ "kind", "min"?, "max"?, "step"? }` - `kind` ∈ `slider · field · colorWell · toggle · dropdown · filePicker`. **`default`** is a *tagged* object `{ "type", "value" }` matching the port's type (e.g. `{"type":"float","value":1.0}`, `{"type":"colorRGB","value":[1,0,0]}`, `{"type":"enum","value":"warm"}`) - never a bare value. An `enum` also carries `options` as positional pairs `[["Label","value"], …]`. The complete per-type table (every `default`/`ui`/runtime read) is the canonical `node-contract` agent doc (`agent_docs_read`), kept in sync with `SZContract.swift`.
+- **`ui`** is an object `{ "kind", "min"?, "max"?, "step"?, "fileTypes"? }` - `kind` ∈ `slider · field · colorWell · toggle · dropdown · filePicker`. `fileTypes` belongs to `filePicker` alone: the filename extensions the port accepts, lowercased and without a dot (`["mlpackage", "mlmodelc"]`). Declaring them does two things - the chooser offers only those files, and the host can say "that is a `.mlmodel`, this port takes `.mlpackage`" instead of the node quietly rendering black. One of them may name a *package* (a folder the Finder shows as one file); the match is on the extension, so it works whether or not anything on this Mac has registered that type. Leaving `fileTypes` out means any file. **`default`** is a *tagged* object `{ "type", "value" }` matching the port's type (e.g. `{"type":"float","value":1.0}`, `{"type":"colorRGB","value":[1,0,0]}`, `{"type":"enum","value":"warm"}`) - never a bare value. An `enum` also carries `options` as positional pairs `[["Label","value"], …]`. The complete per-type table (every `default`/`ui`/runtime read) is the canonical `node-contract` agent doc (`agent_docs_read`), kept in sync with `SZContract.swift`.
 
 - **`card`** (optional) declares the node's custom card: `{ "cols"?, "rows"?, "backdrop"?, "plumbing"? }`
   - a minimum width in grid columns, the region's default height in rows, the texture output the
@@ -125,7 +139,7 @@ control with a default value and sends edits to the node's runtime value.
 | `texture` (`MTLTexture`) | no inline control (must be connected, or sourced by a node) |
 | `bool` | toggle |
 | `enum` (string options, e.g. `["a","b"]`) | dropdown |
-| `string` | text field, **or file picker** when the node marks it as a path |
+| `string` | text field, **or file picker** when the node marks it as a path (`ui.kind = filePicker`; the file is copied into the project and the port stores a bundle-relative path, but the node is still handed an absolute one) |
 | `event` | no control; fires only when an upstream node triggers it |
 
 Outputs use the same type set. **Texture outputs** additionally show a **display** icon: toggle

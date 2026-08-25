@@ -177,12 +177,26 @@ public struct SZPortUI: Codable, Equatable, Sendable {
     public var min: Double?
     public var max: Double?
     public var step: Double?
+    /// `filePicker` only: the filename extensions this port accepts, lowercased and without a dot
+    /// (`["mlpackage", "mlmodelc"]`). Nil/empty means any file. One of these may name a PACKAGE — a
+    /// folder the Finder shows as a single file — and nothing in the app knows which, which is the
+    /// point of declaring it: the chooser matches on the extension rather than on a type some other
+    /// installed app has to have registered.
+    public var fileTypes: [String]?
 
-    public init(kind: SZPortUIKind, min: Double? = nil, max: Double? = nil, step: Double? = nil) {
+    public init(kind: SZPortUIKind, min: Double? = nil, max: Double? = nil, step: Double? = nil,
+                fileTypes: [String]? = nil) {
         self.kind = kind
         self.min = min
         self.max = max
         self.step = step
+        self.fileTypes = fileTypes
+    }
+
+    /// The accepted extensions, normalized for comparison. Empty = accepts anything.
+    public var acceptedExtensions: [String] {
+        (fileTypes ?? []).map { $0.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) }
+            .filter { !$0.isEmpty }
     }
 }
 

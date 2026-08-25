@@ -203,8 +203,10 @@ extension SZHost {
     ///
     /// Deliberately NOT removed: the node's `nodes/<id>/` folder (Node.swift + contract). With no undo
     /// yet it's the only surviving copy of the node's source, so it stays as an orphan (invisible —
-    /// nothing references it; `watchNodeSources` skips non-graph folders). TODO: folder cleanup rides
-    /// the undo/checkpoint layer when it ships. Ditto the wider asymmetry that add/move/connect/update
+    /// nothing references it; `watchNodeSources` skips non-graph folders). Files the node's file ports
+    /// brought into `media/` stay for the same reason and one more: with no undo, deleting them could
+    /// destroy the user's only copy of a file they long since cleared out of Downloads. TODO: folder
+    /// cleanup rides the undo/checkpoint layer when it ships. Ditto the wider asymmetry that add/move/connect/update
     /// edits still persist only via run/promote — unifying edit persistence belongs to that command/
     /// checkpoint layer, not a delete fix.
     @discardableResult

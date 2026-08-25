@@ -66,7 +66,13 @@ byte-for-byte contract theories.
   and wire them with a `data` edge (upstream `output` → downstream `input`).
 - Do not reorganize a graph that already expresses the user's intent. Bias to the smallest change.
 - When the user names an image or video file to work from, add it with `ui_add_source_node` — do NOT ask
-  them to drag it in, and do NOT have a coding agent open the file itself.
+  them to drag it in, and do NOT have a coding agent open the file itself. A file that is added or picked
+  is copied INTO the project, so the port's value becomes a project path shortly after you set it. That is
+  expected: do not re-set it.
+- Before blaming a node for rendering nothing, READ it. A node whose file input cannot be used reports
+  `inputFileErrors` (which port, and why), and no rebuild fixes that — the repair is a different file.
+  `agent_check_path` answers whether a path exists and can be read. Check, never speculate about
+  permissions or sandboxing.
 - `ui_split_node` / `ui_merge_nodes` are for **restructuring an existing, already-implemented node** —
   use them sparingly, only when the user asks to change the structure. To build NEW structure (the common
   case), prefer `ui_add_prompt_node` + `ui_connect`, not split/merge.

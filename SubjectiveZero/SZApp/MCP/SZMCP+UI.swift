@@ -112,7 +112,7 @@ extension SZHostBridge {
                  ]),
             tool("ui_message_status", "Delivery state of a message you sent (`message_id` from ui_send_chat): {state: queued|delivering|processed|failed, reason?}. `failed` carries the reason. Unknown ids (e.g. from before an app restart) return {state: \"unknown\"}. Poll between your own steps — the send never blocks.",
                  properties: ["message_id": ["type": "string"]]),
-            tool("ui_set_input_default", "Set an unconnected input's default value (mirrors its slider/toggle/dropdown) — changes the live render. `value` is coerced to the port's declared type (number, bool, or array of numbers); numbers may be sent as JSON numbers or numeric strings (\"14\", \"[0.1, 0.2, 0.3, 1]\"). A slider port's value is clamped to its `ui.min/max` and snapped to `ui.step`, exactly as dragging the slider would; the returned `value` is the APPLIED one, which may differ from what you asked for.",
+            tool("ui_set_input_default", "Set an unconnected input's default value (mirrors its slider/toggle/dropdown) — changes the live render. `value` is coerced to the port's declared type (number, bool, or array of numbers); numbers may be sent as JSON numbers or numeric strings (\"14\", \"[0.1, 0.2, 0.3, 1]\"). A slider port's value is clamped to its `ui.min/max` and snapped to `ui.step`, exactly as dragging the slider would; the returned `value` is the APPLIED one, which may differ from what you asked for. Setting a FILE port copies the file into the project shortly after this returns, so the port's value then changes to a project path — expected, not a failure, don't retry. A file that can't be read comes back as `warning`.",
                  properties: [
                     "node": ["type": "string"], "port": ["type": "string"],
                     "value": ["type": ["number", "boolean", "array", "string"],
@@ -478,6 +478,9 @@ extension SZHostBridge {
             }
             return (upsert, obj["remove"] as? [String] ?? [])
         }
+        // A file-port default declared here stays exactly as written, absolute path and all: this tool
+        // declares a port SURFACE, and an agent that means to set a VALUE has `ui_set_input_default`,
+        // which brings the file into the project. Deliberate, not an omission.
         let inputs = try ports("inputs"), outputs = try ports("outputs")
         let edit = SZStore.SZPortEdit(upsertInputs: inputs.upsert, removeInputs: inputs.remove,
                                       upsertOutputs: outputs.upsert, removeOutputs: outputs.remove)
@@ -783,6 +786,10 @@ extension SZHostBridge {
         let applied = host.setInputDefault(node: node, port: port, value: value, origin: .agent)
         var response: [String: Any] = ["set": port]
         if let json = Self.jsonValue(applied) { response["value"] = json }
+        // A file that can't be read would otherwise be discovered as a black node several turns later.
+        if let reason = host.store.project?.graph.node(id: node)?.unreadableInputs[port] {
+            response["warning"] = reason
+        }
         return SZJSONRPC.encode(response)
     }
 

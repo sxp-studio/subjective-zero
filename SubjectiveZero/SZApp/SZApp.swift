@@ -77,6 +77,12 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Back to the front: a file a node points at can be moved, renamed or thrown away in the Finder
+    /// while we are in the background, and nothing else would notice. One stat per file port.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        host?.auditInputFiles()
+    }
+
     /// Quit gate: rescue an untitled project before its temp files are cleaned up (saved projects
     /// autosave, so they quit silently). Offered DURING a run too — Save As no longer needs the
     /// graph quiet, and quitting mid-run was the one way to lose an untitled project outright.
