@@ -112,7 +112,36 @@ public struct SZAgentGraphPanel: View {
     @State private var agentsSectionOpen = false
     @State private var runsSectionOpen = true
 
+    /// The sidebar folded away, and how wide it is when it isn't. Session-only, like the
+    /// section folds and the nudges above: this panel's state is a reading position, not
+    /// something the project remembers.
+    @State private var sidebarOpen = true
+    @State private var sidebarWidth: CGFloat = 200
+    /// The width the running resize measures from, stamped on mouse-down so the drag reads
+    /// as absolute instead of accumulating every delta. Cleared by nothing but the next
+    /// mouse-down: dropping it mid-drag is what re-anchoring on the current width means.
+    @State private var resizeAnchor: CGFloat?
+    /// The whole panel's width, so the sidebar can be clamped against the room it actually
+    /// has. The tile's own minimum is 420 — the sidebar's maximum — and the tile CLIPS, so
+    /// an unclamped sidebar can push its own divider and fold button off the edge and strand
+    /// itself there (the width is session state; nothing would put it back).
+    @State private var panelWidth: CGFloat = 0
+
     private static let space = "szagentgraph"
+    /// Narrow enough for a laptop tile, wide enough for a long agent name; past the low end
+    /// the sidebar folds rather than becoming a column of ellipses.
+    private static let sidebarWidths: ClosedRange<CGFloat> = 150...420
+    /// The canvas's floor. Whatever the tile's width, this much of it stays canvas — which is
+    /// what keeps the divider and the fold button inside the clip, and so reachable.
+    private static let canvasFloor: CGFloat = 120
+    /// The fold button's top, in both the open sidebar and the rail: the chrome header floats
+    /// OVER the tile, and this is the first y that clears it.
+    private static let foldButtonTop = SZPanelChromeView<EmptyView>.headerHeight + 4
+    private static let foldButtonHeight: CGFloat = 18
+    /// Where a section label's centre sits inside its own row: 10 pt above an ~11 pt line.
+    /// The sidebar reads it to seat the AGENTS label on the button's line — the two would
+    /// otherwise be a row apart, which is what a stacked layout gave.
+    private static let sectionLabelCentre: CGFloat = 15.5
 
     public init(planAgents: [SZAgentGraphPlanAgent],
                 runs: [SZAgentGraphRun] = [],
@@ -201,41 +230,26 @@ public struct SZAgentGraphPanel: View {
     }
 
     public var body: some View {
-        // ONE permanent sidebar, one outline — and the outline IS the mode: picking a graph
-        // shows its plan, picking a traversal shows that run. No Plan/Run toggle to place,
-        // no chips floating over the canvas — the tree carries the whole selection surface.
-        // The sidebar's permanence is also structural: one stable canvas identity means the
-        // `.onAppear` land-on-runs default runs once, when the panel appears.
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    sectionHeader("AGENTS", open: $agentsSectionOpen)
-                    if agentsSectionOpen { agentTree }
-                    if !runs.isEmpty {
-                        Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
-                            .padding(.horizontal, 8).padding(.top, 8)
-                        sectionHeader("RUNS", open: $runsSectionOpen)
-                        if runsSectionOpen {
-                            SZAgentGraphRunList(runs: runs,
-                                                names: SZAgentGraphNaming(agents: planAgents),
-                                                shownID: effectiveMode == .run ? shown?.id : nil) { run in
-                                selectedRunID = run.id
-                                mode = .run           // picking a traversal shows it
-                                // An archived run is a still picture — only a live one is
-                                // worth chasing.
-                                following = run.isLive
-                            }
-                        }
-                    }
+        // ONE sidebar, one outline — and the outline IS the mode: picking a graph shows its
+        // plan, picking a traversal shows that run. No Plan/Run toggle to place, no chips
+        // floating over the canvas — the tree carries the whole selection surface.
+        // It FOLDS but never leaves: a rail stands in its place, so the canvas identity
+        // stays put and the `.onAppear` land-on-runs default still runs exactly once.
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                if sidebarOpen {
+                    // The CLAMPED width, not the stored one: a tile narrower than the stored
+                    // preference borrows from the sidebar and hands it back when it widens.
+                    sidebar.frame(width: min(sidebarWidth, maxSidebarWidth))
+                    sidebarDivider
+                } else {
+                    sidebarRail
+                    Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1)
                 }
-                // The chrome's header floats OVER the tile; the sidebar starts below it
-                // so the AGENTS section is never hidden underneath.
-                .padding(.top, SZPanelChromeView<EmptyView>.headerHeight + 4)
-                .padding(.bottom, 8)
+                canvas
             }
-            .frame(width: 200)
-            Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1)
-            canvas
+            .onAppear { panelWidth = proxy.size.width }
+            .onChange(of: proxy.size.width) { _, new in panelWidth = new }
         }
         // A NEW live run is the moment the Run view becomes the interesting one: switch to
         // it and re-arm the follow. TWO things it deliberately does not do: it never
@@ -281,6 +295,111 @@ public struct SZAgentGraphPanel: View {
         selectedAgentID = planFocusRequest
         agentsSectionOpen = true
         onConsumePlanFocus()
+    }
+
+    // MARK: The sidebar and its edge
+
+    /// The outline: the two sections, with the fold button sharing the AGENTS label's line.
+    /// The button is an OVERLAY, not a row — pinned, so the control that hides the list can't
+    /// scroll away from whoever wants it, and level with the label rather than stacked above
+    /// it in a strip of its own. `foldButtonTop` is the y that clears the floating chrome
+    /// header; the scroll's own top is derived FROM it, so the two share one baseline and
+    /// moving either means moving the pair.
+    private var sidebar: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                sectionHeader("AGENTS", open: $agentsSectionOpen)
+                if agentsSectionOpen { agentTree }
+                if !runs.isEmpty {
+                    Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                        .padding(.horizontal, 8).padding(.top, 8)
+                    sectionHeader("RUNS", open: $runsSectionOpen)
+                    if runsSectionOpen {
+                        SZAgentGraphRunList(runs: runs,
+                                            names: SZAgentGraphNaming(agents: planAgents),
+                                            shownID: effectiveMode == .run ? shown?.id : nil) { run in
+                            selectedRunID = run.id
+                            mode = .run           // picking a traversal shows it
+                            // An archived run is a still picture — only a live one is
+                            // worth chasing.
+                            following = run.isLive
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, 8)
+        }
+        // Lifted so the AGENTS label's own centre lands on the button's, which stays put.
+        .padding(.top, Self.foldButtonTop + Self.foldButtonHeight / 2 - Self.sectionLabelCentre)
+        .overlay(alignment: .topTrailing) {
+            foldButton(hiding: true).padding(.top, Self.foldButtonTop).padding(.trailing, 6)
+        }
+    }
+
+    /// What the sidebar leaves behind when it folds: the same button, alone. A rail rather
+    /// than nothing, because a canvas with no visible way back to the list is a panel the
+    /// user has to guess at.
+    private var sidebarRail: some View {
+        VStack(spacing: 0) {
+            foldButton(hiding: false)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, Self.foldButtonTop)
+        .frame(width: 22)
+        .frame(maxHeight: .infinity)
+        .background(Color.white.opacity(0.02))
+    }
+
+    /// ONE glyph for both directions — the standard sidebar toggle. A mirrored icon on the
+    /// rail would draw a sidebar on the right, which is not a place this panel has.
+    private func foldButton(hiding: Bool) -> some View {
+        Button { setSidebar(open: !hiding) } label: {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: 20, height: Self.foldButtonHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(hiding ? "Hide the sidebar" : "Show the sidebar")
+    }
+
+    /// The sidebar's edge: a hairline to look at, a 7 pt strip to grab. Drag resizes,
+    /// double click folds — and dragging hard past the minimum folds too, which is the
+    /// gesture people try before they find the button.
+    private var sidebarDivider: some View {
+        SZSidebarDivider(
+            onDragBegan: { resizeAnchor = sidebarWidth },
+            onDrag: { delta in resizeSidebar(to: (resizeAnchor ?? sidebarWidth) + delta) },
+            onDoubleClick: { setSidebar(open: false) })
+            .frame(width: 7)
+            .background(alignment: .center) {
+                Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1)
+            }
+    }
+
+    private func setSidebar(open: Bool) {
+        withAnimation(.easeOut(duration: 0.14)) { sidebarOpen = open }
+    }
+
+    /// As wide as the sidebar may get right now: its own maximum, or whatever the tile can
+    /// spare above the canvas floor. Before the first layout there is no width to go on, so
+    /// the static maximum stands.
+    private var maxSidebarWidth: CGFloat {
+        guard panelWidth > 0 else { return Self.sidebarWidths.upperBound }
+        return min(Self.sidebarWidths.upperBound,
+                   max(Self.sidebarWidths.lowerBound, panelWidth - Self.canvasFloor))
+    }
+
+    private func resizeSidebar(to width: CGFloat) {
+        // Well past the minimum: fold, rather than leaving a stub too narrow to read. The
+        // anchor deliberately survives — the drag that folded is over (its strip is gone),
+        // and a cleared anchor would re-anchor the next report on the current width.
+        guard width > Self.sidebarWidths.lowerBound - 36 else {
+            setSidebar(open: false)
+            return
+        }
+        sidebarWidth = min(max(width, Self.sidebarWidths.lowerBound), maxSidebarWidth)
     }
 
     private var canvas: some View {
