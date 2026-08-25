@@ -83,7 +83,7 @@ extension SZHost {
         return true
     }
 
-    /// Drop the agent sessions (live + disk-restored probation) a switch invalidates, landing the map
+    /// Drop the agent sessions a switch invalidates, landing the map
     /// on disk immediately so a relaunch can't resurrect a dead id.
     ///
     /// `ownedBy: nil` — a **provider** switch: every session goes, since a codex thread can't be
@@ -97,10 +97,8 @@ extension SZHost {
     /// (`sendChat`), which is the context-rebuild story.
     func resetAgentSessions(ownedBy providerID: String? = nil) {
         func owned(_ session: SZAgentSession) -> Bool { providerID == nil || session.providerID == providerID }
-        guard agentSessions.contains(where: { owned($0.value) })
-                || restoredSessions.contains(where: { owned($0.value) }) else { return }
+        guard agentSessions.contains(where: { owned($0.value) }) else { return }
         agentSessions = agentSessions.filter { !owned($0.value) }
-        restoredSessions = restoredSessions.filter { !owned($0.value) }
         persistAgentSessions()
         status = "agent sessions reset — context rebuilds from transcripts"
     }

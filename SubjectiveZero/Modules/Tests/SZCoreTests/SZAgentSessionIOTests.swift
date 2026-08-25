@@ -11,6 +11,13 @@ private func temporaryURL() -> URL {
         .appending(path: "agent-sessions.json")
 }
 
+/// A project directory that exists next to `url`, so a save does not prune it as gone.
+private func existingProject(_ name: String, beside url: URL) throws -> URL {
+    let project = url.deletingLastPathComponent().appending(path: name)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    return project
+}
+
 @Test func sessionsRoundTripPerProject() throws {
     let url = temporaryURL()
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -39,8 +46,8 @@ private func temporaryURL() -> URL {
 @Test func sessionsForTwoProjectsDoNotClobberEachOther() throws {
     let url = temporaryURL()
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-    let projectA = URL(fileURLWithPath: "/tmp/a.subz")
-    let projectB = URL(fileURLWithPath: "/tmp/b.subz")
+    let projectA = try existingProject("a.subz", beside: url)
+    let projectB = try existingProject("b.subz", beside: url)
     let sessionA = [SZChatScope.directorKey: SZAgentSession(providerID: "claude", sessionID: "a-1")]
     let sessionB = [SZChatScope.directorKey: SZAgentSession(providerID: "codex", sessionID: "b-1")]
 
@@ -54,8 +61,8 @@ private func temporaryURL() -> URL {
 @Test func sessionsEmptyMapPrunesTheProjectEntry() throws {
     let url = temporaryURL()
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-    let projectA = URL(fileURLWithPath: "/tmp/a.subz")
-    let projectB = URL(fileURLWithPath: "/tmp/b.subz")
+    let projectA = try existingProject("a.subz", beside: url)
+    let projectB = try existingProject("b.subz", beside: url)
     try SZAgentSessionIO.save([SZChatScope.directorKey: SZAgentSession(providerID: "claude", sessionID: "a-1")],
                               projectURL: projectA, to: url)
     try SZAgentSessionIO.save([SZChatScope.directorKey: SZAgentSession(providerID: "codex", sessionID: "b-1")],
@@ -69,6 +76,42 @@ private func temporaryURL() -> URL {
     #expect(!raw.contains("a.subz"))   // pruned, not just emptied
 }
 
+@Test func sessionsSavePrunesProjectsThatNoLongerExist() throws {
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    let projectA = try existingProject("a.subz", beside: url)
+    let projectB = try existingProject("b.subz", beside: url)
+    let sessionA = [SZChatScope.directorKey: SZAgentSession(providerID: "claude", sessionID: "a-1")]
+    let sessionB = [SZChatScope.directorKey: SZAgentSession(providerID: "codex", sessionID: "b-1")]
+    try SZAgentSessionIO.save(sessionA, projectURL: projectA, to: url)
+    try SZAgentSessionIO.save(sessionB, projectURL: projectB, to: url)
+
+    try FileManager.default.removeItem(at: projectA)
+    try SZAgentSessionIO.save(sessionB, projectURL: projectB, to: url)
+
+    #expect(SZAgentSessionIO.load(projectURL: projectA, from: url).isEmpty)
+    #expect(SZAgentSessionIO.load(projectURL: projectB, from: url) == sessionB)
+    let raw = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+    #expect(!raw.contains("a.subz"))
+}
+
+@Test func sessionsConcurrentSavesKeepBothProjects() async throws {
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    let projectA = try existingProject("a.subz", beside: url)
+    let projectB = try existingProject("b.subz", beside: url)
+    let sessionA = [SZChatScope.directorKey: SZAgentSession(providerID: "claude", sessionID: "a-1")]
+    let sessionB = [SZChatScope.directorKey: SZAgentSession(providerID: "codex", sessionID: "b-1")]
+
+    await withTaskGroup(of: Void.self) { group in
+        group.addTask { for _ in 0..<20 { try? SZAgentSessionIO.save(sessionA, projectURL: projectA, to: url) } }
+        group.addTask { for _ in 0..<20 { try? SZAgentSessionIO.save(sessionB, projectURL: projectB, to: url) } }
+    }
+
+    #expect(SZAgentSessionIO.load(projectURL: projectA, from: url) == sessionA)
+    #expect(SZAgentSessionIO.load(projectURL: projectB, from: url) == sessionB)
+}
+
 @Test func sessionsPartialEntryFailsDecodeAsAbsent() throws {
     // A session missing sessionID is useless — the whole document decode fails and load degrades
     // to empty (forgiving), rather than a half-usable entry sneaking in.
@@ -78,4 +121,14 @@ private func temporaryURL() -> URL {
     try Data(#"{"formatVersion":1,"projects":{"/tmp/x.subz":{"director":{"providerID":"claude"}}}}"#.utf8)
         .write(to: url)
     #expect(SZAgentSessionIO.load(projectURL: URL(fileURLWithPath: "/tmp/x.subz"), from: url).isEmpty)
+}
+
+@Test func sessionsSaveKeepsAProjectWhoseVolumeIsAway() throws {
+    let url = FileManager.default.temporaryDirectory
+        .appending(path: "sz-sessions-\(UUID().uuidString)").appending(path: "agent-sessions.json")
+    let here = try existingProject("here.subz", beside: url)
+    let away = URL(filePath: "/Volumes/\(UUID().uuidString)/away.subz")   // parent does not exist
+    try SZAgentSessionIO.save(["d": SZAgentSession(providerID: "claude", sessionID: "1")], projectURL: away, to: url)
+    try SZAgentSessionIO.save(["d": SZAgentSession(providerID: "claude", sessionID: "2")], projectURL: here, to: url)
+    #expect(SZAgentSessionIO.load(projectURL: away, from: url)["d"]?.sessionID == "1")
 }

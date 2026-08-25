@@ -98,15 +98,19 @@ extension SZHost {
         guard let mcpPort = agentMCPServer?.port, let projectURL = loadedProjectURL else {
             return fail("(host not ready — message not delivered)")
         }
-        let existing = agentSessions[scope.key]
-        let providerID = existing?.providerID ?? activeProviderID
-        guard let provider = SZProviderRegistry.shared.provider(id: providerID) else {
-            return fail("(unknown provider \(providerID) — message not delivered)")
+        let provider: any SZProvider
+        let existing: SZAgentSession?
+        switch providerForTurn(scope, heal: true) {
+        case .refused(let note):
+            return fail(note)
+        case .ready(let ready, let session, let note):
+            provider = ready
+            existing = session
+            if let note {
+                store.appendChatMessage(SZChatMessage(role: .assistant, text: note, transient: true), to: scope)
+            }
         }
-        if existing == nil, !isProviderReadyForNewWork(providerID) {
-            surfaceProviderNotReady()
-            return fail("(\(providerID) is not ready — open Agent Providers)")
-        }
+        let providerID = provider.id
 
         // Redelivery after a restart whose transcript lost the bubble (queue survived, sidecar
         // older): re-append it so the conversation shows what is being delivered.
@@ -148,39 +152,35 @@ extension SZHost {
                            turnID: assistantID)
         }
 
+        var resumedThisTurn = false
         // The turn core, driven by the graph's own ORDER: `tools` and `session` are what
         // the turn node declares (so tool-free-ness is the debug pack's `"tools": []`
         // rather than a scope branch here), and `choice` is the router's verdict.
         func runDeliveredTurn(_ order: SZTurnOrder, prompt: String) async throws
             -> (result: SZAgentRunResult, generation: String) {
-            // Session affinity: a resumed conversation keeps the envelope that opened it.
-            let effective = order.session == .resume
-                ? order.choice.honoringSession(existing) : order.choice
-            guard let turnProvider = SZProviderRegistry.shared.provider(id: effective.providerID) else {
-                throw SZMCPError.message("unknown provider: \(effective.providerID)")
+            let turn = order.resolved(against: existing)
+            guard let turnProvider = SZProviderRegistry.shared.provider(id: turn.choice.providerID) else {
+                throw SZMCPError.message("unknown provider: \(turn.choice.providerID)")
             }
             let request = SZAgentRunRequest(
-                prompt: prompt,
-                workingDirectory: workingDirectory,
-                packageDirectory: projectURL,
-                cacheDirectory: cacheDirectory,
-                mcpServerPort: order.tools?.isEmpty == true ? nil : mcpPort,
-                allowedMCPTools: order.tools ?? SZHostBridge.agentCallableToolNames,
-                resumeSessionID: order.session == .resume
-                    ? Self.resumableSessionID(of: existing, under: effective) : nil,
-                model: effective.model,
-                reasoningEffort: effective.reasoningEffort,
-                fastMode: effective.fastMode,
-                timeout: SZAgentTurnBudgets.codingTimeout,
-                inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
+                turn, prompt: prompt, workingDirectory: workingDirectory, packageDirectory: projectURL,
+                cacheDirectory: cacheDirectory, mcpPort: mcpPort,
+                defaultTools: SZHostBridge.agentCallableToolNames)
+            resumedThisTurn = request.resumeSessionID != nil
             // A scope keeps ONE session, and every lane of the node shares it. A resume turn owns
             // it; a spawn turn may only ESTABLISH it, never replace it — otherwise a side lane
             // (an edit, routed to its own slot) would repin the scope to its model and drag the
             // chat and reconcile lanes onto that model for good.
             let result = try await deliver(scope: scope, request: request, provider: turnProvider,
-                                           persistSession: order.session == .resume || existing == nil,
+                                           pinSession: order.session == .resume || existing == nil,
                                            existingAssistantID: assistantID, claim: claim,
-                                           via: effective.via).result
+                                           via: turn.choice.via).result
+            // A spawn on a pinned scope (an edit) moved the files on without the thread; retire
+            // it so the next chat cold-starts on the recap and the current files.
+            if order.session == .spawn, existing != nil, !result.outcome.failed {
+                agentSessions[scope.key] = nil
+                persistAgentSessions()
+            }
             return (result, SZTurnGeneration(
                 providerID: turnProvider.id, model: request.model,
                 reasoningEffort: request.reasoningEffort, fastMode: request.fastMode).label)
@@ -239,24 +239,22 @@ extension SZHost {
             }
             let empty = store.messages(for: scope).first(where: { $0.id == assistantID })?.text.isEmpty == true
             status = result.outcome.failed ? "chat turn failed" : "chat reply ready"
-            // The shared ladder, with this lane's own pre-emption folded in at its own place: the
-            // stale-session probation must claim a failure before the provider probe opens a setup
-            // sheet at a session that simply expired.
+            // The shared ladder, with this lane's pre-emption first: a failed resume claims the
+            // failure before the provider probe opens a setup sheet at a session that expired.
             switch await turnFailure(result, provider: provider,
-                                     preempt: { self.dropSessionIfStale(scope) }) {
+                                     preempt: { resumedThisTurn && self.dropSessionAfterFailedResume(scope) }) {
             case .timedOut(let detail):
-                // A timeout is its own outcome — the same sentence the run path lands, and NO
-                // stale-session probation: a killed-at-the-clock turn is no evidence the restored
-                // session is dead (the cold retry would only run down the same clock again).
+                // A timeout is its own outcome and no evidence the session is dead (the cold
+                // retry would only run down the same clock again).
                 reply((empty ? "" : "\n") + "⚠️ \(detail)")
                 status = "chat turn timed out"
                 markFailed(detail)
                 return
             case .preempted:
-                // The probation self-heal just fired: ONE cold-start redelivery — bounded
-                // structurally: with the session gone, a second failure lands in markFailed.
-                reply("(session expired — retrying with a fresh session)")
-                status = "chat turn failed — retrying with a fresh session"
+                // ONE cold-start redelivery; with the pin gone a second failure lands in markFailed.
+                reply((empty ? "" : "\n") + "(could not continue the previous session, starting a fresh one)")
+                store.setChatTransient(assistantID, in: scope)   // a notice, not conversation
+                status = "chat turn failed, retrying with a fresh session"
                 requeue()
                 return   // the defer's release re-fires the pump → redelivery
             case .provider(let detail):
@@ -273,9 +271,10 @@ extension SZHost {
             // A deliver that bowed out before its turn-end path ran left the queue-wait row
             // parked under this turn — drop it rather than leak it.
             SZTrace.discard(turnID: assistantID)
-            if dropSessionIfStale(scope) {
-                reply("(session expired — retrying with a fresh session)")
-                status = "chat turn failed — retrying with a fresh session"
+            if resumedThisTurn, dropSessionAfterFailedResume(scope) {
+                reply("(could not continue the previous session, starting a fresh one)")
+                store.setChatTransient(assistantID, in: scope)
+                status = "chat turn failed, retrying with a fresh session"
                 requeue()
                 return
             }
@@ -388,7 +387,7 @@ extension SZHost {
                 return SZWorld(graph: self.store.project?.graph,
                                statuses: self.nodeStatusLines,
                                node: scope.nodeID,
-                               resuming: existing != nil,
+                               resuming: graph.resumes(existing, agent: pack.id, router: router),
                                pendingTasks: self.pendingTasks,
                                conversation: self.conversation(for: scope,
                                                                excluding: priorConversationExcluding))

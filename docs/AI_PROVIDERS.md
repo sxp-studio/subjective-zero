@@ -123,7 +123,11 @@ Settings, and the backward-looking truth is the
   wrong ([AGENT_ORCHESTRATION.md](AGENT_ORCHESTRATION.md#model-routing)).
 - **Session affinity**: a live thread keeps the envelope that opened it; activating, editing, or
   deleting a profile governs NEW conversations only — nothing moves under a running session, and
-  a profile switch is refused outright while a run is in flight.
+  a profile switch is refused outright while a run is in flight. A thread leaves its envelope on
+  Clear Chat, on changing the default model, on switching or disabling a provider, on a build's
+  receipt (the Director) or an edit (a node); turning routing off moves live threads to the
+  default model. A session file from before routing carries no envelope, so under a route to
+  another provider it cold-starts once.
 - **`SZ_MODEL_ROUTING`** (launch env): `=0` kills routing for the session; `=<name>` pins that
   profile; an unknown name REFUSES the delivery rather than guessing (the SZ_AGENT_PACKS rule).
   Unset or `=1`: app-state governs. With no active profile the router is the identity —

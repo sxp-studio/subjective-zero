@@ -106,8 +106,12 @@ struct SZShippedDoorBehaviorTests {
         let retry = await decide(loader,
             facts: #"{"message": "", "resuming": true, "pendingTasks": [], "assignment": {"attempt": 2, "note": "port math was off"}}"#)
         #expect(retry.outcome == .outcome("continue"))
+        // A retry with no session to continue (the first attempt never pinned one) starts over.
+        let coldRetry = await decide(loader,
+            facts: #"{"message": "", "resuming": false, "pendingTasks": [], "assignment": {"attempt": 2}}"#)
+        #expect(coldRetry.outcome == .outcome("implement"))
         // The whole coding surface is deterministic — not one model call.
-        #expect(first.asks.isEmpty && retry.asks.isEmpty)
+        #expect(first.asks.isEmpty && retry.asks.isEmpty && coldRetry.asks.isEmpty)
     }
 
     @Test func unassignedProseIsTriagedAndAQuestionStaysAChat() async throws {

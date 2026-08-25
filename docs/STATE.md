@@ -164,8 +164,12 @@ full mutation surface) so the engine is designed once against the complete set.
   Structural edits and agent-run / chat-turn checkpoints share the stack: one Run = one step, one
   chat turn = one step, one split/merge = one step.
 - **The chat transcript is never truncated** - undo rewinds artifacts, not the conversation.
-- **Lazy agent re-grounding.** When a node's artifacts changed under its resumed session
-  (undo/redo/hand edit), the next chat turn re-grounds the agent with the current contract+source.
+- **After an edit, a node's next chat never continues a thread older than the edit.** An edit
+  runs in a fresh session and rewrites the files. If the node already had a session (say, the
+  one that built it), that session still believes the old files, so it is dropped and the next
+  chat turn starts cold with the transcript recap and the current contract and source. If the
+  node had no session, the edit's own session becomes the node's session: it made the change,
+  so it knows the current files, and the next chat turn resumes it.
 - **Transient churn stays out of history.** Status changes, lock/busy flags, and live agent
   progress are observable state (`SZNodeAgentState`) but never checkpointed.
 

@@ -27,6 +27,7 @@
 // ("use exact project session ID, creating it if missing" — continuity live-verified: a resumed
 // turn recalled the prior turn's content; the session header echoes the passed id). Sessions are
 // keyed by cwd on pi's side, which matches the host's stable per-scope working directories.
+// - `--session-id` creates the session when missing, so an unknown id resumes as an empty thread.
 //
 // STDIN: `pi -p` reads piped stdin to EOF before starting (main.js readPipedStdin) — an inherited
 // stdin that never closes hangs the CLI with ZERO output (reproduced 4×). SZSystemProcessRunner

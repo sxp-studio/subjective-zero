@@ -145,11 +145,6 @@ final class SZHost {
     /// before its tool work, so "text empty" alone would hide the dots too early). Derived from the
     /// in-flight map so the two can't drift.
     var chatInFlight: Set<String> { Set(inFlightAssistantIDs.keys) }
-    /// The sessions restored from DISK this launch (agent-sessions.json), on probation until proven:
-    /// if a resumed turn fails while the scope STILL holds its disk-restored session (compared by
-    /// value — a session re-minted this process never matches, so it can never be dropped by
-    /// mistake), `sendChat` drops it and the next message cold-starts with the transcript recap.
-    var restoredSessions: [String: SZAgentSession] = [:]
     /// The resource ledger — the single home for "who may touch what right now" (SZResourceLedger).
     /// Every agent turn claims its scope's resources for the stream's duration (`deliver`); a run
     /// claims its work set; the busy flags and lock affordances derive from the claims table.
@@ -839,7 +834,6 @@ final class SZHost {
         pendingTasks = []          // invariant stays local: a task scheduled for A never sees B
         admissionSuspended = false // a Stop in A must not freeze B's queue, where nothing stopped
         agentSessions = [:]
-        restoredSessions = [:]
         inFlightAssistantIDs = [:]
         deliveringBubbles = [:]
         optionsCache = [:]
@@ -1251,19 +1245,17 @@ final class SZHost {
     }
 
     /// Set the active provider for new sessions (the composer cluster / `ui_set_provider` / the setup
-    /// sheet's Confirm). Returns false for an unknown id, or while agents are busy (a switch resets
-    /// sessions — cutting a live run/turn over to another CLI would strand it); left unchanged then.
-    /// A real switch persists as the default (post-first-run; Confirm remains the first-run seed) and
-    /// resets every agent session — a codex thread can't be resumed by claude. Transcripts stay: the
-    /// next message per scope cold-starts with the transcript recap (`sendChat`), which is the
-    /// context-rebuild story.
+    /// sheet's Confirm). Refused for an unknown id or while agents own the project (a switch resets
+    /// sessions, and a delivery in its door step has not claimed the transcript yet). A real switch
+    /// persists as the default (post-first-run) and resets every agent session; the next message per
+    /// scope cold-starts with the transcript recap.
     @discardableResult
     func setActiveProvider(_ id: String) -> Bool {
         // A disabled id is refused like an unknown one — covers `ui_set_provider` and stale UI.
         guard SZProviderRegistry.shared.provider(id: id) != nil,
               !disabledProviderIDs.contains(id) else { return false }
         guard id != activeProviderID else { return true }   // no-op switch: nothing to reset or persist
-        guard !isRunning, chatInFlight.isEmpty else { return false }
+        guard !agentsOwnProject else { return false }
         activeProviderID = id
         if defaultProviderID != nil {   // post-first-run the cluster is the source of truth
             defaultProviderID = id
@@ -1307,6 +1299,9 @@ final class SZHost {
             SZChatMessage(role: .assistant, text: text, duration: seconds, receipt: receipt),
             to: .director)
         linkNarrationToRun(id, thread: thread)
+        // The chat thread predates the run; the next chat cold-starts on the transcript, which
+        // now holds the build ask, the Director's run turns and this receipt. Callers persist.
+        agentSessions[SZChatScope.director.key] = nil
         if !isRunning { flushTranscript(.director) }
         return id
     }

@@ -170,6 +170,11 @@ extension SZHost {
                 return false
             }
         }
+        guard !agentsOwnProject else {
+            status = "cannot disable \(id) while agents are running"
+            return false
+        }
+        resetAgentSessions(ownedBy: id)   // its threads cannot be continued once it is off
         disabledProviderIDs.insert(id)
         providerHealth[id] = nil
         providerProbes[id] = nil

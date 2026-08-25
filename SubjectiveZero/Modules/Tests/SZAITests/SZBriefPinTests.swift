@@ -177,6 +177,10 @@ struct SZBriefPinTests {
         // opencode's tool-namespacing is a provider transform applied to the rendered brief —
         // the same real byte transform the recorder pinned.
         out["coding-compile-inline-opencode.md"] = SZOpenCodeProvider.namespacedSubZTools(in: inline)
+        out["coding-compile-retry.md"] = try renderer.render(
+            agent: "coding", template: "node-compile", message: "",
+            world: SZWorld(graph: base, statuses: [grayID: grayStatus], node: grayID,
+                           assignment: SZAssignment(attempt: 2, note: "keep the sliders")))
         out["coding-compile-preserve.md"] = try renderer.render(
             agent: "coding", template: "node-compile", message: "", world: workWorld,
             extras: SZBriefExtras(preserveBehavior: true))

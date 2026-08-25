@@ -152,7 +152,7 @@ public struct SZBriefRenderer: Sendable {
         "graph", "message", "toolbelt", "cards", "node", "contract", "source",
         "round", "cap", "blockers", "inbox", "mutations", "instruction", "tasks",
         "prompt", "title", "symbol", "inputs", "outputs", "boundary", "abi", "reference", "schema",
-        "blocker", "director_message", "grading",
+        "blocker", "director_message", "retry_note", "grading",
         "original", "intent", "stage", "count", "constituents",
     ]
 
@@ -284,6 +284,12 @@ public struct SZBriefRenderer: Sendable {
             world.assignment?.note.map {
                 "\n## A message from the Director — follow this\n\(SZPromptTemplate.defused($0))\n"
             } ?? ""
+        }
+        // A retry on a fresh session: what stopped the previous attempt, else nothing.
+        add("retry_note") {
+            guard let job = world.assignment, job.attempt > 1, let node = world.node else { return "" }
+            return "\n## What blocked the previous attempt\n"
+                + SZPromptTemplate.defused(world.statuses[node] ?? Self.fallbackBlocker) + "\n"
         }
 
         // — the split/merge seed bundle —

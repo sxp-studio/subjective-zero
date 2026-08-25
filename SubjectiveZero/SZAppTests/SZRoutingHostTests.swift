@@ -208,17 +208,6 @@ struct SZRoutingHostTests {
         #expect(host.activeRoutingProfileName == "fast-fleet")
     }
 
-    @Test func aPinlessSessionUnderAMovedRouteIsNotResumable() {
-        // A codex thread can't be resumed by claude: the id is dropped, the turn cold-starts.
-        let session = SZAgentSession(providerID: "codex", sessionID: "s-1")
-        let moved = SZModelChoice(providerID: "claude", fastMode: false, via: "p · a · s")
-        #expect(SZHost.resumableSessionID(of: session, under: moved) == nil)
-        // Same provider (cold start, or affinity already moved the choice back): resumable.
-        let matching = SZModelChoice(providerID: "codex", fastMode: false)
-        #expect(SZHost.resumableSessionID(of: session, under: matching) == "s-1")
-        #expect(SZHost.resumableSessionID(of: nil, under: matching) == nil)
-    }
-
     @Test func offCardsStateEachSlotsLiveResolutionWithNothingPickable() {
         // The Off row (and the no-profiles empty state): every row is resolve-only — the
         // full "Default (…)" truth as its label, no options for the pane to render.

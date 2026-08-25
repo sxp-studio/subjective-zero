@@ -42,7 +42,7 @@ public struct SZAgentRunRequest: Sendable {
     /// per-tool allowlist (claude's `--allowedTools`) mirrors this; the others ignore it and reach
     /// whatever the bus advertises. Empty when no MCP is attached.
     public var allowedMCPTools: [String]
-    public var resumeSessionID: String?   // non-nil → continue an existing session (chat), not a fresh spawn
+    public var resumeSessionID: String?   // non-nil → continue an existing session, not a fresh spawn
     public var model: String?
     public var reasoningEffort: String?
     public var fastMode: Bool
@@ -391,5 +391,15 @@ public extension SZProvider {
 extension String {
     var szFirstLine: String {
         String(split(whereSeparator: \.isNewline).first ?? "").trimmingCharacters(in: .whitespaces)
+    }
+}
+
+extension SZAgentSession {
+    /// The pin a finished turn leaves: the id plus the envelope the thread opened with.
+    public init(providerID: String, sessionID: String, opening request: SZAgentRunRequest) {
+        self.init(providerID: providerID, sessionID: sessionID,
+                  envelope: SZRouteEnvelope(providerID: providerID, model: request.model,
+                                            reasoningEffort: request.reasoningEffort,
+                                            fastMode: request.fastMode))
     }
 }

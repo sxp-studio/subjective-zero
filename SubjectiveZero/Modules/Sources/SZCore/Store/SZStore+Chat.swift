@@ -56,6 +56,11 @@ extension SZStore {
         mutateMessage(messageID, in: scope) { $0.graphRunID = runID }
     }
 
+    /// Mark a message transient (a host notice, not conversation): the recap skips it.
+    public func setChatTransient(_ messageID: UUID, in scope: SZChatScope) {
+        mutateMessage(messageID, in: scope) { $0.transient = true }
+    }
+
     /// Replace ALL transcripts at once — the project-open restore path (the host feeds it
     /// `SZChatTranscriptIO.loadAll` filtered to live scopes). One @Observable fire.
     public func restoreChat(_ transcripts: [String: [SZChatMessage]]) {

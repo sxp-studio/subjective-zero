@@ -12,7 +12,7 @@ public struct SZWorld: Sendable {
     public var statuses: [SZNodeID: String]
     /// The node this delivery is bound to (its scope); nil = a director/debug conversation.
     public var node: SZNodeID?
-    /// Whether the scope already has a session — the doors' cold-vs-resumed fork.
+    /// Whether the scope's session is one this graph's resume turns would continue; the doors' cold-vs-resumed fork.
     public var resuming: Bool
     /// The granted build this delivery serves, while one is live.
     public var run: SZRun?

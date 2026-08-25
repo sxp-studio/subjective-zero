@@ -244,11 +244,10 @@ extension SZHost {
             // not document content.
             try? fm.removeItem(at: dest.appending(path: ".staging"))
 
-            // The session store is keyed by project path — seed the new key so the switch
-            // restores resumable sessions instead of cold-starting every chat.
-            try? SZAgentSessionIO.save(agentSessions, projectURL: dest)
-
+            // An untitled project moves to its new path with its sessions; a copy of a saved
+            // project cold-starts, so two projects never continue the same CLI thread.
             let wasUntitled = isUntitledProject
+            if wasUntitled { try? SZAgentSessionIO.save(agentSessions, projectURL: dest) }
             try await switchProject(to: dest)   // releases the source lock, takes the dest lock
 
             // The document takes its new name from where the user put it.

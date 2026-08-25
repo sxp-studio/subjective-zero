@@ -7,6 +7,7 @@
 // `grok agent stdio`, is a persistent process and doesn't fit the one-shot spawn seam — future work).
 // Sessions are claude-style: the host mints `--session-id`, a chat turn continues with `--resume`
 // (continuity live-verified on 0.2.93: a resumed turn recalled the prior turn's content).
+// - resume of an unknown id: exit 1, 404 on stderr, empty stdout (grok 0.2.93).
 //
 // DYNAMIC MODEL CATALOG (pi-style, see SZPiProvider). grok's served ids are unversioned backend
 // aliases the CLI enumerates via `grok models` — they re-point and disappear underneath a pinned

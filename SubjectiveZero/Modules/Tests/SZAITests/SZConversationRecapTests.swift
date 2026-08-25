@@ -65,4 +65,23 @@ struct SZConversationRecapTests {
         #expect(clipped.contains("(…truncated)"))
         #expect(clipped.count < 8_200)
     }
+
+    @Test func theOmissionHeaderSurvivesTheCharacterCut() throws {
+        let many = (1...30).map { SZChatMessage(role: .user, text: String(repeating: "y", count: 600) + "\($0)") }
+        let recap = try #require(SZConversationRecap.render(many, nodes: []))
+        #expect(recap.contains("(…10 earlier turns omitted)"))
+        #expect(recap.contains("(…truncated)"))
+        #expect(recap.range(of: "omitted")!.lowerBound < recap.range(of: "truncated")!.lowerBound)
+    }
+
+    @Test func aRunReplaysInOrderWithItsReceipt() throws {
+        let receipt = SZChatReceipt(label: "built Warm Orange", conclusion: .ended)
+        let recap = try #require(SZConversationRecap.render([
+            SZChatMessage(role: .user, text: "warm it up"),
+            SZChatMessage(role: .assistant, text: "adding a tint", graphRunID: UUID()),
+            SZChatMessage(role: .assistant, text: "done"),
+            SZChatMessage(role: .assistant, text: "built Warm Orange", receipt: receipt),
+        ], nodes: []))
+        #expect(recap.contains("user: warm it up\nassistant: adding a tint\nassistant: done\nbuild: built Warm Orange"))
+    }
 }

@@ -11,6 +11,8 @@
 // opened elsewhere is transcript replay (SZChatTranscriptIO + the host's cold-start recap); sessions
 // are just the fast path when the same machine relaunches. Keyed by the project's standardized path
 // (paths are machine-local by definition here — that's the point).
+// Each save holds an advisory lock on a sibling `.lock` file, so concurrent windows never lose entries.
+// A save also prunes projects whose path no longer exists on disk.
 import Foundation
 
 public enum SZAgentSessionIO {
@@ -53,15 +55,34 @@ public enum SZAgentSessionIO {
     /// Replace one project's sessions (read-modify-write; other projects' entries are preserved).
     /// An empty map prunes the project's entry.
     public static func save(_ sessions: [String: SZAgentSession], projectURL: URL, to url: URL = defaultURL) throws {
-        var document = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(Document.self, from: $0) }
-            ?? Document()
-        if sessions.isEmpty {
-            document.projects.removeValue(forKey: projectKey(projectURL))
-        } else {
-            document.projects[projectKey(projectURL)] = sessions
-        }
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try SZJSON.encoder().encode(document).write(to: url, options: .atomic)
+        try withFileLock(at: url.appendingPathExtension("lock")) {
+            var document = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(Document.self, from: $0) }
+                ?? Document()
+            let key = projectKey(projectURL)
+            // Prune projects that are gone, not ones on a volume that is merely unmounted.
+            let fm = FileManager.default
+            for stale in document.projects.keys where stale != key && !fm.fileExists(atPath: stale)
+                && fm.fileExists(atPath: (stale as NSString).deletingLastPathComponent) {
+                document.projects.removeValue(forKey: stale)
+            }
+            if sessions.isEmpty {
+                document.projects.removeValue(forKey: key)
+            } else {
+                document.projects[key] = sessions
+            }
+            try SZJSON.encoder().encode(document).write(to: url, options: .atomic)
+        }
+    }
+
+    /// Runs `body` under an exclusive advisory `flock` on `lockURL`.
+    private static func withFileLock(at lockURL: URL, _ body: () throws -> Void) throws {
+        let fd = open(lockURL.path, O_CREAT | O_RDWR, 0o644)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(fd) }
+        guard flock(fd, LOCK_EX) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { flock(fd, LOCK_UN) }
+        try body()
     }
 }

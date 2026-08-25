@@ -16,7 +16,6 @@ public enum SZConversationRecap {
         guard !messages.isEmpty else { return nil }
         let tail = messages.suffix(messageLimit)
         var lines: [String] = []
-        if tail.count < messages.count { lines.append("(…\(messages.count - tail.count) earlier turns omitted)") }
         for message in tail {
             // A build's receipt is not something anyone SAID: labelled as the event it is,
             // not as the agent's own prior words.
@@ -41,6 +40,8 @@ public enum SZConversationRecap {
         }
         var body = lines.joined(separator: "\n")
         if body.count > characterLimit { body = "(…truncated)\n" + String(body.suffix(characterLimit)) }
+        // The omission header goes above the cut so it survives it.
+        if tail.count < messages.count { body = "(…\(messages.count - tail.count) earlier turns omitted)\n" + body }
         return """
         Prior conversation restored from the project (you are a fresh session; catch up from this):
         ---

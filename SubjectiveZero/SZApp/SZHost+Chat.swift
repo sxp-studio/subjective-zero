@@ -248,16 +248,13 @@ extension SZHost {
             flushTranscript(scope)
             return reject("(host not ready)")
         }
-        let existing = agentSessions[scope.key]
-        let providerID = existing?.providerID ?? activeProviderID
-        if SZProviderRegistry.shared.provider(id: providerID) == nil {
+        let providerID: String
+        switch providerForTurn(scope, heal: false) {
+        case .refused(let note):
             flushTranscript(scope)
-            return reject("(unknown provider \(providerID))")
-        }
-        if existing == nil, !isProviderReadyForNewWork(providerID) {
-            surfaceProviderNotReady()
-            flushTranscript(scope)
-            return reject("(\(providerID) is not ready — open Agent Providers)")
+            return reject(note)
+        case .ready(let provider, _, _):
+            providerID = provider.id
         }
 
         // Queue-everywhere: EVERY send is an envelope; the pump delivers it the moment the scope is
@@ -296,18 +293,41 @@ extension SZHost {
         for task in chatTurnTasks.values { task.cancel() }
     }
 
-    /// Self-heal for expired sessions: a DISK-restored session (on probation — `restoredSessions`,
-    /// snapshotted by `restoreTranscripts`) that fails its resumed turn is dropped, so the next
-    /// message cold-starts with the transcript recap instead of failing forever against a dead
-    /// provider thread. Compared by VALUE: a session minted this process never matches the disk
-    /// snapshot, so a transient failure can never cost live conversation context.
-    /// Returns whether a session was actually dropped — the probation-retry signal: a delivery
-    /// that failed AND healed a stale session deserves one cold-start redelivery (the retry needs
-    /// no counter — with the session gone, a second failure can't drop anything, so it terminates).
+    /// Which CLI takes a scope's next turn: the pinned session's provider while it is ready,
+    /// else the active provider on a fresh session (`heal` drops the pin; enqueue only looks).
+    /// Nothing is dropped unless the active provider can actually take the turn.
+    enum TurnProvider {
+        case ready(any SZProvider, session: SZAgentSession?, note: String?)
+        case refused(String)
+    }
+    func providerForTurn(_ scope: SZChatScope, heal: Bool) -> TurnProvider {
+        var session = agentSessions[scope.key]
+        var note: String?
+        if let pinned = session?.providerID, !isProviderReadyForNewWork(pinned) {
+            guard isProviderReadyForNewWork(activeProviderID) else {
+                surfaceProviderNotReady(pinned)
+                return .refused("(\(pinned) is not ready, open Agent Providers)")
+            }
+            if heal { agentSessions[scope.key] = nil; persistAgentSessions() }
+            session = nil
+            note = "(\(pinned) is not ready, continuing on \(activeProviderID) with a fresh session)"
+        }
+        let providerID = session?.providerID ?? activeProviderID
+        guard let provider = SZProviderRegistry.shared.provider(id: providerID) else {
+            return .refused("(unknown provider \(providerID))")
+        }
+        if session == nil, !isProviderReadyForNewWork(providerID) {
+            surfaceProviderNotReady()
+            return .refused("(\(providerID) is not ready, open Agent Providers)")
+        }
+        return .ready(provider, session: session, note: note)
+    }
+
+    /// A resumed turn that failed drops its pin so the redelivery cold-starts on the transcript
+    /// recap. Returns whether a pin was dropped; with it gone a second failure cannot drop again.
     @discardableResult
-    func dropSessionIfStale(_ scope: SZChatScope) -> Bool {
-        guard let restored = restoredSessions.removeValue(forKey: scope.key),
-              agentSessions[scope.key] == restored else { return false }
+    func dropSessionAfterFailedResume(_ scope: SZChatScope) -> Bool {
+        guard agentSessions[scope.key] != nil else { return false }
         agentSessions[scope.key] = nil
         persistAgentSessions()
         return true

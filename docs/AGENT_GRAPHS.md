@@ -25,7 +25,7 @@ state that is true between messages, minted by the host, read by steps and brief
 | `pendingTasks` | always — the asks scheduled and not yet started | the Build press, `ui_run`, or the door's `requestBuild` effect |
 | `assignment` | work stands assigned to this scope — the attempt, the sender's note | a dispatch node's fleet delivery |
 | `graph`, `statuses` | always — the live project document and the agents' reported statuses | the app |
-| `node`, `resuming` | the delivery's binding: which node it is about, whether the scope already has a session | the delivering host |
+| `node`, `resuming` | the delivery's binding: which node it is about, whether the scope's session is one the graph's resume turns would actually continue under the delivery's routes | the delivering host |
 
 New machinery never grows a message: it mints world state and knocks. The rule that keeps
 the spec honest: **every fact names its shipped consumer** (a step predicate or a brief
@@ -81,7 +81,7 @@ A node takes **exactly one of three forms** — enforced at decode:
 | form | body | outcomes |
 |---|---|---|
 | `"step": "<folder>"` | the compiled `Step.swift` in the agent's pack | whatever the step's own exported declaration names |
-| `"turn": { "brief", "session"?, "tools"?, "slot"?, "context"? }` | a full agent turn; the mustache brief (named by stem) IS the body. `"context": "conversation"` puts the scope's prior conversation above a spawned turn's brief (a resumed session already holds it, so the pair is shape-gated) | fixed `ok` / `error` — process truth only, content never routes |
+| `"turn": { "brief", "session"?, "tools"?, "slot"?, "context"? }` | a full agent turn; the mustache brief (named by stem) IS the body. `"context": "conversation"` puts the scope's prior conversation above a spawned turn's brief (a resumed session already holds it, so the pair is shape-gated); the recap is bounded to the last 20 messages, about 8,000 characters | fixed `ok` / `error` — process truth only, content never routes |
 | `"dispatch": { "to" }` | fan the run's work set out to a seat — and **wait for the set** | `settled`, when the last lands (or the watchdog synthesizes the stragglers) |
 
 **Model slots** are the graph's declared kinds of model work — what a routing profile fills
@@ -151,8 +151,9 @@ loop speaks; an unleashed settled loop is refused at load like any unbounded cyc
 leash IS the retry budget (the reconcile brief's `{{cap}}` reads it off the graph).
 
 `session` on a turn: `spawn` (default) cold-starts; `resume` continues the scope's
-existing session (spawning when none exists). `tools` narrows the turn's tool surface;
-`[]` means no MCP server at all.
+existing session (spawning when none exists). A resume whose route lands on another provider
+than the session's cold-starts, since a session id cannot cross CLIs. `tools` narrows the
+turn's tool surface; `[]` means no MCP server at all.
 
 Edges are `{ from, outcome, to, maxTraversals? }`. An outcome with **no edge ends the
 traversal** — that is not an error; it is how a gate's `no` ends a run. A cycle is legal
@@ -308,5 +309,8 @@ with no edge ends the traversal), **conclusions end** (the closed set, exactly o
 traversal: `ended`, `failed`, `cancelled`, `declined` — a refusal is never a failure —
 and `defect`, the traversal's own integrity breaking, which validation makes unreachable
 for shipped packs). **Sessions survive every ending**: the one session store keeps each
-scope's agent session across traversals, a retry resumes it re-grounded on the blocker,
-and a fresh run's first dispatch still cold-starts by design.
+scope's agent session across traversals, a retry resumes it when the session still
+continues under the delivery's routes (else it starts over on the blocker),
+and a fresh run's first dispatch still cold-starts by design. Pins persist by lane: a chat
+turn pins on resume or when the slot is empty, a run's Director turn pins on the run only,
+and a run's coding turn always pins.

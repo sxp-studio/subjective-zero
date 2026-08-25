@@ -57,4 +57,37 @@ extension SZModelChoice {
                              reasoningEffort: pin.reasoningEffort,
                              fastMode: pin.fastMode ?? false, via: "session")
     }
+
+    /// The id this choice may resume; nil when the providers differ (one CLI can't resume
+    /// another's session).
+    public func resumableSessionID(of session: SZAgentSession?) -> String? {
+        guard let session, session.providerID == providerID else { return nil }
+        return session.sessionID
+    }
+}
+
+extension SZTurnOrder {
+    /// The order landed on its scope's session: a resume takes affinity's choice and the id
+    /// it may continue; a spawn passes through untouched.
+    public func resolved(against session: SZAgentSession?) -> SZTurnOrder {
+        guard self.session == .resume else { return self }
+        var order = self
+        order.choice = choice.honoringSession(session)
+        order.resumeSessionID = order.choice.resumableSessionID(of: session)
+        return order
+    }
+}
+
+extension SZAgentGraph {
+    /// Whether every `resume` turn of this graph would actually continue `session` under
+    /// `router`: the world's `resuming` fact, so a door never picks a resume that cold-starts.
+    public func resumes(_ session: SZAgentSession?, agent: String,
+                        router: any SZModelRouting) -> Bool {
+        guard session != nil else { return false }
+        return nodes.allSatisfy { node in
+            guard case .turn(let turn) = node.form, turn.session == .resume else { return true }
+            let choice = router.resolve(SZModelCall(class: .turn, agent: agent, slot: turn.slot))
+            return choice.honoringSession(session).resumableSessionID(of: session) != nil
+        }
+    }
 }

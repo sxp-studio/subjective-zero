@@ -86,8 +86,8 @@ extension SZHost {
         }
     }
 
-    /// Persist the resumable-session map to the machine-local store — called wherever
-    /// `agentSessions` changes (deliver's persist point, the run-end fold, self-heal, purge/clear).
+    /// Persist the resumable-session map to the machine-local store, wherever `agentSessions`
+    /// changes (deliver's pin, a run's receipt, a failed resume, purge/clear, provider resets).
     func persistAgentSessions() {
         guard let url = loadedProjectURL else { return }
         try? SZAgentSessionIO.save(agentSessions, projectURL: url)
@@ -107,10 +107,6 @@ extension SZHost {
         store.restoreChat(restored)
 
         agentSessions = SZAgentSessionIO.load(projectURL: url).filter { live.contains($0.key) }
-        // Disk-restored sessions are on probation until their first resumed turn succeeds — see the
-        // header + the self-heal in `sendChat`. Snapshot by VALUE: a session re-minted this process
-        // won't match the snapshot, so it can never be dropped as stale.
-        restoredSessions = agentSessions
         restoreMessageQueue(live: live)
         restoreTaskQueue()
     }
@@ -221,14 +217,13 @@ extension SZHost {
 
     /// Reset one scope's durable chat state — THE shared teardown for the clear button and the node
     /// purge, so the artifact list can't drift between the two: durable attachment copies, transcript
-    /// (store + sidecar), resumable session (+ probation), and any queued Director message (it
+    /// (store + sidecar), resumable session, and any queued Director message (it
     /// belongs to the conversation being reset — folding it into a later retry would resurrect
     /// context the user explicitly discarded). Callers persist the session map when done.
     func resetScopeChat(_ scope: SZChatScope) {
         removeAttachmentFiles(for: store.messages(for: scope))
         store.removeChat(scopeKey: scope.key)
         agentSessions[scope.key] = nil
-        restoredSessions[scope.key] = nil
         mailbox.removeAll(for: scope.key)   // queued messages die with the conversation (waiters resume .removed)
         if let url = loadedProjectURL { SZChatTranscriptIO.remove(scopeKey: scope.key, projectURL: url) }
     }

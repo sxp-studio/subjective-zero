@@ -25,7 +25,7 @@ extension SZHost {
     @discardableResult
     func deliver(
         scope: SZChatScope, request: SZAgentRunRequest, provider: any SZProvider,
-        persistSession: Bool = true, existingAssistantID: UUID? = nil,
+        pinSession: Bool = true, existingAssistantID: UUID? = nil,
         claim: SZClaimToken? = nil, via: String? = nil
     ) async throws -> (result: SZAgentRunResult, assistantID: UUID) {
         let turnResources = Self.turnResources(for: scope)
@@ -130,23 +130,20 @@ extension SZHost {
         if let stats = result.outcome.reportedStats {
             SZTrace.record(stats.turnEvent(started: started), turnID: assistantID)
         }
-        // A FAILED turn leaves no session behind. codex emits `thread.started` — a real, resumable
-        // thread_id — before the backend rejects the request, so persisting it would let the next
-        // turn `resume` a thread whose only content is that error, and replay it. A failed *resume*
-        // is unaffected: `SZProvider.run` backfills the id it came with, this skips the identical
-        // rewrite, and `sendChat`'s `dropSessionIfStale` owns that probation.
-        if persistSession, !result.outcome.failed, let sessionID = result.outcome.sessionID {
-            // The pin carries the envelope the thread opened with — what a later resume
-            // re-runs even if routing has moved this position (affinity).
-            agentSessions[scope.key] = SZAgentSession(
-                providerID: provider.id, sessionID: sessionID,
-                envelope: SZRouteEnvelope(providerID: provider.id, model: request.model,
-                                          reasoningEffort: request.reasoningEffort,
-                                          fastMode: request.fastMode))
+        // A FAILED turn leaves no session behind: codex emits a resumable `thread.started` before
+        // the backend rejects the request, and resuming it would replay that error. A failed
+        // resume is the chat lane's business (`dropSessionAfterFailedResume`).
+        // A resume re-pins only while the slot still holds the thread it continued; a slot
+        // retired mid-turn (a run's receipt, a failed resume) stays retired.
+        let slotUnchanged = request.resumeSessionID == nil
+            || agentSessions[scope.key]?.sessionID == request.resumeSessionID
+        if pinSession, slotUnchanged, !result.outcome.failed, let sessionID = result.outcome.sessionID {
+            agentSessions[scope.key] = SZAgentSession(providerID: provider.id, sessionID: sessionID,
+                                                      opening: request)
+        } else if pinSession, !result.outcome.failed, request.resumeSessionID == nil {
+            NSLog("[SZ] %@ returned no session id for %@; the next turn cold-starts",
+                  provider.id, scope.key)
         }
-        // A successful turn takes the scope's disk-restored session off probation (self-heal — see
-        // SZHost+Transcripts.swift header); a failed resume is handled by `sendChat`.
-        if !result.outcome.failed { restoredSessions[scope.key] = nil }
         trackTurnEndedTelemetry(scope: scope, providerID: provider.id, failed: result.outcome.failed,
                                 timedOut: result.process.timedOut, cancelled: Task.isCancelled)
         return (result, assistantID)
@@ -183,6 +180,7 @@ extension SZHost {
         // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
         // A cancelled run's zombie dispatch presents its released token; deliver detects that and
         // bows out instead of double-streaming into a scope someone else now owns.
+        // The run's spawn re-pins the node's session on purpose, so `continue` resumes the build thread.
         let result = try await deliver(scope: scope, request: request, provider: provider,
                                        claim: claim, via: via).result
         // Land the provider's actual failure in this node's transcript — otherwise the real reason
@@ -226,17 +224,17 @@ extension SZHost {
 
     /// WHY a turn failed — the one ladder every lane asks (a coding dispatch, a Director turn, a chat
     /// delivery), so their guards and their words cannot drift apart. A user Stop is a choice, not a
-    /// failure: nothing to report. `preempt` runs between the timeout ruling and the provider probe —
-    /// the chat lane's stale-session retry must claim the failure before the probe (and its setup
-    /// sheet) does; no other lane has one. Each lane still decides what to DO with the answer.
+    /// failure: nothing to report. `preempt` runs after the provider probe: a provider that is down
+    /// is its own verdict, so the chat lane's failed-resume retry only claims a failure on a
+    /// healthy provider. Each lane still decides what to DO with the answer.
     func turnFailure(_ result: SZAgentRunResult, provider: any SZProvider,
                      preempt: () -> Bool = { false }) async -> SZTurnFailure? {
         guard result.outcome.failed, !Task.isCancelled else { return nil }
         if result.process.timedOut { return .timedOut(Self.turnFailureDetail(result)) }
-        if preempt() { return .preempted }
         if let detail = await providerFailureDetail(result: result, provider: provider) {
             return .provider(detail)
         }
+        if preempt() { return .preempted }
         return .agent(Self.turnFailureDetail(result))
     }
 
@@ -260,37 +258,27 @@ extension SZHost {
         flushTranscript(scope)
     }
 
-    /// Run one Director Agent turn — the routed choice's provider with the MCP server attached
-    /// and the rendered brief, streamed live into the Director tab. `session: .resume` continues
-    /// the director's own session (the graph's reconcile turn declares it); `.spawn` cold-starts.
+    /// Run one Director Agent turn: the order's provider with the MCP server attached and the
+    /// composed brief, streamed live into the Director tab.
     @MainActor
     func runDirectorTurn(
-        prompt: String, session: SZAgentGraph.Turn.Session, choice: SZModelChoice,
-        mcpPort: UInt16, projectURL: URL, cacheDirectory: URL,
+        order: SZTurnOrder, mcpPort: UInt16, projectURL: URL, cacheDirectory: URL,
         claim: SZClaimToken? = nil
     ) async throws -> (result: SZAgentRunResult, generation: String) {
         let run = activeRun(for: claim)
         let scope = SZChatScope.director
         // A run resumes its own Director thread: the host's slot is keyed by scope, so two
         // concurrent runs sharing it would interleave in one CLI conversation.
-        let sessionSlot = run != nil ? run?.directorSession : agentSessions[scope.key]
-        // Session affinity: a resumed director thread keeps the envelope that opened it.
-        let effective = session == .resume ? choice.honoringSession(sessionSlot) : choice
-        guard let provider = SZProviderRegistry.shared.provider(id: effective.providerID) else {
-            throw SZMCPError.message("unknown provider: \(effective.providerID)")
+        let turn = order.resolved(against: run != nil ? run?.directorSession : agentSessions[scope.key])
+        guard let provider = SZProviderRegistry.shared.provider(id: turn.choice.providerID) else {
+            throw SZMCPError.message("unknown provider: \(turn.choice.providerID)")
         }
         let workingDirectory = cacheDirectory.appending(path: "agent/director")
         try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
         let request = SZAgentRunRequest(
-            prompt: prompt, workingDirectory: workingDirectory, packageDirectory: projectURL,
-            cacheDirectory: cacheDirectory, mcpServerPort: mcpPort,
-            allowedMCPTools: SZHostBridge.agentCallableToolNames,
-            resumeSessionID: session == .resume
-                ? Self.resumableSessionID(of: sessionSlot, under: effective) : nil,
-            model: effective.model, reasoningEffort: effective.reasoningEffort,
-            fastMode: effective.fastMode,
-            timeout: SZAgentTurnBudgets.codingTimeout,
-            inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
+            turn, workingDirectory: workingDirectory, packageDirectory: projectURL,
+            cacheDirectory: cacheDirectory, mcpPort: mcpPort,
+            defaultTools: SZHostBridge.agentCallableToolNames)
         // The Director transcript is claimed for THIS TURN, not for the run's life — that is what
         // lets two runs' fleets work at once while their Director turns take the transcript in
         // turn. Under the run's CAPTURED claim (reentrant per token), never a live lookup: a
@@ -307,16 +295,12 @@ extension SZHost {
         }
         defer { if let claim { ledger.release([.transcript(scope)], by: claim) } }
         let result = try await deliver(scope: scope, request: request, provider: provider,
-                                       persistSession: run == nil, claim: claim,
-                                       via: effective.via).result
-        // A run keeps its Director thread on its own state, not the host's scope slot; the
-        // pin carries the opening envelope affinity re-runs above.
+                                       pinSession: run == nil, claim: claim,
+                                       via: turn.choice.via).result
+        // A run keeps its Director thread on its own state, not the host's scope slot.
         if let run, !result.outcome.failed, let sessionID = result.outcome.sessionID {
-            run.directorSession = SZAgentSession(
-                providerID: provider.id, sessionID: sessionID,
-                envelope: SZRouteEnvelope(providerID: provider.id, model: request.model,
-                                          reasoningEffort: request.reasoningEffort,
-                                          fastMode: request.fastMode))
+            run.directorSession = SZAgentSession(providerID: provider.id, sessionID: sessionID,
+                                                 opening: request)
         }
         // The run re-reads the graph rather than the reply, so a mid-turn provider death
         // would otherwise vanish — land it in the Director tab like a coding turn's error line.
@@ -771,7 +755,8 @@ extension SZHost {
                     .union(self.mailbox.pending(for: director).compactMap(\.transcriptMessageID))
                 return SZWorld(
                     graph: graph, statuses: self.nodeStatusLines, node: nil,
-                    resuming: self.agentSessions[SZChatScope.director.key] != nil,
+                    resuming: directorGraph.resumes(run.directorSession, agent: directorID,
+                                                    router: router),
                     run: SZRun(workSet: scoped, round: state.round, roundCap: roundCap,
                                steers: state.steers, instruction: instruction),
                     mutations: self.mutationJournal.entries(since: state.mutationCursor),
@@ -784,9 +769,8 @@ extension SZHost {
                 state.mutationCursor = self.mutationJournal.count
                 do {
                     let turn = try await self.runDirectorTurn(
-                        prompt: order.brief, session: order.session, choice: order.choice,
-                        mcpPort: mcpPort, projectURL: projectURL, cacheDirectory: cacheDirectory,
-                        claim: claim)
+                        order: order, mcpPort: mcpPort, projectURL: projectURL,
+                        cacheDirectory: cacheDirectory, claim: claim)
                     return SZTurnReport(failed: turn.result.outcome.failed,
                                         detail: turn.result.outcome.message,
                                         generation: turn.generation)
@@ -913,6 +897,18 @@ extension SZHost {
                 continue
             }
             let scopeKey = SZChatScope.node(nodeID).key
+            // The child's router carries its task's grade pick, frozen at this dispatch —
+            // the engine never learns about grading. An unfilled grade slot falls to the
+            // standard one, then to the ordinary cascade.
+            let gradedChoice: SZModelChoice? = {
+                guard let table = router as? SZProfileRouter,
+                      let grade = nodeGrades[nodeID],
+                      let gradeSlots = coding.graph.grades else { return nil }
+                return table.choice(agent: coding.id, slot: gradeSlots[grade])
+                    ?? table.choice(agent: coding.id, slot: gradeSlots["standard"])
+            }()
+            let childRouter: any SZModelRouting =
+                (router as? SZProfileRouter).map { $0.primed(graded: gradedChoice) } ?? router
             let child = SZDelivery(
                 agent: coding.id, message: "",
                 extras: SZBriefExtras(
@@ -926,7 +922,9 @@ extension SZHost {
                     guard let self else { return SZWorld() }
                     return SZWorld(
                         graph: self.store.project?.graph, statuses: self.nodeStatusLines,
-                        node: nodeID, resuming: self.agentSessions[scopeKey] != nil,
+                        node: nodeID,
+                        resuming: coding.graph.resumes(self.agentSessions[scopeKey],
+                                                       agent: coding.id, router: childRouter),
                         assignment: SZAssignment(attempt: order.attempt, note: order.senderNote),
                         conversation: self.conversation(for: .node(nodeID)))
                 },
@@ -934,40 +932,23 @@ extension SZHost {
                     guard let self else { return SZTurnReport(failed: true, detail: "the host is gone") }
                     let workingDirectory = cacheDirectory.appending(path: "agent/\(nodeID.uuidString)")
                     try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
-                    // Session affinity: a resumed node thread keeps the envelope that opened it.
-                    let effective = turnOrder.session == .resume
-                        ? turnOrder.choice.honoringSession(self.agentSessions[scopeKey])
-                        : turnOrder.choice
+                    let turn = turnOrder.resolved(against: self.agentSessions[scopeKey])
                     let request = SZAgentRunRequest(
-                        prompt: turnOrder.brief,
-                        workingDirectory: workingDirectory,
-                        packageDirectory: projectURL,
-                        cacheDirectory: cacheDirectory,
-                        mcpServerPort: mcpPort,
-                        allowedMCPTools: SZHostBridge.agentCallableToolNames,
-                        // `.resume` continues the node's own conversation (the reconcile
-                        // resume); `.spawn` starts cold — a fresh run's first dispatch
-                        // cold-starts by design.
-                        resumeSessionID: turnOrder.session == .resume
-                            ? Self.resumableSessionID(of: self.agentSessions[scopeKey],
-                                                      under: effective) : nil,
-                        model: effective.model,
-                        reasoningEffort: effective.reasoningEffort,
-                        fastMode: effective.fastMode,
-                        timeout: SZAgentTurnBudgets.codingTimeout,
-                        inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
-                    guard let provider = SZProviderRegistry.shared.provider(id: effective.providerID) else {
+                        turn, workingDirectory: workingDirectory, packageDirectory: projectURL,
+                        cacheDirectory: cacheDirectory, mcpPort: mcpPort,
+                        defaultTools: SZHostBridge.agentCallableToolNames)
+                    guard let provider = SZProviderRegistry.shared.provider(id: turn.choice.providerID) else {
                         return SZTurnReport(failed: true,
-                                            detail: "unknown provider: \(effective.providerID)")
+                                            detail: "unknown provider: \(turn.choice.providerID)")
                     }
                     let ranGeneration = SZTurnGeneration(
-                        providerID: effective.providerID, model: effective.model,
-                        reasoningEffort: effective.reasoningEffort,
-                        fastMode: effective.fastMode).label
+                        providerID: turn.choice.providerID, model: turn.choice.model,
+                        reasoningEffort: turn.choice.reasoningEffort,
+                        fastMode: turn.choice.fastMode).label
                     do {
                         let result = try await self.streamCodingAgent(
                             node: nodeID, request: request, provider: provider, claim: claim,
-                            via: effective.via)
+                            via: turn.choice.via)
                         return SZTurnReport(failed: result.outcome.failed, detail: result.outcome.message,
                                             generation: ranGeneration)
                     } catch {
@@ -977,18 +958,6 @@ extension SZHost {
                 },
                 effect: { [weak self] effect in await self?.perform(effect: effect) },
                 onNote: { [weak self] note in self?.noteAgentGraphRun(sighting, note) })
-            // The child's router carries its task's grade pick, frozen at this dispatch —
-            // the engine never learns about grading. An unfilled grade slot falls to the
-            // standard one, then to the ordinary cascade.
-            let gradedChoice: SZModelChoice? = {
-                guard let table = router as? SZProfileRouter,
-                      let grade = nodeGrades[nodeID],
-                      let gradeSlots = coding.graph.grades else { return nil }
-                return table.choice(agent: coding.id, slot: gradeSlots[grade])
-                    ?? table.choice(agent: coding.id, slot: gradeSlots["standard"])
-            }()
-            let childRouter: any SZModelRouting =
-                (router as? SZProfileRouter).map { $0.primed(graded: gradedChoice) } ?? router
             deliveries.append((order, SZGraphEngine(
                 agent: coding.id, graph: coding.graph, attachments: coding.attachments,
                 host: child, steps: steps, router: childRouter), sighting))

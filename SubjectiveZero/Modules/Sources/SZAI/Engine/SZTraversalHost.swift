@@ -17,6 +17,8 @@ public struct SZTurnOrder: Sendable {
     /// Provider + generation settings, resolved by the router. The engine constructs every
     /// order, so nothing else can name a model.
     public var choice: SZModelChoice
+    /// The session a `.resume` turn continues; set by `resolved(against:)`, nil = cold start.
+    public var resumeSessionID: String?
 
     public init(agent: String, brief: String, session: SZAgentGraph.Turn.Session,
                 tools: [String]?, choice: SZModelChoice) {
@@ -25,6 +27,26 @@ public struct SZTurnOrder: Sendable {
         self.session = session
         self.tools = tools
         self.choice = choice
+    }
+}
+
+extension SZAgentRunRequest {
+    /// A resolved order as one request. `tools: []` attaches no MCP; nil takes `defaultTools`.
+    public init(_ order: SZTurnOrder, prompt: String? = nil, workingDirectory: URL,
+                packageDirectory: URL, cacheDirectory: URL, mcpPort: UInt16, defaultTools: [String]) {
+        self.init(
+            prompt: prompt ?? order.brief,
+            workingDirectory: workingDirectory,
+            packageDirectory: packageDirectory,
+            cacheDirectory: cacheDirectory,
+            mcpServerPort: order.tools?.isEmpty == true ? nil : mcpPort,
+            allowedMCPTools: order.tools ?? defaultTools,
+            resumeSessionID: order.resumeSessionID,
+            model: order.choice.model,
+            reasoningEffort: order.choice.reasoningEffort,
+            fastMode: order.choice.fastMode,
+            timeout: SZAgentTurnBudgets.codingTimeout,
+            inactivityTimeout: SZAgentTurnBudgets.codingInactivityTimeout)
     }
 }
 

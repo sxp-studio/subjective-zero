@@ -26,14 +26,6 @@ extension SZHost {
     /// Whether a profile governs new work right now (the settings sheet's Off is nil).
     var routingActive: Bool { (try? activeRoutingProfile()) != nil }
 
-    /// The session id a routed turn may resume. A session whose provider differs from the
-    /// routed choice cold-starts instead — one CLI can't resume another CLI's session id.
-    nonisolated static func resumableSessionID(of session: SZAgentSession?,
-                                               under choice: SZModelChoice) -> String? {
-        guard let session, session.providerID == choice.providerID else { return nil }
-        return session.sessionID
-    }
-
     /// The profile new deliveries resolve against, honouring the launch pin: a stale
     /// persisted name degrades to off, an unknown ENV name throws. `env` is for tests only.
     func activeRoutingProfile(env: String? = SZHost.modelRoutingEnv) throws -> SZRoutingProfile? {

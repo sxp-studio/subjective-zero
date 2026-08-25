@@ -225,7 +225,7 @@ public final class SZMessageQueue {
         }
     }
 
-    /// Requeue an envelope for another delivery attempt (the probation-retry path). A live
+    /// Requeue an envelope for another delivery attempt (the failed-resume retry). A live
     /// `.delivering` envelope resets in place (no terminal transition — ack waiters stay parked
     /// through the retry); a tombstone is revived to the FIFO tail. No-op for unknown ids.
     public func requeue(_ id: UUID) {
