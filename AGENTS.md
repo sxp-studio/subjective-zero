@@ -81,7 +81,11 @@ A step is **done** only when, together:
 - it `swift build`s clean (and any relevant test passes);
 - its behavior is verified — render-affecting changes visually or closed-loop checked;
 - the evidence (commit SHA + how it was verified) is recorded;
-- the change is reviewed and signed off at the checkpoint.
+- the change is reviewed and signed off at the checkpoint;
+- the work item it closes is pushed, then closed, carrying that commit SHA and how the change was
+  verified. Push before closing: closing is the moment the work leaves your head, and unpushed work
+  nobody is thinking about any more is the work a dead disk takes with it. Anything fixed alongside
+  it that had no item of its own is recorded in the same note, so a fix nobody filed leaves a trace.
 
 Never claim a step done without attached evidence, and never report it complete with acceptance
 checks still open.
