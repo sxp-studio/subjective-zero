@@ -79,6 +79,20 @@ struct SZHostNodeBodyTests {
         #expect(try host.applyNodeBody(node: node.id, mode: .preview, plugs: true).plugs == true)
     }
 
+    /// Nothing but the toggle may invent a fold. Auto-size and preview retargets re-apply bodies all
+    /// session long; if any of them defaulted `plugs` to false, cards would fold themselves on load.
+    @Test func aReapplyNeverInventsAFold() throws {
+        let node = textureNode()
+        let host = host(with: node)
+        #expect(try host.applyNodeBody(node: node.id, mode: .preview).plugs == nil)
+        #expect(try host.applyNodeBody(node: node.id, mode: .preview, port: "output").plugs == nil)
+        #expect(try host.applyNodeBody(node: node.id, mode: .none).plugs == nil)
+        // And an unfolded body encodes without the key at all, so old projects round-trip unchanged.
+        let body = SZNodeBody(mode: .preview, previewPort: "output")
+        let json = String(data: try JSONEncoder().encode(body), encoding: .utf8) ?? ""
+        #expect(!json.contains("plugs"))
+    }
+
     @Test func aCardWithNoBodyRefusesToFold() {
         // No texture output and no card: nothing to show in place of the rows.
         let node = SZNode(kind: .generated, title: "Add",
