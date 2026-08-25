@@ -5,14 +5,203 @@
 //   surviving cue that anything was happening was the Stop.
 // - One group per live build: the Director's lane, its coding agents under it on a drawn
 //   connector. Live children first — the cap must never hide the agents actually working.
+// - Past the cap the rest fold into ONE line that OPENS, so the strip stays short by default and
+//   the whole fleet is a click away. `SZStripPlan` lays the band out in one pass, spending a row
+//   budget read off the PANEL, not one per group.
 // - The ■ on a live Director lane stops THAT build; it is the only per-build stop.
 // - Lanes are the strip's own, not the canvas's `SZAgentSubagentLane` (which fills its card's
 //   width by design). Shared instead: `SZRunBadge`, one word per state.
 // - Deliberately OUTSIDE the transcript's ScrollView — a run is state, not a message, so it must
-//   not enter the LazyVStack the bottom-pin anchor drives.
+//   not enter the LazyVStack the bottom-pin anchor drives. Growing the band shrinks that viewport,
+//   so it reports through `onLayoutChange` and the panel re-pins.
 // - Presence, not a lock: the composer stays live and a send simply queues.
 import SwiftUI
 import SZCore
+
+/// What the strip draws, in order: which rows survive the caps, where the elbow stops, and which
+/// line folds the rest away. Pure, so the truncation rules are testable without a host.
+struct SZStripPlan {
+    enum Group: Hashable {
+        case thread(UUID)   // one build's coding agents
+        case running        // builds past the cap
+        case queued         // tasks waiting past the cap
+
+        var key: String {
+            switch self {
+            case .thread(let id): "thread-\(id)"
+            case .running: "running"
+            case .queued: "queued"
+            }
+        }
+    }
+
+    /// The line that stands in for what is folded away, and the way back to it. Always its group's
+    /// LAST row: the band grows upward from the composer, so revealing ABOVE the line is what leaves
+    /// it under the cursor that clicked it.
+    struct Toggle {
+        let group: Group
+        let open: Bool
+        /// What is not on screen: folded away by the cap while closed, or past the budget while open.
+        let hidden: Int
+        /// The elbow, when the group hangs off a Director; nil at the strip's top level.
+        let connector: SZLaneConnector.Kind?
+
+        var label: String {
+            guard open else {
+                switch group {
+                case .thread: return "+\(hidden) more"
+                case .running: return "+\(hidden) more running"
+                case .queued: return "+\(hidden) more queued"
+                }
+            }
+            return hidden > 0 ? "show less · \(hidden) not shown" : "show less"
+        }
+
+        var help: String {
+            switch (group, open) {
+            case (.thread, false): "Show every agent on this build"
+            case (.running, false): "Show every build running"
+            case (.queued, false): "Show everything queued"
+            default: "Show fewer"
+            }
+        }
+    }
+
+    /// One line of the band. A Director and a coding agent are the same pill, but only one of them
+    /// wears an elbow.
+    enum Row: Identifiable {
+        case director(SZAgentGraphRun)
+        case lane(SZAgentGraphRun, SZLaneConnector.Kind)
+        case waiting(UUID)
+        case scheduled(SZScheduledRow)
+        case toggle(Toggle)
+
+        var id: String {
+            switch self {
+            case .director(let run): "d-\(run.id)"
+            case .lane(let run, _): "l-\(run.id)"
+            case .waiting(let thread): "w-\(thread)"
+            case .scheduled(let row): "s-\(row.id)"
+            case .toggle(let toggle): "t-\(toggle.group.key)"
+            }
+        }
+    }
+
+    /// Past these the strip would own more of the panel than the conversation does. Both cap the
+    /// CLOSED band only: opening a group spends the budget instead.
+    static let threadCap = 3
+    static let laneCap = 3
+
+    /// Rows an expansion may ADD to the closed band: two fifths of the panel, so an open group
+    /// cannot crowd out a short window. Whole rows, so a resize drag does not write state per pixel.
+    static func budget(panelHeight: CGFloat) -> Int {
+        let usable = panelHeight.isFinite ? max(0, panelHeight) : 0
+        return max(3, Int(usable * 0.4 / SZLaneMetrics.rowHeight))
+    }
+
+    /// - Parameter extraBudget: rows the expansions may add across the WHOLE strip. Per group would
+    ///   bound nothing, since three open groups would still stack past the panel.
+    static func rows(threads: [UUID], runs: [SZAgentGraphRun], scheduled: [SZScheduledRow],
+                     expanded: Set<Group>, extraBudget: Int) -> [Row] {
+        var rows: [Row] = []
+        var pool = max(0, extraBudget)
+        var openGroups = expanded.count { hidden(in: $0, threads: threads, runs: runs,
+                                                 scheduled: scheduled) > 0 }
+        /// An equal share of what is left, and never less than one row while any is: a fold that
+        /// opens onto nothing is the dead end this line exists to remove.
+        func share(of want: Int) -> Int {
+            guard want > 0, openGroups > 0, pool > 0 else { return 0 }
+            let spent = min(want, max(1, pool / openGroups))
+            pool -= spent
+            openGroups -= 1
+            return spent
+        }
+
+        for thread in threads.prefix(threadCap) {
+            rows += group(thread: thread, runs: runs, expanded: expanded, share: share)
+        }
+        if threads.count > threadCap {
+            let extras = Array(threads.dropFirst(threadCap))
+            // Whole builds only: half a group reads as a defect, not as a budget.
+            var admitted: [[Row]] = []
+            var allowance = expanded.contains(.running)
+                ? share(of: extras.reduce(0) { $0 + closedRowCount(thread: $1, runs: runs) })
+                : 0
+            for thread in extras {
+                let cost = closedRowCount(thread: thread, runs: runs)
+                guard cost <= allowance else { break }
+                allowance -= cost
+                admitted.append(group(thread: thread, runs: runs, expanded: expanded,
+                                      share: { _ in 0 }))
+            }
+            rows += admitted.flatMap { $0 }
+            rows.append(.toggle(Toggle(group: .running, open: expanded.contains(.running),
+                                       hidden: extras.count - admitted.count, connector: nil)))
+        }
+
+        // The asks that survived being second. They sit under the live groups because that is the
+        // order they will happen in.
+        let base = min(scheduled.count, laneCap)
+        let granted = expanded.contains(.queued) ? share(of: scheduled.count - base) : 0
+        rows += scheduled.prefix(base + granted).map(Row.scheduled)
+        if scheduled.count > laneCap {
+            rows.append(.toggle(Toggle(group: .queued, open: expanded.contains(.queued),
+                                       hidden: scheduled.count - base - granted, connector: nil)))
+        }
+        return rows
+    }
+
+    /// What a group folds away while closed: the share-out and the key pruning both read it.
+    static func hidden(in group: Group, threads: [UUID], runs: [SZAgentGraphRun],
+                       scheduled: [SZScheduledRow]) -> Int {
+        switch group {
+        case .thread(let id):
+            max(0, SZAgentGraphRun.workChildren(thread: id, in: runs).count - laneCap)
+        case .running: max(0, threads.count - threadCap)
+        case .queued: max(0, scheduled.count - laneCap)
+        }
+    }
+
+    /// One build: the Director's traversal, then its fleet on a connector, then the fold line.
+    private static func group(thread: UUID, runs: [SZAgentGraphRun], expanded: Set<Group>,
+                              share: (Int) -> Int) -> [Row] {
+        let leader = runs.first { $0.id == thread }
+        let children = SZAgentGraphRun.workChildren(thread: thread, in: runs)
+        let base = min(children.count, laneCap)
+        let open = expanded.contains(.thread(thread))
+        let granted = open ? share(children.count - base) : 0
+        let hidden = children.count - base - granted
+        // Live first whenever ANY are folded away, open or closed: the fold must never hide the
+        // agents actually working. Showing all of them keeps dispatch order, which stops the pills
+        // reshuffling as agents settle.
+        let ordered = hidden > 0 ? children.filter(\.isLive) + children.filter { !$0.isLive }
+                                 : children
+        let lanes = Array(ordered.prefix(base + granted))
+        let folds = children.count > laneCap
+
+        var rows: [Row] = []
+        if let leader {
+            rows.append(.director(leader))
+        } else if lanes.isEmpty {
+            rows.append(.waiting(thread))
+        }
+        for (offset, run) in lanes.enumerated() {
+            rows.append(.lane(run, !folds && offset == lanes.count - 1 ? .last : .middle))
+        }
+        if folds {
+            rows.append(.toggle(Toggle(group: .thread(thread), open: open, hidden: hidden,
+                                       connector: .last)))
+        }
+        return rows
+    }
+
+    /// The rows a build takes while folded — what admitting one more of them costs.
+    private static func closedRowCount(thread: UUID, runs: [SZAgentGraphRun]) -> Int {
+        let children = SZAgentGraphRun.workChildren(thread: thread, in: runs).count
+        let leader = runs.contains { $0.id == thread }
+        return (leader || children == 0 ? 1 : 0) + min(children, laneCap) + (children > laneCap ? 1 : 0)
+    }
+}
 
 struct SZRunStrip: View {
     /// Every live thread, oldest first — builds run concurrently now, so the strip is a list of
@@ -26,78 +215,77 @@ struct SZRunStrip: View {
     /// Open a run in the Agent Graph panel. nil = the surface isn't wired; the strip is a readout.
     let onOpen: ((UUID) -> Void)?
     /// Work SCHEDULED and not yet started, oldest first — the asks that survived being second.
-    /// They sit under the live groups because that is the order they will happen in.
     var scheduled: [SZScheduledRow] = []
     /// Drop a scheduled task (its ✕). nil = the surface isn't wired; the rows are a readout.
     var onCancelScheduled: ((UUID) -> Void)?
     /// Interrupt ONE live traversal by its thread — the running counterpart of a scheduled row's ✕,
     /// and the only control that stops a single build.
     var onStopRun: ((UUID) -> Void)?
+    /// Rows an expansion may add, from `SZStripPlan.budget`. The floor stands in until the panel
+    /// has been measured.
+    var extraBudget: Int = 3
+    /// Fired whenever the band gains or loses a row, by a click or by the fleet. Each one resizes
+    /// the transcript above, and nothing else re-pins it.
+    var onLayoutChange: (() -> Void)?
 
-    /// Past these the strip would own more of the panel than the conversation does; the rest are
-    /// one honest line rather than a silent truncation.
-    private static let threadCap = 3
-    private static let laneCap = 3
-
-    private var shownThreads: [UUID] { Array(threads.prefix(Self.threadCap)) }
-    private var hiddenThreads: Int { max(0, threads.count - Self.threadCap) }
-    private var shownScheduled: [SZScheduledRow] { Array(scheduled.prefix(Self.laneCap)) }
-    private var hiddenScheduled: Int { max(0, scheduled.count - Self.laneCap) }
+    /// Which groups are OPEN. Closed by default, and the set dies with the strip, so every build
+    /// starts folded. Thread ids are never reused, so a leftover key cannot open a future group.
+    @State private var expanded: Set<SZStripPlan.Group> = []
 
     var body: some View {
+        let rows = SZStripPlan.rows(threads: threads, runs: runs, scheduled: scheduled,
+                                    expanded: expanded, extraBudget: extraBudget)
         VStack(spacing: 0) {
             // No rule above it. A hairline said "another section starts here", but the strip is
             // not a section — it is the same conversation's state, and the pills already read as
             // objects rather than prose. What separates it is the same 10pt the composer keeps
             // below it, so the three bands of the panel breathe evenly.
             VStack(alignment: .leading, spacing: SZLaneMetrics.groupGap) {
-                ForEach(shownThreads, id: \.self) { thread in threadGroup(thread) }
-                if hiddenThreads > 0 { overflowLine("+\(hiddenThreads) more running") }
-                if !shownScheduled.isEmpty {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(shownScheduled) { row in scheduledRow(row) }
-                    }
-                }
-                if hiddenScheduled > 0 { overflowLine("+\(hiddenScheduled) more queued") }
+                ForEach(rows) { row($0) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.top, 10)
         }
+        // A dispatched agent grows an open group the way a click does, so follow the row COUNT.
+        .onChange(of: rows.count) { onLayoutChange?() }
+        // A fold with nothing behind it must not reopen itself when the next build overflows.
+        .onChange(of: threads.count) { prune() }
+        .onChange(of: scheduled.count) { prune() }
     }
 
-    /// One build: the Director's traversal, then its fleet on a connector. Rows are flush (the gap
-    /// lives inside each row) so the connector's vertical runs unbroken down the group.
+    private func prune() {
+        for group in [SZStripPlan.Group.running, .queued]
+        where expanded.contains(group) && SZStripPlan.hidden(in: group, threads: threads,
+                                                             runs: runs, scheduled: scheduled) == 0 {
+            expanded.remove(group)
+        }
+    }
+
     @ViewBuilder
-    private func threadGroup(_ thread: UUID) -> some View {
-        let leader = runs.first { $0.id == thread }
-        let children = SZAgentGraphRun.workChildren(thread: thread, in: runs)
-        // LIVE children first: `workChildren` is oldest-first and keeps sealed records, so a plain
-        // prefix showed three finished agents and hid the working ones behind "+N more".
-        let lanes = Array((children.filter(\.isLive) + children.filter { !$0.isLive })
-                            .prefix(Self.laneCap))
-        let overflow = max(0, children.count - lanes.count)
-        VStack(alignment: .leading, spacing: 0) {
-            if let leader {
-                laneRow(SZLaneModel(run: leader, name: "Director", symbol: "eyeglasses",
-                                    tint: SZEdgeStyle.intentViolet),
-                        stop: leader.isLive
-                            ? onStopRun.map { stop in { stop(leader.thread ?? leader.id) } }
-                            : nil)
-            }
-            if lanes.isEmpty {
-                if leader == nil { waitingLine(thread: thread) }
-            } else {
-                ForEach(Array(lanes.enumerated()), id: \.element.id) { index, run in
-                    laneRow(SZLaneModel(run: run, name: run.work.flatMap(title) ?? "work",
-                                        symbol: "hammer", tint: SZAgentGraphStyle.live),
-                            connector: (index == lanes.count - 1 && overflow == 0) ? .last : .middle)
-                }
-                if overflow > 0 {
-                    HStack(spacing: 0) {
-                        SZLaneConnector(kind: .last)
-                        overflowLine("+\(overflow) more")
-                    }
+    private func row(_ row: SZStripPlan.Row) -> some View {
+        switch row {
+        case .director(let run):
+            laneRow(SZLaneModel(run: run, name: "Director", symbol: "eyeglasses",
+                                tint: SZEdgeStyle.intentViolet),
+                    stop: run.isLive
+                        ? onStopRun.map { stop in { stop(run.thread ?? run.id) } }
+                        : nil)
+        case .lane(let run, let connector):
+            laneRow(SZLaneModel(run: run, name: run.work.flatMap(title) ?? "work",
+                                symbol: "hammer", tint: SZAgentGraphStyle.live),
+                    connector: connector)
+        case .waiting(let thread):
+            waitingLine(thread: thread)
+        case .scheduled(let task):
+            scheduledRow(task)
+        case .toggle(let toggle):
+            SZStripToggleRow(toggle: toggle) {
+                // The band changing height is the one motion here worth showing: it moves the
+                // conversation above it, and a jump reads as a glitch rather than as a fold.
+                withAnimation(.easeOut(duration: SZLaneMetrics.foldDuration)) {
+                    if expanded.contains(toggle.group) { expanded.remove(toggle.group) }
+                    else { expanded.insert(toggle.group) }
                 }
             }
         }
@@ -115,13 +303,6 @@ struct SZRunStrip: View {
                         onStop: stop)
             Spacer(minLength: 0)
         }
-    }
-
-    private func overflowLine(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 8, design: .monospaced))
-            .foregroundStyle(.tertiary)
-            .frame(height: SZLaneMetrics.rowHeight, alignment: .leading)
     }
 
     /// One scheduled task: what was asked, and why it has not started. Deliberately quieter than a
@@ -181,6 +362,44 @@ struct SZRunStrip: View {
     }
 }
 
+/// The line that folds a group away, and opens it again. A real Button, unlike a lane: nothing
+/// nests inside it, so there is no pair of buttons to resolve.
+private struct SZStripToggleRow: View {
+    let toggle: SZStripPlan.Toggle
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if let connector = toggle.connector { SZLaneConnector(kind: connector) }
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    // Open points UP, at the rows it folds away: the band grows upward from the
+                    // composer, so what this line reveals sits above it, not below.
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 7, weight: .bold))
+                        .rotationEffect(.degrees(toggle.open ? -90 : 0))
+                    Text(toggle.label)
+                        .font(.system(size: 9, design: .monospaced))
+                }
+                .foregroundStyle(hover ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                // A pill like everything else in this band, quieter. Bare text read as a caption
+                // and gave the pointer nothing to aim at: you cannot see where a caption ends.
+                .padding(.horizontal, SZLaneMetrics.padH)
+                .frame(height: SZLaneMetrics.pillHeight)
+                .background(RoundedRectangle(cornerRadius: SZLaneMetrics.radius)
+                    .fill(Color.white.opacity(hover ? 0.075 : 0.03)))
+                .frame(height: SZLaneMetrics.rowHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .trackingHover($hover)
+            .help(toggle.help)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 /// The strip's one set of numbers. A row is taller than its pill: the difference is the gap between
 /// pills, and it belongs to the ROW so the connector can draw through it.
 enum SZLaneMetrics {
@@ -191,6 +410,9 @@ enum SZLaneMetrics {
     static let connectorWidth: CGFloat = 15
     /// Every small control in the strip — a lane's ■, a scheduled row's ✕ — is this size.
     static let controlSize: CGFloat = 16
+    /// How long the band takes to fold or open. The transcript above re-pins on the same curve, so
+    /// the two move together instead of the message drifting while the strip settles.
+    static let foldDuration: Double = 0.16
     /// Zero: a row already carries its own gap (rowHeight − pillHeight), so anything here made
     /// the step BETWEEN builds bigger than the step from a Director to its own agents — which
     /// reads as the child belonging to the group below it.

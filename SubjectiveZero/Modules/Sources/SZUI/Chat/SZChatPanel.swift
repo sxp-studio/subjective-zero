@@ -73,6 +73,8 @@ public struct SZChatPanel: View {
     @State private var dropTargeted = false             // a file drag is hovering the panel → show the drop hint
     @State private var menuHover = false                // the composer's ⋯ (conversation actions)
     @State private var transcriptHasMoreBelow = false   // scrolled up → fade the transcript's last inch
+    @State private var stripBudget = 3                  // rows an opened run-strip group may add
+    @State private var stripLayoutNonce = 0             // bumped when the strip changes height → re-pin below
 
     // Mention autocomplete: the live `@query` (nil = no session), the highlighted row, and whether
     // the user Esc-dismissed the list for this query. The relay lands a pick back in the buffer.
@@ -203,6 +205,13 @@ public struct SZChatPanel: View {
             composer
         }
         .background(Self.panelFill)
+        // Measured as the strip's BUDGET, not the height: a raw CGFloat would write state, and so
+        // re-evaluate this body and its lazy rows, on every pixel of a resize drag.
+        .onGeometryChange(for: Int.self, of: { SZStripPlan.budget(panelHeight: $0.size.height) }) {
+            stripBudget = $0
+        }
+        // The strip arriving or leaving is the biggest height change, and it has no row to count.
+        .onChange(of: isRunning || !scheduledTasks.isEmpty) { stripLayoutNonce &+= 1 }
         // Drop a file ANYWHERE on this panel → attach it to the active transcript (AppKit catcher behind
         // the content; SwiftUI's .dropDestination on a parent only caught the transcript).
         .background(SZFileDropCatcher(onDrop: { urls, _ in appendAttachments(urls); return true },
@@ -347,6 +356,15 @@ public struct SZChatPanel: View {
             // an interruptible 0.15s animation restarted per flush. The animated scroll stays for
             // new-message transitions only (above).
             .onChange(of: items.last?.message.text.count) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            // The strip resized THIS viewport from below, and without a pin the last message slides
+            // out of view. Only for a reader already at the bottom: the flag still holds its
+            // pre-resize value here, since the geometry callback fires after layout.
+            .onChange(of: stripLayoutNonce) {
+                guard !transcriptHasMoreBelow else { return }
+                withAnimation(.easeOut(duration: SZLaneMetrics.foldDuration)) {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                }
+            }
             // How much transcript is still below the fold. Quantized to a Bool on purpose: the raw
             // distance changes every scroll tick, and writing that to state would re-evaluate the
             // panel (and its lazy rows) at scroll cadence.
@@ -378,7 +396,9 @@ public struct SZChatPanel: View {
                    onOpen: revealInAgentGraph.map { reveal in { reveal($0) } },
                    scheduled: scheduledTasks,
                    onCancelScheduled: onCancelScheduledTask,
-                   onStopRun: onStopOneRun)
+                   onStopRun: onStopOneRun,
+                   extraBudget: stripBudget,
+                   onLayoutChange: { stripLayoutNonce &+= 1 })
     }
 
     /// The invitation. One conversation and one recipient, so it names no scope.
