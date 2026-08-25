@@ -64,7 +64,7 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
   `binding_commit`, `binding_remove`        // moved control ({armed, seen, key, value01}), commit it as a
                                             // mappings row + derived float output (+ data edge with `target`),
                                             // remove by output port — one store transaction each
-- `ui_set_node_body`                        // none | preview | custom — a node's body region (the custom
+- `ui_set_node_body`                        // none | preview | custom + `plugs` — a node's body region (the custom
                                             // card = the node's Card.swift; cols/rows/pinned = its footprint)
 - `ui_connect`, `ui_disconnect`            // flow or data edges
 - `ui_update_node`                          // title, sfSymbol, prompt, summary, permissions → triggers reflow.

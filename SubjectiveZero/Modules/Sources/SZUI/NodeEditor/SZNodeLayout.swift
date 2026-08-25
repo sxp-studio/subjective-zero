@@ -17,6 +17,11 @@ import SZCore
 /// Which side of a node a socket sits on. A data/flow output feeds an input.
 public enum SZSocketSide: Sendable { case input, output }
 
+/// How much chrome a node card renders. `.full` is header + body + port rows; `.picture` drops the
+/// rows so the body IS the card (the plugs fold); `.tile` is the semantic-zoom tier — body only,
+/// no header, dots hidden and inert. See `SZNodeLayout.tier(of:zoomedOut:)`.
+public enum SZCardTier: Sendable { case full, picture, tile }
+
 public enum SZNodeLayout {
     /// World-space pitch of the canvas dot grid — shared by the grid drawing (SZDotGridView) and
     /// every snapping site (drag, create, MCP ui_* placement) so "on grid" means one thing.
@@ -71,6 +76,32 @@ public enum SZNodeLayout {
     /// plumbing (a card can't emit).
     public static func rowInputs(of node: SZNode) -> [SZPort] {
         node.effectiveBodyMode == .custom ? inputs(of: node).filter { !isPlumbing(node, port: $0.name) } : inputs(of: node)
+    }
+
+    /// How much chrome a card shows right now. ONE resolve for the two ways to get there: distance
+    /// (semantic zoom) and intent (the plugs fold). `.tile` wins — from orbit a folded card and an
+    /// expanded one look the same. Render-only: `height(of:)` and `socketOffset(of:)` never call this,
+    /// so card rects, sockets and edges stay identical at every zoom.
+    ///
+    /// Takes the already-thresholded `zoomedOut` (the panel's `camera.zoom < lodZoomThreshold`), not raw
+    /// zoom: the card layer is `.equatable()`, so feeding it a value that changes every zoom tick would
+    /// re-render every card on the canvas instead of only at the crossing.
+    public static func tier(of node: SZNode, zoomedOut: Bool) -> SZCardTier {
+        if zoomedOut { return .tile }
+        return showsPlugs(of: node) ? .full : .picture
+    }
+
+    /// Whether a card CAN fold its plugs: only when it has a body to show instead. Keyed on the
+    /// RENDERED body height, not the mode, so a `.preview` node folds back to rows when the global
+    /// Live Previews gate collapses its region. Without this a bodyless card would fold to a 48pt
+    /// title chip with its sockets crammed into 8pt of edge.
+    public static func canFoldPlugs(_ node: SZNode) -> Bool { bodyInset(of: node) > 0 }
+
+    /// Whether a card renders its port rows. Geometry-affecting and node-only (never reads zoom).
+    /// A stored fold degrades to shown when there is nothing to fold to, so the flag can sit in the
+    /// project harmlessly while the node has no body.
+    public static func showsPlugs(of node: SZNode) -> Bool {
+        node.body?.plugs != false || !canFoldPlugs(node)
     }
 
     /// Extra card height the preview body contributes — `previewHeight` when the node effectively
@@ -150,7 +181,7 @@ public enum SZNodeLayout {
         case .prompt:
             return promptHeight
         case .generated:
-            let rows = rowInputs(of: node).count + outputs(of: node).count
+            let rows = showsPlugs(of: node) ? rowInputs(of: node).count + outputs(of: node).count : 0
             let inset = bodyInset(of: node)
             guard rows > 0 else { return headerHeight + bodyTopPadding + inset + bodyBottomPadding }
             return headerHeight + inset + bodyTopPadding
@@ -390,6 +421,10 @@ public enum SZNodeLayout {
             guard let index = ports.firstIndex(where: { $0.name == port }) else {
                 return CGPoint(x: x, y: flowY(of: node))
             }
+            // Folded: no rows to ride, so each side stacks against the body's edge in port order.
+            if !showsPlugs(of: node) {
+                return CGPoint(x: x, y: foldedSocketY(of: node, index: index, count: ports.count))
+            }
             let row = side == .input ? index : rowInputs(of: node).count + index
             return CGPoint(x: x, y: rowCenterY(of: node, row: row))
         }
@@ -408,6 +443,28 @@ public enum SZNodeLayout {
     public static func rowCenterY(of node: SZNode, row: Int) -> CGFloat {
         let bodyTop = -height(of: node) / 2 + headerHeight + bodyInset(of: node) + bodyTopPadding
         return bodyTop + rowHeight / 2 + CGFloat(row) * (rowHeight + rowSpacing)
+    }
+
+    /// Y of a folded card's socket `index` of `count` on one side: the stack is centred in the region
+    /// below the header and keeps `rowHeight` pitch, so unfolding slides each dot down into its own
+    /// row rather than reshuffling. A card with more ports than the region has room for squeezes its
+    /// pitch instead of spilling past the card edges.
+    public static func foldedSocketY(of node: SZNode, index: Int, count: Int) -> CGFloat {
+        guard count > 0 else { return flowY(of: node) }
+        let h = height(of: node)
+        let below = h - headerHeight
+        let pitch = min(rowHeight, below / CGFloat(count))
+        let center = -h / 2 + headerHeight + below / 2
+        return center + (CGFloat(index) - CGFloat(count - 1) / 2) * pitch
+    }
+
+    /// The height a card loses when its plugs fold — always a whole number of grid cells, which is
+    /// what lets the toggle hold the card's TOP edge (move the centre by half of this) and keep all
+    /// four edges on grid for any row count.
+    public static func foldDelta(of node: SZNode) -> CGFloat {
+        guard node.kind == .generated, canFoldPlugs(node) else { return 0 }
+        let rows = rowInputs(of: node).count + outputs(of: node).count
+        return CGFloat(rows) * rowHeight
     }
 
     /// Screen → world: inverse of the canvas layer's `.scaleEffect(zoom).offset(canvasOffset)`.

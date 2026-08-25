@@ -2,7 +2,7 @@
 // The one body-edit path for a node card: `applyNodeBody` turns a mode + optional datum into a
 // validated `SZNodeBody` and lands it through `setNodeBody` (the previews' store-write →
 // stale-thumb-drop → persist → watch-set-refresh choreography). Every caller — the MCP tool, the
-// context-menu toggle, the card host's auto-size, the failed chip's "Show rows", promote's
+// context-menu toggle, the card host's auto-size, the failed chip's "Hide Custom Card", promote's
 // first-card flip, library instantiate — resolves through it, so preview and custom bodies can
 // never disagree about what a valid body is.
 import Foundation
@@ -40,17 +40,19 @@ extension SZHost {
     ///   strip a pin; a pin can't drop the footprint); nothing is seeded — an unset footprint reads
     ///   the contract's `card` hints in the layout, so a later hint change reaches existing cards.
     ///   Flipping rows↔custom never touches the file on disk.
+    /// `plugs` is orthogonal to all three and carried forward unless overridden, so the card host's
+    /// auto-size re-apply can never unfold a card behind the user's back.
     /// Returns the applied body.
     @discardableResult
     func applyNodeBody(node id: SZNodeID, mode: SZNodeBodyMode, port: String? = nil,
                        cols: Int? = nil, rows: Int? = nil, pinned: Bool? = nil,
-                       origin: SZMutationOrigin = .user) throws -> SZNodeBody {
+                       plugs: Bool? = nil, origin: SZMutationOrigin = .user) throws -> SZNodeBody {
         guard let node = store.project?.graph.node(id: id) else { throw NodeBodyError(description: "no node \(id)") }
         // Body is a generated-card affordance: a prompt card is a single field with no body region.
         guard node.kind == .generated else {
             throw NodeBodyError(description: "node \(id) is a prompt card — it has no body region")
         }
-        let body: SZNodeBody
+        var body: SZNodeBody
         switch mode {
         case .none:
             body = SZNodeBody(mode: .none)
@@ -76,6 +78,7 @@ extension SZHost {
                 rows: (rows ?? previous?.rows).map { max(2, min($0, 24)) },
                 pinned: pinned ?? previous?.pinned))
         }
+        body.plugs = plugs ?? node.body?.plugs
         guard setNodeBody(node: id, body: body, origin: origin) else {
             throw NodeBodyError(description: status)
         }

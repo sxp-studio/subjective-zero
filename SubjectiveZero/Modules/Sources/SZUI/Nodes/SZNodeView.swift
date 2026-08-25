@@ -2,8 +2,9 @@
 // A generated node card — a vertical stack: header (SF Symbol + title, flow sockets on the
 // sides) → stacked input rows (data socket left + render-only control) → stacked output rows (data
 // socket right; a texture output shows a monitor icon marking the render endpoint). A status pill
-// floats above. Sockets are placed by SZNodeLayout so the edge layer lands on them. Always-expanded —
-// TODO: a collapsed card state.
+// floats above. Sockets are placed by SZNodeLayout so the edge layer lands on them. How much chrome
+// the card renders is one value, `SZNodeLayout.tier(of:zoomedOut:)`: `.full` here, `.picture` when the plugs
+// are folded (rows gone, body untouched), `.tile` from orbit.
 import SwiftUI
 import SZCore
 
@@ -18,9 +19,10 @@ struct SZNodeView: View, Equatable {
     /// Mirrors `SZNodeLayout.previewsEnabled` (the host writes both together). The body derives its
     /// preview region from SZNodeLayout — this prop exists so `==` sees a gate flip and reflows the card.
     var previewsEnabled: Bool = true
-    /// Semantic-zoom tier (canvas zoom < `SZNodeLayout.lodZoomThreshold`): render as a preview-only
-    /// tile. Render-only — the card frame and socket geometry are identical in both tiers.
-    var zoomedOut: Bool = false
+    /// How much chrome to render (`SZNodeLayout.tier(of:zoomedOut:)`). Render-only for the `.tile` step —
+    /// the card frame and socket geometry are identical at every zoom; `.picture` is the folded card,
+    /// whose SHORTER frame comes from the layout, not from here.
+    var tier: SZCardTier = .full
     /// Input port names currently fed by a data edge — their inline control is hidden (the wire's value
     /// wins at runtime, so an editable default would lie). The contract keeps the default untouched, so
     /// disconnecting brings the control back with its pre-connection value.
@@ -37,6 +39,7 @@ struct SZNodeView: View, Equatable {
     var onSetInput: ((String, SZPortValue, Bool) -> Void)? = nil   // (port, value, persist) → ui_set_input_default
     var onToggleDisplay: ((String) -> Void)? = nil   // texture output monitor icon → ui_toggle_display (port)
     var onTogglePreview: ((String) -> Void)? = nil   // texture output photo icon → toggle the card's live preview (port)
+    var onTogglePlugs: (() -> Void)? = nil   // chevron pill → fold the port rows away, leaving the body
     var optionsFor: ((String) -> [SZEnumOption])? = nil   // effective enum options (dynamic ?? static) for a port
     var onFix: (() -> Void)? = nil          // Outdated/Error pill → compose a rebuild request to its Coding Agent
 
@@ -58,7 +61,7 @@ struct SZNodeView: View, Equatable {
             && lhs.errorDetail == rhs.errorDetail
             && lhs.renderEndpoint == rhs.renderEndpoint
             && lhs.previewsEnabled == rhs.previewsEnabled
-            && lhs.zoomedOut == rhs.zoomedOut
+            && lhs.tier == rhs.tier
             && lhs.connectedInputs == rhs.connectedInputs
     }
 
@@ -67,7 +70,7 @@ struct SZNodeView: View, Equatable {
 
     var body: some View {
         VStack(spacing: 0) {
-            if zoomedOut {
+            if tier == .tile {
                 lodTile
             } else {
                 header
@@ -88,13 +91,17 @@ struct SZNodeView: View, Equatable {
                 // row, rowSpacing between rows) so the overlaid sockets line up with their labels. A
                 // custom card's plumbing inputs (the ports the card itself controls) get no row.
                 // The card-wide numeric-cell width, computed ONCE per body pass (each row reuses it).
-                let fieldWidth = SZNodeLayout.numericFieldWidth(of: node)
-                VStack(spacing: SZNodeLayout.rowSpacing) {
-                    ForEach(SZNodeLayout.rowInputs(of: node), id: \.name) { inputRow($0, fieldWidth: fieldWidth) }
-                    ForEach(outputs, id: \.name) { outputRow($0) }
+                // Folded (`.picture`), the rows are simply not built — the body above is untouched, so a
+                // custom card keeps its size and stays live. SZNodeLayout.height drops the same band.
+                if tier == .full {
+                    let fieldWidth = SZNodeLayout.numericFieldWidth(of: node)
+                    VStack(spacing: SZNodeLayout.rowSpacing) {
+                        ForEach(SZNodeLayout.rowInputs(of: node), id: \.name) { inputRow($0, fieldWidth: fieldWidth) }
+                        ForEach(outputs, id: \.name) { outputRow($0) }
+                    }
+                    .padding(.top, SZNodeLayout.bodyTopPadding)
+                    .padding(.bottom, SZNodeLayout.bodyBottomPadding)
                 }
-                .padding(.top, SZNodeLayout.bodyTopPadding)
-                .padding(.bottom, SZNodeLayout.bodyBottomPadding)
             }
         }
         .frame(width: SZNodeLayout.width(of: node), height: SZNodeLayout.height(of: node), alignment: .top)
@@ -123,7 +130,7 @@ struct SZNodeView: View, Equatable {
         }
         .graphOpGlow(status, cornerRadius: SZNodeLayout.cornerRadius)
         // No action pills from orbit — the zoomed-out tile is preview + pill only.
-        .overlay(alignment: .bottomLeading) { if !zoomedOut { bottomButtons } }
+        .overlay(alignment: .bottomLeading) { if tier != .tile { bottomButtons } }
     }
 
     /// The in-card live-thumbnail region (between header and rows). Height is the layout's
@@ -172,6 +179,13 @@ struct SZNodeView: View, Equatable {
                                  action: onOpenSource)
             }
             if let onOpenChat { SZCardPillButton(symbol: "bubble.left.fill", help: "Chat with this node's Coding Agent", action: onOpenChat) }
+            // Offered only when the card has a body to show instead of its rows.
+            if let onTogglePlugs, SZNodeLayout.canFoldPlugs(node) {
+                let folded = tier == .picture
+                SZCardPillButton(symbol: folded ? "chevron.down" : "chevron.up",
+                                 help: folded ? "Show this node's plugs" : "Hide this node's plugs",
+                                 action: onTogglePlugs)
+            }
             if let onOpenMenu { SZCardPillButton(symbol: "ellipsis", help: "Node actions", action: onOpenMenu) }
         }
         .offset(x: 2, y: 27)

@@ -71,7 +71,7 @@ struct SZCardPort {
 Writes are by PORT NAME and go through the same funnel the plain rows use: the host clamps to the
 contract's `ui` range, snaps to `step`, pushes the runtime live, writes the store, persists. Only
 numeric ports (float, vectors, colors, bool) can be written from a card — an enum/string input stays on
-the plain rows (the user flips with right-click → "Show Rows").
+the plain rows (the user flips with right-click → "Hide Custom Card").
 
 **Host verbs** (`call`) exist only for controller nodes — a contract with a `mappings` string input and
 a `lastKey` string output (MIDI Input, OSC Input): `learn_arm`, `learn_cancel`, `learn_commit`

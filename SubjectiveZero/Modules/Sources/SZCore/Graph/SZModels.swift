@@ -164,15 +164,19 @@ public struct SZCustomCardRef: Codable, Equatable, Sendable {
 /// A node card's body: which mode, plus the datum that mode needs. `previewPort` names the texture output a
 /// `.preview` shows (nil = the display-marked/first texture output); `custom` carries a `.custom` body's
 /// committed footprint (nil = defaults). `preview` and `custom` share the one body slot and are mutually
-/// exclusive.
+/// exclusive. `plugs`: false folds the card's port rows away so the body IS the card (nil/true = shown) —
+/// a separate axis from `mode`, which picks what fills the body slot.
 public struct SZNodeBody: Codable, Equatable, Sendable {
     public var mode: SZNodeBodyMode
     public var previewPort: String?
     public var custom: SZCustomCardRef?
-    public init(mode: SZNodeBodyMode, previewPort: String? = nil, custom: SZCustomCardRef? = nil) {
+    public var plugs: Bool?
+    public init(mode: SZNodeBodyMode, previewPort: String? = nil, custom: SZCustomCardRef? = nil,
+                plugs: Bool? = nil) {
         self.mode = mode
         self.previewPort = previewPort
         self.custom = custom
+        self.plugs = plugs
     }
 }
 

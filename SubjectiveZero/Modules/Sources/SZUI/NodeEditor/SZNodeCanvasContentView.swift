@@ -44,6 +44,10 @@ struct SZNodeCanvasContentView: View, Equatable {
     let lockedNodes: Set<SZNodeID>    // ledger-held nodes (host-owned) — the lock affordance's source
     var previewsEnabled: Bool = true  // the global Live Previews gate (mirrors SZNodeLayout.previewsEnabled)
     var zoomedOut: Bool = false       // semantic-zoom tier: cards render as preview-only tiles, socket dots hide
+    /// Nodes holding a legal target for the in-flight wire — their folded cards show their dots so you
+    /// can see where a drop lands. Flips at most twice per drag (the source can't change mid-drag), so
+    /// the `.equatable()` freeze still skips every tick.
+    var wireRevealNodeIDs: Set<SZNodeID> = []
 
     // Interaction plumbing — closures excluded from `==` (see header). `previewFrames` rides with
     // them: a stable registry ref whose per-node boxes are observed only by the thumb leaves.
@@ -66,6 +70,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     var onSetInputDefault: (SZNodeID, String, SZPortValue, Bool) -> Void = { _, _, _, _ in }
     var onToggleDisplay: (SZNodeID, String) -> Void = { _, _ in }
     var onTogglePreview: (SZNodeID, String) -> Void = { _, _ in }
+    var onTogglePlugs: (SZNodeID) -> Void = { _ in }
     var optionsFor: (SZNodeID, String) -> [SZEnumOption] = { _, _ in [] }
     var onCommitPrompt: (SZNodeID, String) -> Void = { _, _ in }
     var onPromptEditingChanged: (SZNodeID, Bool) -> Void = { _, _ in }
@@ -90,6 +95,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             && lhs.lockedNodes == rhs.lockedNodes
             && lhs.previewsEnabled == rhs.previewsEnabled
             && lhs.zoomedOut == rhs.zoomedOut
+            && lhs.wireRevealNodeIDs == rhs.wireRevealNodeIDs
     }
 
     var body: some View {
@@ -122,20 +128,41 @@ struct SZNodeCanvasContentView: View, Equatable {
     // One node's interactive sockets (interleaved above its card in `body`): each socket is a drag
     // source for wiring.
     private func socketLayer(for node: SZNode) -> some View {
-        ForEach(SZGraphCanvasModel.sockets(of: node)) { socket in
+        // Folded, a dot shows only if it earns the space: a wire lands on it, the card is selected, or
+        // an in-flight wire could drop on it. Everything hidden goes INERT too — an invisible 22pt drag
+        // target over a picture would turn "drag the card" into a wire drag the user never saw (the
+        // rule the zoomed-out tier already sets). Ghosting keeps hit-testing (opacity only): the live
+        // drag gesture owning those sockets must not cancel mid-drag.
+        let tier = self.tier(for: node)
+        let revealed = selectedNodeID == node.id || multiSelection.contains(node.id)
+            || wireRevealNodeIDs.contains(node.id)
+        return ForEach(SZGraphCanvasModel.sockets(of: node)) { socket in
+            let shown = shows(socket, tier: tier, revealed: revealed)
             SZPortSocket(kind: socket.kind, isConnected: connectedSockets.contains(socket.id))
                 .frame(width: 22, height: 22)            // forgiving hit target around the 12pt dot
                 .contentShape(Circle())
                 .position(socket.point)
-                // Zoomed out, dots hide with the rest of the card chrome — and their hit areas go
-                // INERT: an invisible 22pt drag target over a preview tile would turn "drag the
-                // tile" into a wire drag the user never saw. Ghosting keeps hit-testing (opacity
-                // only): the live drag gesture owning those sockets must not cancel mid-drag.
-                .opacity(ghostedNodeIDs.contains(socket.nodeID) || zoomedOut ? 0 : 1)
-                .allowsHitTesting(!zoomedOut)
+                .opacity(ghostedNodeIDs.contains(socket.nodeID) || !shown ? 0 : 1)
+                .allowsHitTesting(shown)
                 .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
                     .onChanged { onSocketDragChanged(socket, $0.location) }
                     .onEnded { _ in onSocketDragEnded() })
+        }
+    }
+
+    /// This node's chrome tier. `.tile` is the whole canvas (semantic zoom); `.picture`/`.full` is the
+    /// node's own plugs fold.
+    private func tier(for node: SZNode) -> SZCardTier {
+        SZNodeLayout.tier(of: node, zoomedOut: zoomedOut)
+    }
+
+    /// Whether one socket paints and accepts a grab. `.tile` hides every dot outright — nothing the
+    /// fold adds may appear from orbit.
+    private func shows(_ socket: SZSocket, tier: SZCardTier, revealed: Bool) -> Bool {
+        switch tier {
+        case .tile: return false
+        case .full: return true
+        case .picture: return connectedSockets.contains(socket.id) || revealed
         }
     }
 
@@ -152,7 +179,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputsByNode[node.id] ?? [],
             previewsEnabled: previewsEnabled,
-            zoomedOut: zoomedOut,
+            tier: tier(for: node),
             previewFrame: previewFrames?.frame(for: node.id),
             cardProvider: cardProvider,
             onOpenSource: { onOpenNodeSource(node.id) },
@@ -161,6 +188,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             onSetInput: { port, value, persist in onSetInputDefault(node.id, port, value, persist) },
             onToggleDisplay: { port in onToggleDisplay(node.id, port) },
             onTogglePreview: { port in onTogglePreview(node.id, port) },
+            onTogglePlugs: { onTogglePlugs(node.id) },
             optionsFor: { port in optionsFor(node.id, port) },
             onCommitPrompt: { onCommitPrompt(node.id, $0) },
             onPromptEditingChanged: { onPromptEditingChanged(node.id, $0) },
@@ -184,7 +212,7 @@ struct SZNodeCanvasContentView: View, Equatable {
         for node: SZNode, status: SZNodeStatus, isSelected: Bool, locked: Bool, isRunning: Bool,
         errorDetail: String?, renderEndpoint: SZPortRef?, connectedInputs: Set<String>,
         previewsEnabled: Bool = true,
-        zoomedOut: Bool = false,
+        tier: SZCardTier = .full,
         previewFrame: SZNodePreviewFrame? = nil,
         cardProvider: (any SZCustomCardProvider)? = nil,
         onOpenSource: (() -> Void)? = nil,
@@ -193,6 +221,7 @@ struct SZNodeCanvasContentView: View, Equatable {
         onSetInput: @escaping (String, SZPortValue, Bool) -> Void = { _, _, _ in },
         onToggleDisplay: @escaping (String) -> Void = { _ in },
         onTogglePreview: @escaping (String) -> Void = { _ in },
+        onTogglePlugs: (() -> Void)? = nil,
         optionsFor: @escaping (String) -> [SZEnumOption] = { _ in [] },
         onCommitPrompt: @escaping (String) -> Void = { _ in },
         onPromptEditingChanged: @escaping (Bool) -> Void = { _ in },
@@ -214,7 +243,7 @@ struct SZNodeCanvasContentView: View, Equatable {
                        showPill: showPill(status, isRunning: isRunning), errorDetail: errorDetail,
                        renderEndpoint: renderEndpoint,
                        previewsEnabled: previewsEnabled,
-                       zoomedOut: zoomedOut,
+                       tier: tier,
                        connectedInputs: connectedInputs,
                        previewFrame: previewFrame,
                        cardProvider: cardProvider,
@@ -224,6 +253,7 @@ struct SZNodeCanvasContentView: View, Equatable {
                        onSetInput: onSetInput,
                        onToggleDisplay: onToggleDisplay,
                        onTogglePreview: onTogglePreview,
+                       onTogglePlugs: onTogglePlugs,
                        optionsFor: optionsFor,
                        onFix: onFix)
                 .equatable()

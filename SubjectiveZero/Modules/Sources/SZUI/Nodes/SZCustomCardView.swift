@@ -2,7 +2,7 @@
 // The custom-card body region: the node's live-output thumbnail as a backdrop (when the contract
 // asks for one), the mounted card's SwiftUI content on top at `.ready`, a spinner while its dylib
 // compiles, a warning chip when the latest edit failed but the previous build still runs, and the
-// error chip + "Show rows" at `.failed`. The failed frame KEEPS its committed footprint — geometry
+// error chip + "Hide Custom Card" at `.failed`. The failed frame KEEPS its committed footprint — geometry
 // is graph truth; reverting is an explicit body commit through the provider.
 //
 // Card content arrives as the dylib's root view VALUE (AnyView), not an embedded NSView: it joins
@@ -130,7 +130,7 @@ struct SZCustomCardView: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 10)
-            Button("Show rows") {
+            Button("Hide Custom Card") {
                 provider?.setCardShown(node: nodeID, false)
             }
             .buttonStyle(.bordered)

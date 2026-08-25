@@ -67,6 +67,24 @@ extension SZHost {
         return try? applyNodeBody(node: id, mode: node.effectivePreviewPort == port ? .none : .preview, port: port)
     }
 
+    /// Fold or unfold a card's port rows — the chevron pill and the context menu's Hide/Show Plugs.
+    /// The card keeps its TOP edge: the collapse always removes a whole number of grid cells, so
+    /// moving the centre by half of that leaves all four edges on grid for any row count. The move
+    /// lands before the body write, so the pair persists once.
+    @discardableResult
+    func toggleNodePlugs(node id: SZNodeID) -> SZNodeBody? {
+        guard let node = store.project?.graph.node(id: id), SZNodeLayout.canFoldPlugs(node) else { return nil }
+        let folding = SZNodeLayout.showsPlugs(of: node)
+        let shift = SZNodeLayout.foldDelta(of: node) / 2
+        if shift != 0 {
+            // Folding shrinks the card, so the CENTRE rises by half the loss to leave the top edge put.
+            _ = store.moveNode(id: id, to: SZPoint(x: node.position.x,
+                                                   y: node.position.y + (folding ? -shift : shift)))
+        }
+        return try? applyNodeBody(node: id, mode: node.effectiveBodyMode, port: node.effectivePreviewPort,
+                                  plugs: !folding)
+    }
+
     // MARK: - Watch-set maintenance (event-driven)
 
     /// The editor's visible-node report (SZNodeEditorPanel → SZApp closure). `nil` until the first

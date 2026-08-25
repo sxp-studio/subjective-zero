@@ -39,14 +39,14 @@ private func storedProperties(of subject: Any) -> Set<String> {
     #expect(storedProperties(of: view) == [
         // compared in ==
         "node", "status", "isSelected", "locked", "showPill", "errorDetail", "renderEndpoint",
-        "connectedInputs", "previewsEnabled", "zoomedOut",
+        "connectedInputs", "previewsEnabled", "tier",
         // the app's card host — a stable ref like previewFrame, excluded from == (the card region
         // observes its per-node mount box directly)
         "cardProvider",
         // closures — deliberately excluded from == (capture only stable refs). The card's
         // bottom-left buttons: file (onOpenSource), speech (onOpenChat), and "⋯" (onOpenMenu).
         "onOpenSource", "onOpenChat", "onOpenMenu",
-        "onSetInput", "onToggleDisplay", "onTogglePreview", "optionsFor",
+        "onSetInput", "onToggleDisplay", "onTogglePreview", "onTogglePlugs", "optionsFor",
         // the Outdated/Error pill's one-click repair request
         "onFix",
         // the live-preview box — a stable per-node ref like the closures; only the thumb leaf
@@ -82,6 +82,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
         "graph", "strokeZoom", "space", "selectedNodeID", "multiSelection", "selectedConnectionID",
         "hiddenConnectionID", "ghostedNodeIDs", "raisedTiers", "connectedSockets", "connectedInputsByNode",
         "nodeAgentState", "graphOpStatus", "isRunning", "runWorkSet", "lockedNodes", "previewsEnabled", "zoomedOut",
+        "wireRevealNodeIDs",
         // the app's card host — stable ref, excluded like previewFrames
         "cardProvider",
         // closures — deliberately excluded from == (routed to the panel's live handlers).
@@ -91,7 +92,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
         "onSocketDragChanged", "onSocketDragEnded", "onEdgeDragChanged", "onEdgeDragEnded",
         "autoEditNodeID",
         "onOpenNodeMenu", "onMentionNodeInChat", "onOpenNodeSource", "onFixNode", "onSetInputDefault",
-        "onToggleDisplay", "onTogglePreview", "optionsFor", "onCommitPrompt", "onPromptEditingChanged",
+        "onToggleDisplay", "onTogglePreview", "onTogglePlugs", "optionsFor", "onCommitPrompt", "onPromptEditingChanged",
         "onLivePrompt",
         // the preview-box registry — stable host-owned ref; per-node boxes are observed by the
         // thumb leaves, never compared here
@@ -113,13 +114,13 @@ private let portRef = SZPortRef(node: node.id, port: "output")
 private func nodeView(
     node n: SZNode = node, status: SZNodeStatus = .ready, isSelected: Bool = false, locked: Bool = false,
     showPill: Bool = true, errorDetail: String? = nil, renderEndpoint: SZPortRef? = nil,
-    previewsEnabled: Bool = true, zoomedOut: Bool = false,
+    previewsEnabled: Bool = true, tier: SZCardTier = .full,
     connectedInputs: Set<String> = [], previewFrame: SZNodePreviewFrame? = nil,
     cardProvider: (any SZCustomCardProvider)? = nil
 ) -> SZNodeView {
     SZNodeView(node: n, status: status, isSelected: isSelected, locked: locked, showPill: showPill,
                errorDetail: errorDetail, renderEndpoint: renderEndpoint,
-               previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
+               previewsEnabled: previewsEnabled, tier: tier,
                connectedInputs: connectedInputs, previewFrame: previewFrame,
                cardProvider: cardProvider)
 }
@@ -147,7 +148,9 @@ private final class StubCardProvider: SZCustomCardProvider {
     #expect(nodeView(errorDetail: "boom") != nodeView())
     #expect(nodeView(renderEndpoint: portRef) != nodeView())
     #expect(nodeView(previewsEnabled: false) != nodeView())                    // gate flip must reflow the card
-    #expect(nodeView(zoomedOut: true) != nodeView())                           // LOD crossing re-renders once
+    #expect(nodeView(tier: .tile) != nodeView())                               // LOD crossing re-renders once
+    #expect(nodeView(tier: .picture) != nodeView())                            // folding the plugs re-renders once
+    #expect(nodeView(tier: .picture) != nodeView(tier: .tile))                 // the two quiet tiers differ
     #expect(nodeView(connectedInputs: ["input"]) != nodeView())                // the clause at SZNodeView.swift:46
     var previewing = node; previewing.body = SZNodeBody(mode: .preview)        // body rides node ==
     #expect(nodeView(node: previewing) != nodeView())
@@ -215,7 +218,8 @@ private func canvasView(
     nodeAgentState: [SZNodeID: SZNodeAgentState] = [:], graphOpStatus: [SZNodeID: String] = [:],
     isRunning: Bool = false, runWorkSet: Set<SZNodeID> = [], lockedNodes: Set<SZNodeID> = [],
     autoEditNodeID: SZNodeID? = nil,
-    previewsEnabled: Bool = true, zoomedOut: Bool = false, previewFrames: SZNodePreviewFrames? = nil,
+    previewsEnabled: Bool = true, zoomedOut: Bool = false,
+    wireRevealNodeIDs: Set<SZNodeID> = [], previewFrames: SZNodePreviewFrames? = nil,
     cardProvider: (any SZCustomCardProvider)? = nil
 ) -> SZNodeCanvasContentView {
     var v = SZNodeCanvasContentView(
@@ -225,6 +229,7 @@ private func canvasView(
         connectedSockets: connectedSockets, connectedInputsByNode: connectedInputsByNode,
         nodeAgentState: nodeAgentState, graphOpStatus: graphOpStatus, isRunning: isRunning,
         runWorkSet: runWorkSet, lockedNodes: lockedNodes, previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
+        wireRevealNodeIDs: wireRevealNodeIDs,
         previewFrames: previewFrames, cardProvider: cardProvider)
     v.autoEditNodeID = autoEditNodeID
     return v
@@ -252,6 +257,7 @@ private func canvasView(
     #expect(canvasView(runWorkSet: [id]) != canvasView())
     #expect(canvasView(previewsEnabled: false) != canvasView())
     #expect(canvasView(zoomedOut: true) != canvasView())
+    #expect(canvasView(wireRevealNodeIDs: [node.id]) != canvasView())          // a folded target shows its dots
 }
 
 @MainActor

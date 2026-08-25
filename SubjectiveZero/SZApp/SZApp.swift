@@ -808,6 +808,7 @@ struct SZApp: App {
                               onCommitPrompt: { host.updateNodeContent(id: $0, prompt: $1) },
                               onLivePrompt: { host.notePendingPromptEdit(id: $0, text: $1) },
                               onTogglePreview: { host.toggleNodePreview(node: $0, port: $1) },
+                              onTogglePlugs: { host.toggleNodePlugs(node: $0) },
                               optionsFor: { host.effectiveOptions(node: $0, port: $1) },
                               onDeleteNodes: { host.deleteNodes(ids: $0) },
                               onDeleteConnection: { host.deleteConnection(id: $0) },

@@ -47,6 +47,7 @@ public struct SZNodeEditorPanel: View {
     private let previewFrames: SZNodePreviewFrames?   // host-owned per-node thumb boxes (stable refs)
     private let cardProvider: (any SZCustomCardProvider)?   // host-owned custom-card mounts (stable ref)
     private let onTogglePreview: (SZNodeID, String) -> Void
+    private let onTogglePlugs: (SZNodeID) -> Void   // fold/unfold a card's port rows (card pill + menu)
     /// Debounced visible-node reports for the host's preview watch-set culling (the camera is
     /// panel-local @State — this closure is how visibility leaves the panel).
     private let onVisibleNodesChanged: ((Set<SZNodeID>) -> Void)?
@@ -150,6 +151,7 @@ public struct SZNodeEditorPanel: View {
                 onCommitPrompt: @escaping (SZNodeID, String) -> Void,
                 onLivePrompt: @escaping (SZNodeID, String) -> Void,
                 onTogglePreview: @escaping (SZNodeID, String) -> Void = { _, _ in },
+                onTogglePlugs: @escaping (SZNodeID) -> Void = { _ in },
                 optionsFor: @escaping (SZNodeID, String) -> [SZEnumOption] = { _, _ in [] },
                 onDeleteNodes: @escaping ([SZNodeID]) -> Void = { _ in },
                 onDeleteConnection: @escaping (SZConnectionID) -> Void = { _ in },
@@ -196,6 +198,7 @@ public struct SZNodeEditorPanel: View {
         self.onCommitPrompt = onCommitPrompt
         self.onLivePrompt = onLivePrompt
         self.onTogglePreview = onTogglePreview
+        self.onTogglePlugs = onTogglePlugs
         self.optionsFor = optionsFor
         self.onDeleteNodes = onDeleteNodes
         self.onDeleteConnection = onDeleteConnection
@@ -694,13 +697,20 @@ public struct SZNodeEditorPanel: View {
                 if let cardProvider, cardProvider.hasCardSource(for: id) {
                     let showing = node.effectiveBodyMode == .custom
                     actions.append(SZContextAction(kind: .toggleCard(id, on: !showing),
-                                                   label: showing ? "Show Rows" : "Show Custom Card",
+                                                   label: showing ? "Hide Custom Card" : "Show Custom Card",
                                                    sfSymbol: showing ? "list.bullet.rectangle" : "rectangle.inset.filled"))
                     actions.append(SZContextAction(kind: .openCard(id), label: "Open Card.swift",
                                                    sfSymbol: "rectangle.and.pencil.and.ellipsis"))
                 } else if cardProvider != nil {
                     actions.append(SZContextAction(kind: .newCard(id), label: "New Custom Card…",
                                                    sfSymbol: "rectangle.badge.plus"))
+                }
+                // Only offered when the card has a body to show in place of its rows.
+                if SZNodeLayout.canFoldPlugs(node) {
+                    let showing = SZNodeLayout.showsPlugs(of: node)
+                    actions.append(SZContextAction(kind: .togglePlugs(id, on: !showing),
+                                                   label: showing ? "Hide Plugs" : "Show Plugs",
+                                                   sfSymbol: showing ? "chevron.up" : "chevron.down"))
                 }
             }
             return actions
@@ -723,6 +733,7 @@ public struct SZNodeEditorPanel: View {
         case .toggleCard(let id, let on): cardProvider?.setCardShown(node: id, on)
         case .openCard(let id): cardProvider?.openCardSource(node: id)
         case .newCard(let id): cardProvider?.createCard(node: id)
+        case .togglePlugs(let id, _): onTogglePlugs(id)
         }
     }
 
@@ -807,6 +818,7 @@ public struct SZNodeEditorPanel: View {
             // Compared as a Bool, so pinch ticks keep skipping the subtree — it flips only when the
             // zoom crosses the LOD threshold, re-rendering the cards once per crossing.
             zoomedOut: zoomedOut,
+            wireRevealNodeIDs: wireRevealNodeIDs,
             previewFrames: previewFrames,
             cardProvider: cardProvider,
             onSelectNode: { selectNode($0, additive: $1) },
@@ -829,6 +841,7 @@ public struct SZNodeEditorPanel: View {
             onSetInputDefault: onSetInputDefault,
             onToggleDisplay: onToggleDisplay,
             onTogglePreview: onTogglePreview,
+            onTogglePlugs: onTogglePlugs,
             optionsFor: optionsFor,
             onCommitPrompt: onCommitPrompt,
             onPromptEditingChanged: { id, editing in
@@ -897,7 +910,7 @@ public struct SZNodeEditorPanel: View {
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputs,
             previewsEnabled: livePreviews,
-            zoomedOut: zoomedOut,
+            tier: SZNodeLayout.tier(of: node, zoomedOut: zoomedOut),
             // The SAME stable box as the resting card — a dragged card keeps its live thumb (and
             // its mounted custom card).
             previewFrame: previewFrames?.frame(for: node.id),
@@ -919,6 +932,18 @@ public struct SZNodeEditorPanel: View {
     /// powers of two (≤ ~9% width error mid-step) re-diffs a handful of times across a full pinch.
     private static func quantizedStrokeZoom(_ zoom: CGFloat) -> CGFloat {
         exp2((log2(max(zoom, 0.1)) * 4).rounded() / 4)
+    }
+
+    /// Nodes an in-flight wire could legally land on — a folded card among them shows its dots, so the
+    /// rings the overlay draws sit on something. Same call `wireTargetsOverlay` makes, and the value is
+    /// stable for the whole drag (the source can't change), so the frozen content view sees it flip
+    /// once at pickup and once at drop.
+    private var wireRevealNodeIDs: Set<SZNodeID> {
+        guard let wire, wire.moved, let graph = project?.graph else { return [] }
+        return Set(SZGraphCanvasModel.validTargets(for: wire.source, in: displayGraph(graph),
+                                                   tiers: raisedTiers,
+                                                   pickedConnectionID: wire.picked?.id,
+                                                   isLocked: isLocked).map(\.nodeID))
     }
 
     /// The compatible-slot feedback for an in-flight wire: a soft ring on every socket a drop would

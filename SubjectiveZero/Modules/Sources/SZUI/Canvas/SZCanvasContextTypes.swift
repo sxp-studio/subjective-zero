@@ -57,6 +57,7 @@ public struct SZContextAction: Identifiable, Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case mentionInChat(SZNodeID), openSource(SZNodeID), addNode
         case toggleCard(SZNodeID, on: Bool), openCard(SZNodeID), newCard(SZNodeID)
+        case togglePlugs(SZNodeID, on: Bool)
     }
     public let kind: Kind
     public let label: String

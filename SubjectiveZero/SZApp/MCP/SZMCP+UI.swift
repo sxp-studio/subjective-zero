@@ -121,7 +121,7 @@ extension SZHostBridge {
                  ]),
             tool("ui_toggle_display", "Toggle a node's texture output as the viewport render endpoint (mirrors clicking the node card's monitor icon) — switches the live viewport to that output. Pointing at the current endpoint clears it. `port` must be a `texture` output.",
                  properties: ["node": ["type": "string"], "port": ["type": "string"]]),
-            tool("ui_set_node_body", "Set a generated node card's body region (between header and rows). `mode`: \"none\" (compact card), \"preview\" (a live thumbnail of a texture output — `port` picks which, defaulting to the display-marked/first texture output), or \"custom\" (the node's own Card.swift, mounted as its body — the node folder must hold one; `cols`/`rows` set the footprint in grid cells, `pinned` stops auto-size). An unset body auto-previews a texture node; an explicit value pins the choice. Geometry-affecting and persisted; echoes the applied body.",
+            tool("ui_set_node_body", "Set a generated node card's body region (between header and rows). `mode`: \"none\" (compact card), \"preview\" (a live thumbnail of a texture output — `port` picks which, defaulting to the display-marked/first texture output), or \"custom\" (the node's own Card.swift, mounted as its body — the node folder must hold one; `cols`/`rows` set the footprint in grid cells, `pinned` stops auto-size). An unset body auto-previews a texture node; an explicit value pins the choice. `plugs: false` folds the card's port rows away (labels, controls and dots) so the body IS the card — the ports stay wired and connectable, and their edges land stacked on the body's edge. Geometry-affecting and persisted; echoes the applied body.",
                  properties: [
                     "node": ["type": "string"],
                     "mode": ["type": "string", "enum": ["none", "preview", "custom"]],
@@ -129,6 +129,7 @@ extension SZHostBridge {
                     "cols": ["type": "integer", "description": "custom only: card width in grid cells (6…24)"],
                     "rows": ["type": "integer", "description": "custom only: card body height in grid cells (2…24)"],
                     "pinned": ["type": "boolean", "description": "custom only: pin the size against auto-measure"],
+                    "plugs": ["type": "boolean", "description": "false folds the port rows away (needs a preview or custom body to show instead)"],
                  ]),
             // The chat-tab and panel tools below are view/window navigation — no graph or render
             // effect — so they are withheld from agents (`agentCallable: false`); only the human
@@ -838,12 +839,13 @@ extension SZHostBridge {
             body = try host.applyNodeBody(
                 node: id, mode: mode, port: arguments.string("port"),
                 cols: (arguments["cols"] as? NSNumber)?.intValue, rows: (arguments["rows"] as? NSNumber)?.intValue,
-                pinned: arguments["pinned"] as? Bool, origin: .agent)
+                pinned: arguments["pinned"] as? Bool, plugs: arguments["plugs"] as? Bool, origin: .agent)
         } catch {
             throw SZMCPError.message(String(describing: error))
         }
 
         var applied: [String: Any] = ["mode": body.mode.rawValue]
+        if let plugs = body.plugs { applied["plugs"] = plugs }
         if let previewPort = body.previewPort { applied["previewPort"] = previewPort }
         if let custom = body.custom {
             var card: [String: Any] = [:]

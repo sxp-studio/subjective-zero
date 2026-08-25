@@ -104,6 +104,12 @@ A classic node-graph editor rendered natively over the viewport. Two node kinds
   when it ships a `Card.swift` and the body is set to custom ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md#custom-card-cardswift)).
   A backdrop card (corner-pin) shows the output under its handles and sizes the region to the
   render aspect; the inputs the card owns (`card.plumbing`) get no row while it shows.
+- **Folding the plugs:** a card with a body can put its port rows away (chevron pill under the card,
+  or right-click → **Hide Plugs**), so the preview or the custom card IS the card. The card keeps its
+  **top edge** and folds up under its header; the fold always drops a whole number of grid cells, so
+  every edge stays on grid. Ports stay wired and connectable: a socket with a wire in it keeps its
+  dot, stacked against the body edge in port order, and the rest come back when the card is selected
+  or a wire is in flight looking for a target. A card with no body to show is not offered the fold.
 
 Node anatomy should be **compact and sleek** (right anatomy, minimal bulk). The whole node view
 is derived from the node's contract, so reflow on `ui_update_node` is
@@ -127,8 +133,9 @@ are REAL messages to real agents; determinism stays in the agents' `ui_*` tools)
 - **A node** → "@\<node\> fix this: \<blocker\>" (when its agent reported error/needsInput),
   "@project implement @\<node\>" (prompt node) or "@project split @\<node\> into two stages"
   (generated), plus **Mention in Chat** (`text.bubble` — puts the node in the composer, since one
-  conversation has no tab to open) and **Open Node.swift** (`doc.text`) action rows. A generated node with a `Card.swift` adds **Show Custom Card / Show Rows** and
+  conversation has no tab to open) and **Open Node.swift** (`doc.text`) action rows. A generated node with a `Card.swift` adds **Show Custom Card / Hide Custom Card** and
   **Open Card.swift**; one without adds **New Custom Card…** (scaffolds a starter and opens it).
+  A generated node with a body region also adds **Hide Plugs / Show Plugs**.
   Right-click also selects the node (a multi-selection member keeps the set).
 - **A multi-selection** → "@project merge @A, @B and @C into one node".
 - **Empty canvas** → "@project implement the N pending nodes".

@@ -98,7 +98,7 @@ interactions the rows can't express - dragging corner handles over the output (t
 
 - **Model:** the node's `body` is `none | preview | custom` (graph state, persisted like `position`);
   `custom` is only accepted when `Card.swift` exists on disk. Right-click → **Show Custom Card /
-  Show Rows** flips it; `ui_set_node_body` is the same edit from MCP. The file stays either way.
+  Hide Custom Card** flips it; `ui_set_node_body` is the same edit from MCP. The file stays either way.
 - **Data flow:** the card reads a scoped snapshot of its node (contract, current input values,
   connected inputs, render size) and, for nodes with float/floatArray outputs, a lossy ~30 Hz
   telemetry stream. It writes through two verbs only - `live` (per-gesture-tick, unpersisted) and
