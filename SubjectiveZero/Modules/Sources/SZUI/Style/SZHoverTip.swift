@@ -7,6 +7,9 @@ import SwiftUI
 
 struct SZHoverTip: ViewModifier {
     let text: String
+    /// Which side of the view the tip floats on. `.bottom` for controls that already sit below their
+    /// card (the node's action pills), so the tip lands on empty canvas instead of over the rows.
+    let edge: VerticalEdge
     @State private var hovering = false
     @State private var show = false
 
@@ -23,7 +26,7 @@ struct SZHoverTip: ViewModifier {
                     show = false
                 }
             }
-            .overlay(alignment: .top) {
+            .overlay(alignment: edge == .top ? .top : .bottom) {
                 if show {
                     Text(text)
                         .font(.system(size: 10, weight: .medium))
@@ -34,7 +37,7 @@ struct SZHoverTip: ViewModifier {
                         .background(Capsule().fill(Color(white: 0.12)))
                         .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
-                        .offset(y: -22)                       // float just above the button
+                        .offset(y: edge == .top ? -22 : 22)   // float clear of the button
                         .allowsHitTesting(false)              // never intercept the click it describes
                         .transition(.opacity)
                         .zIndex(1)
@@ -46,5 +49,7 @@ struct SZHoverTip: ViewModifier {
 
 extension View {
     /// A small hover tooltip that works inside the zoomable canvas (where system `.help()` is flaky).
-    func hoverTip(_ text: String) -> some View { modifier(SZHoverTip(text: text)) }
+    func hoverTip(_ text: String, edge: VerticalEdge = .top) -> some View {
+        modifier(SZHoverTip(text: text, edge: edge))
+    }
 }

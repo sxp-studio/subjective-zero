@@ -174,16 +174,15 @@ struct SZNodeView: View, Equatable {
             if let onOpenSource {
                 let hasCard = cardProvider?.hasCardSource(for: node.id) ?? false
                 SZCardPillButton(symbol: "doc.text",
-                                 help: hasCard ? "Open this node's sources (Node.swift + Card.swift)"
-                                               : "Open this node's source (Node.swift)",
+                                 help: hasCard ? "Open Node.swift and Card.swift" : "Open Node.swift",
                                  action: onOpenSource)
             }
-            if let onOpenChat { SZCardPillButton(symbol: "bubble.left.fill", help: "Chat with this node's Coding Agent", action: onOpenChat) }
+            if let onOpenChat { SZCardPillButton(symbol: "bubble.left.fill", help: "Chat with this node", action: onOpenChat) }
             // Offered only when the card has a body to show instead of its rows.
             if let onTogglePlugs, SZNodeLayout.canFoldPlugs(node) {
                 let folded = tier == .picture
                 SZCardPillButton(symbol: folded ? "chevron.down" : "chevron.up",
-                                 help: folded ? "Show this node's plugs" : "Hide this node's plugs",
+                                 help: folded ? "Show plugs" : "Hide plugs",
                                  action: onTogglePlugs)
             }
             if let onOpenMenu { SZCardPillButton(symbol: "ellipsis", help: "Node actions", action: onOpenMenu) }
@@ -236,13 +235,11 @@ struct SZNodeView: View, Equatable {
                 // choice isn't the row's to make (the host refuses it too), so the glyph steps aside.
                 if node.effectiveBodyMode != .custom {
                     toggleGlyph("photo", active: previewing, port: port.name,
-                                help: previewing ? "Hide this output's live preview"
-                                                 : "Preview this output on the card",
+                                help: previewing ? "Hide preview" : "Preview on the card",
                                 action: onTogglePreview)
                 }
                 toggleGlyph("display", active: isRenderEndpoint(port), port: port.name,
-                            help: isRenderEndpoint(port) ? "Stop displaying this output"
-                                                         : "Display this output in the viewport",
+                            help: isRenderEndpoint(port) ? "Stop showing" : "Show in viewport",
                             action: onToggleDisplay)
             }
             Text(port.name)
@@ -311,6 +308,9 @@ struct SZCardPillButton: View {
         }
         .buttonStyle(.plain)
         .trackingHover($hover)
+        // `.help` is inert in here (an ancestor scales the canvas), so the tip is drawn by hand.
+        // Below the button: this strip already hangs under the card, so a tip above would cover the rows.
         .help(help)
+        .hoverTip(help, edge: .bottom)
     }
 }
