@@ -192,7 +192,7 @@ struct SZAgentGraphRunList: View {
                                 } else {
                                     // The thread's ending is its deciding traversal's —
                                     // declined and stopped stay visible at thread level.
-                                    SZRunBadge.forConclusion(director.conclusion)
+                                    SZRunBadge.forRun(director)
                                 }
                                 Spacer(minLength: 0)
                             }
@@ -240,8 +240,9 @@ struct SZRunBadge: View {
     /// one out, a broadcast word among build words — and ONE colour, because the badge says what
     /// state a run is in, never which agent is in it. Whose run it is, the lane says in its own
     /// tint; if the badge borrowed that tint too, the same state wore two colours across surfaces.
+    /// The blue is the traversing card's own pulse: badge and card now say "going" the same way.
     static func running() -> SZRunBadge {
-        SZRunBadge(label: "running", colour: SZAgentGraphStyle.live)
+        SZRunBadge(label: "running", colour: SZAgentGraphStyle.running)
     }
 
     static func forConclusion(_ conclusion: SZAgentGraphRun.Conclusion?) -> SZRunBadge {
@@ -249,11 +250,37 @@ struct SZRunBadge: View {
         return SZRunBadge(label: style.label, colour: style.colour)
     }
 
+    /// A RECORD's badge — the same table, plus the one fact the conclusion drops: the outcome
+    /// the last visited node answered. Use this wherever the trace is at hand; a receipt, which
+    /// has no trace, keeps `forConclusion`.
+    static func forRun(_ run: SZAgentGraphRun) -> SZRunBadge {
+        let style = style(for: run.conclusion, endedOn: run.trace.last?.outcome)
+        return SZRunBadge(label: style.label, colour: style.colour)
+    }
+
+    /// An ending that came out of an unhandled ERROR port. The engine seals it a clean ending —
+    /// nothing threw, the traversal simply had nowhere left to go — but the work did not land,
+    /// and the canvas has always drawn that capsule in the failure orange while the row beside
+    /// it called the same run a clean exit. Read here, so both say one thing.
+    static func endedOnError(_ outcome: String?) -> Bool {
+        guard let outcome else { return false }
+        return outcome.hasPrefix("error") || outcome.hasPrefix("failed")
+    }
+
     /// An ending's words and colour — the ONE vocabulary, pure so the canvas terminal reads
     /// the same table and so the mapping is testable without a view. The WORD comes from the model
     /// (`Conclusion.word`), because the MCP surface and any driver need the same five words and
     /// cannot see this view; what is decided here is the colour it wears.
-    static func style(for conclusion: SZAgentGraphRun.Conclusion?) -> (label: String, colour: Color) {
+    ///
+    /// `endedOn` is the last visited node's outcome, when the caller has the record to hand. It
+    /// only ever RECLASSIFIES a clean ending into a failed one — everything else is the
+    /// conclusion's own business, so a refusal off an error port is still a refusal.
+    static func style(for conclusion: SZAgentGraphRun.Conclusion?,
+                      endedOn outcome: String? = nil) -> (label: String, colour: Color) {
+        var conclusion = conclusion
+        if conclusion == .ended || conclusion == nil, endedOnError(outcome) {
+            conclusion = .failed(reason: "the last node answered '\(outcome ?? "error")'")
+        }
         let label = conclusion?.word ?? SZAgentGraphRun.Conclusion.ended.word
         return switch conclusion {
         case .failed, .defect: (label, SZAgentGraphStyle.failed)
@@ -268,7 +295,7 @@ struct SZRunBadge: View {
         // a refusal is never a failure, and it is never nobody's doing either.
         case .declined:        (label, SZEdgeStyle.intentViolet)
         // A record sealed without a conclusion cannot happen through the host's seal; drawn
-        // as a plain ending rather than left blank. The SAME blue the canvas gives a clean
+        // as a plain ending rather than left blank. The SAME green the canvas gives a clean
         // exit — a list badge and the terminal capsule are two views of one fact.
         case .ended, .none:    (label, SZAgentGraphStyle.ended)
         }
@@ -386,7 +413,7 @@ struct SZAgentGraphRunRow: View {
                 SZRunBadge.running()
             }
         } else {
-            SZRunBadge.forConclusion(run.conclusion)
+            SZRunBadge.forRun(run)
         }
     }
 }

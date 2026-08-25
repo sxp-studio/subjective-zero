@@ -273,7 +273,7 @@ struct SZRunStrip: View {
                         : nil)
         case .lane(let run, let connector):
             laneRow(SZLaneModel(run: run, name: run.work.flatMap(title) ?? "work",
-                                symbol: "hammer", tint: SZAgentGraphStyle.live),
+                                symbol: "hammer", tint: SZAgentGraphStyle.running),
                     connector: connector)
         case .waiting(let thread):
             waitingLine(thread: thread)
@@ -491,7 +491,7 @@ struct SZStripLane: View {
                         SZRunBadge.running()
                     }
                 } else {
-                    SZRunBadge.forConclusion(model.run.conclusion)
+                    SZRunBadge.forRun(model.run)
                 }
             }
         }

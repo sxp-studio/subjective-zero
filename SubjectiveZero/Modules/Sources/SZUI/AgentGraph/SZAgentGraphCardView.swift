@@ -421,15 +421,16 @@ enum SZAgentGraphStyle {
     /// Orange-red rather than pure red: on this canvas a step's honest "no" branch is an
     /// ordinary fact, and hard red would read as breakage every time one answers.
     static let failed = Color(red: 0.93, green: 0.44, blue: 0.26)
+    /// IN FLIGHT — one blue for every surface that says "this is going right now": a
+    /// traversing card's pulse and border, the RUNS badge, a live lane's stroke. It used to
+    /// be blue on the cards and orange on the badges, which made the same fact wear two
+    /// colours, and the orange sat one hue away from `failed`.
     static let running = Color(red: 0.30, green: 0.55, blue: 0.95)
-    /// A VALID conclusion — the `end` capsule of a traversal that ended on purpose, and the
-    /// RUNS badge that says the same thing: ONE constant, so the list and the canvas can
-    /// never disagree about an ending. The app's accent blue, FIXED — deliberately not
-    /// `Color.accentColor`: a semantic colour must not be repalettable.
-    static let ended = running
-    /// IN FLIGHT — the HUD Stop button's orange, reused so "a run is going" says the same
-    /// thing in the toolbar, the RUNS list and a traversing card's clock.
-    static let live = Color.orange
+    /// A VALID conclusion — the `complete` capsule of a traversal that ended on purpose, and
+    /// the RUNS badge that says the same thing: ONE constant, so the list and the canvas can
+    /// never disagree about an ending. GREEN, the same green a settled card's checkmark
+    /// wears: finishing a run and finishing a node are the same kind of good news.
+    static let ended = done
     static let neutral = Color(white: 0.50)
 
     /// The one place an outcome becomes a colour, so wires and their sockets can never

@@ -201,7 +201,9 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             case .cancelled, .interrupted: "stopped"
             // A DECISION, not an accident — never folded into failure.
             case .declined: "declined"
-            case .ended: "end"
+            // "complete", not "end": a traversal that ran to its own finish SUCCEEDED, and
+            // the word people read next to a green badge should say so.
+            case .ended: "complete"
             }
         }
     }

@@ -133,7 +133,7 @@ struct SZAgentGraphCanvasContent: View {
                 .foregroundStyle(Color.black.opacity(0.82))
                 .padding(.horizontal, max(3, 5 / z))
                 .padding(.vertical, max(1, 2 / z))
-                .background(Capsule().fill(SZAgentGraphStyle.done))
+                .background(Capsule().fill(SZAgentGraphStyle.neutral))
                 .position(x: start.x - 16, y: start.y)
         }
     }
@@ -195,22 +195,14 @@ struct SZAgentGraphCanvasContent: View {
                     case .none:
                         futureLayer(from: last, frame: lastFrame, face: lastFace,
                                     subheader: hasSubheader(last, record))
-                    case .ended:
-                        // A traversal that ended on purpose exits BLUE; one that ended on an
-                        // error outcome keeps the failed orange — the capsule states
-                        // validity, the port hue stays the wire's business.
-                        let outcome = SZAgentGraphLayout.terminalPort(last.outcome, in: lastFace)
-                        let invalid = outcome == "error" || outcome.hasPrefix("error")
-                            || outcome.hasPrefix("failed")
-                        terminal(after: lastFrame, face: lastFace, outcome: last.outcome,
-                                 label: "end",
-                                 colour: invalid ? SZAgentGraphStyle.failed : SZAgentGraphStyle.ended,
-                                 subheader: hasSubheader(last, record))
-                    // Failed, stopped, interrupted, declined: the capsule the RUNS list
-                    // already gives each — one vocabulary, read from `SZRunBadge.style`. A
-                    // refusal stays deliberately neutral, not red.
-                    case .failed, .defect, .cancelled, .interrupted, .declined:
-                        let style = SZRunBadge.style(for: record.conclusion)
+                    // Every ending, in ONE call: the capsule the RUNS list gives the same
+                    // record, word and colour together. The ending's own port goes with it,
+                    // because a clean-looking exit off an error port is a failure and only
+                    // the trace can say so — the row reads it the same way.
+                    default:
+                        let style = SZRunBadge.style(
+                            for: record.conclusion,
+                            endedOn: SZAgentGraphLayout.terminalPort(last.outcome, in: lastFace))
                         terminal(after: lastFrame, face: lastFace, outcome: last.outcome,
                                  label: style.label, colour: style.colour,
                                  subheader: hasSubheader(last, record))
@@ -258,8 +250,9 @@ struct SZAgentGraphCanvasContent: View {
                                      generation: entry.generation)
     }
 
-    /// "The traversal entered here" — the `end` capsule's mirror image. GREEN, deliberately
-    /// apart from the outcome-coloured `end`: entering is "go".
+    /// "The traversal entered here" — the `complete` capsule's mirror image. NEUTRAL: it was
+    /// green while endings were blue, and green now means an ending that succeeded. A start
+    /// capsule is a label on a wire, not a verdict, and every run has one however it went.
     @ViewBuilder
     private func origin(into frame: CGRect) -> some View {
         let end = SZAgentGraphLayout.inputPoint(frame)
@@ -271,7 +264,7 @@ struct SZAgentGraphCanvasContent: View {
             .foregroundStyle(Color.black.opacity(0.82))
             .padding(.horizontal, max(3, 5 / z))
             .padding(.vertical, max(1, 2 / z))
-            .background(Capsule().fill(SZAgentGraphStyle.done))
+            .background(Capsule().fill(SZAgentGraphStyle.neutral))
             .position(x: start.x - 14, y: start.y)
     }
 
@@ -339,7 +332,11 @@ struct SZAgentGraphCanvasContent: View {
             .padding(.horizontal, max(3, 5 / z))
             .padding(.vertical, max(1, 2 / z))
             .background(Capsule().fill(capsule))
-            .position(x: end.x + 12 + CGFloat(label.count - 3) * 3, y: end.y)
+            // Scaled by the zoom like the font and padding above it: the capsule grows in
+            // world points as you zoom out, and a fixed offset let a long word lap back over
+            // the card it belongs to. Identical at 1:1.
+            .position(x: end.x + max(12, 12 / z) + CGFloat(label.count - 3) * max(3, 3 / z),
+                      y: end.y)
     }
 
     // MARK: Plumbing
@@ -459,7 +456,7 @@ struct SZAgentSubagentLane: View {
             .background(RoundedRectangle(cornerRadius: 5)
                 .fill(Color.white.opacity(run.isLive ? 0.05 : 0.025)))
             .overlay(RoundedRectangle(cornerRadius: 5)
-                .stroke(run.isLive ? (tint ?? SZAgentGraphStyle.live).opacity(0.45)
+                .stroke(run.isLive ? (tint ?? SZAgentGraphStyle.running).opacity(0.45)
                                    : Color.white.opacity(0.08), lineWidth: 1))
             .contentShape(Rectangle())
         }
