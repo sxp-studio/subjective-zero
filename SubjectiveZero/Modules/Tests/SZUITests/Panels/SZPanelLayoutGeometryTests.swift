@@ -101,3 +101,27 @@ private let divider = SZPanelLayoutGeometry.dividerThickness
             == CGRect(x: 100, y: 150, width: 400, height: 100))
     #expect(SZPanelLayoutGeometry.dropPreviewRect(zone: .center, in: rect) == rect)
 }
+
+@Test func theWindowBorderIsTheBandThatPins() {
+    // Inside the border band, on every side, and out in the gap around the tiles.
+    #expect(SZPanelLayoutGeometry.windowEdgeZone(at: CGPoint(x: window.minX + 4, y: window.midY), in: window) == .left)
+    #expect(SZPanelLayoutGeometry.windowEdgeZone(at: CGPoint(x: window.maxX - 4, y: window.midY), in: window) == .right)
+    #expect(SZPanelLayoutGeometry.windowEdgeZone(at: CGPoint(x: window.midX, y: window.minY + 4), in: window) == .top)
+    #expect(SZPanelLayoutGeometry.windowEdgeZone(at: CGPoint(x: window.midX, y: window.maxY - 4), in: window) == .bottom)
+    #expect(SZPanelLayoutGeometry.windowEdgeZone(at: CGPoint(x: window.minX - 4, y: window.midY), in: window) == .left)
+    // Past the band it's an ordinary drop, and well outside the window it's nothing (a tear-out).
+    #expect(SZPanelLayoutGeometry.windowEdgeZone(at: CGPoint(x: window.midX, y: window.midY), in: window) == nil)
+    #expect(SZPanelLayoutGeometry.windowEdgeZone(at: CGPoint(x: window.minX - 200, y: window.midY), in: window) == nil)
+    // Corners resolve by nearest edge, ties left before top.
+    #expect(SZPanelLayoutGeometry.windowEdgeZone(at: CGPoint(x: window.minX + 2, y: window.minY + 8), in: window) == .left)
+}
+
+@Test func theBandStaysInsideEveryPanelsOwnEdgeZone() {
+    // The band overlays the outermost panels' borders, so it must never swallow a panel's own edge
+    // zone (a quarter of it). This is the invariant that keeps both gestures reachable.
+    for kind in SZPanelKind.allCases {
+        let min = SZPanelLayoutGeometry.minSize(for: kind)
+        #expect(SZPanelLayoutGeometry.windowEdgeBand < min.width / 4)
+        #expect(SZPanelLayoutGeometry.windowEdgeBand < min.height / 4)
+    }
+}

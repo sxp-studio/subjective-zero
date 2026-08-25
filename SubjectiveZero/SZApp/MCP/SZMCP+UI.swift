@@ -138,7 +138,7 @@ extension SZHostBridge {
                  properties: ["panel": Self.panelProperty], agentCallable: false),
             tool("ui_close_panel", "Close a top-level panel (mirrors its header ✕) — its split collapses and its spot is remembered; a popped-out panel's window closes and its record is dropped. Returns {closed:true, layout, popped_out_panels}. The last panel can't be closed, and a panel that isn't open can't either: both return {closed:false, reason, layout, popped_out_panels}.",
                  properties: ["panel": Self.panelProperty], agentCallable: false),
-            tool("ui_move_panel", "Move a panel (mirrors dragging its header onto another panel): an edge `zone` splits `onto` with `panel` on that side; \"center\" swaps the two. Returns the resulting layout tree.",
+            tool("ui_move_panel", "Move a panel (mirrors dragging its header): with `onto`, an edge `zone` splits that panel with `panel` on that side and \"center\" swaps the two. Without `onto`, `panel` is pinned to that side of the WHOLE window, spanning it with everything else beside it. Returns the resulting layout tree.",
                  properties: [
                     "panel": Self.panelProperty,
                     "onto": Self.panelProperty,
@@ -974,11 +974,18 @@ extension SZHostBridge {
 
     private func uiMovePanel(_ arguments: [String: Any]) throws -> String {
         let panel = try panelIDArgument(arguments, key: "panel")
-        let onto = try panelIDArgument(arguments, key: "onto")
         guard let zone = arguments.string("zone").flatMap(SZPanelDropZone.init(rawValue:)) else {
             throw SZMCPError.message("`zone` must be one of: left, right, top, bottom, center")
         }
-        host.movePanel(panel, onto: onto, zone: zone)
+        if arguments["onto"] != nil {
+            host.movePanel(panel, onto: try panelIDArgument(arguments, key: "onto"), zone: zone)
+        } else {
+            guard zone != .center else {
+                throw SZMCPError.message("`zone` can't be \"center\" without `onto`"
+                    + " (a swap is between two panels)")
+            }
+            host.pinPanel(panel, to: zone)
+        }
         return panelLayoutJSON()
     }
 

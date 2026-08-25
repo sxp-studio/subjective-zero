@@ -107,7 +107,7 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 - `ui_routing_profiles`                     // {profiles, active_profile, env_pinned} — the saved
                                             // profiles and which governs (env_pinned = the
                                             // SZ_MODEL_ROUTING launch pin, when it names one)
-- `ui_show_panel`, `ui_close_panel`, `ui_move_panel`  // panel layout: reopen / ✕ / header drag & drop
+- `ui_show_panel`, `ui_close_panel`, `ui_move_panel`  // panel layout: reopen / ✕ / header drag & drop (`onto` a panel, or `zone` alone to pin to a window side)
 - `ui_clone_panel`, `ui_popout_panel`, `ui_dock_panel`  // viewport clones + pop-out windows (panels addressed by token, e.g. "viewport:2")
 
 **`agent_` (orchestration + host ops)**

@@ -307,6 +307,7 @@ struct SZApp: App {
                         onDividerFractionChange: { host.setPanelDividerFraction($1, at: $0) },
                         onDividerDragEnd: { host.commitPanelDividerFraction($1, at: $0) },
                         onMovePanel: { host.movePanel($0, onto: $1, zone: $2) },
+                        onPinPanel: { host.pinPanel($0, to: $1) },
                         onClosePanel: { host.closePanel($0) },
                         onToggleMaximize: { host.toggleMaximizePanel($0) },
                         onClonePanel: { host.clonePanel($0) },

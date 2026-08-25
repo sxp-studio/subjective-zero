@@ -435,3 +435,66 @@ func insertOntoDocksDetachedPanelAtExplicitSpot(zone: SZPanelDropZone) {
     let ids: [SZPanelID] = [SZPanelID(.viewport, instance: 1), .chat, .viewport, .nodeEditor]
     #expect(ids.sorted() == [.viewport, SZPanelID(.viewport, instance: 1), .nodeEditor, .chat])
 }
+
+// MARK: - Pinning a panel to a side of the window
+
+@Test(arguments: [SZPanelDropZone.left, .right, .top, .bottom])
+func pinningSpansTheWholeSide(zone: SZPanelDropZone) {
+    // The chat starts nested beside the viewport, so every side is a real move (in the default
+    // layout it already spans the right, which is its own test below). It takes a whole side of the
+    // window and the other two keep their arrangement beside it: no onto-a-panel drop can do this.
+    var layout = SZPanelLayoutState(
+        root: .split(orientation: .vertical, fraction: 0.5,
+                     leading: .split(orientation: .horizontal, fraction: 0.5,
+                                     leading: .panel(.viewport), trailing: .panel(.chat)),
+                     trailing: .panel(.nodeEditor)))
+    layout.movePanel(.chat, toWindowEdge: zone)
+
+    #expect(layout.presentIDs == Set([.viewport, .nodeEditor, .chat]))
+    guard case .split(let orientation, let fraction, let leading, let trailing) = layout.root else {
+        Issue.record("root should be the new pin split"); return
+    }
+    #expect(orientation == ((zone == .left || zone == .right) ? .horizontal : .vertical))
+    #expect(fraction == 0.5)
+    let (pinned, rest) = (zone == .left || zone == .top) ? (leading, trailing) : (trailing, leading)
+    #expect(pinned == .panel(.chat))
+    #expect(rest == .split(orientation: .vertical, fraction: 0.5,
+                           leading: .panel(.viewport), trailing: .panel(.nodeEditor)))
+}
+
+@Test func pinningReachesTheReportedLayoutInOneMove() {
+    // "A B / A C": the viewport down the whole left, the other two stacked on the right. Reported
+    // as needing several drags, because a panel could only ever be paired with one other panel.
+    var layout = SZPanelLayoutState(
+        root: .split(orientation: .vertical, fraction: 0.5,
+                     leading: .split(orientation: .horizontal, fraction: 0.5,
+                                     leading: .panel(.chat), trailing: .panel(.viewport)),
+                     trailing: .panel(.nodeEditor)))
+    layout.movePanel(.viewport, toWindowEdge: .left)
+    #expect(layout.root == .split(orientation: .horizontal, fraction: 0.5,
+                                  leading: .panel(.viewport),
+                                  trailing: .split(orientation: .vertical, fraction: 0.5,
+                                                   leading: .panel(.chat), trailing: .panel(.nodeEditor))))
+}
+
+@Test func pinningToTheSideAPanelAlreadyOccupiesChangesNothing() {
+    // The default layout already has the chat down the right, so re-pinning it there must not
+    // rewrite the divider the user dragged.
+    var layout = SZPanelLayoutState.default
+    layout.movePanel(.chat, toWindowEdge: .right)
+    #expect(layout == .default)
+}
+
+@Test func pinningRefusesCenterAbsentAndLastPanel() {
+    let untouched = SZPanelLayoutState.default
+    var swap = untouched
+    swap.movePanel(.chat, toWindowEdge: .center)
+    #expect(swap == untouched)
+    var absent = untouched
+    absent.movePanel(.profiler, toWindowEdge: .left)
+    #expect(absent == untouched)
+    // A lone panel can't be pinned: there would be nothing left to sit beside it.
+    var alone = SZPanelLayoutState(root: .panel(.viewport))
+    alone.movePanel(.viewport, toWindowEdge: .left)
+    #expect(alone.root == .panel(.viewport))
+}

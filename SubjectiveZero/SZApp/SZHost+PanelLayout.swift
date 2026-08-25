@@ -33,6 +33,14 @@ extension SZHost {
         persistAppState()
     }
 
+    /// Pin a panel to one side of the whole window (a header dropped on the window's border).
+    func pinPanel(_ id: SZPanelID, to zone: SZPanelDropZone) {
+        maximizedPanel = nil   // any structural edit exits maximize
+        panelLayout.movePanel(id, toWindowEdge: zone)
+        panelLayout.normalize()
+        persistAppState()
+    }
+
     /// Live divider drag — track the cursor without normalizing (min sizes clamp the pixels anyway)
     /// and without touching the disk.
     func setPanelDividerFraction(_ fraction: Double, at path: SZPanelNodePath) {

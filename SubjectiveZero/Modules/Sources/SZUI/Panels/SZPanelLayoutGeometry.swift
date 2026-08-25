@@ -88,6 +88,31 @@ public enum SZPanelLayoutGeometry {
         return .bottom
     }
 
+    /// How close to the window's border a drop means "pin to that whole side" instead of "split the
+    /// panel under the cursor". Reaches from the outer gap inward, so pushing a panel against the
+    /// edge of the window is the gesture, and it stays well inside any panel's own edge zone.
+    public static let windowEdgeBand: CGFloat = 20
+
+    /// How far a header drag must travel before the window border takes over from the panel under
+    /// the cursor. A header often sits right against an edge, so a slip must stay a cancel.
+    public static let dragArmingDistance: CGFloat = 24
+
+    /// The window edge `point` is pinned to, or nil away from the border. Nearest edge wins, ties
+    /// break left, right, top, bottom like `dropZone`. `.center` is never a window edge.
+    public static func windowEdgeZone(at point: CGPoint, in rect: CGRect) -> SZPanelDropZone? {
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        let toLeft = point.x - rect.minX, toRight = rect.maxX - point.x
+        let toTop = point.y - rect.minY, toBottom = rect.maxY - point.y
+        let nearest = min(toLeft, toRight, toTop, toBottom)
+        // The lower bound keeps the affordance inside the window: a release far outside is a
+        // tear-out, which the container still handles on its own.
+        guard nearest <= windowEdgeBand, nearest >= -outerGap else { return nil }
+        if nearest == toLeft { return .left }
+        if nearest == toRight { return .right }
+        if nearest == toTop { return .top }
+        return .bottom
+    }
+
     /// The tinted preview for a pending drop: the half of the target the dragged panel would take
     /// (edge zones), or the whole target (center = swap).
     public static func dropPreviewRect(zone: SZPanelDropZone, in rect: CGRect) -> CGRect {

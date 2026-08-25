@@ -292,6 +292,26 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
         root = detached.replacingLeaf(target, with: Self.splitNode(around: target, inserting: id, zone: zone, share: 0.5))
     }
 
+    /// Pin a panel to one side of the WHOLE window: detach it, then split everything that's left
+    /// with the panel on that side, so it spans that edge with the rest stacked beside it. The one
+    /// arrangement an onto-a-panel drop can't make, since that always pairs it with one other panel.
+    /// No-op for `.center`, an absent panel, the last panel, or one already pinned to that side.
+    public mutating func movePanel(_ id: SZPanelID, toWindowEdge zone: SZPanelDropZone,
+                                   share: Double = 0.5) {
+        guard zone != .center, contains(id), !isPinned(id, to: zone),
+              let remaining = root.removingLeaf(id)?.remaining else { return }
+        root = Self.splitNodeAroundRoot(remaining, inserting: id, zone: zone, share: share)
+    }
+
+    /// Whether `id` already spans `zone`'s side of the window. Without this, re-pinning a panel to
+    /// the side it already occupies would reset the divider the user dragged.
+    public func isPinned(_ id: SZPanelID, to zone: SZPanelDropZone) -> Bool {
+        guard case .split(let orientation, _, let leading, let trailing) = root else { return false }
+        let along: SZPanelSplitOrientation = (zone == .left || zone == .right) ? .horizontal : .vertical
+        guard orientation == along else { return false }
+        return (zone == .left || zone == .top ? leading : trailing) == .panel(id)
+    }
+
     /// Clone a tile: allocate the lowest free instance of `source.kind` and split the source
     /// 50/50 with the clone on `zone`'s side. `excluding` lets the caller reserve instances that
     /// live outside the tree (popped-out windows) so their identities are never reallocated.

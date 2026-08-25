@@ -53,7 +53,11 @@ overlays: a binary split tree
   window drags from move events + the mouse button, since AppKit has no end-of-drag API).
   `ui_dock_panel` mirrors both paths.
 - **Drag a header onto another panel** to rearrange: edge zones split that panel (a tinted overlay
-  + label explain the pending change), the center zone swaps the two. Dropping runs a quick
+  + label explain the pending change), the center zone swaps the two. **Drag it to the window's
+  border** instead and the panel pins to that whole side, spanning it with everything else beside
+  it - the one arrangement an onto-a-panel drop can't make, since that always pairs it with exactly
+  one other panel. The border wins over the panel under it, but only once the drag has clearly
+  begun, so a slip on a header stays the cancel it has always been. Dropping runs a quick
   autolayout (`normalize()`: fraction clamping + tree sanitizing, including stripping instances
   beyond a kind's cap).
 - **Dividers** (the gaps between tiles) drag to resize, with per-orientation resize cursors and
