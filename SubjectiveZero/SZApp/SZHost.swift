@@ -1437,7 +1437,10 @@ final class SZHost {
     /// Throttle window for re-enumerating a node's dynamic options (so opening the camera dropdown picks up
     /// a just-connected device — e.g. a Continuity Camera — without a reload, and without per-frame cost).
     private static let optionsTTL: TimeInterval = 1.0
-    private var optionsCache: [String: (options: [SZEnumOption], at: Date)] = [:]
+    /// OUT of observation: `effectiveOptions` fills this from inside a view body, and an observed
+    /// write during a SwiftUI update aborts the process on an AttributeGraph precondition. Nothing
+    /// renders from the cache either — it returns the same options either way.
+    @ObservationIgnored private var optionsCache: [String: (options: [SZEnumOption], at: Date)] = [:]
 
     /// The effective enum choices for a port — one source for the editor dropdown + `debug_snapshot_state`,
     /// so the user and an agent see the same choices. A *static* enum's choices live in the contract; a
