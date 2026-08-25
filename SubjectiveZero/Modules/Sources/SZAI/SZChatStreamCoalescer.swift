@@ -70,6 +70,15 @@ public final class SZChatStreamCoalescer {
         }
     }
 
+    /// What the armed trailing flush does when it fires, minus the wait — true if one was armed.
+    /// The wait is `Task.sleep`, which is not ours to test, and asserting it on a real clock made
+    /// a test that fails whenever another suite holds the main actor. That silence PAINTS is ours.
+    func fireTrailing() -> Bool {
+        guard trailing != nil else { return false }
+        flush()
+        return true
+    }
+
     private func flush() {
         trailing?.cancel()
         trailing = nil

@@ -54,20 +54,13 @@ struct SZChatStreamCoalescerTests {
         #expect(sink.thinking == (0..<50).map { "t\($0) " }.joined())
     }
 
-    @Test func trailingFlushPaintsBurstThenSilence() async throws {
+    @Test func trailingFlushPaintsBurstThenSilence() {
         let (coalescer, sink) = makeCoalescer(flushInterval: .seconds(60), trailingDelay: .milliseconds(20))
         coalescer.addReply("opening")           // immediate (backdated first flush)
         coalescer.addReply(" tail")             // buffered; trailing flush armed
         #expect(sink.reply == "opening")
-        // Poll to a generous deadline rather than one fixed sleep: under a loaded machine
-        // (parallel suites driving real swiftc) the 20ms trailing task can be scheduled
-        // late, and the assertion is "it paints without finish()", not "it paints fast".
-        let clock = ContinuousClock()
-        let start = clock.now
-        while sink.reply != "opening tail", clock.now - start < .seconds(10) {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(sink.reply == "opening tail")   // painted by the trailing flush, no finish() needed
+        #expect(coalescer.fireTrailing())       // silence had a flush waiting for it…
+        #expect(sink.reply == "opening tail")   // …and it paints the tail, no finish() needed
     }
 
     @Test func nothingLandsAfterFinish() async throws {
