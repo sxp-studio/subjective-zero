@@ -176,7 +176,8 @@ struct SZNodeCanvasContentView: View, Equatable {
             isSelected: selectedNodeID == node.id || multiSelection.contains(node.id),
             locked: Self.isLocked(node.id, ops: graphOpStatus, lockedNodes: lockedNodes),
             isRunning: isRunning,
-            diagnostic: Self.nodeDiagnostic(for: node, agentState: nodeAgentState[node.id]),
+            diagnostic: Self.nodeDiagnostic(for: node, agentState: nodeAgentState[node.id],
+                                            inFlight: isRunning && runWorkSet.contains(node.id)),
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputsByNode[node.id] ?? [],
             previewsEnabled: previewsEnabled,
@@ -265,8 +266,12 @@ struct SZNodeCanvasContentView: View, Equatable {
     /// What the node's error pill should say, or nil when there is nothing wrong. One winner: a build or
     /// agent report outranks a file fault, because a node that doesn't compile has no business opening
     /// files yet. The file case names the port, so a node with two file inputs says which one.
-    static func nodeDiagnostic(for node: SZNode, agentState: SZNodeAgentState?) -> (detail: String, title: String)? {
-        if let detail = agentState?.errorDetail {
+    /// `inFlight` (the live run is working this node) silences the build/agent case, the same way
+    /// `pillStatus` does: a fault an agent is mid-repair on is not the user's problem yet, and the detail
+    /// is only held back, so it returns at run end if the repair didn't land.
+    static func nodeDiagnostic(for node: SZNode, agentState: SZNodeAgentState?,
+                               inFlight: Bool = false) -> (detail: String, title: String)? {
+        if let detail = agentState?.errorDetail, !inFlight {
             // It compiled; what's wrong is that its source and its contract disagree.
             return (detail, node.rebuildReason == .sourceMismatch ? "Contract mismatch" : "Build error")
         }
@@ -304,8 +309,13 @@ struct SZNodeCanvasContentView: View, Equatable {
         // An original node being split/merged wears that label (not "Ready"/"Coding") until the swap.
         if let op = ops[node.id] { return op == "Merging" ? .merging : .splitting }
         let state = agentState[node.id] ?? SZNodeAgentState()
+        // Is the live run working this node right now? Then a failure it is being acted upon reads as
+        // work, not as a verdict: red is the last word on a node nobody is fixing, and the run's own
+        // accounting writes it again at run end if the repair didn't land. A question the agent asked
+        // is not covered by this — that one is addressed to the user and must keep saying so.
+        let inFlight = isRunning && workSet.contains(node.id)
         switch state.phase {
-        case .error: return .error
+        case .error where !inFlight: return .error
         case .needsInput: return .needsInput
         case .reloading: return .reloading            // hand-edited Node.swift is recompiling
         default: break
@@ -326,7 +336,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             // declares ports the code hasn't written yet is merely unfinished (amber).
             switch node.rebuildReason {
             case nil: return .ready
-            case .some(let reason) where !(isRunning && workSet.contains(node.id)):
+            case .some(let reason) where !inFlight:
                 return reason == .sourceMismatch ? .error : .outdated
             default: break                              // being rebuilt right now → fall through to Building
             }
@@ -338,7 +348,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             // A prompt node in the run's captured WORK SET reads Coding while it waits for its agent to
             // report; a prompt node NOT in the set during a run (e.g. one the user dropped on the canvas
             // mid-run) isn't the fleet's work, so it stays Draft.
-            return (isRunning && workSet.contains(node.id)) ? .building : .draft
+            return inFlight ? .building : .draft
         }
     }
 

@@ -117,3 +117,25 @@ private func built(_ reason: SZRebuildReason?) -> SZNode {
     let state = [n.id: SZNodeAgentState(phase: .error)]
     #expect(SZNodeCanvasContentView.pillStatus(for: n, agentState: state, ops: [:], isRunning: false) == .error)
 }
+
+/// A failure the live run is working on reads Building, not Error — the card can't say "error" while the
+/// queue says the node's agent is implementing it. Red is for what nobody is fixing.
+@MainActor
+@Test func aReportedErrorYieldsToWorkInFlight() {
+    let n = built(.contractChanged)
+    let state = [n.id: SZNodeAgentState(phase: .error)]
+    #expect(SZNodeCanvasContentView.pillStatus(for: n, agentState: state, ops: [:],
+                                               isRunning: true, workSet: [n.id]) == .building)
+    // Same run, but this node is not its work: nobody is fixing it, so it keeps the red pill.
+    #expect(SZNodeCanvasContentView.pillStatus(for: n, agentState: state, ops: [:],
+                                               isRunning: true, workSet: []) == .error)
+}
+
+/// A question is addressed to the USER, so no amount of work in flight may swallow it.
+@MainActor
+@Test func needsInputSurvivesWorkInFlight() {
+    let n = built(.contractChanged)
+    let state = [n.id: SZNodeAgentState(phase: .needsInput)]
+    #expect(SZNodeCanvasContentView.pillStatus(for: n, agentState: state, ops: [:],
+                                               isRunning: true, workSet: [n.id]) == .needsInput)
+}

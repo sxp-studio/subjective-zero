@@ -71,6 +71,22 @@ private func fileFaultNode(_ reasons: [String: String] = ["path": "no file at /U
     #expect(SZNodeCanvasContentView.nodeDiagnostic(for: clean, agentState: nil) == nil)
 }
 
+/// While the run works the node, its build/agent detail is held back — the card would otherwise wear a red
+/// Error pill (the detail outranks the status in the badge) over a node whose agent is mid-repair. The file
+/// fault is not held back: no rebuild fixes it, and it re-surfaces as the diagnostic in its place.
+@MainActor
+@Test func aDiagnosticIsHeldBackWhileTheRunWorksTheNode() {
+    let node = fileFaultNode()
+    var built = SZNodeAgentState()
+    built.errorDetail = "error: cannot find 'foo'"
+    #expect(SZNodeCanvasContentView.nodeDiagnostic(for: node, agentState: built, inFlight: true)?.title
+            == "Input file")
+
+    let clean = SZNode(kind: .generated, title: "T", position: SZPoint(x: 0, y: 0))
+    #expect(SZNodeCanvasContentView.nodeDiagnostic(for: clean, agentState: built, inFlight: true) == nil)
+    #expect(SZNodeCanvasContentView.nodeDiagnostic(for: clean, agentState: built)?.title == "Build error")
+}
+
 /// Two file inputs, one broken: the card has to say WHICH.
 @MainActor
 @Test func theDiagnosticListsEveryBrokenPortInAStableOrder() {
