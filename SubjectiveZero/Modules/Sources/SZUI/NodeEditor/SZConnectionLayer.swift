@@ -16,6 +16,17 @@ struct SZConnectionShape: Shape {
     var from: CGPoint
     var to: CGPoint
 
+    /// Both endpoints, so a socket that MOVES under an animation (the plugs fold restacking a card's
+    /// dots) drags its wire along instead of teleporting it. Endpoint changes that aren't animated —
+    /// every drag tick — still land in one step.
+    var animatableData: AnimatablePair<CGPoint.AnimatableData, CGPoint.AnimatableData> {
+        get { AnimatablePair(from.animatableData, to.animatableData) }
+        set {
+            from.animatableData = newValue.first
+            to.animatableData = newValue.second
+        }
+    }
+
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: from)

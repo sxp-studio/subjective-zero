@@ -26,7 +26,12 @@ struct SZEdgeMotionView: NSViewRepresentable {
     func makeNSView(context: Context) -> SZEdgeMotionBackingView { SZEdgeMotionBackingView() }
 
     func updateNSView(_ view: SZEdgeMotionBackingView, context: Context) {
-        view.apply(from: from, to: to, strokes: strokes, period: period, animated: animated, zoom: zoom)
+        // Endpoints normally move per drag tick, where a tween would just be lag — so the layer
+        // snaps. They move ONE step at a time only under a SwiftUI animation (the plugs fold
+        // restacking a card's dots), and there the layer glides on the same curve and duration as
+        // the wire it rides, which SZConnectionShape interpolates.
+        view.apply(from: from, to: to, strokes: strokes, period: period, animated: animated, zoom: zoom,
+                   glide: context.transaction.animation == nil ? 0 : SZCardFold.duration)
     }
 }
 
@@ -49,8 +54,10 @@ final class SZEdgeMotionBackingView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
+    /// `glide` > 0 tweens an endpoint move over that many seconds instead of jumping (see
+    /// SZEdgeMotionView.updateNSView); everything else here is always immediate.
     func apply(from: CGPoint, to: CGPoint, strokes: [SZEdgeDashStroke], period: Double,
-               animated: Bool, zoom: CGFloat) {
+               animated: Bool, zoom: CGFloat, glide: Double = 0) {
         // Layer count follows the stroke count (2 for a comet, 1 for flow dashes) — rebuilt only
         // when it changes, which in practice is never after the first update.
         if shapeLayers.count != strokes.count {
@@ -75,12 +82,28 @@ final class SZEdgeMotionBackingView: NSView {
         defer { CATransaction.commit() }
 
         if appliedEndpoints == nil || appliedEndpoints! != (from, to) {
+            let hadEndpoints = appliedEndpoints != nil
             appliedEndpoints = (from, to)
             let path = CGMutablePath()
             path.move(to: from)
             let (c1, c2) = SZCubic.controls(from, to)
             path.addCurve(to: to, control1: c1, control2: c2)
-            for shape in shapeLayers { shape.path = path }
+            for shape in shapeLayers {
+                // Where the layer is RIGHT NOW (mid-glide if one is running), so an interrupted
+                // fold carries on from what's on screen rather than snapping back to start.
+                let departing = shape.presentation()?.path ?? shape.path
+                shape.path = path
+                guard glide > 0, hadEndpoints, let departing else {
+                    shape.removeAnimation(forKey: "glide")
+                    continue
+                }
+                let move = CABasicAnimation(keyPath: "path")
+                move.fromValue = departing
+                move.toValue = path
+                move.duration = glide
+                move.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                shape.add(move, forKey: "glide")
+            }
         }
 
         if appliedStrokes != strokes {

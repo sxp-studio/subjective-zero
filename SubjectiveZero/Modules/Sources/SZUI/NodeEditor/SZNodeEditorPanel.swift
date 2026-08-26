@@ -738,7 +738,7 @@ public struct SZNodeEditorPanel: View {
         case .toggleCard(let id, let on): cardProvider?.setCardShown(node: id, on)
         case .openCard(let id): cardProvider?.openCardSource(node: id)
         case .newCard(let id): cardProvider?.createCard(node: id)
-        case .togglePlugs(let id, _): onTogglePlugs(id)
+        case .togglePlugs(let id, _): withAnimation(SZCardFold.animation) { onTogglePlugs(id) }
         }
     }
 
@@ -846,7 +846,9 @@ public struct SZNodeEditorPanel: View {
             onSetInputDefault: onSetInputDefault,
             onToggleDisplay: onToggleDisplay,
             onTogglePreview: onTogglePreview,
-            onTogglePlugs: onTogglePlugs,
+            // The fold's one animation: the card's frame and centre, its dots, and the wires on
+            // them all move under it (SZCardFold), whichever way the fold was asked for.
+            onTogglePlugs: { id in withAnimation(SZCardFold.animation) { onTogglePlugs(id) } },
             optionsFor: optionsFor,
             onCommitPrompt: onCommitPrompt,
             onPromptEditingChanged: { id, editing in

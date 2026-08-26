@@ -94,12 +94,16 @@ struct SZNodeView: View, Equatable {
                 // The card-wide numeric-cell width, computed ONCE per body pass (each row reuses it).
                 // Folded (`.picture`), the rows are simply not built — the body above is untouched, so a
                 // custom card keeps its size and stays live. SZNodeLayout.height drops the same band.
+                // Mid-fold the rows keep their full height and the shrinking card clips them (see
+                // the frame below): the card edge wipes across them like a blind. `.identity` is
+                // what holds them intact for that — the default would dissolve them in place.
                 if tier == .full {
                     let fieldWidth = SZNodeLayout.numericFieldWidth(of: node)
                     VStack(spacing: SZNodeLayout.rowSpacing) {
                         ForEach(SZNodeLayout.rowInputs(of: node), id: \.name) { inputRow($0, fieldWidth: fieldWidth) }
                         ForEach(outputs, id: \.name) { outputRow($0) }
                     }
+                    .transition(.identity)
                     .padding(.top, SZNodeLayout.bodyTopPadding)
                     .padding(.bottom, SZNodeLayout.bodyBottomPadding)
                 }
@@ -107,6 +111,10 @@ struct SZNodeView: View, Equatable {
         }
         .frame(width: SZNodeLayout.width(of: node),
                height: SZNodeLayout.height(of: node, previewsEnabled: previewsEnabled), alignment: .top)
+        // Nothing paints outside the card. At rest this changes nothing (every region is built to
+        // fit); it earns its place while the plugs fold animates the height, where the rows are
+        // briefly taller than the frame and would otherwise spill across the canvas.
+        .clipShape(RoundedRectangle(cornerRadius: SZNodeLayout.cornerRadius))
         .background(
             RoundedRectangle(cornerRadius: SZNodeLayout.cornerRadius)
                 // Hover changes fill/stroke only — NOT the shadow: animating shadow(radius:) forces an
@@ -302,6 +310,9 @@ struct SZCardPillButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
+                // The plugs chevron flips direction as the card folds — swap the glyph rather than
+                // cut to it, so the pill reads as part of the same motion.
+                .contentTransition(.symbolEffect(.replace))
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.white.opacity(hover ? 1 : 0.75))
                 .frame(width: 26, height: 22)
