@@ -209,32 +209,40 @@ struct SZBriefPinTests {
             SZRun(workSet: workSet, round: round, roundCap: roundCap,
                   steers: steers, instruction: instruction)
         }
+        // The arrows a live run captured at its start — every build brief below passes these, as the
+        // host does. The chat/amend/debug pins pass none and still list the whole graph, which is what
+        // proves the gate is the run and not an empty list.
+        let runArrows = base.connections.filter { $0.kind == .flow }
         out["director-decompose.md"] = try renderer.render(
             agent: "director", template: "decompose", message: "",
-            world: SZWorld(graph: base, run: run(instruction: "make the camera feed grayscale")))
+            world: SZWorld(graph: base, run: run(instruction: "make the camera feed grayscale"),
+                           unwiredArrows: runArrows))
         out["director-decompose-noinstruction.md"] = try renderer.render(
             agent: "director", template: "decompose", message: "",
-            world: SZWorld(graph: base, run: run()))
+            world: SZWorld(graph: base, run: run(), unwiredArrows: runArrows))
         out["director-reconcile-r1.md"] = try renderer.render(
             agent: "director", template: "reconcile", message: "",
             world: SZWorld(graph: base, statuses: [grayID: grayStatus],
                            run: run(workSet: [grayID], round: 1, roundCap: 2,
                                     steers: [fleetInboxLine]),
-                           mutations: reconcileMutations))
+                           mutations: reconcileMutations, unwiredArrows: runArrows))
         // Round 2: the inbox drained on round 1; the statuses are the run's last-reported.
         out["director-reconcile-r2.md"] = try renderer.render(
             agent: "director", template: "reconcile", message: "",
             world: SZWorld(graph: base, statuses: [grayID: grayStatus],
-                           run: run(workSet: [grayID], round: 2, roundCap: 2)))
+                           run: run(workSet: [grayID], round: 2, roundCap: 2),
+                           unwiredArrows: runArrows))
         out["director-reconcile-r1-bare.md"] = try renderer.render(
             agent: "director", template: "reconcile", message: "",
-            world: SZWorld(graph: base, run: run(workSet: [grayID], round: 1, roundCap: 2)))
+            world: SZWorld(graph: base, run: run(workSet: [grayID], round: 1, roundCap: 2),
+                           unwiredArrows: runArrows))
         // With a grade-mapping profile active, the briefing templates teach the grade —
         // pinned so the teaching itself can't drift; every OTHER render above proves the
         // token renders to nothing while grading is off (their pins predate it, unmoved).
         out["director-decompose-grading.md"] = try renderer.render(
             agent: "director", template: "decompose", message: "",
-            world: SZWorld(graph: base, run: run(instruction: "make the camera feed grayscale")),
+            world: SZWorld(graph: base, run: run(instruction: "make the camera feed grayscale"),
+                           unwiredArrows: runArrows),
             extras: SZBriefExtras(gradingEnabled: true))
 
         // — graphSummary's fallback branches, through the one summary renderer —

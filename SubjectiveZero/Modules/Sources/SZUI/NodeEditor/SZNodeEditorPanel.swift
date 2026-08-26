@@ -443,7 +443,9 @@ public struct SZNodeEditorPanel: View {
 
     /// Build shows whenever there is work left to kick off OR something is building — it must not
     /// vanish mid-run, or the button that dispatched the work looks like it turned into the Stop.
-    private var showBuildSegment: Bool { pendingNodeCount > 0 || isRunning }
+    /// `pendingWorkHint` carries work the node count cannot see (arrows never wired), so the control
+    /// is there wherever a press would start a run.
+    private var showBuildSegment: Bool { pendingNodeCount > 0 || pendingWorkHint || isRunning }
 
     /// The graph's run control, and the only one the HUD owns. Stopping is NOT here: builds are
     /// concurrent, so a stop has to name which one, and the place that can name one is the chat

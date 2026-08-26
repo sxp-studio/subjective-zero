@@ -815,3 +815,23 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
         SZPort(name: "gain", type: .float, def: .float(2))]))
     #expect(result.changedValues == [.init(port: "gain", value: .float(2), note: nil)])
 }
+
+@MainActor
+@Test func repeatingADataEdgeStillResolvesTheArrowBehindIt() {
+    // Laying an edge clears the arrow behind it, including when the wiring is already there. Returning
+    // the existing id bare left the arrow standing over a wired pair, which still reads as work owed.
+    let store = SZStore()
+    let a = SZNode(kind: .generated, title: "A", position: SZPoint(x: 0, y: 0))
+    let b = SZNode(kind: .generated, title: "B", position: SZPoint(x: 1, y: 0))
+    let from = SZPortRef(node: a.id, port: "output"), to = SZPortRef(node: b.id, port: "input")
+    store.setProject(SZProject(name: "t", graph: SZGraph(
+        nodes: [a, b],
+        connections: [SZConnection(from: from, to: to, kind: .data),
+                      SZConnection(from: SZPortRef(node: a.id, port: "flow"),
+                                   to: SZPortRef(node: b.id, port: "flow"), kind: .flow)])))
+
+    let result = store.tryConnect(from: from, to: to, kind: .data)
+    if case .connected = result {} else { Issue.record("expected the existing edge's id") }
+    #expect(store.project?.graph.connections.filter { $0.kind == .flow }.isEmpty == true)
+    #expect(store.project?.graph.connections.filter { $0.kind == .data }.count == 1)
+}

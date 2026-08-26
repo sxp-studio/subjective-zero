@@ -76,7 +76,12 @@ extension SZStore {
             $0.kind == kind && (kind == .flow
                 ? (SZConnection.sameFlowEnd($0.from, from) && SZConnection.sameFlowEnd($0.to, to))
                 : ($0.from == from && $0.to == to))
-        }) { return .connected(existing.id) }
+        }) {
+            // Repeating a data edge still clears the arrow behind it. Returning the id bare left one
+            // standing over wiring that already existed, which reads as work still owed.
+            if kind == .data { mutate { $0.graph.connections.removeAll { $0.isFlowIntent(realizedBy: from, to) } } }
+            return .connected(existing.id)
+        }
         if kind == .data {
             var probe = graph
             probe.connections.removeAll { $0.kind == .data && $0.to == to }   // the swap victim goes either way

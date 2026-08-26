@@ -60,14 +60,17 @@ public struct SZRun: Codable, Sendable {
     public var steers: [String]
     /// The run's standing instruction — the decompose brief's `{{instruction}}`.
     public var instruction: String
+    /// Work-set nodes with an arrow nobody wired. `hasWorkLeft`'s other evidence, and the reconcile brief's `{{unwired}}`.
+    public var unwired: [UUID]
 
     public init(workSet: [UUID], round: Int, roundCap: Int, steers: [String],
-                instruction: String) {
+                instruction: String, unwired: [UUID] = []) {
         self.workSet = workSet
         self.round = round
         self.roundCap = roundCap
         self.steers = steers
         self.instruction = instruction
+        self.unwired = unwired
     }
 }
 
@@ -90,8 +93,12 @@ public enum SZEffect: String, Codable, Sendable {
 // SZFactGen:end
 
 extension SZFacts {
-    /// Whether the run still owes work — the work-left gate's predicate; `run.workSet` is
-    /// its evidence.
-    public var hasWorkLeft: Bool { !(run?.workSet.isEmpty ?? true) }
+    /// Whether the run still owes work: nodes to build, or nodes carrying an arrow nobody wired. A
+    /// node that builds leaves the first list and stays in the second, which is how a run used to end
+    /// over a built node whose declared inputs were never connected.
+    public var hasWorkLeft: Bool {
+        guard let run else { return false }
+        return !run.workSet.isEmpty || !run.unwired.isEmpty
+    }
 }
 

@@ -3,8 +3,12 @@
 // with `topologicalOrder` (Kahn); the connect surfaces ask `wouldCloseCycle` BEFORE adding a data
 // edge so a cycle is refused where it is attempted; and `repairDataCycles` is the load-time repair
 // for a persisted cycle (a hand-edited or externally-written file), so no project fails to open for
-// this reason. Flow edges are authoring intent, never checked — intent may legitimately point
-// "backwards" (GRAPH_AND_NODES).
+// this reason.
+//
+// An arrow never constrains a data edge — a wish must not block a fact — so `wouldCloseCycle` reads
+// data only. Arrows do constrain each other: a ring of them asks for a ring of wires, which a DAG
+// cannot carry (feedback is the feedback node, never a cycle — RUNTIME). `wouldCloseIntentCycle` asks
+// that, where an arrow is drawn.
 import Foundation
 
 extension SZGraph {
@@ -44,12 +48,25 @@ extension SZGraph {
     /// A self-loop is refused here (`[from, from]`): the scheduler kernel deliberately skips
     /// self-loops rather than failing on them, so this guard is the only thing that stops one.
     public func wouldCloseCycle(from: SZNodeID, to: SZNodeID) -> [SZNodeID]? {
+        reachabilityWalk(from: from, to: to, countingIntent: false)
+    }
+
+    /// Would an arrow `from → to` close a ring, counting the arrows already drawn? Only one edge of a
+    /// ring could ever be laid. Returns the walk, nil when the arrow is answerable. Asked where an
+    /// arrow is drawn; a data edge is judged by `wouldCloseCycle` over data alone.
+    public func wouldCloseIntentCycle(from: SZNodeID, to: SZNodeID) -> [SZNodeID]? {
+        reachabilityWalk(from: from, to: to, countingIntent: true)
+    }
+
+    /// The shared walk: is `from` reachable from `to`, so closing `from → to` would ring?
+    private func reachabilityWalk(from: SZNodeID, to: SZNodeID, countingIntent: Bool) -> [SZNodeID]? {
         if from == to { return [from, from] }
         // Reachability walk from `to` seeking `from`, over the same edge set the kernel orders by
         // (data only, both endpoints present, no self-loops); parents reconstruct the path.
         let known = Set(nodes.map(\.id))
         var successors: [SZNodeID: [SZNodeID]] = [:]
-        for c in connections where c.kind == .data && c.from.node != c.to.node
+        for c in connections where (c.kind == .data || (countingIntent && c.kind == .flow))
+            && c.from.node != c.to.node
             && known.contains(c.from.node) && known.contains(c.to.node) {
             successors[c.from.node, default: []].append(c.to.node)
         }

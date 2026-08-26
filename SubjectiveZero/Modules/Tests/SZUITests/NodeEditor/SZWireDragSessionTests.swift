@@ -334,3 +334,69 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     #expect(on.isValidTarget(occupied, for: newSource, in: g, tiers: [:],
                                              pickedConnectionID: conn.id) { $0 == source.id })
 }
+
+// MARK: - An arrow that would run in a circle
+
+/// Two cards far enough apart that socket radii cannot overlap, joined by one arrow A ──▶ B.
+private func arrowGraph() -> (a: SZNode, b: SZNode, graph: SZGraph) {
+    let a = texNode("A", at: SZPoint(x: 0, y: 0), outputs: ["out"])
+    let b = texNode("B", at: SZPoint(x: 900, y: 0), inputs: ["in"])
+    let arrow = SZConnection(from: .flow(node: a.id), to: .flow(node: b.id), kind: .flow)
+    return (a, b, SZGraph(nodes: [a, b], connections: [arrow]))
+}
+
+@Test func anArrowBackOverAnArrowIsNotAValidTarget() {
+    // A then B is already drawn; B then A closes a visible circle, and only one of the two could
+    // ever become a wire. The dot does not light and the drop does not land.
+    let (a, b, graph) = arrowGraph()
+    let outOfB = socket(b, .output, .flow, "")
+    let intoA = socket(a, .input, .flow, "")
+    #expect(!SZGraphCanvasModel.canConnect(outOfB, intoA, in: graph))
+
+    // The direction that does not close it stays legal, so a second arrow along the chain is fine.
+    let c = texNode("C", at: SZPoint(x: 1800, y: 0), inputs: ["in"])
+    var extended = graph
+    extended.nodes.append(c)
+    #expect(SZGraphCanvasModel.canConnect(socket(b, .output, .flow, ""),
+                                          socket(c, .input, .flow, ""), in: extended))
+}
+
+@Test func anArrowIntoANodeWithNoMatchingPortIsStillAllowed() {
+    // Asking for a port that does not exist yet is what an arrow is for, and declaring it is the
+    // Director's job. Only a circle refuses an arrow, never the ports.
+    let source = texNode("Source", at: SZPoint(x: 0, y: 0), outputs: ["out"])
+    let floatOnly = SZNode(kind: .generated, title: "Knob", sfSymbol: "dial",
+                           contract: SZNodeContract(title: "Knob", sfSymbol: "dial", summary: "",
+                                                    inputs: [SZPort(name: "amount", type: .float)]),
+                           position: SZPoint(x: 900, y: 0))
+    let bare = SZNode(kind: .prompt, title: "New Node", prompt: "do something",
+                      position: SZPoint(x: 900, y: 400))
+    let graph = SZGraph(nodes: [source, floatOnly, bare])
+
+    #expect(SZGraphCanvasModel.canConnect(socket(source, .output, .flow, ""),
+                                          socket(floatOnly, .input, .flow, ""), in: graph))
+    #expect(SZGraphCanvasModel.canConnect(socket(source, .output, .flow, ""),
+                                          socket(bare, .input, .flow, ""), in: graph))
+}
+
+@Test func aRefusedDropOnACardMakesNothingAtAll() {
+    // Dragging into space spawns a node. A drop on the card the user aimed at, refused, is a missed
+    // aim rather than a request for a new node: it must make nothing, or the refusal leaves a stray
+    // empty card sitting on top of the one they were pointing at.
+    let (a, b, graph) = arrowGraph()
+    let grab = socket(b, .output, .flow, "")
+    var drag = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+                                       in: graph, previewsEnabled: true, isLocked: unlocked)!
+    let card = on.cardRect(of: a)
+    drag.update(toWorld: CGPoint(x: card.midX, y: card.midY), zoom: 1, in: graph, tiers: [:],
+                previewsEnabled: true, isLocked: unlocked)
+
+    #expect(drag.target == nil)                  // refused: it would close the circle
+    #expect(drag.outcome() == .none)             // and nothing is created
+
+    // Empty canvas still spawns: the gesture that means "generate something here" is untouched.
+    var intoSpace = drag
+    intoSpace.update(toWorld: CGPoint(x: 400, y: 2000), zoom: 1, in: graph, tiers: [:],
+                     previewsEnabled: true, isLocked: unlocked)
+    if case .spawnPromptNode = intoSpace.outcome() {} else { Issue.record("empty canvas should spawn") }
+}

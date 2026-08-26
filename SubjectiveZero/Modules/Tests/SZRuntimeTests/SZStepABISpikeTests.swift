@@ -99,7 +99,7 @@ let step = SZStep(outcomes: ["layout"]) { _ in
 /// nil was the old architecture's favorite way to lie), so tests send every field.
 private func buildFacts(workLeft: Int) -> String {
     let ids = "[" + (0..<workLeft).map { _ in "\"\(UUID().uuidString)\"" }.joined(separator: ", ") + "]"
-    return #"{"message": "", "resuming": false, "pendingTasks": [], "runningTasks": [], "run": {"workSet": \#(ids), "round": 1, "roundCap": 2, "steers": [], "instruction": ""}}"#
+    return #"{"message": "", "resuming": false, "pendingTasks": [], "runningTasks": [], "run": {"workSet": \#(ids), "round": 1, "roundCap": 2, "steers": [], "instruction": "", "unwired": []}}"#
 }
 
 private let chatFacts = #"{"message": "hey", "resuming": false, "pendingTasks": [], "runningTasks": []}"#

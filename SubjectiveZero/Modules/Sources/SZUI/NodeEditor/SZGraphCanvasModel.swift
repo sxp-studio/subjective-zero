@@ -139,13 +139,18 @@ public enum SZGraphCanvasModel {
 
     /// Whether `a`→`b` is a legal connection (order-independent): different nodes, opposite sides.
     /// data↔data additionally requires equal port types (texture→texture, float→float, …) and must not
-    /// close a cycle. Anything touching a flow socket lays a flow edge — always allowed between an
-    /// output and an input; a flow↔data mix pins the flow edge to that data slot (`SZConnection.pinnedPort`).
+    /// close a cycle. Anything touching a flow socket lays a flow edge — a flow↔data mix pins it to that
+    /// data slot (`SZConnection.pinnedPort`).
+    ///
+    /// An arrow is refused for one reason: it would ring, counting the arrows already drawn. Never for
+    /// ports — asking for a port that does not exist yet is what an arrow is for.
     public static func canConnect(_ a: SZSocket, _ b: SZSocket, in graph: SZGraph) -> Bool {
         guard a.nodeID != b.nodeID, a.side != b.side else { return false }
-        guard a.kind == .data, b.kind == .data else { return true }
         let out = a.side == .output ? a : b
         let inp = a.side == .input ? a : b
+        guard a.kind == .data, b.kind == .data else {
+            return graph.wouldCloseIntentCycle(from: out.nodeID, to: inp.nodeID) == nil
+        }
         guard let outNode = graph.node(id: out.nodeID), let inNode = graph.node(id: inp.nodeID),
               let outType = portType(of: outNode, side: .output, port: out.port),
               let inType = portType(of: inNode, side: .input, port: inp.port) else { return false }

@@ -30,7 +30,9 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
 - `ui_connect { "from": "<id>", "fromPort": "<output>", "to": "<id>", "toPort": "<input>", "kind": "data" }`
   — wire an upstream output port to a downstream input port. **Flow** edges are the user's *drawing
   intent* ("A should feed B") and order nothing at runtime; laying the `data` edge along one **realizes and
-  clears it** (like resolving a comment). You only ever create `data` edges — never manage flow edges yourself.
+  clears it** (like resolving a comment). You only ever create `data` edges. You never remove an arrow on
+  your own judgement either: remove one with `ui_disconnect` only when the user asks you to, in words, in
+  this conversation.
 - `ui_add_prompt_node { "prompt": "...", "x": <n>, "y": <n> }` — add a node; returns its id.
 - `ui_toggle_display { "node": "<id>", "port": "<texture output>" }` — point the viewport at the final
   output so the result is visible. Do this once, on the last node's display output, after its contract exists.

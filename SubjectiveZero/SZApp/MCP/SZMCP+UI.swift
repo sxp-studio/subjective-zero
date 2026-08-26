@@ -29,7 +29,7 @@ extension SZHostBridge {
                     "library": ["type": "string", "description": "the NodeLibrary id"],
                     "x": ["type": "number"], "y": ["type": "number"],
                  ]),
-            tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged. Data edges must keep the graph acyclic: a data connection that would close a cycle is refused with {status: \"refused\", reason} naming the path — rewire or drop an edge instead. Flow (intent) edges are never cycle-checked; a flow edge given an explicit fromPort/toPort naming a declared data port is PINNED to that slot (the user-drop-on-a-blue-dot semantics) — omit the ports for plain node-to-node intent.",
+            tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged. Data edges must keep the graph acyclic: a data connection that would close a cycle is refused with {status: \"refused\", reason} naming the path — rewire or drop an edge instead. A flow (intent) edge is refused the same way when it would run in a circle, counting the arrows already drawn, since only one edge of a ring could ever be laid; nothing about ports refuses an arrow. A flow edge given an explicit fromPort/toPort naming a declared data port is PINNED to that slot (the user-drop-on-a-blue-dot semantics) — omit the ports for plain node-to-node intent.",
                  properties: [
                     "from": ["type": "string"], "fromPort": ["type": "string"],
                     "to": ["type": "string"], "toPort": ["type": "string"],
@@ -346,6 +346,12 @@ extension SZHostBridge {
         }
         guard SZGraphCanvasModel.canConnect(src, dst, in: graph) else {
             if from == to { throw SZMCPError.message("cannot connect node \(from) to itself") }
+            // An arrow is only ever refused for ringing; a data edge for its port types (its own cycle
+            // case was answered above). Naming the wrong one sends the caller after the wrong fix.
+            if kind == .flow, let path = graph.wouldCloseIntentCycle(from: from, to: to) {
+                return SZJSONRPC.encode(["status": "refused",
+                                         "reason": "the arrows would run in a circle: \(host.cyclePathDescription(path))"])
+            }
             throw SZMCPError.message("incompatible \(kindRaw) connection \(fromNode.title):\(fromPort) → \(toNode.title):\(toPort) (port types differ)")
         }
         try requireUnfenced([from, to])

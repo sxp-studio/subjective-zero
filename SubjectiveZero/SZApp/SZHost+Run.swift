@@ -446,6 +446,52 @@ extension SZHost {
         return (described.subtracting(claimed), blank, described.intersection(claimed))
     }
 
+    /// What a new run should take for its wiring alone: the targets of arrows a run could actually
+    /// realize, narrowed to a task's named set when it named one. The same question
+    /// `workSetCandidates` asks of the code, asked of the arrows — and the reason a graph whose only
+    /// fault is missing wiring can start the run that fixes it at all.
+    ///
+    /// Four arrows are not this run's to take:
+    /// - into an undescribed node, which would brief a Coding Agent with no statement of what to build;
+    /// - out of a node another run holds, since `ui_connect` fences on both ends and would refuse;
+    /// - already satisfied by a data edge (`SZGraph.unwiredIntent` drops those);
+    /// - stuck, so every attempt is refused and the press would buy a Director round to be told again.
+    ///
+    /// Admission only. A rejected arrow still rides `{{unwired}}` in a run that starts for other
+    /// reasons, so the Director still says why; it just cannot be why a run begins.
+    static func unwiredCandidates(in graph: SZGraph?, excluding claimed: Set<SZNodeID>,
+                                  named: Set<SZNodeID>) -> Set<SZNodeID> {
+        guard let graph else { return [] }
+        let blank = Set(graph.nodes.filter {
+            $0.kind == .prompt && ($0.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }.map(\.id))
+        var unwired = Set(graph.unwiredIntent(into: Set(graph.nodes.map(\.id)))
+            .filter { !claimed.contains($0.from.node) && !claimed.contains($0.to.node) }
+            .filter { !graph.isStuckIntent($0) }
+            .map(\.to.node))
+            .subtracting(blank)
+        if !named.isEmpty { unwired.formIntersection(named) }
+        return unwired
+    }
+
+    /// What Build says when it finds nothing to build. A stuck arrow is work the user can see, so
+    /// answering "every node is built and current" over one denies it — name it, and say what settles it.
+    static func nothingToImplementNarration(in graph: SZGraph?) -> (line: String, status: String) {
+        let stuck = graph?.stuckIntent ?? []
+        guard let graph, !stuck.isEmpty else {
+            return ("Nothing to implement. Every node is built and current.", "nothing to implement")
+        }
+        if stuck.count == 1, let only = stuck.first {
+            let path = (graph.wouldCloseCycle(from: only.from.node, to: only.to.node) ?? [])
+                .map { graph.node(id: $0)?.title ?? "a node" }.joined(separator: " → ")
+            return ("Nothing to implement. One arrow cannot be wired: \(path) would run in a circle. "
+                + "Delete it, or draw it the other way.", "one arrow cannot be wired")
+        }
+        return ("Nothing to implement. \(stuck.count) arrows cannot be wired because they would run "
+            + "in a circle. Delete them, or draw them the other way.",
+                "\(stuck.count) arrows cannot be wired")
+    }
+
     /// Start a run over the current graph with the active provider (the Build press and
     /// `ui_run`'s direct entry). Runs are scoped by their WORK SET, not serialized: a second
     /// build over disjoint nodes starts alongside; one that overlaps waits for the holder.
@@ -526,10 +572,15 @@ extension SZHost {
         }
         let implementable = candidates.work
         let blankIDs = candidates.blank
+        // Arrows are work too, even when every node compiled — the rule lives in `unwiredCandidates`.
+        // These nodes are claimed and briefed, never dispatched: a built node is not
+        // `needsImplementation`, so the reconcile turn wires them and no agent is sent one.
+        let unwired = Self.unwiredCandidates(in: store.project?.graph, excluding: taken,
+                                             named: task.workSet)
         // A task that NAMED its nodes and has none of them available must not run: an empty run
         // spends a Director turn to conclude there is nothing to do, and drops the ask on the
         // floor. Two different situations, two different answers.
-        if !task.workSet.isEmpty, implementable.isEmpty {
+        if !task.workSet.isEmpty, implementable.isEmpty, unwired.isEmpty {
             if !candidates.taken.isEmpty {
                 // Only SOME of the named nodes are in a live run; the rest are clean or blank, and
                 // the blank ones still deserve the line below. Wait for the holder rather than
@@ -556,15 +607,16 @@ extension SZHost {
         // a decompose turn to conclude "no work"). A run WITH an instruction still goes
         // through — the Director may CREATE work mid-run — and a staged split/merge always
         // runs: its pieces are the work.
-        if implementable.isEmpty, instruction.isEmpty, !startedForGraphOp {
+        if implementable.isEmpty, unwired.isEmpty, instruction.isEmpty, !startedForGraphOp {
             showChat()
             if !candidates.taken.isEmpty {
                 // Every dirty node belongs to a run already — say THAT, not "nothing to implement".
                 status = "already building"
                 narrateDirector("Everything that needs implementing is already being built.")
             } else if blankIDs.isEmpty {
-                narrateDirector("Nothing to implement — every node is built and current.")
-                status = "nothing to implement"
+                let answer = Self.nothingToImplementNarration(in: store.project?.graph)
+                narrateDirector(answer.line)
+                status = answer.status
             } else {
                 let n = blankIDs.count
                 narrateDirector("\(n) node\(n == 1 ? " has" : "s have") no prompt yet — describe what \(n == 1 ? "it" : "each one") should do, then build. An empty node is left as-is, never guessed.")
@@ -591,9 +643,10 @@ extension SZHost {
         agentGraphPlanCache = nil
         let providerID = activeProviderID
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
-        // This run's WORK SET: the implementable nodes dirty at start. It grows as the run's
-        // own tooling creates work (`noteRunCreatedWork`); a node the user adds mid-run never joins.
-        let workSet = implementable
+        // This run's work set: the nodes dirty at start, plus the ones holding an unwired arrow.
+        // It grows as the run's own tooling creates work (`noteRunCreatedWork`); a node the user
+        // adds mid-run never joins.
+        let workSet = implementable.union(unwired)
         // Claim ONLY what this run touches — atomically, refuse on contention.
         var claimSet: Set<SZResourceID> = []
         for id in workSet {
@@ -613,9 +666,16 @@ extension SZHost {
         // THIS object, so a zombie can never touch a sibling's. The RUNS thread id is the build
         // traversal's own record id (its children share it), minted here so the run's closing
         // RECEIPT can carry it — that stamp is the transcript's durable way back once it scrolls away.
+        // The arrows this run owes, frozen with the work set. Captured by connection id, so laying the
+        // edge clears the arrow and shrinks the list, while one drawn later is never in the set.
+        let owedArrows = Set((store.project?.graph.unwiredIntent(into: workSet) ?? [])
+            .filter { !taken.contains($0.from.node) }                 // a source a sibling holds refuses
+            .map(\.id))
         let run = SZRunState(taskID: taskID, claim: claim, instruction: instruction,
                              title: task.title, origin: task.origin,
-                             ownsGraphOp: startedForGraphOp, workSet: workSet)
+                             ownsGraphOp: startedForGraphOp, workSet: workSet,
+                             unwiredIntent: owedArrows,
+                             wiringOnly: unwired.subtracting(implementable))
         activeRuns[taskID] = run
         let thread = run.thread
         // A grade is one briefing's read: this run's nodes start ungraded (its own Director
@@ -790,6 +850,11 @@ extension SZHost {
                 // not ours to dispatch to, and delivering to one would present a claim we do not
                 // hold (deliver's holder guard would trip).
                 let scoped = candidates.filter(run.workSet.contains)
+                // The arrows this run owes: captured at admission, still standing. Not a live read,
+                // which would race the user's own drag; not scoped to `scoped` either, since a node
+                // leaves the dirty list at promote, exactly when its arrows still need noticing.
+                let arrows = graph?.unwiredIntent(among: run.unwiredIntent) ?? []
+                let unwired = graph?.unwiredNodes(among: run.unwiredIntent) ?? []
                 // The chat that led here, minus the delivery that scheduled this run (its words
                 // are the instruction), one mid-delivery now, and whatever is queued behind it.
                 let director = SZChatScope.director.key
@@ -801,9 +866,10 @@ extension SZHost {
                     resuming: directorGraph.resumes(run.directorSession, agent: directorID,
                                                     router: router),
                     run: SZRun(workSet: scoped, round: state.round, roundCap: roundCap,
-                               steers: state.steers, instruction: instruction),
+                               steers: state.steers, instruction: instruction, unwired: unwired),
                     mutations: self.mutationJournal.entries(since: state.mutationCursor),
-                    conversation: self.conversation(for: .director, excluding: notPrior))
+                    conversation: self.conversation(for: .director, excluding: notPrior),
+                    unwiredArrows: arrows)
             },
             turn: { [weak self] order in
                 guard let self else { return SZTurnReport(failed: true, detail: "the host is gone") }
@@ -1231,7 +1297,7 @@ extension SZHost {
     @discardableResult
     func surfaceUnresolvedNodes(_ run: SZRunState) -> (implemented: Int, failed: Int) {
         var implemented = 0, failed = 0
-        for id in run.workSet {                                                    // this run's captured work (grown)
+        for id in accountedWork(run) {                                             // the work it speaks for
             guard let node = store.project?.graph.node(id: id) else { continue }   // removed mid-run (merge)
             let verdict = SZRunNodeVerdict.classify(node: node, promoted: run.promoted.contains(id),
                                                     state: nodeAgentState[id])
@@ -1290,8 +1356,20 @@ extension SZHost {
     /// node has since been merged away). This is what stops concurrent one-node builds from
     /// finishing as the same sentence repeated: three runs, three names.
     private func soleWorkTitle(_ run: SZRunState) -> String? {
-        guard run.workSet.count == 1, let id = run.workSet.first else { return nil }
+        let work = accountedWork(run)
+        guard work.count == 1, let id = work.first else { return nil }
         return store.project?.graph.node(id: id)?.title
+    }
+
+    /// The work-set nodes a run's receipt speaks for. One admitted for its arrows alone, that nothing
+    /// built and that needs nothing, was wired rather than implemented — counting it claimed a build
+    /// that never happened. It rejoins the tally on a promote, or a re-brief that leaves it dirty.
+    private func accountedWork(_ run: SZRunState) -> Set<SZNodeID> {
+        run.workSet.filter { id in
+            guard run.wiringOnly.contains(id), !run.promoted.contains(id),
+                  let node = store.project?.graph.node(id: id) else { return true }
+            return node.needsImplementation
+        }
     }
 
     /// How long the run took, off the MONOTONIC start — an NTP step mid-run must not stretch or
@@ -1310,7 +1388,7 @@ extension SZHost {
     /// never built and no longer exists. A missing node is not a built one.
     private func settledRunNodeCounts(_ run: SZRunState) -> (implemented: Int, unfinished: Int) {
         var implemented = 0, unfinished = 0
-        for id in run.workSet {
+        for id in accountedWork(run) {
             guard let node = store.project?.graph.node(id: id) else { continue }
             if node.needsImplementation { unfinished += 1 } else { implemented += 1 }
         }

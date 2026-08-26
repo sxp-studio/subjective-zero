@@ -53,7 +53,7 @@ private let noAsk: SZStepAskRunner = { _ in throw CancellationError() }
 /// Complete facts documents — the snapshot is all-required by design.
 private func runtimeBuildFacts(workLeft: Int) -> String {
     let ids = "[" + (0..<workLeft).map { _ in "\"\(UUID().uuidString)\"" }.joined(separator: ", ") + "]"
-    return #"{"message": "", "resuming": false, "pendingTasks": [], "runningTasks": [], "run": {"workSet": \#(ids), "round": 1, "roundCap": 2, "steers": [], "instruction": ""}}"#
+    return #"{"message": "", "resuming": false, "pendingTasks": [], "runningTasks": [], "run": {"workSet": \#(ids), "round": 1, "roundCap": 2, "steers": [], "instruction": "", "unwired": []}}"#
 }
 private let runtimeChatFacts = #"{"message": "hey", "resuming": false, "pendingTasks": [], "runningTasks": []}"#
 

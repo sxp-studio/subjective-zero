@@ -31,12 +31,16 @@ public struct SZWorld: Sendable {
     /// (not the delivered bubble, not bubbles queued behind it, not the ones that scheduled a
     /// run). Read by a turn declaring `context: conversation`. Host-side like the graph.
     public var conversation: [SZChatMessage]
+    /// The arrows the live run still owes — the run's captured set, not a sweep of the project, so the
+    /// brief names what the gate counted. Host-side like the graph; never crosses the step ABI.
+    public var unwiredArrows: [SZConnection]
 
     public init(graph: SZGraph? = nil, statuses: [SZNodeID: String] = [:],
                 node: SZNodeID? = nil, resuming: Bool = false, run: SZRun? = nil,
                 assignment: SZAssignment? = nil, pendingTasks: [SZTask] = [],
                 runningTasks: [SZTask] = [],
-                mutations: [SZGraphMutation] = [], conversation: [SZChatMessage] = []) {
+                mutations: [SZGraphMutation] = [], conversation: [SZChatMessage] = [],
+                unwiredArrows: [SZConnection] = []) {
         self.graph = graph
         self.statuses = statuses
         self.node = node
@@ -47,6 +51,7 @@ public struct SZWorld: Sendable {
         self.runningTasks = runningTasks
         self.mutations = mutations
         self.conversation = conversation
+        self.unwiredArrows = unwiredArrows
     }
 
     /// The step-visible slice: the wire document an evaluation (and its asks) is pinned to.

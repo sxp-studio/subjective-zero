@@ -150,7 +150,7 @@ public struct SZBriefRenderer: Sendable {
     /// briefs against. Tied to the assembly: `add` asserts each computed token is listed.
     public static let knownTokens: Set<String> = [
         "graph", "message", "toolbelt", "cards", "node", "contract", "source",
-        "round", "cap", "blockers", "inbox", "mutations", "instruction", "tasks",
+        "round", "cap", "blockers", "unwired", "inbox", "mutations", "instruction", "tasks",
         "prompt", "title", "symbol", "inputs", "outputs", "boundary", "abi", "reference", "schema",
         "blocker", "director_message", "retry_note", "grading",
         "original", "intent", "stage", "count", "constituents",
@@ -191,8 +191,12 @@ public struct SZBriefRenderer: Sendable {
 
         // — the world — (values built on outside words are defused: a user asking about
         // "{{node}}", a node title or agent status spelling a token, must ship as words)
+        // A live run reads the arrows it captured, never a fresh sweep: the user keeps drawing while
+        // the fleet works. Gated on the run, never on the list being empty — a chat or debug turn has
+        // no run and must still see every arrow.
         try add("graph") { SZPromptTemplate.defused(
-            SZDirectorPrompt.graphSummary(try need(world.graph, "graph", "a project"))) }
+            SZDirectorPrompt.graphSummary(try need(world.graph, "graph", "a project"),
+                                          arrows: world.run == nil ? nil : world.unwiredArrows)) }
         add("message") { SZPromptTemplate.defused(message) }
         try add("toolbelt") { try template(agent, Self.toolbeltPartial) }
         // Rendered only when the active profile maps a grade — teaching an assessment
@@ -207,6 +211,11 @@ public struct SZBriefRenderer: Sendable {
             return SZPromptTemplate.defused(SZDirectorPrompt.blockerLines(
                 graph: try need(world.graph, "blockers", "a project"),
                 unresolved: run.workSet, statuses: world.statuses))
+        }
+        try add("unwired") {
+            SZPromptTemplate.defused(SZDirectorPrompt.unwiredLines(
+                graph: try need(world.graph, "unwired", "a project"),
+                arrows: world.unwiredArrows))
         }
         try add("inbox") { SZPromptTemplate.defused(
             SZDirectorPrompt.inboxLines(try need(world.run, "inbox", "a live run").steers)) }

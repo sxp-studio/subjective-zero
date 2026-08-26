@@ -156,6 +156,21 @@ public enum SZDirectorPrompt {
         return blocks.isEmpty ? "- (none)" : blocks
     }
 
+    /// The reconcile brief's `{{unwired}}` value: one line per owed arrow, both ends named plus the
+    /// target's declared ports. A pinned end prints as `node.port`. Takes the arrows rather than
+    /// deriving them, so the brief lists what the gate counted.
+    static func unwiredLines(graph: SZGraph, arrows: [SZConnection]) -> String {
+        func end(_ node: SZNodeID, _ pin: String?) -> String {
+            let title = graph.node(id: node)?.title ?? "node"
+            return "`\(node.uuidString)` \"\(title)\"" + (pin.map { ".\($0)" } ?? "")
+        }
+        let lines = arrows.map { c in
+            "- \(end(c.from.node, c.pinnedPort(.from))) → \(end(c.to.node, c.pinnedPort(.to)))\n"
+                + "  target declares: \(contractIO(graph.node(id: c.to.node)?.contract, fallback: "no contract"))"
+        }
+        return lines.isEmpty ? "- (none)" : lines.joined(separator: "\n")
+    }
+
     /// The reconcile brief's `{{inbox}}` value — the fleet's messages, FIFO, verbatim.
     static func inboxLines(_ inbox: [String]) -> String {
         inbox.isEmpty ? "- (none)" : inbox.map { "- \($0)" }.joined(separator: "\n")
@@ -226,7 +241,9 @@ public enum SZDirectorPrompt {
     /// A compact, agent-readable description of the graph: each node's id/title/kind/contract-state/prompt,
     /// then the flow (drawing-intent) + data edges and the render endpoint — enough for the Director to
     /// target `ui_*` calls. Flow edges are the user's intent to realize; laying a data edge resolves them.
-    static func graphSummary(_ graph: SZGraph) -> String {
+    /// `arrows` nil lists every arrow; a live run passes the set it captured at its start, so the list
+    /// cannot drift under it while the user keeps drawing.
+    static func graphSummary(_ graph: SZGraph, arrows: [SZConnection]? = nil) -> String {
         func short(_ id: SZNodeID) -> String { String(id.uuidString.prefix(8)) }
         let nodes = graph.nodes.map { n -> String in
             let io = contractIO(n.contract, fallback: "no contract yet")
@@ -249,7 +266,7 @@ public enum SZDirectorPrompt {
         }.joined(separator: "\n")
 
         // A pinned end prints as `node.port` — the user dropped the arrow on that exact slot.
-        let flow = graph.connections.filter { $0.kind == .flow }
+        let flow = (arrows ?? graph.connections.filter { $0.kind == .flow })
             .map { c in
                 let from = short(c.from.node) + (c.pinnedPort(.from).map { ".\($0)" } ?? "")
                 let to = short(c.to.node) + (c.pinnedPort(.to).map { ".\($0)" } ?? "")

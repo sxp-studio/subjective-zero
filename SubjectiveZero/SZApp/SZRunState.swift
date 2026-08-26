@@ -40,6 +40,13 @@ import SZCore
     /// as the run's own tooling creates work. The fleet, the editor lock and the `ui_connect`
     /// guard all read it.
     var workSet: Set<SZNodeID>
+    /// The unwired arrows standing at admission — frozen like `workSet`, and for the same reason: one
+    /// the user draws mid-run is theirs. Read back against the live graph each turn, so a wired arrow
+    /// drops out on its own.
+    let unwiredIntent: Set<SZConnectionID>
+    /// Of `workSet`, the nodes admitted for their arrows alone — nothing about them needed building.
+    /// The accounting speaks for the rest, or the receipt claims a build that never happened.
+    let wiringOnly: Set<SZNodeID>
     /// Nodes `promoteStagedNode` landed for their LATEST dispatch — this run's success evidence.
     /// Cleared per node at each redispatch: a redispatch says the previous build did not settle it.
     var promoted: Set<SZNodeID> = []
@@ -53,7 +60,8 @@ import SZCore
     var directorSession: SZAgentSession?
 
     init(taskID: UUID, claim: SZClaimToken, instruction: String, title: String = "",
-         origin: Set<UUID> = [], ownsGraphOp: Bool, workSet: Set<SZNodeID>) {
+         origin: Set<UUID> = [], ownsGraphOp: Bool, workSet: Set<SZNodeID>,
+         unwiredIntent: Set<SZConnectionID> = [], wiringOnly: Set<SZNodeID> = []) {
         self.taskID = taskID
         self.claim = claim
         self.instruction = instruction
@@ -61,5 +69,7 @@ import SZCore
         self.origin = origin
         self.ownsGraphOp = ownsGraphOp
         self.workSet = workSet
+        self.unwiredIntent = unwiredIntent
+        self.wiringOnly = wiringOnly
     }
 }

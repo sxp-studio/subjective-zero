@@ -46,7 +46,7 @@ struct SZShippedDoorBehaviorTests {
     @Test func aGrantedRunEntersTheBuildLaneWithoutSpendingAToken() async throws {
         let (loader, dir) = try compiled("director", "door")
         defer { try? FileManager.default.removeItem(at: dir) }
-        let facts = #"{"message": "build it", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": ["\#(UUID().uuidString)"], "round": 1, "roundCap": 2, "steers": [], "instruction": "build it"}}"#
+        let facts = #"{"message": "build it", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": ["\#(UUID().uuidString)"], "round": 1, "roundCap": 2, "steers": [], "instruction": "build it", "unwired": []}}"#
         let (outcome, asks) = await decide(loader, facts: facts)
         #expect(outcome == .outcome("build"))
         // The fleet path spends ZERO model calls: a granted run is pre-ruled, never re-triaged.
@@ -167,10 +167,20 @@ struct SZShippedDoorBehaviorTests {
         let (loader, dir) = try compiled("director", "work-left")
         defer { try? FileManager.default.removeItem(at: dir) }
         let owing = await decide(loader,
-            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": ["\#(UUID().uuidString)"], "round": 2, "roundCap": 2, "steers": [], "instruction": ""}}"#)
+            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": ["\#(UUID().uuidString)"], "round": 2, "roundCap": 2, "steers": [], "instruction": "", "unwired": []}}"#)
         #expect(owing.outcome == SZStepEvalResult.outcome("yes"))
         let settled = await decide(loader,
-            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": [], "round": 2, "roundCap": 2, "steers": [], "instruction": ""}}"#)
+            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": [], "round": 2, "roundCap": 2, "steers": [], "instruction": "", "unwired": []}}"#)
         #expect(settled.outcome == SZStepEvalResult.outcome("no"))
+    }
+
+    @Test func theWorkLeftGateAlsoCountsArrowsNobodyWired() async throws {
+        // Nothing left to build and the run still owes work: a node that compiled fine but has an
+        // arrow hanging off it. The gate must send the run back, or the wiring is never laid.
+        let (loader, dir) = try compiled("director", "work-left")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let owing = await decide(loader,
+            facts: #"{"message": "", "resuming": true, "pendingTasks": [], "runningTasks": [], "run": {"workSet": [], "round": 2, "roundCap": 2, "steers": [], "instruction": "", "unwired": ["\#(UUID().uuidString)"]}}"#)
+        #expect(owing.outcome == SZStepEvalResult.outcome("yes"))
     }
 }

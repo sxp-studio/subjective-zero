@@ -17,6 +17,10 @@ struct SZWireDragSession {
     var target: SZSocket?
     let picked: (id: SZConnectionID, end: SZConnectionEnd, original: SZPortRef)?   // re-routing an edge
     var moved = false       // passed the click guard — a plain click must not drop/disconnect
+    /// Whether the cursor is over a card. Dragging into space means "generate something here", so a
+    /// drop on a card with no target was a missed aim, not a request for a new node — without this,
+    /// a refused drop leaves a stray card on top of the one being aimed at.
+    var overCard = false
 
     /// Begin from a SOCKET grab. Grabbing a CONNECTED data input picks its wire up to re-route: the
     /// preview re-anchors to the far output socket and the original edge hides until drop — refused
@@ -63,6 +67,8 @@ struct SZWireDragSession {
         target = SZGraphCanvasModel.snapTarget(for: source, at: world, zoom: zoom, in: graph,
                                                tiers: tiers, pickedConnectionID: picked?.id,
                                                previewsEnabled: previewsEnabled, isLocked: isLocked)
+        overCard = SZGraphCanvasModel.topmostNode(at: world, in: graph, tiers: tiers,
+                                                  previewsEnabled: previewsEnabled) != nil
     }
 
     /// What a drop should do — the panel dispatches to the host/store.
@@ -102,7 +108,7 @@ struct SZWireDragSession {
             return .connect(from: Self.ref(out, flow: flow), to: Self.ref(inp, flow: flow),
                             kind: flow ? .flow : .data)
         }
-        if moved {
+        if moved, !overCard {
             // Anchor the new node by the EDGE the wire lands on, not its centroid: drop from an
             // OUT socket and the node grows rightward with its LEFT edge (input side) at the drop
             // point; drop from an IN socket and it grows leftward with its RIGHT edge at the drop.

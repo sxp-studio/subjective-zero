@@ -116,7 +116,16 @@ extension SZHost {
     /// Work waiting to be kicked off. NOT gated on "nothing is running" any more: a run is scoped
     /// to its own nodes, so a draft added while another build is going is perfectly buildable —
     /// and gating it here was half of why that draft had no control at all.
-    var pendingWorkAvailable: Bool { pendingNodeCount > 0 }
+    ///
+    /// Wiring counts, though it is not a node to build: reading only `pendingNodeCount` hid the Build
+    /// control on the one graph that needs it. The badge still counts nodes; this decides whether the
+    /// control is there at all, and matches what `startRun` would admit.
+    var pendingWorkAvailable: Bool { pendingNodeCount > 0 || wiringWorkAvailable }
+
+    /// Whether any arrow could be realized right now — the admission rule, asked without starting.
+    var wiringWorkAvailable: Bool {
+        !Self.unwiredCandidates(in: store.project?.graph, excluding: runWorkSet, named: []).isEmpty
+    }
 
     /// HUD message icon — show the chat, or hide it if it is already showing.
     func toggleDirectorChat() {
