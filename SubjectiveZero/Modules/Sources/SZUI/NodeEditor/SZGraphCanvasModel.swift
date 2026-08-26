@@ -24,8 +24,10 @@ public struct SZSocket: Identifiable, Equatable, Sendable {
 
 public enum SZGraphCanvasModel {
     /// World-space point of one of a node's sockets.
-    public static func socketPoint(of node: SZNode, side: SZSocketSide, kind: SZConnectionKind, port: String) -> CGPoint {
-        let offset = SZNodeLayout.socketOffset(of: node, side: side, kind: kind, port: port)
+    public static func socketPoint(of node: SZNode, side: SZSocketSide, kind: SZConnectionKind,
+                                   port: String, previewsEnabled: Bool) -> CGPoint {
+        let offset = SZNodeLayout.socketOffset(of: node, side: side, kind: kind, port: port,
+                                              previewsEnabled: previewsEnabled)
         return CGPoint(x: CGFloat(node.position.x) + offset.x, y: CGFloat(node.position.y) + offset.y)
     }
 
@@ -35,11 +37,12 @@ public enum SZGraphCanvasModel {
     /// Distinct from `sockets(of:)`, which is what the canvas DRAWS. A draft prompt node the Director has
     /// just given a contract owns those ports and is wirable, even though its card shows only flow dots
     /// until it's implemented. Conflating the two makes a rendering rule reject a legal graph edit.
-    public static func connectableSockets(of node: SZNode) -> [SZSocket] {
+    public static func connectableSockets(of node: SZNode, previewsEnabled: Bool) -> [SZSocket] {
         var result: [SZSocket] = []
         func add(_ side: SZSocketSide, _ kind: SZConnectionKind, _ port: String) {
             result.append(SZSocket(nodeID: node.id, side: side, kind: kind, port: port,
-                                   point: socketPoint(of: node, side: side, kind: kind, port: port)))
+                                   point: socketPoint(of: node, side: side, kind: kind, port: port,
+                                                      previewsEnabled: previewsEnabled)))
         }
         add(.input, .flow, "")
         add(.output, .flow, "")
@@ -54,29 +57,31 @@ public enum SZGraphCanvasModel {
     /// generated node (prompt cards show only flow sockets, matching the node views). A shown custom
     /// card's plumbing inputs have no row and no dot — the card is their control; they stay
     /// CONNECTABLE (MCP, or flip to rows to wire by hand).
-    public static func sockets(of node: SZNode) -> [SZSocket] {
-        connectableSockets(of: node).filter {
+    public static func sockets(of node: SZNode, previewsEnabled: Bool) -> [SZSocket] {
+        connectableSockets(of: node, previewsEnabled: previewsEnabled).filter {
             ($0.kind == .flow || node.kind == .generated)
                 && !($0.side == .input && $0.kind == .data && SZNodeLayout.isPlumbing(node, port: $0.port))
         }
     }
 
     /// Every interactive socket in the graph — `sockets(of:)` over every node.
-    public static func sockets(in graph: SZGraph) -> [SZSocket] {
-        graph.nodes.flatMap(sockets(of:))
+    public static func sockets(in graph: SZGraph, previewsEnabled: Bool) -> [SZSocket] {
+        graph.nodes.flatMap { sockets(of: $0, previewsEnabled: previewsEnabled) }
     }
 
     /// Whether `socket` is visually buried under a card that renders ABOVE the socket's own node —
     /// mirror of the canvas z-order: `tiers` (higher rides above, missing = 0), ties broken by
     /// `graph.nodes` order; a node never occludes its own dots (they draw just above its card).
     /// Keeps invisible dots from being wire-drop targets: what you see is what you can hit.
-    public static func isOccluded(_ socket: SZSocket, in graph: SZGraph, tiers: [SZNodeID: Int] = [:]) -> Bool {
+    public static func isOccluded(_ socket: SZSocket, in graph: SZGraph, tiers: [SZNodeID: Int] = [:],
+                                  previewsEnabled: Bool) -> Bool {
         guard let ownerIndex = graph.nodes.firstIndex(where: { $0.id == socket.nodeID }) else { return false }
         let ownerTier = tiers[socket.nodeID] ?? 0
         for (i, node) in graph.nodes.enumerated() where node.id != socket.nodeID {
             let tier = tiers[node.id] ?? 0
             guard tier > ownerTier || (tier == ownerTier && i > ownerIndex) else { continue }
-            if SZNodeLayout.cardRect(of: node).contains(socket.point) { return true }
+            if SZNodeLayout.cardRect(of: node, previewsEnabled: previewsEnabled)
+                .contains(socket.point) { return true }
         }
         return false
     }
@@ -85,19 +90,21 @@ public enum SZGraphCanvasModel {
     /// `graph.nodes` order — the mirror of `isOccluded`'s what-you-see-is-what-you-hit rule), or nil
     /// for empty canvas.
     public static func topmostNode(at point: CGPoint, in graph: SZGraph,
-                                   tiers: [SZNodeID: Int] = [:]) -> SZNode? {
+                                   tiers: [SZNodeID: Int] = [:], previewsEnabled: Bool) -> SZNode? {
         graph.nodes.enumerated()
-            .filter { SZNodeLayout.cardRect(of: $0.element).contains(point) }
+            .filter { SZNodeLayout.cardRect(of: $0.element, previewsEnabled: previewsEnabled).contains(point) }
             .max { (tiers[$0.element.id] ?? 0, $0.offset) < (tiers[$1.element.id] ?? 0, $1.offset) }?
             .element
     }
 
     /// World-space bounding box of every node card (each card via `SZNodeLayout.cardRect`). Nil when
     /// the graph has no nodes.
-    public static func worldBounds(of graph: SZGraph) -> CGRect? {
+    public static func worldBounds(of graph: SZGraph, previewsEnabled: Bool) -> CGRect? {
         guard !graph.nodes.isEmpty else { return nil }
         var box = CGRect.null
-        for node in graph.nodes { box = box.union(SZNodeLayout.cardRect(of: node)) }
+        for node in graph.nodes {
+            box = box.union(SZNodeLayout.cardRect(of: node, previewsEnabled: previewsEnabled))
+        }
         return box.isNull ? nil : box
     }
 
@@ -161,10 +168,10 @@ public enum SZGraphCanvasModel {
     /// dropping back restores it.
     public static func isValidTarget(_ socket: SZSocket, for source: SZSocket, in graph: SZGraph,
                                      tiers: [SZNodeID: Int], pickedConnectionID: SZConnectionID?,
-                                     isLocked: (SZNodeID) -> Bool) -> Bool {
+                                     previewsEnabled: Bool, isLocked: (SZNodeID) -> Bool) -> Bool {
         guard !isLocked(socket.nodeID),
               canConnect(source, socket, in: graph),
-              !isOccluded(socket, in: graph, tiers: tiers)
+              !isOccluded(socket, in: graph, tiers: tiers, previewsEnabled: previewsEnabled)
         else { return false }
         // A picked-up edge keeps its kind on re-route: a DATA edge can't land on a flow socket
         // (a flow edge dropped on a data socket just becomes pinned).
@@ -181,11 +188,12 @@ public enum SZGraphCanvasModel {
     public static func snapTarget(for source: SZSocket, at point: CGPoint, zoom: CGFloat,
                                   in graph: SZGraph, tiers: [SZNodeID: Int],
                                   pickedConnectionID: SZConnectionID?,
-                                  isLocked: (SZNodeID) -> Bool) -> SZSocket? {
+                                  previewsEnabled: Bool, isLocked: (SZNodeID) -> Bool) -> SZSocket? {
         let radius = 28 / max(zoom, 0.1)
-        return sockets(in: graph)
+        return sockets(in: graph, previewsEnabled: previewsEnabled)
             .filter { isValidTarget($0, for: source, in: graph, tiers: tiers,
-                                    pickedConnectionID: pickedConnectionID, isLocked: isLocked) }
+                                    pickedConnectionID: pickedConnectionID,
+                                    previewsEnabled: previewsEnabled, isLocked: isLocked) }
             .map { (socket: $0, d: hypot($0.point.x - point.x, $0.point.y - point.y)) }
             .filter { $0.d <= radius }
             .min { $0.d < $1.d }?.socket
@@ -195,10 +203,11 @@ public enum SZGraphCanvasModel {
     /// highlight drawn while a wire is being dragged.
     public static func validTargets(for source: SZSocket, in graph: SZGraph, tiers: [SZNodeID: Int],
                                     pickedConnectionID: SZConnectionID?,
-                                    isLocked: (SZNodeID) -> Bool) -> [SZSocket] {
-        sockets(in: graph).filter {
+                                    previewsEnabled: Bool, isLocked: (SZNodeID) -> Bool) -> [SZSocket] {
+        sockets(in: graph, previewsEnabled: previewsEnabled).filter {
             isValidTarget($0, for: source, in: graph, tiers: tiers,
-                          pickedConnectionID: pickedConnectionID, isLocked: isLocked)
+                          pickedConnectionID: pickedConnectionID,
+                          previewsEnabled: previewsEnabled, isLocked: isLocked)
         }
     }
 
@@ -217,8 +226,9 @@ public enum SZGraphCanvasModel {
     /// the canvas convention (`endSocket`: portless flow, or the data socket a data/pinned end names).
     /// Nil if the edge's endpoints don't resolve.
     public static func pickupAnchor(detaching end: SZConnectionEnd, of connection: SZConnection,
-                                    in graph: SZGraph) -> SZSocket? {
-        guard let pts = endpoints(of: connection, in: graph) else { return nil }
+                                    in graph: SZGraph, previewsEnabled: Bool) -> SZSocket? {
+        guard let pts = endpoints(of: connection, in: graph, previewsEnabled: previewsEnabled)
+        else { return nil }
         let kept: SZConnectionEnd = end == .to ? .from : .to
         let ref = kept == .from ? connection.from : connection.to
         let socket = endSocket(of: connection, end: kept)
@@ -233,8 +243,9 @@ public enum SZGraphCanvasModel {
     /// endpoint nearer the grab (nearer the input end → move the input end, nearer the output end →
     /// move the source). Nil if the edge's endpoints don't resolve (an endpoint is still a prompt node).
     public static func detachableEnd(of connection: SZConnection, grabbedAt point: CGPoint,
-                                     in graph: SZGraph) -> SZConnectionEnd? {
-        guard let pts = endpoints(of: connection, in: graph) else { return nil }
+                                     in graph: SZGraph, previewsEnabled: Bool) -> SZConnectionEnd? {
+        guard let pts = endpoints(of: connection, in: graph, previewsEnabled: previewsEnabled)
+        else { return nil }
         return hypot(point.x - pts.to.x, point.y - pts.to.y)
             < hypot(point.x - pts.from.x, point.y - pts.from.y) ? .to : .from
     }
@@ -246,7 +257,8 @@ public enum SZGraphCanvasModel {
     /// draft step realizes into this data edge (and resolves) once the contract lands. A flow end
     /// PINNED to a declared data port lands on that data socket; an unresolvable pin falls back to
     /// the flow socket.
-    public static func endpoints(of connection: SZConnection, in graph: SZGraph) -> (from: CGPoint, to: CGPoint)? {
+    public static func endpoints(of connection: SZConnection, in graph: SZGraph,
+                                previewsEnabled: Bool) -> (from: CGPoint, to: CGPoint)? {
         guard let fromNode = graph.node(id: connection.from.node),
               let toNode = graph.node(id: connection.to.node) else { return nil }
         if connection.kind == .data {
@@ -256,8 +268,11 @@ public enum SZGraphCanvasModel {
         func point(_ node: SZNode, _ side: SZSocketSide, _ end: SZConnectionEnd) -> CGPoint {
             let s = endSocket(of: connection, end: end)
             let resolvable = connection.kind == .data || portType(of: node, side: side, port: s.port) != nil
-            return resolvable ? socketPoint(of: node, side: side, kind: s.kind, port: s.port)
-                              : socketPoint(of: node, side: side, kind: .flow, port: "")
+            return resolvable
+                ? socketPoint(of: node, side: side, kind: s.kind, port: s.port,
+                              previewsEnabled: previewsEnabled)
+                : socketPoint(of: node, side: side, kind: .flow, port: "",
+                              previewsEnabled: previewsEnabled)
         }
         return (point(fromNode, .output, .from), point(toNode, .input, .to))
     }

@@ -17,9 +17,9 @@ struct SZNodeView: View, Equatable {
     var errorDetail: String? = nil   // full diagnostic → clickable error pill
     var errorTitle: String = ""      // what that pill's popover calls it (SZNodeCanvasContentView.nodeDiagnostic)
     let renderEndpoint: SZPortRef?
-    /// Mirrors `SZNodeLayout.previewsEnabled` (the host writes both together). The body derives its
-    /// preview region from SZNodeLayout — this prop exists so `==` sees a gate flip and reflows the card.
-    var previewsEnabled: Bool = true
+    /// Graph ▸ Live Previews, the host's pref. Card geometry derives from it, so it has no default:
+    /// a card laid out against the wrong value is 144pt too tall and every socket in it is displaced.
+    let previewsEnabled: Bool
     /// How much chrome to render (`SZNodeLayout.tier(of:zoomedOut:)`). Render-only for the `.tile` step —
     /// the card frame and socket geometry are identical at every zoom; `.picture` is the folded card,
     /// whose SHORTER frame comes from the layout, not from here.
@@ -78,7 +78,7 @@ struct SZNodeView: View, Equatable {
                 // The body region sits between header and rows — the preview thumb (exactly
                 // `previewHeight` tall) or the node's custom card (`customInset` tall). One slot;
                 // SZNodeLayout.bodyInset is the ONE term the frame below and rowCenterY share.
-                if SZNodeLayout.previewInset(of: node) > 0 {
+                if SZNodeLayout.previewInset(of: node, previewsEnabled: previewsEnabled) > 0 {
                     previewRegion
                 } else if SZNodeLayout.customInset(of: node) > 0 {
                     SZCustomCardView(nodeID: node.id,
@@ -105,7 +105,8 @@ struct SZNodeView: View, Equatable {
                 }
             }
         }
-        .frame(width: SZNodeLayout.width(of: node), height: SZNodeLayout.height(of: node), alignment: .top)
+        .frame(width: SZNodeLayout.width(of: node),
+               height: SZNodeLayout.height(of: node, previewsEnabled: previewsEnabled), alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: SZNodeLayout.cornerRadius)
                 // Hover changes fill/stroke only — NOT the shadow: animating shadow(radius:) forces an
@@ -178,7 +179,7 @@ struct SZNodeView: View, Equatable {
             }
             if let onOpenChat { SZCardPillButton(symbol: "bubble.left.fill", help: "Chat with this node", action: onOpenChat) }
             // Offered only when the card has a body to show instead of its rows.
-            if let onTogglePlugs, SZNodeLayout.canFoldPlugs(node) {
+            if let onTogglePlugs, SZNodeLayout.canFoldPlugs(node, previewsEnabled: previewsEnabled) {
                 let folded = tier == .picture
                 SZCardPillButton(symbol: folded ? "chevron.down" : "chevron.up",
                                  help: folded ? "Show plugs" : "Hide plugs",

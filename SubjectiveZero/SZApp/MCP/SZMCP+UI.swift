@@ -320,7 +320,8 @@ extension SZHostBridge {
         // draws no data dots until it's implemented. The Director's whole flow is to set a contract on a
         // draft node and then wire it — those ports exist the moment the contract lands.
         func resolveSocket(on node: SZNode, side: SZSocketSide, port: String) throws -> SZSocket {
-            let match = SZGraphCanvasModel.connectableSockets(of: node).first {
+            let match = SZGraphCanvasModel.connectableSockets(
+                of: node, previewsEnabled: host.livePreviews).first {
                 $0.side == side && $0.kind == kind && (kind == .flow || $0.port == port)
             }
             guard let socket = match else {
@@ -527,7 +528,9 @@ extension SZHostBridge {
         guard let node = host.store.project?.graph.node(id: id) else {
             throw SZMCPError.message("no node \(id)")
         }
-        let position = placedPosition(x: x, y: y, cardSize: SZNodeLayout.size(of: node))
+        let position = placedPosition(x: x, y: y,
+                                      cardSize: SZNodeLayout.size(of: node,
+                                                                  previewsEnabled: host.livePreviews))
         guard host.store.moveNode(id: id, to: position) else {
             throw SZMCPError.message("no node \(id)")
         }

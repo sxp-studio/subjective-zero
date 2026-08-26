@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Live node previews — the host half. Owns the Graph ▸ Live Previews pref (the global gate), the
+// Live node previews — the host half. Owns the Graph ▸ Live Previews pref, the
 // per-node preview toggle op (the card's photo icon + `ui_set_node_body`), and the WATCH SET the
 // runtime's zero-copy preview stream captures: effective-preview nodes ∩ the editor's visible set,
 // capped. Event-driven end to end — graph edits arrive via Observation on the store, camera moves
@@ -18,11 +18,9 @@ extension SZHost {
     /// Long-edge pixels of a thumb target — 2x a ~160pt preview region, crisp on Retina.
     nonisolated static let previewMaxDimension = 320
 
-    /// Graph ▸ Live Previews — the global gate over per-card preview bodies. Order matters: the
-    /// geometry gate flips first, then the observable pref re-renders the cards (their `==` compares
-    /// it), so every card reflows exactly once with both in agreement.
+    /// Graph ▸ Live Previews — the gate over per-card preview bodies. One write: the panel threads
+    /// this value into every layout call and the cards compare it, so a flip reflows each card once.
     func setLivePreviews(_ on: Bool) {
-        SZNodeLayout.previewsEnabled = on
         livePreviews = on
         if !on { previewFrames.clear() }
         refreshPreviewStream()
@@ -73,9 +71,10 @@ extension SZHost {
     /// lands before the body write, so the pair persists once.
     @discardableResult
     func toggleNodePlugs(node id: SZNodeID) -> SZNodeBody? {
-        guard let node = store.project?.graph.node(id: id), SZNodeLayout.canFoldPlugs(node) else { return nil }
-        let folding = SZNodeLayout.showsPlugs(of: node)
-        let shift = SZNodeLayout.foldDelta(of: node) / 2
+        guard let node = store.project?.graph.node(id: id),
+              SZNodeLayout.canFoldPlugs(node, previewsEnabled: livePreviews) else { return nil }
+        let folding = SZNodeLayout.showsPlugs(of: node, previewsEnabled: livePreviews)
+        let shift = SZNodeLayout.foldDelta(of: node, previewsEnabled: livePreviews) / 2
         if shift != 0 {
             // Folding shrinks the card, so the CENTRE rises by half the loss to leave the top edge put.
             _ = store.moveNode(id: id, to: SZPoint(x: node.position.x,

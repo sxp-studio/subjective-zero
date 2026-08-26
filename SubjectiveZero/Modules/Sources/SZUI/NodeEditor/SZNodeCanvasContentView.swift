@@ -42,7 +42,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     let isRunning: Bool
     let runWorkSet: Set<SZNodeID>     // the run's captured work — members read Coding; a user's mid-run draft isn't in it
     let lockedNodes: Set<SZNodeID>    // ledger-held nodes (host-owned) — the lock affordance's source
-    var previewsEnabled: Bool = true  // the global Live Previews gate (mirrors SZNodeLayout.previewsEnabled)
+    let previewsEnabled: Bool         // Graph ▸ Live Previews — no default: card geometry derives from it
     var zoomedOut: Bool = false       // semantic-zoom tier: cards render as preview-only tiles, socket dots hide
     /// Nodes holding a legal target for the in-flight wire — their folded cards show their dots so you
     /// can see where a drop lands. Flips at most twice per drag (the source can't change mid-drag), so
@@ -100,7 +100,8 @@ struct SZNodeCanvasContentView: View, Equatable {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            SZConnectionLayer(graph: graph, zoom: strokeZoom, selectedID: selectedConnectionID,
+            SZConnectionLayer(graph: graph, previewsEnabled: previewsEnabled,
+                              zoom: strokeZoom, selectedID: selectedConnectionID,
                               hiddenID: hiddenConnectionID, hiddenNodeIDs: ghostedNodeIDs, space: space,
                               onSelect: { onSelectConnection($0) },
                               onDragChanged: { onEdgeDragChanged($0, $1) },
@@ -136,7 +137,7 @@ struct SZNodeCanvasContentView: View, Equatable {
         let tier = self.tier(for: node)
         let revealed = selectedNodeID == node.id || multiSelection.contains(node.id)
             || wireRevealNodeIDs.contains(node.id)
-        return ForEach(SZGraphCanvasModel.sockets(of: node)) { socket in
+        return ForEach(SZGraphCanvasModel.sockets(of: node, previewsEnabled: previewsEnabled)) { socket in
             let shown = shows(socket, tier: tier, revealed: revealed)
             SZPortSocket(kind: socket.kind, isConnected: connectedSockets.contains(socket.id))
                 .frame(width: 22, height: 22)            // forgiving hit target around the 12pt dot
@@ -153,7 +154,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     /// This node's chrome tier. `.tile` is the whole canvas (semantic zoom); `.picture`/`.full` is the
     /// node's own plugs fold.
     private func tier(for node: SZNode) -> SZCardTier {
-        SZNodeLayout.tier(of: node, zoomedOut: zoomedOut)
+        SZNodeLayout.tier(of: node, zoomedOut: zoomedOut, previewsEnabled: previewsEnabled)
     }
 
     /// Whether one socket paints and accepts a grab. `.tile` hides every dot outright — nothing the
@@ -211,7 +212,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     static func card(
         for node: SZNode, status: SZNodeStatus, isSelected: Bool, locked: Bool, isRunning: Bool,
         diagnostic: (detail: String, title: String)?, renderEndpoint: SZPortRef?, connectedInputs: Set<String>,
-        previewsEnabled: Bool = true,
+        previewsEnabled: Bool,
         tier: SZCardTier = .full,
         previewFrame: SZNodePreviewFrame? = nil,
         cardProvider: (any SZCustomCardProvider)? = nil,

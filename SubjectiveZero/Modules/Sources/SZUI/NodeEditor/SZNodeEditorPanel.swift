@@ -43,7 +43,7 @@ public struct SZNodeEditorPanel: View {
     private let snapToGrid: Bool                  // host-owned pref (Graph menu); grid dots draw regardless
     private let gridCursorTrail: Bool             // host-owned pref (Graph menu); dots morph to glyphs near the cursor
     private let showMiniMap: Bool                 // host-owned pref (Graph menu); the corner overview map
-    private let livePreviews: Bool                // host-owned pref (Graph menu); mirrors SZNodeLayout.previewsEnabled
+    private let livePreviews: Bool                // host-owned pref (Graph menu); card geometry derives from it
     private let previewFrames: SZNodePreviewFrames?   // host-owned per-node thumb boxes (stable refs)
     private let cardProvider: (any SZCustomCardProvider)?   // host-owned custom-card mounts (stable ref)
     private let onTogglePreview: (SZNodeID, String) -> Void
@@ -133,7 +133,7 @@ public struct SZNodeEditorPanel: View {
                 snapToGrid: Bool = true,
                 gridCursorTrail: Bool = true,
                 showMiniMap: Bool = true,
-                livePreviews: Bool = true,
+                livePreviews: Bool,
                 previewFrames: SZNodePreviewFrames? = nil,
                 cardProvider: (any SZCustomCardProvider)? = nil,
                 onVisibleNodesChanged: ((Set<SZNodeID>) -> Void)? = nil,
@@ -234,7 +234,8 @@ public struct SZNodeEditorPanel: View {
     private func publishVisibleNodes(override: Set<SZNodeID>? = nil) {
         guard let onVisibleNodesChanged else { return }
         let visible = override ?? project.map {
-            SZCanvasVisibility.visibleNodes(in: $0.graph, camera: camera, viewSize: viewSize)
+            SZCanvasVisibility.visibleNodes(in: $0.graph, camera: camera, viewSize: viewSize,
+                                            previewsEnabled: livePreviews)
         } ?? []
         guard visible != lastPublishedVisible else { return }
         lastPublishedVisible = visible
@@ -375,7 +376,8 @@ public struct SZNodeEditorPanel: View {
     @ViewBuilder
     private var miniMapOverlay: some View {
         if showMiniMap, let graph = project?.graph, !graph.nodes.isEmpty {
-            SZMiniMapView(graph: contentGraph(graph), camera: camera, viewSize: viewSize, isRunning: isRunning,
+            SZMiniMapView(graph: contentGraph(graph), camera: camera, viewSize: viewSize,
+                          previewsEnabled: livePreviews, isRunning: isRunning,
                           isSelected: { isSelected($0) },
                           statusOf: { node in
                               SZNodeCanvasContentView.pillStatus(for: node, agentState: nodeAgentState,
@@ -590,7 +592,8 @@ public struct SZNodeEditorPanel: View {
     private func nodeHit(at point: CGPoint) -> SZNode? {
         guard let graph = project?.graph else { return nil }
         return SZGraphCanvasModel.topmostNode(at: camera.worldPoint(screen: point),
-                                              in: contentGraph(graph), tiers: raisedTiers)
+                                              in: contentGraph(graph), tiers: raisedTiers,
+                                              previewsEnabled: livePreviews)
     }
 
     /// Open the menu at a canvas point: hit-test, update the selection FIRST (an unselected node
@@ -616,7 +619,7 @@ public struct SZNodeEditorPanel: View {
     /// screen), so the ⋯ is a discoverable entry to the same actions as right-click.
     private func openNodeMenu(_ id: SZNodeID) {
         guard let node = project?.graph.node(id: id) else { return }
-        let card = SZNodeLayout.cardRect(of: node)
+        let card = SZNodeLayout.cardRect(of: node, previewsEnabled: livePreviews)
         let anchor = camera.screenPoint(world: CGPoint(x: card.maxX, y: card.minY))
         selectNode(id, additive: false)
         presentContextMenu(target: .node(id), anchor: anchor)
@@ -706,8 +709,8 @@ public struct SZNodeEditorPanel: View {
                                                    sfSymbol: "rectangle.badge.plus"))
                 }
                 // Only offered when the card has a body to show in place of its rows.
-                if SZNodeLayout.canFoldPlugs(node) {
-                    let showing = SZNodeLayout.showsPlugs(of: node)
+                if SZNodeLayout.canFoldPlugs(node, previewsEnabled: livePreviews) {
+                    let showing = SZNodeLayout.showsPlugs(of: node, previewsEnabled: livePreviews)
                     actions.append(SZContextAction(kind: .togglePlugs(id, on: !showing),
                                                    label: showing ? "Hide Plugs" : "Show Plugs",
                                                    sfSymbol: showing ? "chevron.up" : "chevron.down"))
@@ -772,7 +775,7 @@ public struct SZNodeEditorPanel: View {
         // center — standard "rubber-band intersects = select".
         multiSelection = Set(nodes.filter { node in
             guard !hiddenPieces.contains(node.id) else { return false }
-            return world.intersects(SZNodeLayout.cardRect(of: node))
+            return world.intersects(SZNodeLayout.cardRect(of: node, previewsEnabled: livePreviews))
         }.map(\.id))
         selectedNodeID = nil            // a multi-select supersedes the single chat/edit selection
         selectedConnectionID = nil
@@ -869,7 +872,8 @@ public struct SZNodeEditorPanel: View {
                 ForEach(ghost.connections.filter {
                     memberIDs.contains($0.from.node) || memberIDs.contains($0.to.node)
                 }) { connection in
-                    if let points = SZGraphCanvasModel.endpoints(of: connection, in: ghost) {
+                    if let points = SZGraphCanvasModel.endpoints(of: connection, in: ghost,
+                                                                 previewsEnabled: livePreviews) {
                         SZConnectionStrokeView(from: points.from, to: points.to, kind: connection.kind,
                                                selected: connection.id == selectedConnectionID,
                                                hidden: false, zoom: Self.quantizedStrokeZoom(camera.zoom))
@@ -881,7 +885,8 @@ public struct SZNodeEditorPanel: View {
                 }
                 // Member-scoped socket enumeration: only the dragged nodes' dots move, so don't build
                 // (and discard) the whole graph's socket array every tick.
-                ForEach(SZGraphCanvasModel.sockets(in: SZGraph(nodes: members))) { socket in
+                ForEach(SZGraphCanvasModel.sockets(in: SZGraph(nodes: members),
+                                                   previewsEnabled: livePreviews)) { socket in
                     SZPortSocket(kind: socket.kind, isConnected: connected.contains(socket.id))
                         .frame(width: 22, height: 22)
                         .position(socket.point)
@@ -910,7 +915,7 @@ public struct SZNodeEditorPanel: View {
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputs,
             previewsEnabled: livePreviews,
-            tier: SZNodeLayout.tier(of: node, zoomedOut: zoomedOut),
+            tier: SZNodeLayout.tier(of: node, zoomedOut: zoomedOut, previewsEnabled: livePreviews),
             // The SAME stable box as the resting card — a dragged card keeps its live thumb (and
             // its mounted custom card).
             previewFrame: previewFrames?.frame(for: node.id),
@@ -943,6 +948,7 @@ public struct SZNodeEditorPanel: View {
         return Set(SZGraphCanvasModel.validTargets(for: wire.source, in: displayGraph(graph),
                                                    tiers: raisedTiers,
                                                    pickedConnectionID: wire.picked?.id,
+                                                   previewsEnabled: livePreviews,
                                                    isLocked: isLocked).map(\.nodeID))
     }
 
@@ -957,6 +963,7 @@ public struct SZNodeEditorPanel: View {
             let display = displayGraph(graph)
             ForEach(SZGraphCanvasModel.validTargets(for: wire.source, in: display, tiers: raisedTiers,
                                                     pickedConnectionID: wire.picked?.id,
+                                                    previewsEnabled: livePreviews,
                                                     isLocked: isLocked)) { socket in
                 SZWireTargetHighlight(kind: socket.kind, isActiveTarget: socket.id == wire.target?.id)
                     .position(socket.point)
@@ -970,7 +977,8 @@ public struct SZNodeEditorPanel: View {
     private func selectedConnectionHighlight(_ graph: SZGraph) -> some View {
         if let id = selectedConnectionID,
            let conn = graph.connections.first(where: { $0.id == id }),
-           let pts = SZGraphCanvasModel.endpoints(of: conn, in: displayGraph(graph)) {
+           let pts = SZGraphCanvasModel.endpoints(of: conn, in: displayGraph(graph),
+                                                  previewsEnabled: livePreviews) {
             let color: Color = conn.kind == .flow ? SZEdgeStyle.intentViolet : .cyan
             endpointGlow(pts.from, color)
             endpointGlow(pts.to, color)
@@ -1047,7 +1055,8 @@ public struct SZNodeEditorPanel: View {
               let node = project?.graph.node(id: drag.primary) else { return delta }
         let raw = CGPoint(x: primary.start.x + delta.width,
                           y: primary.start.y + delta.height)
-        let target = SZNodeLayout.snappedCenter(raw, size: SZNodeLayout.size(of: node))
+        let target = SZNodeLayout.snappedCenter(
+            raw, size: SZNodeLayout.size(of: node, previewsEnabled: livePreviews))
         return CGSize(width: target.x - primary.start.x, height: target.y - primary.start.y)
     }
 
@@ -1149,7 +1158,8 @@ public struct SZNodeEditorPanel: View {
         if wire?.grabbed.id != source.id {
             // A refused grab (locked far end) returns BEFORE feedAutoPan — no trail/band flicker.
             guard let session = SZWireDragSession.begin(from: source, atWorld: world, screen: location,
-                                                        in: graph, isLocked: isLocked) else { return }
+                                                        in: graph, previewsEnabled: livePreviews,
+                                                        isLocked: isLocked) else { return }
             wire = session
         } else {
             wire?.lastScreen = location
@@ -1168,7 +1178,8 @@ public struct SZNodeEditorPanel: View {
         if wire?.picked?.id != connection.id {
             // Same rule as the socket grab: an unresolvable edge returns before feedAutoPan.
             guard let session = SZWireDragSession.begin(along: connection, atWorld: world,
-                                                        screen: screen, in: graph) else { return }
+                                                        screen: screen, in: graph,
+                                                        previewsEnabled: livePreviews) else { return }
             wire = session
         } else {
             wire?.lastScreen = screen
@@ -1179,7 +1190,7 @@ public struct SZNodeEditorPanel: View {
 
     private func updateWireDrag(to world: CGPoint, in graph: SZGraph) {
         wire?.update(toWorld: world, zoom: camera.zoom, in: graph, tiers: raisedTiers,
-                     isLocked: isLocked)
+                     previewsEnabled: livePreviews, isLocked: isLocked)
     }
 
     /// Shared drop for both wire gestures: the session decides (`outcome`), the panel dispatches —
@@ -1318,7 +1329,7 @@ public struct SZNodeEditorPanel: View {
 
     /// World-space bounding box of every node card. Nil with no graph / no nodes.
     private func graphWorldBounds() -> CGRect? {
-        project.flatMap { SZGraphCanvasModel.worldBounds(of: $0.graph) }
+        project.flatMap { SZGraphCanvasModel.worldBounds(of: $0.graph, previewsEnabled: livePreviews) }
     }
 }
 

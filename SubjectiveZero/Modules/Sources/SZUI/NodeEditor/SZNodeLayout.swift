@@ -50,18 +50,6 @@ public enum SZNodeLayout {
     /// geometry here reads it — card rects, sockets, and edges are identical at every zoom.
     public static let lodZoomThreshold: CGFloat = 0.5
 
-    /// The global Live Previews gate (Graph ▸ Live Previews). Geometry-affecting: OFF collapses every
-    /// preview region (`previewInset` returns 0), so cards reflow to compact. Module state rather than
-    /// a parameter so the many pure call sites stay signature-stable; the ONE writer is SZHost's pref
-    /// plumbing (views must re-render on flip — the host threads the value into the card views so
-    /// equality sees it). Tests that flip it live in one `.serialized` suite: it is process-global,
-    /// and Swift Testing otherwise interleaves tests around the flip.
-    public static var previewsEnabled: Bool {
-        get { previewsEnabledBox.withLock { $0 } }
-        set { previewsEnabledBox.withLock { $0 = newValue } }
-    }
-    private static let previewsEnabledBox = Mutex<Bool>(true)
-
     public static func inputs(of node: SZNode) -> [SZPort] { node.contract?.inputs ?? [] }
     public static func outputs(of node: SZNode) -> [SZPort] { node.contract?.outputs ?? [] }
 
@@ -86,29 +74,34 @@ public enum SZNodeLayout {
     /// Takes the already-thresholded `zoomedOut` (the panel's `camera.zoom < lodZoomThreshold`), not raw
     /// zoom: the card layer is `.equatable()`, so feeding it a value that changes every zoom tick would
     /// re-render every card on the canvas instead of only at the crossing.
-    public static func tier(of node: SZNode, zoomedOut: Bool) -> SZCardTier {
+    public static func tier(of node: SZNode, zoomedOut: Bool, previewsEnabled: Bool) -> SZCardTier {
         if zoomedOut { return .tile }
-        return showsPlugs(of: node) ? .full : .picture
+        return showsPlugs(of: node, previewsEnabled: previewsEnabled) ? .full : .picture
     }
 
-    /// Whether a card CAN fold its plugs: only when it has a body to show instead. Keyed on the
-    /// RENDERED body height, not the mode, so a `.preview` node folds back to rows when the global
-    /// Live Previews gate collapses its region. Without this a bodyless card would fold to a 48pt
-    /// title chip with its sockets crammed into 8pt of edge.
-    public static func canFoldPlugs(_ node: SZNode) -> Bool { bodyInset(of: node) > 0 }
+    /// Whether a card can fold its plugs: only when it has a body to show instead. Keyed on the
+    /// rendered body height, not the mode, so a `.preview` node folds back to rows when the Live
+    /// Previews gate collapses its region. Without this a bodyless card would fold to a 48pt title
+    /// chip with its sockets crammed into 8pt of edge.
+    public static func canFoldPlugs(_ node: SZNode, previewsEnabled: Bool) -> Bool {
+        bodyInset(of: node, previewsEnabled: previewsEnabled) > 0
+    }
 
     /// Whether a card renders its port rows. Geometry-affecting and node-only (never reads zoom).
     /// A stored fold degrades to shown when there is nothing to fold to, so the flag can sit in the
     /// project harmlessly while the node has no body.
-    public static func showsPlugs(of node: SZNode) -> Bool {
-        node.body?.plugs != false || !canFoldPlugs(node)
+    public static func showsPlugs(of node: SZNode, previewsEnabled: Bool) -> Bool {
+        node.body?.plugs != false || !canFoldPlugs(node, previewsEnabled: previewsEnabled)
     }
 
     /// Extra card height the preview body contributes — `previewHeight` when the node effectively
-    /// previews (`SZNode.effectiveBodyMode`, the SZCore policy) AND the global gate is on, else 0.
-    /// The ONE term `height(of:)` and `rowCenterY` share, so the card frame and the socket rows can
-    /// never disagree about where the rows start.
-    public static func previewInset(of node: SZNode) -> CGFloat {
+    /// previews (`SZNode.effectiveBodyMode`, the SZCore policy) and the Live Previews gate is on,
+    /// else 0. The one term `height(of:)` and `rowCenterY` share, so the card frame and the socket
+    /// rows can never disagree about where the rows start.
+    ///
+    /// `previewsEnabled` is the user's Graph ▸ Live Previews pref, threaded in as data: it changes
+    /// card geometry, so every caller states it rather than reading it from somewhere.
+    public static func previewInset(of node: SZNode, previewsEnabled: Bool) -> CGFloat {
         previewsEnabled && node.effectiveBodyMode == .preview ? previewHeight : 0
     }
 
@@ -145,8 +138,8 @@ public enum SZNodeLayout {
 
     /// The body region's height, whichever mode fills it — the ONE term `height(of:)`, `rowCenterY`,
     /// and the custom socket placement share.
-    public static func bodyInset(of node: SZNode) -> CGFloat {
-        previewInset(of: node) + customInset(of: node)
+    public static func bodyInset(of node: SZNode, previewsEnabled: Bool) -> CGFloat {
+        previewInset(of: node, previewsEnabled: previewsEnabled) + customInset(of: node)
     }
 
     /// The chrome around a custom card's backdrop thumb: `backdropMargin` on top and both sides
@@ -176,13 +169,14 @@ public enum SZNodeLayout {
     /// of gridPitch — the metrics above are chosen so this needs no rounding slack. A custom card is
     /// a region between header and rows (like the preview): the generated rows stay, minus the
     /// plumbing inputs the card owns.
-    public static func height(of node: SZNode) -> CGFloat {
+    public static func height(of node: SZNode, previewsEnabled: Bool) -> CGFloat {
         switch node.kind {
         case .prompt:
             return promptHeight
         case .generated:
-            let rows = showsPlugs(of: node) ? rowInputs(of: node).count + outputs(of: node).count : 0
-            let inset = bodyInset(of: node)
+            let rows = showsPlugs(of: node, previewsEnabled: previewsEnabled)
+                ? rowInputs(of: node).count + outputs(of: node).count : 0
+            let inset = bodyInset(of: node, previewsEnabled: previewsEnabled)
             guard rows > 0 else { return headerHeight + bodyTopPadding + inset + bodyBottomPadding }
             return headerHeight + inset + bodyTopPadding
                 + CGFloat(rows) * rowHeight + CGFloat(rows - 1) * rowSpacing
@@ -190,8 +184,8 @@ public enum SZNodeLayout {
         }
     }
 
-    public static func size(of node: SZNode) -> CGSize {
-        CGSize(width: width(of: node), height: height(of: node))
+    public static func size(of node: SZNode, previewsEnabled: Bool) -> CGSize {
+        CGSize(width: width(of: node), height: height(of: node, previewsEnabled: previewsEnabled))
     }
 
     /// The fixed footprint of a prompt card (base width × prompt height) — what every creation site
@@ -200,8 +194,8 @@ public enum SZNodeLayout {
 
     /// World-space card rect: `node.position` is the card CENTER, inset by half `size(of:)`. The ONE
     /// rect shared by hit-testing, marquee membership, occlusion, and bounds math.
-    public static func cardRect(of node: SZNode) -> CGRect {
-        let size = size(of: node)
+    public static func cardRect(of node: SZNode, previewsEnabled: Bool) -> CGRect {
+        let size = size(of: node, previewsEnabled: previewsEnabled)
         return CGRect(x: CGFloat(node.position.x) - size.width / 2,
                       y: CGFloat(node.position.y) - size.height / 2,
                       width: size.width, height: size.height)
@@ -401,47 +395,52 @@ public enum SZNodeLayout {
     /// Socket position relative to the node's CENTER. Flow sockets ride the header sides; data sockets
     /// ride their port row's left (input) / right (output) edge. An unknown data port falls back to
     /// the flow position so a half-wired edge still renders somewhere sane.
-    public static func socketOffset(of node: SZNode, side: SZSocketSide, kind: SZConnectionKind, port: String) -> CGPoint {
+    public static func socketOffset(of node: SZNode, side: SZSocketSide, kind: SZConnectionKind,
+                                    port: String, previewsEnabled: Bool) -> CGPoint {
         let x = side == .input ? -width(of: node) / 2 : width(of: node) / 2
         // A prompt node renders as a single field with flow sockets on its sides and shows NO per-port
         // rows — even when a contract is already attached (e.g. a camera prompt that declares its
         // permission). So every endpoint on a prompt card lands at the flow (side-center) position.
-        guard node.kind == .generated else { return CGPoint(x: x, y: flowY(of: node)) }
+        guard node.kind == .generated else {
+            return CGPoint(x: x, y: flowY(of: node, previewsEnabled: previewsEnabled))
+        }
         switch kind {
         case .flow:
-            return CGPoint(x: x, y: flowY(of: node))
+            return CGPoint(x: x, y: flowY(of: node, previewsEnabled: previewsEnabled))
         case .data:
             // A card-owned (plumbing) input has no row while the card shows; an edge that still
             // targets it lands at the region's left edge, mid-height.
             if side == .input, isPlumbing(node, port: port) {
-                let regionTop = -height(of: node) / 2 + headerHeight
+                let regionTop = -height(of: node, previewsEnabled: previewsEnabled) / 2 + headerHeight
                 return CGPoint(x: x, y: regionTop + customInset(of: node) / 2)
             }
             let ports = side == .input ? rowInputs(of: node) : outputs(of: node)
             guard let index = ports.firstIndex(where: { $0.name == port }) else {
-                return CGPoint(x: x, y: flowY(of: node))
+                return CGPoint(x: x, y: flowY(of: node, previewsEnabled: previewsEnabled))
             }
             // Folded: no rows to ride, so each side stacks against the body's edge in port order.
-            if !showsPlugs(of: node) {
-                return CGPoint(x: x, y: foldedSocketY(of: node, index: index, count: ports.count))
+            if !showsPlugs(of: node, previewsEnabled: previewsEnabled) {
+                return CGPoint(x: x, y: foldedSocketY(of: node, index: index, count: ports.count,
+                                                      previewsEnabled: previewsEnabled))
             }
             let row = side == .input ? index : rowInputs(of: node).count + index
-            return CGPoint(x: x, y: rowCenterY(of: node, row: row))
+            return CGPoint(x: x, y: rowCenterY(of: node, row: row, previewsEnabled: previewsEnabled))
         }
     }
 
     /// Y of the flow sockets: header level for a generated node, card center for a prompt node.
-    public static func flowY(of node: SZNode) -> CGFloat {
+    public static func flowY(of node: SZNode, previewsEnabled: Bool) -> CGFloat {
         switch node.kind {
         case .prompt: return 0
-        case .generated: return -height(of: node) / 2 + headerHeight / 2
+        case .generated: return -height(of: node, previewsEnabled: previewsEnabled) / 2 + headerHeight / 2
         }
     }
 
     /// Y center of the stacked port row `row` (0-based across inputs then outputs). The body region
     /// sits between header and rows, so the rows shift down by exactly `bodyInset`.
-    public static func rowCenterY(of node: SZNode, row: Int) -> CGFloat {
-        let bodyTop = -height(of: node) / 2 + headerHeight + bodyInset(of: node) + bodyTopPadding
+    public static func rowCenterY(of node: SZNode, row: Int, previewsEnabled: Bool) -> CGFloat {
+        let bodyTop = -height(of: node, previewsEnabled: previewsEnabled) / 2 + headerHeight
+            + bodyInset(of: node, previewsEnabled: previewsEnabled) + bodyTopPadding
         return bodyTop + rowHeight / 2 + CGFloat(row) * (rowHeight + rowSpacing)
     }
 
@@ -449,9 +448,10 @@ public enum SZNodeLayout {
     /// below the header and keeps `rowHeight` pitch, so unfolding slides each dot down into its own
     /// row rather than reshuffling. A card with more ports than the region has room for squeezes its
     /// pitch instead of spilling past the card edges.
-    public static func foldedSocketY(of node: SZNode, index: Int, count: Int) -> CGFloat {
-        guard count > 0 else { return flowY(of: node) }
-        let h = height(of: node)
+    public static func foldedSocketY(of node: SZNode, index: Int, count: Int,
+                                     previewsEnabled: Bool) -> CGFloat {
+        guard count > 0 else { return flowY(of: node, previewsEnabled: previewsEnabled) }
+        let h = height(of: node, previewsEnabled: previewsEnabled)
         let below = h - headerHeight
         let pitch = min(rowHeight, below / CGFloat(count))
         let center = -h / 2 + headerHeight + below / 2
@@ -461,8 +461,8 @@ public enum SZNodeLayout {
     /// The height a card loses when its plugs fold — always a whole number of grid cells, which is
     /// what lets the toggle hold the card's TOP edge (move the centre by half of this) and keep all
     /// four edges on grid for any row count.
-    public static func foldDelta(of node: SZNode) -> CGFloat {
-        guard node.kind == .generated, canFoldPlugs(node) else { return 0 }
+    public static func foldDelta(of node: SZNode, previewsEnabled: Bool) -> CGFloat {
+        guard node.kind == .generated, canFoldPlugs(node, previewsEnabled: previewsEnabled) else { return 0 }
         let rows = rowInputs(of: node).count + outputs(of: node).count
         return CGFloat(rows) * rowHeight
     }

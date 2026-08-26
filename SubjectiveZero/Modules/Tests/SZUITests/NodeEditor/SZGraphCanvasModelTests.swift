@@ -8,6 +8,9 @@ import Testing
 @testable import SZUI
 import SZCore
 
+/// Canvas geometry with Live Previews on — the setting these assertions are written against.
+private let on = SZLayoutProbe(previewsEnabled: true)
+
 private func cameraNode(at position: SZPoint = SZPoint(x: 100, y: 200)) -> SZNode {
     SZNode(
         kind: .generated, title: "MacBook Camera", sfSymbol: "camera",
@@ -35,18 +38,18 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     // which is currently 0 and so contributes nothing visible to a mirrored sum.
     // 40 header + 4 top + 3 rows × 24 + 2 gaps × 0 + 4 bottom = 120.
     let node = cameraNode()                      // 2 inputs + 1 output = 3 rows
-    #expect(SZNodeLayout.height(of: node) == 120)
-    #expect(SZNodeLayout.size(of: node).width == SZNodeLayout.width)
+    #expect(on.height(of: node) == 120)
+    #expect(on.size(of: node).width == SZNodeLayout.width)
 }
 
 @Test func promptNodeIsASingleFieldRow() {
-    #expect(SZNodeLayout.height(of: promptNode()) == SZNodeLayout.promptHeight)
+    #expect(on.height(of: promptNode()) == SZNodeLayout.promptHeight)
 }
 
 @Test func inputSocketsSitOnLeftEdgeStackedByRow() {
     let node = cameraNode()
-    let mirror = SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "mirror")
-    let camera = SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "camera")
+    let mirror = on.socketOffset(of: node, side: .input, kind: .data, port: "mirror")
+    let camera = on.socketOffset(of: node, side: .input, kind: .data, port: "camera")
     #expect(mirror.x == -SZNodeLayout.width / 2)            // left edge
     #expect(camera.x == -SZNodeLayout.width / 2)
     #expect(camera.y > mirror.y)                            // 2nd input is below the 1st
@@ -55,22 +58,22 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
 
 @Test func outputTextureSocketSitsOnRightEdgeBelowInputs() {
     let node = cameraNode()
-    let tex = SZNodeLayout.socketOffset(of: node, side: .output, kind: .data, port: "texture")
-    let lastInput = SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "camera")
+    let tex = on.socketOffset(of: node, side: .output, kind: .data, port: "texture")
+    let lastInput = on.socketOffset(of: node, side: .input, kind: .data, port: "camera")
     #expect(tex.x == SZNodeLayout.width / 2)               // right edge
     #expect(tex.y > lastInput.y)                           // output row stacks after the inputs
 }
 
 @Test func flowSocketsRideTheHeaderSidesForGeneratedAndCenterForPrompt() {
     let gen = cameraNode()
-    let outFlow = SZNodeLayout.socketOffset(of: gen, side: .output, kind: .flow, port: "")
-    let inFlow = SZNodeLayout.socketOffset(of: gen, side: .input, kind: .flow, port: "")
+    let outFlow = on.socketOffset(of: gen, side: .output, kind: .flow, port: "")
+    let inFlow = on.socketOffset(of: gen, side: .input, kind: .flow, port: "")
     #expect(outFlow.x == SZNodeLayout.width / 2)
     #expect(inFlow.x == -SZNodeLayout.width / 2)
-    #expect(outFlow.y == -SZNodeLayout.height(of: gen) / 2 + SZNodeLayout.headerHeight / 2)
+    #expect(outFlow.y == -on.height(of: gen) / 2 + SZNodeLayout.headerHeight / 2)
 
     let prompt = promptNode()
-    #expect(SZNodeLayout.socketOffset(of: prompt, side: .output, kind: .flow, port: "").y == 0)
+    #expect(on.socketOffset(of: prompt, side: .output, kind: .flow, port: "").y == 0)
 }
 
 @Test func promptNodeWithAContractStillSocketsAtTheFlowPosition() {
@@ -82,22 +85,22 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
         contract: SZNodeContract(title: "MacBook Camera", sfSymbol: "camera", summary: "cam",
                                  outputs: [SZPort(name: "texture", type: .texture, display: true)]),
         position: SZPoint(x: 0, y: 0))
-    let tex = SZNodeLayout.socketOffset(of: camera, side: .output, kind: .data, port: "texture")
-    #expect(tex.y == SZNodeLayout.flowY(of: camera))   // == 0, the prompt card center
+    let tex = on.socketOffset(of: camera, side: .output, kind: .data, port: "texture")
+    #expect(tex.y == on.flowY(of: camera))   // == 0, the prompt card center
     #expect(tex.x == SZNodeLayout.width / 2)
 }
 
 @Test func unknownDataPortFallsBackToFlowPosition() {
     let node = cameraNode()
-    let bogus = SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "nope")
-    #expect(bogus.y == SZNodeLayout.flowY(of: node))
+    let bogus = on.socketOffset(of: node, side: .input, kind: .data, port: "nope")
+    #expect(bogus.y == on.flowY(of: node))
 }
 
 @Test func socketPointIsCenteredOnNodePosition() {
     let node = cameraNode(at: SZPoint(x: 500, y: 300))
-    let tex = SZGraphCanvasModel.socketPoint(of: node, side: .output, kind: .data, port: "texture")
+    let tex = on.socketPoint(of: node, side: .output, kind: .data, port: "texture")
     #expect(tex.x == 500 + SZNodeLayout.width / 2)
-    #expect(tex.y == 300 + SZNodeLayout.socketOffset(of: node, side: .output, kind: .data, port: "texture").y)
+    #expect(tex.y == 300 + on.socketOffset(of: node, side: .output, kind: .data, port: "texture").y)
 }
 
 @Test func connectionEndpointsResolveBothNodesOrNil() {
@@ -112,14 +115,14 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
                             to: SZPortRef(node: gray.id, port: "input"), kind: .data)
     let graph = SZGraph(nodes: [camera, gray], connections: [conn],
                         renderEndpoint: SZPortRef(node: gray.id, port: "output"))
-    let pts = SZGraphCanvasModel.endpoints(of: conn, in: graph)
+    let pts = on.endpoints(of: conn, in: graph)
     #expect(pts != nil)
     #expect(pts?.from.x == camera.position.x.cg + SZNodeLayout.width / 2)   // camera output right edge
     #expect(pts?.to.x == gray.position.x.cg - SZNodeLayout.width / 2)       // grayscale input left edge
 
     let dangling = SZConnection(from: SZPortRef(node: SZNodeID(), port: "x"),
                                 to: SZPortRef(node: gray.id, port: "input"), kind: .data)
-    #expect(SZGraphCanvasModel.endpoints(of: dangling, in: graph) == nil)
+    #expect(on.endpoints(of: dangling, in: graph) == nil)
 }
 
 @Test func aDataEdgeIntoASeededSpawnPromptNodeResolvesAtTheCardSideCenter() {
@@ -135,18 +138,18 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     let conn = SZConnection(from: SZPortRef(node: camera.id, port: "texture"),
                             to: SZPortRef(node: spawn.id, port: "input"), kind: .data)
     let graph = SZGraph(nodes: [camera, spawn], connections: [conn])
-    let pts = SZGraphCanvasModel.endpoints(of: conn, in: graph)
+    let pts = on.endpoints(of: conn, in: graph)
     #expect(pts != nil)
     #expect(pts?.to.x == spawn.position.x.cg - SZNodeLayout.width / 2)   // left edge…
-    #expect(pts?.to.y == spawn.position.y.cg + SZNodeLayout.flowY(of: spawn))   // …at side-center
+    #expect(pts?.to.y == spawn.position.y.cg + on.flowY(of: spawn))   // …at side-center
 }
 
 @Test func socketsEnumeratesFlowForAllPlusDataForGeneratedPorts() {
     let camera = cameraNode()                 // generated: 2 inputs + 1 output
     let prompt = promptNode()                 // prompt: flow only
     let graph = SZGraph(nodes: [camera, prompt])
-    let cam = SZGraphCanvasModel.sockets(in: graph).filter { $0.nodeID == camera.id }
-    let pr = SZGraphCanvasModel.sockets(in: graph).filter { $0.nodeID == prompt.id }
+    let cam = on.sockets(in: graph).filter { $0.nodeID == camera.id }
+    let pr = on.sockets(in: graph).filter { $0.nodeID == prompt.id }
     // camera: 2 flow + 2 data-in + 1 data-out = 5
     #expect(cam.count == 5)
     #expect(cam.filter { $0.kind == .data }.map(\.port).sorted() == ["camera", "mirror", "texture"])
@@ -166,7 +169,7 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
         position: SZPoint(x: 400, y: 0))
     let graph = SZGraph(nodes: [camera, gray])
     func sock(_ id: SZNodeID, _ side: SZSocketSide, _ kind: SZConnectionKind, _ port: String) -> SZSocket {
-        SZGraphCanvasModel.sockets(in: graph).first { $0.nodeID == id && $0.side == side && $0.kind == kind && $0.port == port }!
+        on.sockets(in: graph).first { $0.nodeID == id && $0.side == side && $0.kind == kind && $0.port == port }!
     }
     let camTex = sock(camera.id, .output, .data, "texture")
     let grayIn = sock(gray.id, .input, .data, "input")
@@ -204,11 +207,11 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     let graph = SZGraph(nodes: [camera, gray], connections: [pinned, stale])
     #expect(pinned.pinnedPort(.to) == "amount" && pinned.pinnedPort(.from) == nil)
 
-    let pts = SZGraphCanvasModel.endpoints(of: pinned, in: graph)!
-    #expect(pts.from == SZGraphCanvasModel.socketPoint(of: camera, side: .output, kind: .flow, port: ""))
-    #expect(pts.to == SZGraphCanvasModel.socketPoint(of: gray, side: .input, kind: .data, port: "amount"))
-    #expect(SZGraphCanvasModel.endpoints(of: stale, in: graph)!.to
-            == SZGraphCanvasModel.socketPoint(of: gray, side: .input, kind: .flow, port: ""))
+    let pts = on.endpoints(of: pinned, in: graph)!
+    #expect(pts.from == on.socketPoint(of: camera, side: .output, kind: .flow, port: ""))
+    #expect(pts.to == on.socketPoint(of: gray, side: .input, kind: .data, port: "amount"))
+    #expect(on.endpoints(of: stale, in: graph)!.to
+            == on.socketPoint(of: gray, side: .input, kind: .flow, port: ""))
 
     let connected = SZGraphCanvasModel.connectedSocketIDs(in: graph)
     #expect(connected.contains(SZSocket.key(nodeID: gray.id, side: .input, kind: .data, port: "amount")))
@@ -216,12 +219,12 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     #expect(!connected.contains(SZSocket.key(nodeID: gray.id, side: .input, kind: .flow, port: "")))
 
     // detaching the source end keeps the pinned data socket as the anchor
-    let anchor = SZGraphCanvasModel.pickupAnchor(detaching: .from, of: pinned, in: graph)!
+    let anchor = on.pickupAnchor(detaching: .from, of: pinned, in: graph)!
     #expect(anchor.kind == .data && anchor.port == "amount" && anchor.side == .input && anchor.point == pts.to)
 
     // while a flow wire is dragged from camera's flow-out, gray's blue inputs are live targets
-    let flowOut = SZGraphCanvasModel.sockets(in: graph).first { $0.nodeID == camera.id && $0.side == .output && $0.kind == .flow }!
-    let targets = SZGraphCanvasModel.validTargets(for: flowOut, in: graph, tiers: [:], pickedConnectionID: nil, isLocked: { _ in false })
+    let flowOut = on.sockets(in: graph).first { $0.nodeID == camera.id && $0.side == .output && $0.kind == .flow }!
+    let targets = on.validTargets(for: flowOut, in: graph, tiers: [:], pickedConnectionID: nil, isLocked: { _ in false })
     #expect(Set(targets.map(\.port)) == ["", "input", "amount"])
     #expect(targets.allSatisfy { $0.nodeID == gray.id && $0.side == .input })
 }
@@ -246,13 +249,13 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
                             to: SZPortRef(node: gray.id, port: "input"), kind: .data)
     let graph = SZGraph(nodes: [camera, gray], connections: [conn])
     func sock(_ id: SZNodeID, _ side: SZSocketSide, _ port: String) -> SZSocket {
-        SZGraphCanvasModel.sockets(in: graph).first { $0.nodeID == id && $0.side == side && $0.kind == .data && $0.port == port }!
+        on.sockets(in: graph).first { $0.nodeID == id && $0.side == side && $0.kind == .data && $0.port == port }!
     }
     // The cycle-closing wire never validates, so its target never highlights (isValidTarget builds
     // on canConnect).
     #expect(!SZGraphCanvasModel.canConnect(sock(gray.id, .output, "output"),
                                            sock(camera.id, .input, "feedback"), in: graph))
-    #expect(!SZGraphCanvasModel.isValidTarget(sock(camera.id, .input, "feedback"),
+    #expect(!on.isValidTarget(sock(camera.id, .input, "feedback"),
                                               for: sock(gray.id, .output, "output"), in: graph,
                                               tiers: [:], pickedConnectionID: nil, isLocked: { _ in false }))
     // Dropping the picked-up wire back on its own port is not a cycle — the edge IS the occupant.
@@ -275,7 +278,7 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
                             to: SZPortRef(node: gray.id, port: "flow"), kind: .flow)
     let graph = SZGraph(nodes: [camera, gray], connections: [conn, flow])
     func sock(_ id: SZNodeID, _ side: SZSocketSide, _ kind: SZConnectionKind, _ port: String) -> SZSocket {
-        SZGraphCanvasModel.sockets(in: graph).first { $0.nodeID == id && $0.side == side && $0.kind == kind && $0.port == port }!
+        on.sockets(in: graph).first { $0.nodeID == id && $0.side == side && $0.kind == kind && $0.port == port }!
     }
     // the wired data input resolves to its edge — this is the socket a pickup drag starts from
     #expect(SZGraphCanvasModel.incomingDataConnection(to: sock(gray.id, .input, .data, "input"), in: graph)?.id == conn.id)
@@ -302,7 +305,7 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     let graph = SZGraph(nodes: [camera, gray], connections: [data, flow])
     let connected = SZGraphCanvasModel.connectedSocketIDs(in: graph)
     func sock(_ id: SZNodeID, _ side: SZSocketSide, _ kind: SZConnectionKind, _ port: String) -> SZSocket {
-        SZGraphCanvasModel.sockets(in: graph).first { $0.nodeID == id && $0.side == side && $0.kind == kind && $0.port == port }!
+        on.sockets(in: graph).first { $0.nodeID == id && $0.side == side && $0.kind == kind && $0.port == port }!
     }
     // both ends of each edge light up, matching the sockets' own ids
     #expect(connected.contains(sock(camera.id, .output, .data, "texture").id))
@@ -330,14 +333,14 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     let conn = SZConnection(from: SZPortRef(node: camera.id, port: "texture"),
                             to: SZPortRef(node: gray.id, port: "input"), kind: .data)
     let graph = SZGraph(nodes: [camera, gray], connections: [conn])
-    let pts = SZGraphCanvasModel.endpoints(of: conn, in: graph)!
+    let pts = on.endpoints(of: conn, in: graph)!
     // grabbing near the output end detaches `from`; near the input end detaches `to`
-    #expect(SZGraphCanvasModel.detachableEnd(of: conn, grabbedAt: CGPoint(x: pts.from.x + 10, y: pts.from.y), in: graph) == .from)
-    #expect(SZGraphCanvasModel.detachableEnd(of: conn, grabbedAt: CGPoint(x: pts.to.x - 10, y: pts.to.y), in: graph) == .to)
+    #expect(on.detachableEnd(of: conn, grabbedAt: CGPoint(x: pts.from.x + 10, y: pts.from.y), in: graph) == .from)
+    #expect(on.detachableEnd(of: conn, grabbedAt: CGPoint(x: pts.to.x - 10, y: pts.to.y), in: graph) == .to)
     // an unresolvable edge (dangling endpoint) can't be picked up
     let dangling = SZConnection(from: SZPortRef(node: SZNodeID(), port: "x"),
                                 to: SZPortRef(node: gray.id, port: "input"), kind: .data)
-    #expect(SZGraphCanvasModel.detachableEnd(of: dangling, grabbedAt: .zero, in: graph) == nil)
+    #expect(on.detachableEnd(of: dangling, grabbedAt: .zero, in: graph) == nil)
 }
 
 @Test func pickupAnchorIsTheKeptEndWithCanvasPortConventions() {
@@ -354,15 +357,15 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
                             to: SZPortRef(node: gray.id, port: "flow"), kind: .flow)
     let graph = SZGraph(nodes: [camera, gray], connections: [data, flow])
     // detaching the input end anchors at the source output, and vice versa
-    let keptOut = SZGraphCanvasModel.pickupAnchor(detaching: .to, of: data, in: graph)!
+    let keptOut = on.pickupAnchor(detaching: .to, of: data, in: graph)!
     #expect(keptOut.nodeID == camera.id && keptOut.side == .output && keptOut.port == "texture")
-    #expect(keptOut.point == SZGraphCanvasModel.socketPoint(of: camera, side: .output, kind: .data, port: "texture"))
-    let keptIn = SZGraphCanvasModel.pickupAnchor(detaching: .from, of: data, in: graph)!
+    #expect(keptOut.point == on.socketPoint(of: camera, side: .output, kind: .data, port: "texture"))
+    let keptIn = on.pickupAnchor(detaching: .from, of: data, in: graph)!
     #expect(keptIn.nodeID == gray.id && keptIn.side == .input && keptIn.port == "input")
     // a flow anchor's port normalizes to the canvas socket convention ("", not the ref's "flow")
-    let flowAnchor = SZGraphCanvasModel.pickupAnchor(detaching: .to, of: flow, in: graph)!
+    let flowAnchor = on.pickupAnchor(detaching: .to, of: flow, in: graph)!
     #expect(flowAnchor.kind == .flow && flowAnchor.port == "")
-    #expect(flowAnchor.point == SZGraphCanvasModel.socketPoint(of: camera, side: .output, kind: .flow, port: ""))
+    #expect(flowAnchor.point == on.socketPoint(of: camera, side: .output, kind: .flow, port: ""))
 }
 
 @Test func dataEdgeHiddenUntilBothPortsExistThenSnapsToRealPorts() {
@@ -372,15 +375,15 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     let grayscale = promptNode(at: SZPoint(x: 400, y: 0))
     let conn = SZConnection(from: SZPortRef(node: camera.id, port: "texture"),
                             to: SZPortRef(node: grayscale.id, port: "input"), kind: .data)
-    #expect(SZGraphCanvasModel.endpoints(of: conn, in: SZGraph(nodes: [camera, grayscale], connections: [conn])) == nil)
+    #expect(on.endpoints(of: conn, in: SZGraph(nodes: [camera, grayscale], connections: [conn])) == nil)
     // once grayscale generates (gains an `input` texture port), the data edge appears at the real ports:
     let grayGen = SZNode(id: grayscale.id, kind: .generated, title: "G", sfSymbol: "g",
                          contract: SZNodeContract(title: "G", sfSymbol: "g", summary: "",
                                                   inputs: [SZPort(name: "input", type: .texture)],
                                                   outputs: [SZPort(name: "output", type: .texture)]),
                          position: SZPoint(x: 400, y: 0))
-    let pts = SZGraphCanvasModel.endpoints(of: conn, in: SZGraph(nodes: [camera, grayGen], connections: [conn]))!
-    #expect(pts.from.y == camera.position.y.cg + SZNodeLayout.socketOffset(of: camera, side: .output, kind: .data, port: "texture").y)
+    let pts = on.endpoints(of: conn, in: SZGraph(nodes: [camera, grayGen], connections: [conn]))!
+    #expect(pts.from.y == camera.position.y.cg + on.socketOffset(of: camera, side: .output, kind: .data, port: "texture").y)
 }
 
 @Test func screenToWorldRoundTripsAtNonUnitZoom() {
@@ -401,14 +404,14 @@ private func promptNode(at position: SZPoint = SZPoint(x: 0, y: 0)) -> SZNode {
     #expect(SZNodeLayout.promptHeight.truncatingRemainder(dividingBy: pitch) == 0)
     let bare = SZNode(id: UUID(), kind: .generated, title: "B", sfSymbol: "b", contract: nil,
                       position: SZPoint(x: 0, y: 0))
-    #expect(SZNodeLayout.height(of: bare).truncatingRemainder(dividingBy: pitch) == 0)
+    #expect(on.height(of: bare).truncatingRemainder(dividingBy: pitch) == 0)
     for rows in 1...6 {
         let node = SZNode(id: UUID(), kind: .generated, title: "N", sfSymbol: "n",
                           contract: SZNodeContract(title: "N", sfSymbol: "n", summary: "",
                                                    inputs: (0..<rows).map { SZPort(name: "in\($0)", type: .texture) },
                                                    outputs: []),
                           position: SZPoint(x: 0, y: 0))
-        #expect(SZNodeLayout.height(of: node).truncatingRemainder(dividingBy: pitch) == 0)
+        #expect(on.height(of: node).truncatingRemainder(dividingBy: pitch) == 0)
     }
 }
 
@@ -489,9 +492,9 @@ private func zooNode() -> SZNode {
 @Test func socketsRideTheAutoSizedEdges() {
     let node = zooNode()
     let w = SZNodeLayout.width(of: node)
-    #expect(SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "corners").x == -w / 2)
-    #expect(SZNodeLayout.socketOffset(of: node, side: .output, kind: .data, port: "texture").x == w / 2)
-    #expect(SZNodeLayout.size(of: node).width == w)
+    #expect(on.socketOffset(of: node, side: .input, kind: .data, port: "corners").x == -w / 2)
+    #expect(on.socketOffset(of: node, side: .output, kind: .data, port: "texture").x == w / 2)
+    #expect(on.size(of: node).width == w)
 }
 
 // MARK: - Slider semantics (the clamp/step predicate itself now lives in SZCoreTests/SZPortSliderTests)
@@ -565,14 +568,14 @@ private func zooNode() -> SZNode {
     let a = cameraNode(at: SZPoint(x: 100, y: 200))
     let b = cameraNode(at: SZPoint(x: 100 + Double(SZNodeLayout.width) / 2, y: 200))
     let graph = SZGraph(nodes: [a, b], connections: [])
-    let buried = SZGraphCanvasModel.sockets(of: a).first { $0.side == .output && $0.kind == .data }!
+    let buried = on.sockets(of: a).first { $0.side == .output && $0.kind == .data }!
     // Array order: B is later → above A → A's output dot is buried.
-    #expect(SZGraphCanvasModel.isOccluded(buried, in: graph))
+    #expect(on.isOccluded(buried, in: graph))
     // Raising A (selection tier) lifts its dots above B.
-    #expect(!SZGraphCanvasModel.isOccluded(buried, in: graph, tiers: [a.id: 2]))
+    #expect(!on.isOccluded(buried, in: graph, tiers: [a.id: 2]))
     // B's own dots are never occluded by B's card, and A's card is below them.
-    let bSocket = SZGraphCanvasModel.sockets(of: b).first { $0.side == .input && $0.kind == .data }!
-    #expect(!SZGraphCanvasModel.isOccluded(bSocket, in: graph))
+    let bSocket = on.sockets(of: b).first { $0.side == .input && $0.kind == .data }!
+    #expect(!on.isOccluded(bSocket, in: graph))
 }
 
 // MARK: - what the canvas draws vs what a connection may target
@@ -588,12 +591,12 @@ private func zooNode() -> SZNode {
         inputs: [SZPort(name: "input", type: .texture)],
         outputs: [SZPort(name: "output", type: .texture)])
 
-    let connectable = SZGraphCanvasModel.connectableSockets(of: draft)
+    let connectable = on.connectableSockets(of: draft)
     #expect(connectable.contains { $0.kind == .data && $0.side == .input && $0.port == "input" })
     #expect(connectable.contains { $0.kind == .data && $0.side == .output && $0.port == "output" })
 
     // …while the canvas still draws only its flow sockets.
-    let drawn = SZGraphCanvasModel.sockets(of: draft)
+    let drawn = on.sockets(of: draft)
     #expect(drawn.allSatisfy { $0.kind == .flow })
 
     // And the edge itself is legal: a texture output into a texture input on another draft.
@@ -602,32 +605,32 @@ private func zooNode() -> SZNode {
     other.contract = draft.contract
     var graph = SZGraph()
     graph.nodes = [draft, other]
-    let out = SZGraphCanvasModel.connectableSockets(of: draft).first { $0.kind == .data && $0.side == .output }!
-    let inp = SZGraphCanvasModel.connectableSockets(of: other).first { $0.kind == .data && $0.side == .input }!
+    let out = on.connectableSockets(of: draft).first { $0.kind == .data && $0.side == .output }!
+    let inp = on.connectableSockets(of: other).first { $0.kind == .data && $0.side == .input }!
     #expect(SZGraphCanvasModel.canConnect(out, inp, in: graph))
 }
 
 @Test func aContractlessDraftExposesOnlyFlowSockets() {
     let draft = SZNode(kind: .prompt, title: "Draft", position: SZPoint(x: 0, y: 0))
-    #expect(SZGraphCanvasModel.connectableSockets(of: draft).allSatisfy { $0.kind == .flow })
+    #expect(on.connectableSockets(of: draft).allSatisfy { $0.kind == .flow })
 }
 
 // MARK: - Card rects, hit-testing, world bounds (the ONE cardRect shared by all geometry consumers)
 
 @Test func cardRectIsCenteredOnNodePosition() {
     let node = promptNode(at: SZPoint(x: 100, y: 200))
-    let rect = SZNodeLayout.cardRect(of: node)
+    let rect = on.cardRect(of: node)
     #expect(rect.midX == 100)
     #expect(rect.midY == 200)
-    #expect(rect.size == SZNodeLayout.size(of: node))
+    #expect(rect.size == on.size(of: node))
 }
 
 @Test func worldBoundsUnionsEveryCardAndIsNilWhenEmpty() {
     let a = promptNode(at: SZPoint(x: 0, y: 0))
     let b = cameraNode(at: SZPoint(x: 600, y: 300))
-    let bounds = SZGraphCanvasModel.worldBounds(of: SZGraph(nodes: [a, b], connections: []))
-    #expect(bounds == SZNodeLayout.cardRect(of: a).union(SZNodeLayout.cardRect(of: b)))
-    #expect(SZGraphCanvasModel.worldBounds(of: SZGraph(nodes: [], connections: [])) == nil)
+    let bounds = on.worldBounds(of: SZGraph(nodes: [a, b], connections: []))
+    #expect(bounds == on.cardRect(of: a).union(on.cardRect(of: b)))
+    #expect(on.worldBounds(of: SZGraph(nodes: [], connections: [])) == nil)
 }
 
 @Test func topmostNodeBreaksTiesByDeclarationOrderAndRespectsTiers() {
@@ -638,13 +641,13 @@ private func zooNode() -> SZNode {
     let above = promptNode(at: SZPoint(x: 10, y: 10))
     let graph = SZGraph(nodes: [below, above], connections: [])
     let point = CGPoint(x: 5, y: 5)   // inside both cards
-    #expect(SZGraphCanvasModel.topmostNode(at: point, in: graph)?.id == above.id)
-    #expect(SZGraphCanvasModel.topmostNode(at: point, in: graph, tiers: [below.id: 2])?.id == below.id)
+    #expect(on.topmostNode(at: point, in: graph)?.id == above.id)
+    #expect(on.topmostNode(at: point, in: graph, tiers: [below.id: 2])?.id == below.id)
 }
 
 @Test func topmostNodeMissesOffCardPointsAndEmptyCanvas() {
     let node = promptNode(at: SZPoint(x: 0, y: 0))
     let graph = SZGraph(nodes: [node], connections: [])
-    #expect(SZGraphCanvasModel.topmostNode(at: CGPoint(x: 10_000, y: 0), in: graph) == nil)
-    #expect(SZGraphCanvasModel.topmostNode(at: .zero, in: SZGraph(nodes: [], connections: [])) == nil)
+    #expect(on.topmostNode(at: CGPoint(x: 10_000, y: 0), in: graph) == nil)
+    #expect(on.topmostNode(at: .zero, in: SZGraph(nodes: [], connections: [])) == nil)
 }

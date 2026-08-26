@@ -7,6 +7,9 @@ import Testing
 @testable import SZUI
 import SZCore
 
+/// Canvas geometry with Live Previews on — the setting these assertions are written against.
+private let on = SZLayoutProbe(previewsEnabled: true)
+
 private func node(at x: Double, _ y: Double) -> SZNode {
     SZNode(kind: .generated, title: "N",
            contract: SZNodeContract(title: "N", sfSymbol: "circle", summary: "s",
@@ -28,7 +31,7 @@ private func close(_ a: CGPoint, _ b: CGPoint, tolerance: CGFloat = 1e-6) -> Boo
 
 @Test func extentCoversBothGraphAndViewportAndFitPreservesAspect() {
     let graph = SZGraph(nodes: [node(at: 0, 0), node(at: 3000, 200)])
-    let bounds = SZGraphCanvasModel.worldBounds(of: graph)!
+    let bounds = on.worldBounds(of: graph)!
     let viewport = CGRect(x: -2000, y: -2000, width: 800, height: 600)   // far off the graph
     let layout = SZMiniMapLayout(graphBounds: bounds, viewport: viewport)
     #expect(layout.extent.contains(bounds))
@@ -61,7 +64,7 @@ private func close(_ a: CGPoint, _ b: CGPoint, tolerance: CGFloat = 1e-6) -> Boo
     let graph = SZGraph(nodes: [node(at: 0, 0), target])
     let viewSize = CGSize(width: 800, height: 600)
     let camera = SZCanvasCamera(zoom: 1.3, offset: CGSize(width: 40, height: 40))
-    let layout = SZMiniMapLayout(graphBounds: SZGraphCanvasModel.worldBounds(of: graph),
+    let layout = SZMiniMapLayout(graphBounds: on.worldBounds(of: graph),
                                  viewport: SZMiniMapLayout.viewportWorldRect(camera: camera, viewSize: viewSize))
     let click = layout.mapPoint(world: CGPoint(x: 2400, y: 900))
     let centered = layout.cameraCentering(mapPoint: click, camera: camera, viewSize: viewSize)

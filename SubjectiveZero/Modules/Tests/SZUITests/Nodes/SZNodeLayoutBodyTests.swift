@@ -3,7 +3,7 @@
 // generated port rows stay, minus the plumbing inputs the card owns; the region's footprint comes
 // from the committed cols/rows (else the contract's `card` hints); a backdrop card's rows are
 // what `backdropRows` computes for the render aspect (the host commits them through auto-size).
-// `previewsEnabled` is process-global, so these run `.serialized` and pin it per test.
+// The Live Previews gate reaches layout as an argument; these assertions are written with it on.
 import CoreGraphics
 import Testing
 @testable import SZUI
@@ -28,22 +28,23 @@ private func cornerPinNode(pinned: Bool? = nil, rows: Int? = nil) -> SZNode {
                hints: SZCardHints(cols: 12, rows: 8, backdrop: "output", plumbing: ["tl", "tr", "br", "bl"]))
 }
 
-@Suite(.serialized) struct SZNodeLayoutCustomBodyTests {
-    init() { SZNodeLayout.previewsEnabled = true }
+private let on = SZLayoutProbe(previewsEnabled: true)
+
+@Suite struct SZNodeLayoutCustomBodyTests {
 
     @Test func customCardIsARegionAboveTheGeneratedRows() {
         // 8-row region → header 40 + region 192 + top pad 4 + 2 rows (value, out) 48 + bottom pad 4 = 288.
         let node = customNode()
         #expect(SZNodeLayout.customInset(of: node) == 192)
-        #expect(SZNodeLayout.height(of: node) == 288)
+        #expect(on.height(of: node) == 288)
         // Rows still count: more ports, taller card (the region doesn't swallow them).
         var many = customNode()
         many.contract?.inputs += (0..<2).map { SZPort(name: "p\($0)", type: .float) }
-        #expect(SZNodeLayout.height(of: many) == CGFloat(288 + 48))
+        #expect(on.height(of: many) == CGFloat(288 + 48))
         // Grid invariant: height is a multiple of the pitch.
-        #expect(SZNodeLayout.height(of: node).truncatingRemainder(dividingBy: SZNodeLayout.gridPitch) == 0)
+        #expect(on.height(of: node).truncatingRemainder(dividingBy: SZNodeLayout.gridPitch) == 0)
         // Rows sit BELOW the region: first row center = top + header + region + pad + 12.
-        #expect(SZNodeLayout.rowCenterY(of: node, row: 0) == CGFloat(-144 + 40 + 192 + 4 + 12))
+        #expect(on.rowCenterY(of: node, row: 0) == CGFloat(-144 + 40 + 192 + 4 + 12))
     }
 
     @Test func customRowsClampToTheSharedBounds() {
@@ -79,20 +80,20 @@ private func cornerPinNode(pinned: Bool? = nil, rows: Int? = nil) -> SZNode {
         #expect(!SZNodeLayout.isPlumbing(node, port: "input"))
         #expect(SZNodeLayout.rowInputs(of: node).map(\.name) == ["input"])
         // Sockets: flow in/out + `input` + `output` only.
-        let data = SZGraphCanvasModel.sockets(of: node).filter { $0.kind == .data }
+        let data = on.sockets(of: node).filter { $0.kind == .data }
         #expect(data.map(\.port) == ["input", "output"])
         // The `input` row is the first (and only) input row; `output` follows it.
-        #expect(SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "input").y
-                == SZNodeLayout.rowCenterY(of: node, row: 0))
-        #expect(SZNodeLayout.socketOffset(of: node, side: .output, kind: .data, port: "output").y
-                == SZNodeLayout.rowCenterY(of: node, row: 1))
+        #expect(on.socketOffset(of: node, side: .input, kind: .data, port: "input").y
+                == on.rowCenterY(of: node, row: 0))
+        #expect(on.socketOffset(of: node, side: .output, kind: .data, port: "output").y
+                == on.rowCenterY(of: node, row: 1))
         // A stray edge to a plumbing port lands on the region's edge, mid-height (never the flow dot).
-        let stray = SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "br")
-        #expect(stray.y == -SZNodeLayout.height(of: node) / 2 + 40 + SZNodeLayout.customInset(of: node) / 2)
+        let stray = on.socketOffset(of: node, side: .input, kind: .data, port: "br")
+        #expect(stray.y == -on.height(of: node) / 2 + 40 + SZNodeLayout.customInset(of: node) / 2)
         // Rows shown again (body none) → nothing is plumbing; every port has its row + dot.
         var rows = node; rows.body = SZNodeBody(mode: .none)
         #expect(!SZNodeLayout.isPlumbing(rows, port: "tl"))
-        #expect(SZGraphCanvasModel.sockets(of: rows).filter { $0.kind == .data && $0.side == .input }.count == 5)
+        #expect(on.sockets(of: rows).filter { $0.kind == .data && $0.side == .input }.count == 5)
     }
 
     @Test func backdropRowsFollowTheRenderAspect() {
@@ -133,8 +134,8 @@ private func cornerPinNode(pinned: Bool? = nil, rows: Int? = nil) -> SZNode {
 
     @Test func flowSocketsKeepRidingTheHeader() {
         let node = customNode(rows: 8)
-        let flow = SZNodeLayout.socketOffset(of: node, side: .input, kind: .flow, port: "in")
-        #expect(flow.y == -SZNodeLayout.height(of: node) / 2 + SZNodeLayout.headerHeight / 2)
+        let flow = on.socketOffset(of: node, side: .input, kind: .flow, port: "in")
+        #expect(flow.y == -on.height(of: node) / 2 + SZNodeLayout.headerHeight / 2)
     }
 
     @Test func effectiveCustomIsTheModeAloneAndNeedsNoTexture() {

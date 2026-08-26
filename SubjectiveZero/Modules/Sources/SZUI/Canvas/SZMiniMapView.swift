@@ -11,6 +11,8 @@ struct SZMiniMapView: View {
     let graph: SZGraph
     let camera: SZCanvasCamera
     let viewSize: CGSize
+    /// Graph ▸ Live Previews — card geometry derives from it, so the map's rects do too.
+    let previewsEnabled: Bool
     let isRunning: Bool
     let isSelected: (SZNodeID) -> Bool
     let statusOf: (SZNode) -> SZNodeStatus
@@ -33,7 +35,8 @@ struct SZMiniMapView: View {
 
     private var layout: SZMiniMapLayout {
         dragStart?.layout
-            ?? SZMiniMapLayout(graphBounds: SZGraphCanvasModel.worldBounds(of: graph),
+            ?? SZMiniMapLayout(graphBounds: SZGraphCanvasModel.worldBounds(of: graph,
+                                                                         previewsEnabled: previewsEnabled),
                                viewport: SZMiniMapLayout.viewportWorldRect(camera: camera, viewSize: viewSize))
     }
 
@@ -45,13 +48,16 @@ struct SZMiniMapView: View {
             context.fill(Path(roundedRect: bounds, cornerRadius: Self.cornerRadius), with: .color(Color(white: 0.055)))
             var wires = Path()
             for connection in graph.connections {
-                guard let ends = SZGraphCanvasModel.endpoints(of: connection, in: graph) else { continue }
+                guard let ends = SZGraphCanvasModel.endpoints(of: connection, in: graph,
+                                                             previewsEnabled: previewsEnabled)
+                else { continue }
                 wires.move(to: layout.mapPoint(world: ends.from))
                 wires.addLine(to: layout.mapPoint(world: ends.to))
             }
             context.stroke(wires, with: .color(.white.opacity(0.25)), lineWidth: 0.75)
             for node in graph.nodes {
-                let rect = layout.mapRect(world: SZNodeLayout.cardRect(of: node))
+                let rect = layout.mapRect(world: SZNodeLayout.cardRect(of: node,
+                                                                      previewsEnabled: previewsEnabled))
                 let status = statusOf(node)
                 let fill: Color = SZNodeCanvasContentView.showPill(status, isRunning: isRunning)
                     ? status.color.opacity(0.85)

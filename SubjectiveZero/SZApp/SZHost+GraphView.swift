@@ -19,7 +19,8 @@ extension SZHost {
     func tidyGraph() -> [SZNodeID: SZPoint] {
         guard let graph = store.project?.graph, !graph.nodes.isEmpty else { return [:] }
         let tidied = SZGraphLayout.tidied(nodes: graph.nodes, connections: graph.connections,
-                                          anchor: graph.renderEndpoint?.node)
+                                          anchor: graph.renderEndpoint?.node,
+                                          previewsEnabled: livePreviews)
         guard !tidied.isEmpty else { return [:] }
         store.moveNodes(tidied.map { (id: $0.key, to: $0.value) })
         persistProject()

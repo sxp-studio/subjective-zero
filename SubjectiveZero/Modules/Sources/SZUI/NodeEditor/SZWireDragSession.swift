@@ -24,9 +24,11 @@ struct SZWireDragSession {
     /// the edge-path pickup). Everything else (outputs, flow, unwired inputs) starts a new wire — a
     /// flow-in holds N edges, so its wires are picked up along their paths instead.
     static func begin(from socket: SZSocket, atWorld world: CGPoint, screen: CGPoint,
-                      in graph: SZGraph, isLocked: (SZNodeID) -> Bool) -> SZWireDragSession? {
+                      in graph: SZGraph, previewsEnabled: Bool,
+                      isLocked: (SZNodeID) -> Bool) -> SZWireDragSession? {
         if let conn = SZGraphCanvasModel.incomingDataConnection(to: socket, in: graph),
-           let anchor = SZGraphCanvasModel.pickupAnchor(detaching: .to, of: conn, in: graph) {
+           let anchor = SZGraphCanvasModel.pickupAnchor(detaching: .to, of: conn, in: graph,
+                                                        previewsEnabled: previewsEnabled) {
             guard !isLocked(conn.from.node) else { return nil }
             return SZWireDragSession(grabbed: socket, source: anchor, start: world, current: world,
                                      lastScreen: screen, target: nil,
@@ -40,9 +42,11 @@ struct SZWireDragSession {
     /// (nearer the input → re-route the input end, nearer the output → re-route the source) and the
     /// preview anchors at the kept end. Nil if the edge's endpoints don't resolve.
     static func begin(along connection: SZConnection, atWorld world: CGPoint, screen: CGPoint,
-                      in graph: SZGraph) -> SZWireDragSession? {
-        guard let end = SZGraphCanvasModel.detachableEnd(of: connection, grabbedAt: world, in: graph),
-              let anchor = SZGraphCanvasModel.pickupAnchor(detaching: end, of: connection, in: graph)
+                      in graph: SZGraph, previewsEnabled: Bool) -> SZWireDragSession? {
+        guard let end = SZGraphCanvasModel.detachableEnd(of: connection, grabbedAt: world, in: graph,
+                                                         previewsEnabled: previewsEnabled),
+              let anchor = SZGraphCanvasModel.pickupAnchor(detaching: end, of: connection, in: graph,
+                                                           previewsEnabled: previewsEnabled)
         else { return nil }
         return SZWireDragSession(grabbed: anchor, source: anchor, start: world, current: world,
                                  lastScreen: screen, target: nil,
@@ -52,12 +56,13 @@ struct SZWireDragSession {
     /// Shared per-tick update for both wire gestures: track the cursor, arm the click guard once the
     /// grab has really moved (world-space, zoom-aware), and snap to the nearest legal target.
     mutating func update(toWorld world: CGPoint, zoom: CGFloat, in graph: SZGraph,
-                         tiers: [SZNodeID: Int], isLocked: (SZNodeID) -> Bool) {
+                         tiers: [SZNodeID: Int], previewsEnabled: Bool,
+                         isLocked: (SZNodeID) -> Bool) {
         current = world
         if hypot(world.x - start.x, world.y - start.y) > 8 / max(zoom, 0.1) { moved = true }
         target = SZGraphCanvasModel.snapTarget(for: source, at: world, zoom: zoom, in: graph,
                                                tiers: tiers, pickedConnectionID: picked?.id,
-                                               isLocked: isLocked)
+                                               previewsEnabled: previewsEnabled, isLocked: isLocked)
     }
 
     /// What a drop should do — the panel dispatches to the host/store.

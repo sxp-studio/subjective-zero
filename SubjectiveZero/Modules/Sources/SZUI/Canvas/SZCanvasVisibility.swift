@@ -11,11 +11,14 @@ enum SZCanvasVisibility {
     static let overscan: CGFloat = 0.25
 
     /// Nodes whose card rect intersects the current screen viewport (inflated by `overscan`).
-    static func visibleNodes(in graph: SZGraph, camera: SZCanvasCamera, viewSize: CGSize) -> Set<SZNodeID> {
+    static func visibleNodes(in graph: SZGraph, camera: SZCanvasCamera, viewSize: CGSize,
+                             previewsEnabled: Bool) -> Set<SZNodeID> {
         guard viewSize.width > 0, viewSize.height > 0 else { return [] }
         let screen = CGRect(origin: .zero, size: viewSize)
             .insetBy(dx: -viewSize.width * overscan, dy: -viewSize.height * overscan)
         let viewport = SZMiniMapLayout.viewportWorldRect(camera: camera, screen: screen)
-        return Set(graph.nodes.filter { SZNodeLayout.cardRect(of: $0).intersects(viewport) }.map(\.id))
+        return Set(graph.nodes.filter {
+            SZNodeLayout.cardRect(of: $0, previewsEnabled: previewsEnabled).intersects(viewport)
+        }.map(\.id))
     }
 }

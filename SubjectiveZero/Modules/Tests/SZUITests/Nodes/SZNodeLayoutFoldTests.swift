@@ -2,8 +2,8 @@
 // Folding a card's plugs: the rows go, the body stays, and the card keeps its TOP edge. The
 // invariants that matter are (1) the fold removes a whole number of grid cells, so a snapped card
 // stays snapped through it, (2) width never moves, so no wire shifts sideways, and (3) the tier is
-// render-only — geometry never reads zoom. `previewsEnabled` is process-global, so this whole suite is
-// `.serialized` and pins it: the reads and the one flip must not interleave.
+// render-only — geometry never reads zoom. The Live Previews gate reaches layout as an argument, so
+// this suite states it once (`on` / `off`) and nothing here is order-dependent.
 import CoreGraphics
 import Testing
 @testable import SZUI
@@ -44,17 +44,19 @@ private func knobCardNode() -> SZNode {
            body: SZNodeBody(mode: .custom, custom: SZCustomCardRef(rows: 4)))
 }
 
-@Suite(.serialized) struct SZNodeLayoutFoldTests {
-    init() { SZNodeLayout.previewsEnabled = true }
+private let on = SZLayoutProbe(previewsEnabled: true)
+private let off = SZLayoutProbe(previewsEnabled: false)
+
+@Suite struct SZNodeLayoutFoldTests {
 
     // MARK: - Height and the grid
 
     @Test func foldingDropsExactlyTheRowBand() {
         let node = previewNode()                       // 3 in + 1 out, 144pt preview
-        #expect(SZNodeLayout.height(of: node) == 288)  // 40 + 144 + 4 + 4*24 + 4
-        #expect(SZNodeLayout.height(of: folded(node)) == 192)   // 40 + 4 + 144 + 4
-        #expect(SZNodeLayout.foldDelta(of: node) == 96)
-        #expect(SZNodeLayout.foldDelta(of: folded(node)) == 96) // same both ways, so the toggle reverses
+        #expect(on.height(of: node) == 288)  // 40 + 144 + 4 + 4*24 + 4
+        #expect(on.height(of: folded(node)) == 192)   // 40 + 4 + 144 + 4
+        #expect(on.foldDelta(of: node) == 96)
+        #expect(on.foldDelta(of: folded(node)) == 96) // same both ways, so the toggle reverses
     }
 
     /// The top-anchor invariant: holding the top edge and moving the centre by foldDelta/2 leaves all
@@ -62,21 +64,21 @@ private func knobCardNode() -> SZNode {
     @Test func topAnchoredFoldKeepsEveryEdgeOnGrid() {
         for count in 1...12 {
             let node = previewNode(inputs: count)            // + 1 texture output, so rows = count + 1
-            #expect(SZNodeLayout.canFoldPlugs(node))
-            let delta = SZNodeLayout.foldDelta(of: node)
+            #expect(on.canFoldPlugs(node))
+            let delta = on.foldDelta(of: node)
             #expect(delta == CGFloat(count + 1) * SZNodeLayout.rowHeight)
             #expect(delta.truncatingRemainder(dividingBy: SZNodeLayout.gridPitch) == 0,
                     "fold must remove whole cells (count \(count))")
 
             // Snap the expanded card, then fold it holding the top edge.
             let snapped = SZNodeLayout.snappedCenter(CGPoint(x: 13, y: 7),
-                                                     size: SZNodeLayout.size(of: node))
+                                                     size: on.size(of: node))
             var open = node
             open.position = SZPoint(x: snapped.x, y: snapped.y)
             var shut = folded(open)
             shut.position = SZPoint(x: snapped.x, y: snapped.y - delta / 2)
 
-            let a = SZNodeLayout.cardRect(of: open), b = SZNodeLayout.cardRect(of: shut)
+            let a = on.cardRect(of: open), b = on.cardRect(of: shut)
             #expect(a.minY == b.minY, "top edge must not move (count \(count))")
             for edge in [b.minX, b.maxX, b.minY, b.maxY] {
                 #expect(edge.truncatingRemainder(dividingBy: SZNodeLayout.gridPitch) == 0,
@@ -87,7 +89,7 @@ private func knobCardNode() -> SZNode {
 
     @Test func widthNeverMoves() {
         let node = previewNode()
-        #expect(!SZNodeLayout.showsPlugs(of: folded(node)))   // guard: the fixture really folds
+        #expect(!on.showsPlugs(of: folded(node)))   // guard: the fixture really folds
         #expect(SZNodeLayout.width(of: folded(node)) == SZNodeLayout.width(of: node))
     }
 
@@ -95,20 +97,20 @@ private func knobCardNode() -> SZNode {
 
     @Test func foldedSocketsStackInPortOrderAtRowPitch() {
         let node = folded(previewNode())               // card spans y ∈ [-96, +96]
-        let ys = (0..<3).map { SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "in\($0)").y }
+        let ys = (0..<3).map { on.socketOffset(of: node, side: .input, kind: .data, port: "in\($0)").y }
         #expect(ys == [-4, 20, 44])                    // centred in the 152pt region below the header
         #expect(zip(ys, ys.dropFirst()).allSatisfy { $1 - $0 == SZNodeLayout.rowHeight })
         // The single output centres on the same region.
-        #expect(SZNodeLayout.socketOffset(of: node, side: .output, kind: .data, port: "out0").y == 20)
+        #expect(on.socketOffset(of: node, side: .output, kind: .data, port: "out0").y == 20)
         // Every dot stays inside the card.
-        let rect = SZNodeLayout.cardRect(of: node)
+        let rect = on.cardRect(of: node)
         for y in ys { #expect(y > rect.minY && y < rect.maxY) }
     }
 
     @Test func aCrowdedCardSqueezesRatherThanSpills() {
         let node = folded(previewNode(inputs: 12))
-        let rect = SZNodeLayout.cardRect(of: node)
-        let ys = (0..<12).map { SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "in\($0)").y }
+        let rect = on.cardRect(of: node)
+        let ys = (0..<12).map { on.socketOffset(of: node, side: .input, kind: .data, port: "in\($0)").y }
         for y in ys { #expect(y >= rect.minY && y <= rect.maxY) }
         #expect(ys == ys.sorted(), "port order must survive the fold")
     }
@@ -116,11 +118,11 @@ private func knobCardNode() -> SZNode {
     @Test func flowSocketsAndSidesAreUnaffected() {
         let node = folded(previewNode())
         // Flow rides the header, which the fold never touches.
-        #expect(SZNodeLayout.socketOffset(of: node, side: .input, kind: .flow, port: "").y
-                    == SZNodeLayout.flowY(of: node))
-        #expect(SZNodeLayout.socketOffset(of: node, side: .input, kind: .data, port: "in0").x
+        #expect(on.socketOffset(of: node, side: .input, kind: .flow, port: "").y
+                    == on.flowY(of: node))
+        #expect(on.socketOffset(of: node, side: .input, kind: .data, port: "in0").x
                     == -SZNodeLayout.width(of: node) / 2)
-        #expect(SZNodeLayout.socketOffset(of: node, side: .output, kind: .data, port: "out0").x
+        #expect(on.socketOffset(of: node, side: .output, kind: .data, port: "out0").x
                     == SZNodeLayout.width(of: node) / 2)
     }
 
@@ -128,54 +130,52 @@ private func knobCardNode() -> SZNode {
     /// occlusion and validity keep working on a folded card.
     @Test func theSocketSetIsUnchangedByTheFold() {
         let node = previewNode()
-        #expect(SZGraphCanvasModel.sockets(of: folded(node)).count == SZGraphCanvasModel.sockets(of: node).count)
-        #expect(SZGraphCanvasModel.connectableSockets(of: folded(node)).count
-                    == SZGraphCanvasModel.connectableSockets(of: node).count)
+        #expect(on.sockets(of: folded(node)).count == on.sockets(of: node).count)
+        #expect(on.connectableSockets(of: folded(node)).count
+                    == on.connectableSockets(of: node).count)
     }
 
     // MARK: - When a fold is offered
 
     @Test func aCardWithNothingToShowCannotFold() {
         let bare = bodylessNode()
-        #expect(!SZNodeLayout.canFoldPlugs(bare))
+        #expect(!on.canFoldPlugs(bare))
         // Even with the flag set, it keeps its rows rather than becoming a title chip.
         var pinned = bare
         pinned.body = SZNodeBody(mode: .none, plugs: false)
-        #expect(SZNodeLayout.showsPlugs(of: pinned))
-        #expect(SZNodeLayout.height(of: pinned) == SZNodeLayout.height(of: bare))
-        #expect(SZNodeLayout.foldDelta(of: pinned) == 0)
+        #expect(on.showsPlugs(of: pinned))
+        #expect(on.height(of: pinned) == on.height(of: bare))
+        #expect(on.foldDelta(of: pinned) == 0)
     }
 
     @Test func aCustomCardWithNoBackdropStillFolds() {
         let knob = knobCardNode()
-        #expect(SZNodeLayout.canFoldPlugs(knob))          // the card IS the body, no preview needed
+        #expect(on.canFoldPlugs(knob))          // the card IS the body, no preview needed
         #expect(knob.effectivePreviewPort == nil)
         // 40 + 4 + 96 (4 rows of card) + 4
-        #expect(SZNodeLayout.height(of: folded(knob)) == 144)
+        #expect(on.height(of: folded(knob)) == 144)
     }
 
     // MARK: - The tier
 
     @Test func tierResolvesDistanceBeforeIntent() {
         let open = previewNode(), shut = folded(open)
-        #expect(SZNodeLayout.tier(of: open, zoomedOut: false) == .full)
-        #expect(SZNodeLayout.tier(of: shut, zoomedOut: false) == .picture)
+        #expect(on.tier(of: open, zoomedOut: false) == .full)
+        #expect(on.tier(of: shut, zoomedOut: false) == .picture)
         // From orbit a folded card and an expanded one render the same way.
-        #expect(SZNodeLayout.tier(of: open, zoomedOut: true) == .tile)
-        #expect(SZNodeLayout.tier(of: shut, zoomedOut: true) == .tile)
+        #expect(on.tier(of: open, zoomedOut: true) == .tile)
+        #expect(on.tier(of: shut, zoomedOut: true) == .tile)
     }
 
     /// With previews off a `.preview` card has no rendered body, so it must come back to its rows
-    /// rather than collapse to a bare title chip. Keyed on the RENDERED height, not the mode.
+    /// rather than collapse to a bare title chip. Keyed on the rendered height, not the mode.
     @Test func previewsOffTakesTheFoldAway() {
         let node = folded(previewNode())
-        #expect(!SZNodeLayout.showsPlugs(of: node))
-        SZNodeLayout.previewsEnabled = false
-        defer { SZNodeLayout.previewsEnabled = true }
+        #expect(!on.showsPlugs(of: node))                // folded while the gate is on
         #expect(node.effectiveBodyMode == .preview)      // the mode is unchanged...
-        #expect(!SZNodeLayout.canFoldPlugs(node))        // ...but there is nothing to fold to
-        #expect(SZNodeLayout.showsPlugs(of: node))
+        #expect(!off.canFoldPlugs(node))                 // ...but there is nothing to fold to
+        #expect(off.showsPlugs(of: node))
         let expanded: CGFloat = 144   // 40 header + 4 pad + 4 rows * 24 + 4 pad
-        #expect(SZNodeLayout.height(of: node) == expanded)
+        #expect(off.height(of: node) == expanded)
     }
 }

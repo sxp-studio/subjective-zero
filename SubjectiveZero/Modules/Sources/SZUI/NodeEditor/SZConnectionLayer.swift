@@ -57,6 +57,8 @@ struct SZConnectionHitShape: Shape {
 
 struct SZConnectionLayer: View {
     let graph: SZGraph
+    /// Graph ▸ Live Previews — the edges must meet the sockets on the cards it reshapes.
+    let previewsEnabled: Bool
     var zoom: CGFloat = 1
     var selectedID: SZConnectionID?
     var hiddenID: SZConnectionID?      // a picked-up edge: invisible (the drag preview stands in), but the
@@ -76,7 +78,8 @@ struct SZConnectionLayer: View {
         let animated = graph.connections.count <= Self.animationEdgeLimit
         ZStack {
             ForEach(graph.connections) { connection in
-                if let points = SZGraphCanvasModel.endpoints(of: connection, in: graph) {
+                if let points = SZGraphCanvasModel.endpoints(of: connection, in: graph,
+                                                             previewsEnabled: previewsEnabled) {
                     // The visual stroke is an Equatable subtree: a drag tick re-strokes only the edges
                     // whose endpoints actually moved. The hit shape + gestures stay OUT here so their
                     // closures are rebuilt every render and never capture a stale graph.

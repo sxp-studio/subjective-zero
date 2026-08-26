@@ -8,6 +8,9 @@ import Testing
 @testable import SZUI
 import SZCore
 
+/// Canvas geometry with Live Previews on — the setting these assertions are written against.
+private let on = SZLayoutProbe(previewsEnabled: true)
+
 private func texNode(_ title: String, at position: SZPoint,
                      inputs: [String] = [], outputs: [String] = []) -> SZNode {
     SZNode(kind: .generated, title: title, sfSymbol: "circle",
@@ -18,7 +21,7 @@ private func texNode(_ title: String, at position: SZPoint,
 }
 
 private func socket(_ node: SZNode, _ side: SZSocketSide, _ kind: SZConnectionKind, _ port: String) -> SZSocket {
-    SZGraphCanvasModel.connectableSockets(of: node).first {
+    on.connectableSockets(of: node).first {
         $0.side == side && $0.kind == kind && $0.port == port
     }!
 }
@@ -39,7 +42,7 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
 @Test func grabbingAConnectedDataInputPicksUpItsWireAnchoredAtTheFarOutput() {
     let (source, sink, conn, graph) = wiredGraph()
     let grab = socket(sink, .input, .data, "input")
-    let session = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+    let session = on.begin(from: grab, atWorld: grab.point, screen: grab.point,
                                           in: graph, isLocked: unlocked)
     #expect(session?.picked?.id == conn.id)
     #expect(session?.picked?.end == .to)
@@ -51,7 +54,7 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
 @Test func pickupIsRefusedWhenTheFarEndIsLocked() {
     let (source, sink, _, graph) = wiredGraph()
     let grab = socket(sink, .input, .data, "input")
-    let session = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+    let session = on.begin(from: grab, atWorld: grab.point, screen: grab.point,
                                           in: graph) { $0 == source.id }
     #expect(session == nil)
 }
@@ -61,7 +64,7 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     for grab in [socket(source, .output, .data, "out"),      // an output
                  socket(sink, .output, .data, "result"),     // an unwired output
                  socket(source, .input, .flow, "")] {        // a flow socket
-        let session = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+        let session = on.begin(from: grab, atWorld: grab.point, screen: grab.point,
                                               in: graph, isLocked: unlocked)
         #expect(session?.picked == nil)
         #expect(session?.source.id == grab.id)               // anchored where it started
@@ -70,15 +73,15 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
 
 @Test func edgeGrabDetachesTheEndNearerTheGrab() {
     let (source, sink, conn, graph) = wiredGraph()
-    let pts = SZGraphCanvasModel.endpoints(of: conn, in: graph)!
+    let pts = on.endpoints(of: conn, in: graph)!
     // Grab near the INPUT end → the input end detaches; preview keeps the output anchor.
     let nearInput = CGPoint(x: pts.to.x - 20, y: pts.to.y)
-    let a = SZWireDragSession.begin(along: conn, atWorld: nearInput, screen: nearInput, in: graph)
+    let a = on.begin(along: conn, atWorld: nearInput, screen: nearInput, in: graph)
     #expect(a?.picked?.end == .to)
     #expect(a?.source.nodeID == source.id)
     // Grab near the OUTPUT end → the source end detaches; preview keeps the input anchor.
     let nearOutput = CGPoint(x: pts.from.x + 20, y: pts.from.y)
-    let b = SZWireDragSession.begin(along: conn, atWorld: nearOutput, screen: nearOutput, in: graph)
+    let b = on.begin(along: conn, atWorld: nearOutput, screen: nearOutput, in: graph)
     #expect(b?.picked?.end == .from)
     #expect(b?.source.nodeID == sink.id)
 }
@@ -88,30 +91,30 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
 @Test func aSubThresholdWobbleNeverDropsOrDisconnects() {
     let (_, sink, _, graph) = wiredGraph()
     let grab = socket(sink, .input, .data, "input")
-    var session = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+    var session = on.begin(from: grab, atWorld: grab.point, screen: grab.point,
                                           in: graph, isLocked: unlocked)!
     // 5pt of wobble at zoom 1 stays under the 8pt guard: the pickup must restore untouched.
     session.update(toWorld: CGPoint(x: grab.point.x + 5, y: grab.point.y), zoom: 1,
-                   in: graph, tiers: [:], isLocked: unlocked)
+                   in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(!session.moved)
     #expect(session.outcome() == .none)
     // The same drag past the guard, dropped on empty canvas, disconnects.
     session.update(toWorld: CGPoint(x: grab.point.x + 200, y: grab.point.y + 200), zoom: 1,
-                   in: graph, tiers: [:], isLocked: unlocked)
+                   in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(session.moved)
 }
 
 @Test func theClickGuardThresholdIsZoomAware() {
     let (_, sink, _, graph) = wiredGraph()
     let grab = socket(sink, .input, .data, "input")
-    var session = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+    var session = on.begin(from: grab, atWorld: grab.point, screen: grab.point,
                                           in: graph, isLocked: unlocked)!
     // 12 world-pt exceeds 8/1 at zoom 1 but stays under 8/0.5 = 16 at zoom 0.5.
     session.update(toWorld: CGPoint(x: grab.point.x + 12, y: grab.point.y), zoom: 0.5,
-                   in: graph, tiers: [:], isLocked: unlocked)
+                   in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(!session.moved)
     session.update(toWorld: CGPoint(x: grab.point.x + 12, y: grab.point.y), zoom: 1,
-                   in: graph, tiers: [:], isLocked: unlocked)
+                   in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(session.moved)
 }
 
@@ -120,9 +123,9 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
 @Test func aPickedWireDroppedOnEmptyCanvasDisconnects() {
     let (_, sink, conn, graph) = wiredGraph()
     let grab = socket(sink, .input, .data, "input")
-    var session = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+    var session = on.begin(from: grab, atWorld: grab.point, screen: grab.point,
                                           in: graph, isLocked: unlocked)!
-    session.update(toWorld: CGPoint(x: 300, y: 400), zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    session.update(toWorld: CGPoint(x: 300, y: 400), zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(session.target == nil)
     #expect(session.outcome() == .disconnect(conn.id))
 }
@@ -130,11 +133,11 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
 @Test func droppingBackOnTheOriginalPortRestoresTheWireUntouched() {
     let (_, sink, _, graph) = wiredGraph()
     let grab = socket(sink, .input, .data, "input")
-    var session = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+    var session = on.begin(from: grab, atWorld: grab.point, screen: grab.point,
                                           in: graph, isLocked: unlocked)!
     // Wander past the click guard, then come home: the snap re-acquires the original socket.
-    session.update(toWorld: CGPoint(x: 300, y: 400), zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
-    session.update(toWorld: grab.point, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    session.update(toWorld: CGPoint(x: 300, y: 400), zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
+    session.update(toWorld: grab.point, zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(session.target?.id == grab.id)
     #expect(session.outcome() == .none)
 }
@@ -147,16 +150,16 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     let flow = SZConnection(from: SZPortRef(node: a.id, port: "flow"),
                             to: SZPortRef(node: b.id, port: "flow"), kind: .flow)
     let graph = SZGraph(nodes: [a, b], connections: [flow])
-    let pts = SZGraphCanvasModel.endpoints(of: flow, in: graph)!
+    let pts = on.endpoints(of: flow, in: graph)!
     let nearInput = CGPoint(x: pts.to.x - 20, y: pts.to.y)
-    var session = SZWireDragSession.begin(along: flow, atWorld: nearInput, screen: nearInput, in: graph)!
-    session.update(toWorld: CGPoint(x: 300, y: 300), zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
-    session.update(toWorld: pts.to, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    var session = on.begin(along: flow, atWorld: nearInput, screen: nearInput, in: graph)!
+    session.update(toWorld: CGPoint(x: 300, y: 300), zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
+    session.update(toWorld: pts.to, zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(session.target?.nodeID == b.id)
     #expect(session.outcome() == .none)
     // …but dropping it on the same node's BLUE input is a real re-route: the edge becomes pinned.
     let blueIn = socket(b, .input, .data, "input")
-    session.update(toWorld: blueIn.point, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    session.update(toWorld: blueIn.point, zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(session.target?.id == blueIn.id)
     #expect(session.outcome() == .reconnect(flow.id, .to, SZPortRef(node: b.id, port: "input")))
 }
@@ -169,9 +172,9 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     // flow-out → blue input: a flow edge, its `to` pinned to the exact slot; `from` is the plain marker
     let flowOut = socket(a, .output, .flow, "")
     let mask = socket(b, .input, .data, "mask")
-    var s1 = SZWireDragSession.begin(from: flowOut, atWorld: flowOut.point, screen: flowOut.point,
+    var s1 = on.begin(from: flowOut, atWorld: flowOut.point, screen: flowOut.point,
                                      in: graph, isLocked: unlocked)!
-    s1.update(toWorld: mask.point, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    s1.update(toWorld: mask.point, zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(s1.target?.id == mask.id)
     #expect(s1.outcome() == .connect(from: SZPortRef.flow(node: a.id),
                                      to: SZPortRef(node: b.id, port: "mask"), kind: .flow))
@@ -179,9 +182,9 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     // blue output → flow-in: the mirror image pins the SOURCE port
     let out = socket(a, .output, .data, "out")
     let flowIn = socket(b, .input, .flow, "")
-    var s2 = SZWireDragSession.begin(from: out, atWorld: out.point, screen: out.point,
+    var s2 = on.begin(from: out, atWorld: out.point, screen: out.point,
                                      in: graph, isLocked: unlocked)!
-    s2.update(toWorld: flowIn.point, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    s2.update(toWorld: flowIn.point, zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(s2.outcome() == .connect(from: SZPortRef(node: a.id, port: "out"),
                                      to: SZPortRef.flow(node: b.id), kind: .flow))
 
@@ -190,9 +193,9 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
                             to: SZPortRef(node: b.id, port: "input"), kind: .data)
     let wired = SZGraph(nodes: [a, b], connections: [data])
     let grab = socket(b, .input, .data, "input")
-    var s3 = SZWireDragSession.begin(from: grab, atWorld: grab.point, screen: grab.point,
+    var s3 = on.begin(from: grab, atWorld: grab.point, screen: grab.point,
                                      in: wired, isLocked: unlocked)!
-    s3.update(toWorld: flowIn.point, zoom: 1, in: wired, tiers: [:], isLocked: unlocked)
+    s3.update(toWorld: flowIn.point, zoom: 1, in: wired, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(s3.target == nil)
 }
 
@@ -209,15 +212,15 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
         to: SZPortRef(node: to.id, port: "input"), kind: .data)
 
     // output → input
-    var a = SZWireDragSession.begin(from: out, atWorld: out.point, screen: out.point,
+    var a = on.begin(from: out, atWorld: out.point, screen: out.point,
                                     in: fresh, isLocked: unlocked)!
-    a.update(toWorld: inp.point, zoom: 1, in: fresh, tiers: [:], isLocked: unlocked)
+    a.update(toWorld: inp.point, zoom: 1, in: fresh, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(a.outcome() == expected)
 
     // input → output lands the SAME oriented connect
-    var b = SZWireDragSession.begin(from: inp, atWorld: inp.point, screen: inp.point,
+    var b = on.begin(from: inp, atWorld: inp.point, screen: inp.point,
                                     in: fresh, isLocked: unlocked)!
-    b.update(toWorld: out.point, zoom: 1, in: fresh, tiers: [:], isLocked: unlocked)
+    b.update(toWorld: out.point, zoom: 1, in: fresh, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(b.outcome() == expected)
 }
 
@@ -228,9 +231,9 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
 
     // From a flow-OUT the node is downstream and grows rightward: LEFT edge at the drop point.
     let flowOut = socket(a, .output, .flow, "")
-    var out = SZWireDragSession.begin(from: flowOut, atWorld: flowOut.point, screen: flowOut.point,
+    var out = on.begin(from: flowOut, atWorld: flowOut.point, screen: flowOut.point,
                                       in: graph, isLocked: unlocked)!
-    out.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    out.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(out.outcome() == .spawnPromptNode(
         center: CGPoint(x: drop.x + SZNodeLayout.width / 2, y: drop.y),
         source: SZPortRef(node: a.id, port: "flow"), kind: .flow, downstream: true))
@@ -238,9 +241,9 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     // From a flow-IN the node is upstream and grows leftward. The center is RAW — snapping is the
     // panel's placement rule (snappedPromptCenter), applied at dispatch, not the session's.
     let flowIn = socket(a, .input, .flow, "")
-    var inp = SZWireDragSession.begin(from: flowIn, atWorld: flowIn.point, screen: flowIn.point,
+    var inp = on.begin(from: flowIn, atWorld: flowIn.point, screen: flowIn.point,
                                       in: graph, isLocked: unlocked)!
-    inp.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    inp.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(inp.outcome() == .spawnPromptNode(
         center: CGPoint(x: drop.x - SZNodeLayout.width / 2, y: drop.y),
         source: SZPortRef(node: a.id, port: "flow"), kind: .flow, downstream: false))
@@ -253,22 +256,22 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
 
     // A plain click on a data socket (sub-threshold, `moved` unset) must not spawn.
     let out = socket(a, .output, .data, "out")
-    var session = SZWireDragSession.begin(from: out, atWorld: out.point, screen: out.point,
+    var session = on.begin(from: out, atWorld: out.point, screen: out.point,
                                           in: graph, isLocked: unlocked)!
     #expect(session.outcome() == .none)
 
     // From a data-OUT the node is downstream, LEFT edge at the drop point — same anchoring as
     // flow. The ref keeps the dragged port's name so the panel can resolve its type.
-    session.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    session.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(session.outcome() == .spawnPromptNode(
         center: CGPoint(x: drop.x + SZNodeLayout.width / 2, y: drop.y),
         source: SZPortRef(node: a.id, port: "out"), kind: .data, downstream: true))
 
     // From an UNWIRED data-IN (a fresh wire, not a pickup) the node is upstream, mirrored.
     let inp = socket(a, .input, .data, "input")
-    var upstream = SZWireDragSession.begin(from: inp, atWorld: inp.point, screen: inp.point,
+    var upstream = on.begin(from: inp, atWorld: inp.point, screen: inp.point,
                                            in: graph, isLocked: unlocked)!
-    upstream.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], isLocked: unlocked)
+    upstream.update(toWorld: drop, zoom: 1, in: graph, tiers: [:], previewsEnabled: true, isLocked: unlocked)
     #expect(upstream.outcome() == .spawnPromptNode(
         center: CGPoint(x: drop.x - SZNodeLayout.width / 2, y: drop.y),
         source: SZPortRef(node: a.id, port: "input"), kind: .data, downstream: false))
@@ -285,14 +288,14 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     let nearInput = socket(near, .input, .data, "input")
 
     let probe = CGPoint(x: nearInput.point.x + 10, y: nearInput.point.y + 10)
-    #expect(SZGraphCanvasModel.snapTarget(for: source, at: probe, zoom: 1, in: graph, tiers: [:],
+    #expect(on.snapTarget(for: source, at: probe, zoom: 1, in: graph, tiers: [:],
                                           pickedConnectionID: nil, isLocked: unlocked)?.id
             == nearInput.id)
     // 40pt out exceeds the 28/zoom radius at zoom 1 but not at zoom 0.5 (radius 56).
     let out = CGPoint(x: nearInput.point.x + 40, y: nearInput.point.y)
-    #expect(SZGraphCanvasModel.snapTarget(for: source, at: out, zoom: 1, in: graph, tiers: [:],
+    #expect(on.snapTarget(for: source, at: out, zoom: 1, in: graph, tiers: [:],
                                           pickedConnectionID: nil, isLocked: unlocked) == nil)
-    #expect(SZGraphCanvasModel.snapTarget(for: source, at: out, zoom: 0.5, in: graph, tiers: [:],
+    #expect(on.snapTarget(for: source, at: out, zoom: 0.5, in: graph, tiers: [:],
                                           pickedConnectionID: nil, isLocked: unlocked)?.id
             == nearInput.id)
 }
@@ -306,10 +309,10 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     let graph = SZGraph(nodes: [from, sink, cover], connections: [])
     let source = socket(from, .output, .data, "out")
     let buried = socket(sink, .input, .data, "input")
-    #expect(SZGraphCanvasModel.isOccluded(buried, in: graph))   // fixture sanity
-    #expect(!SZGraphCanvasModel.isValidTarget(buried, for: source, in: graph, tiers: [:],
+    #expect(on.isOccluded(buried, in: graph))   // fixture sanity
+    #expect(!on.isValidTarget(buried, for: source, in: graph, tiers: [:],
                                               pickedConnectionID: nil, isLocked: unlocked))
-    #expect(SZGraphCanvasModel.isValidTarget(buried, for: source, in: graph, tiers: [sink.id: 2],
+    #expect(on.isValidTarget(buried, for: source, in: graph, tiers: [sink.id: 2],
                                              pickedConnectionID: nil, isLocked: unlocked))
 }
 
@@ -322,12 +325,12 @@ private func wiredGraph() -> (source: SZNode, sink: SZNode, conn: SZConnection, 
     let occupied = socket(sink, .input, .data, "input")
 
     // The displaced edge's source is locked → refuse the swap.
-    #expect(!SZGraphCanvasModel.isValidTarget(occupied, for: newSource, in: g, tiers: [:],
+    #expect(!on.isValidTarget(occupied, for: newSource, in: g, tiers: [:],
                                               pickedConnectionID: nil) { $0 == source.id })
     // Unlocked → the swap is legal.
-    #expect(SZGraphCanvasModel.isValidTarget(occupied, for: newSource, in: g, tiers: [:],
+    #expect(on.isValidTarget(occupied, for: newSource, in: g, tiers: [:],
                                              pickedConnectionID: nil, isLocked: unlocked))
     // The currently picked-up edge doesn't count as occupying: dropping back restores it.
-    #expect(SZGraphCanvasModel.isValidTarget(occupied, for: newSource, in: g, tiers: [:],
+    #expect(on.isValidTarget(occupied, for: newSource, in: g, tiers: [:],
                                              pickedConnectionID: conn.id) { $0 == source.id })
 }

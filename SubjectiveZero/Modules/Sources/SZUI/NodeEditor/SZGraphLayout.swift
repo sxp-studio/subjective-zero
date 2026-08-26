@@ -22,7 +22,7 @@ public enum SZGraphLayout {
     /// per-axis median (robust to a far outlier, unlike a bounding-box midpoint). Callers can commit the
     /// whole map through `SZStore.moveNodes` without the graph jumping across the canvas.
     public static func tidied(nodes: [SZNode], connections: [SZConnection],
-                              anchor: SZNodeID? = nil) -> [SZNodeID: SZPoint] {
+                              anchor: SZNodeID? = nil, previewsEnabled: Bool) -> [SZNodeID: SZPoint] {
         guard !nodes.isEmpty else { return [:] }
         let nodesByID = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
 
@@ -58,14 +58,16 @@ public enum SZGraphLayout {
 
         // Lay columns left→right at a fixed pitch (all cards in a column share a center x); stack cards
         // top→down by their own heights + nodeGap. Origin is arbitrary — recentering below fixes it.
-        let maxNodeWidth = nodes.map { SZNodeLayout.size(of: $0).width }.max() ?? SZNodeLayout.width
+        let maxNodeWidth = nodes.map {
+            SZNodeLayout.size(of: $0, previewsEnabled: previewsEnabled).width
+        }.max() ?? SZNodeLayout.width
         var positions: [SZNodeID: SZPoint] = [:]
         for (layerIndex, layer) in layers.enumerated() {
             let centerX = CGFloat(layerIndex) * (maxNodeWidth + layerGap)
             var top: CGFloat = 0
             for id in layer {
                 guard let node = nodesByID[id] else { continue }
-                let height = SZNodeLayout.size(of: node).height
+                let height = SZNodeLayout.size(of: node, previewsEnabled: previewsEnabled).height
                 positions[id] = SZPoint(x: Double(centerX), y: Double(top + height / 2))
                 top += height + nodeGap
             }

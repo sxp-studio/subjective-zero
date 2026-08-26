@@ -51,19 +51,21 @@ struct SZHostNodeBodyTests {
         _ = try host.applyNodeBody(node: node.id, mode: .preview)
 
         let before = host.store.project!.graph.node(id: node.id)!
-        let topBefore = SZNodeLayout.cardRect(of: before).minY
+        let topBefore = SZNodeLayout.cardRect(of: before, previewsEnabled: host.livePreviews).minY
 
         #expect(host.toggleNodePlugs(node: node.id)?.plugs == false)
         let folded = host.store.project!.graph.node(id: node.id)!
-        #expect(!SZNodeLayout.showsPlugs(of: folded))
-        #expect(SZNodeLayout.height(of: folded) < SZNodeLayout.height(of: before))
-        #expect(SZNodeLayout.cardRect(of: folded).minY == topBefore, "the header must not move")
+        #expect(!SZNodeLayout.showsPlugs(of: folded, previewsEnabled: host.livePreviews))
+        #expect(SZNodeLayout.height(of: folded, previewsEnabled: host.livePreviews)
+              < SZNodeLayout.height(of: before, previewsEnabled: host.livePreviews))
+        #expect(SZNodeLayout.cardRect(of: folded, previewsEnabled: host.livePreviews).minY == topBefore,
+                "the header must not move")
 
         // …and unfolding puts it back exactly.
         #expect(host.toggleNodePlugs(node: node.id)?.plugs == true)
         let reopened = host.store.project!.graph.node(id: node.id)!
         #expect(reopened.position.y == before.position.y)
-        #expect(SZNodeLayout.cardRect(of: reopened).minY == topBefore)
+        #expect(SZNodeLayout.cardRect(of: reopened, previewsEnabled: host.livePreviews).minY == topBefore)
     }
 
     /// The card host re-applies `.custom` with fresh rows all session long (auto-size, backdrop

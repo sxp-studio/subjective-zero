@@ -287,10 +287,9 @@ final class SZHost {
 
     // Node-editor live previews (per-card thumbnails of texture outputs) — same app-state.json +
     // restore story, mutated via setLivePreviews (SZHost+NodePreviews.swift). Toggled from the Graph
-    // menu (SZApp), beside Snap to Grid. Defaults ON: texture nodes auto-preview. The geometry gate
-    // (SZNodeLayout.previewsEnabled) is seeded FIRST thing in start() — before any project can load,
-    // so no card is ever laid out against the unseeded default — and thereafter written only
-    // together with this pref (setLivePreviews), so the card views reflow deterministically on a flip.
+    // menu (SZApp), beside Snap to Grid. Defaults on: texture nodes auto-preview. Card geometry
+    // derives from it, so it is the value the panel threads down to every layout call — restored
+    // here at its declaration, before anything can lay out a card.
     internal(set) var livePreviews: Bool = SZAppStateIO.load()?.livePreviews ?? true
 
     // Per-node live-preview thumbs (stable observable boxes the cards hold uncompared refs to) and
@@ -559,11 +558,6 @@ final class SZHost {
         // Queue durability: every enqueue/state change flushes the sidecar (queue-before-transcript
         // at enqueue is what makes the crash direction tolerable — see sendChat).
         mailbox.onChange = { [weak self] in self?.flushMessageQueue() }
-        // Geometry gate follows the restored pref BEFORE anything can render a card (project loads
-        // below) — and before the Metal-unavailable early return, which must not strand the gate at
-        // its compile-time default while the pref says otherwise.
-        SZNodeLayout.previewsEnabled = livePreviews
-
         guard let runtime = SZRuntime() else {
             status = "Metal device unavailable"
             return

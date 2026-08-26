@@ -35,7 +35,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
 }
 
 @Test func nodeViewStoredPropertiesMatchItsEquatableContract() {
-    let view = SZNodeView(node: node, status: .ready, renderEndpoint: nil)
+    let view = SZNodeView(node: node, status: .ready, renderEndpoint: nil, previewsEnabled: true)
     #expect(storedProperties(of: view) == [
         // compared in ==
         "node", "status", "isSelected", "locked", "showPill", "errorDetail", "errorTitle",
@@ -76,7 +76,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
         graph: SZGraph(), strokeZoom: 1, space: "s", selectedNodeID: nil, multiSelection: [],
         selectedConnectionID: nil, hiddenConnectionID: nil, ghostedNodeIDs: [], raisedTiers: [:],
         connectedSockets: [], connectedInputsByNode: [:], nodeAgentState: [:], graphOpStatus: [:],
-        isRunning: false, runWorkSet: [], lockedNodes: [])
+        isRunning: false, runWorkSet: [], lockedNodes: [], previewsEnabled: true)
     #expect(storedProperties(of: view) == [
         // compared in ==
         "graph", "strokeZoom", "space", "selectedNodeID", "multiSelection", "selectedConnectionID",
@@ -174,7 +174,7 @@ private final class StubCardProvider: SZCustomCardProvider {
 
     // Closures capture only stable refs; a fresh closure identity each render must not invalidate.
     let withClosures = SZNodeView(
-        node: node, status: .ready, renderEndpoint: nil,
+        node: node, status: .ready, renderEndpoint: nil, previewsEnabled: true,
         onOpenSource: {}, onOpenChat: {}, onOpenMenu: {},
         onSetInput: { _, _, _ in }, onToggleDisplay: { _ in }, onTogglePreview: { _ in },
         optionsFor: { _ in [] })

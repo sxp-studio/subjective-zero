@@ -7,6 +7,9 @@ import Testing
 @testable import SZUI
 import SZCore
 
+/// Canvas geometry with Live Previews on — the setting these assertions are written against.
+private let on = SZLayoutProbe(previewsEnabled: true)
+
 private func node(at x: Double, _ y: Double) -> SZNode {
     SZNode(kind: .generated, title: "N",
            contract: SZNodeContract(title: "N", sfSymbol: "circle", summary: "s",
@@ -18,7 +21,7 @@ private func node(at x: Double, _ y: Double) -> SZNode {
     let near = node(at: 400, 300)
     let far = node(at: 10_000, 10_000)
     let graph = SZGraph(nodes: [near, far])
-    let visible = SZCanvasVisibility.visibleNodes(in: graph, camera: SZCanvasCamera(),
+    let visible = on.visibleNodes(in: graph, camera: SZCanvasCamera(),
                                                   viewSize: CGSize(width: 800, height: 600))
     #expect(visible == [near.id])
 }
@@ -30,7 +33,7 @@ private func node(at x: Double, _ y: Double) -> SZNode {
     let justOff = node(at: 1050, 300)
     let wellOff = node(at: 1600, 300)
     let graph = SZGraph(nodes: [justOff, wellOff])
-    let visible = SZCanvasVisibility.visibleNodes(in: graph, camera: SZCanvasCamera(),
+    let visible = on.visibleNodes(in: graph, camera: SZCanvasCamera(),
                                                   viewSize: CGSize(width: 800, height: 600))
     #expect(visible == [justOff.id])
 }
@@ -40,7 +43,7 @@ private func node(at x: Double, _ y: Double) -> SZNode {
     let graph = SZGraph(nodes: [far])
     var camera = SZCanvasCamera()
     camera.pan(by: CGSize(width: -9_600, height: -9_700))   // world 10k lands mid-viewport
-    let visible = SZCanvasVisibility.visibleNodes(in: graph, camera: camera,
+    let visible = on.visibleNodes(in: graph, camera: camera,
                                                   viewSize: CGSize(width: 800, height: 600))
     #expect(visible == [far.id])
 }
@@ -49,15 +52,15 @@ private func node(at x: Double, _ y: Double) -> SZNode {
     let spread = (0..<6).map { node(at: Double($0) * 1_000, 300) }
     let graph = SZGraph(nodes: spread)
     let size = CGSize(width: 800, height: 600)
-    let atOne = SZCanvasVisibility.visibleNodes(in: graph, camera: SZCanvasCamera(), viewSize: size)
+    let atOne = on.visibleNodes(in: graph, camera: SZCanvasCamera(), viewSize: size)
     var zoomedOut = SZCanvasCamera()
     zoomedOut.applyZoom(SZCanvasCamera.zoomRange.lowerBound, pivot: .zero, from: zoomedOut)
-    let atMin = SZCanvasVisibility.visibleNodes(in: graph, camera: zoomedOut, viewSize: size)
+    let atMin = on.visibleNodes(in: graph, camera: zoomedOut, viewSize: size)
     #expect(atMin.count > atOne.count)
     #expect(atOne.isSubset(of: atMin))
 }
 
 @Test func degenerateViewportIsEmpty() {
     let graph = SZGraph(nodes: [node(at: 0, 0)])
-    #expect(SZCanvasVisibility.visibleNodes(in: graph, camera: SZCanvasCamera(), viewSize: .zero).isEmpty)
+    #expect(on.visibleNodes(in: graph, camera: SZCanvasCamera(), viewSize: .zero).isEmpty)
 }
