@@ -451,9 +451,9 @@ struct SZApp: App {
                     // Appearance — squares just the viewport tile.
                     Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
                                                                      set: { host.setViewportRoundedCorners($0) }))
-                    // Chat display — per-turn tokens under replies.
-                    Toggle("Show Token Counts", isOn: Binding(get: { host.showTokenCounts },
-                                                              set: { host.setShowTokenCounts($0) }))
+                    // Chat display — each coding agent's own turns while it builds.
+                    Toggle("Show Agent Activity", isOn: Binding(get: { host.showAgentActivity },
+                                                                set: { host.setShowAgentActivity($0) }))
                 }
                 Divider()
             }
@@ -646,8 +646,8 @@ struct SZApp: App {
                                                                 set: { host.setAutoHidePanelHeaders($0) }))
                 Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
                                                                  set: { host.setViewportRoundedCorners($0) }))
-                Toggle("Show Token Counts", isOn: Binding(get: { host.showTokenCounts },
-                                                          set: { host.setShowTokenCounts($0) }))
+                Toggle("Show Agent Activity", isOn: Binding(get: { host.showAgentActivity },
+                                                            set: { host.setShowAgentActivity($0) }))
             }
         }
         Menu("Graph") {
@@ -842,7 +842,6 @@ struct SZApp: App {
                         streaming: !host.chatInFlight.isEmpty,
                         streamingIDs: Set(host.inFlightAssistantIDs.values),
                         isRunning: host.isRunning, isLoading: host.openingProject != nil,
-                        showTokenCounts: host.showTokenCounts,
                         showTurnBreakdown: host.showTurnBreakdown,
                         agentAccents: host.chatAgentAccents,
                         workingScopes: host.chatInFlight,
@@ -894,7 +893,8 @@ struct SZApp: App {
                               focusRequest: host.agentGraphFocusRequest,
                               onConsumeFocus: { host.agentGraphFocusRequest = nil },
                               planFocusRequest: agentGraphPlanFocus,
-                              onConsumePlanFocus: { agentGraphPlanFocus = nil })
+                              onConsumePlanFocus: { agentGraphPlanFocus = nil },
+                              store: host.store)
         }
     }
 }

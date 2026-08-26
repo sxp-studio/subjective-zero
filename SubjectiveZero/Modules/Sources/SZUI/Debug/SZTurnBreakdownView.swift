@@ -15,8 +15,8 @@ import SZCore
 /// identity is the message id (ForEach in the panel), so `expanded` survives re-renders.
 struct SZTurnBreakdownView: View {
     /// The row's already-composed "Worked for …" line (the row renders the same string plain when
-    /// breakdowns are hidden, and it carries the Show Token Counts choice — recomposing it here
-    /// would duplicate that). nil = the run-rollup case: derived from the `run.total` row instead.
+    /// breakdowns are hidden, so recomposing it here would duplicate that). nil = the run-rollup
+    /// case: derived from the `run.total` row instead.
     let turnCaption: String?
     let events: [SZTurnEvent]
     /// The Profiler record this breakdown belongs to (the runID for run-owned data, else the

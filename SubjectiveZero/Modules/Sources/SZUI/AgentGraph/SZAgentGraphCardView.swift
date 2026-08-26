@@ -55,6 +55,23 @@ struct SZAgentGraphCardView: View {
     /// The Run view's per-visit cost line. Present exactly when
     /// `SZAgentGraphLayout.hasStats` was told this form spends — the frames/pixels pact.
     var stats: SZAgentGraphCardStats? = nil
+    /// The transcripts, for the band and the spend to read this visit's turn out of. Handed
+    /// in, not fetched through a closure, so the read lands in those leaf views and a
+    /// streaming turn re-renders them rather than the canvas.
+    var store: SZStore? = nil
+    /// The turn this card's visit ran — the message id the band and the spend read.
+    var turnID: UUID? = nil
+    /// Whether the activity band is showing — the same flag `SZAgentGraphLayout.runFrames`
+    /// was given, or the card draws a band its frame did not reserve.
+    var activityOpen: Bool = false
+    /// Open/close the band. nil = this visit has nothing to show, and no chevron is drawn.
+    var onToggleActivity: (() -> Void)? = nil
+    /// Whether the footer says what the turn spent (`SZAgentGraphLayout.hasTokenLine`).
+    var showsTokenLine: Bool = false
+    /// Whether the footer reserves the receipt line (`SZAgentGraphLayout.extraFooterLines`).
+    /// Both come from the same predicates the frame was sized by, so the drawn card and its
+    /// frame cannot disagree.
+    var showsReceiptLine: Bool = false
 
     /// Only the states you need to FIND get a heavier outline. "Finished" is the common
     /// case in a completed traversal — if it shouts, nothing else can.
@@ -83,6 +100,9 @@ struct SZAgentGraphCardView: View {
             }
             .padding(.top, SZNodeLayout.bodyTopPadding)
             .padding(.bottom, SZNodeLayout.bodyBottomPadding)
+            if activityOpen, let store, let turnID {
+                SZAgentGraphActivityBand(store: store, turnID: turnID)
+            }
             if let stats { statsFooter(stats) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -186,12 +206,30 @@ struct SZAgentGraphCardView: View {
     /// competing with the outcome rows. Only the bottom corners round, so it reads as part
     /// of the card rather than a chip sitting on it.
     private func statsFooter(_ stats: SZAgentGraphCardStats) -> some View {
-        HStack(spacing: 5) {
-            statLine(stats)
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: SZAgentGraphLayout.activityFooterGap) {
+                statLine(stats)
+                Spacer(minLength: 0)
+            }
+            .frame(height: SZAgentGraphLayout.footerRowHeight)
+            // The envelope receipt, on the line the frame reserved for every turn card. Empty
+            // until the turn opens and names its model.
+            if showsReceiptLine {
+                Text(stats.generation ?? "")
+                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.45))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(height: SZAgentGraphLayout.footerRowHeight)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, footerIndent)
+                    .help(stats.generation ?? "")
+            }
+            // Under the clock, open or folded, indented past the chevron so the lines share
+            // a left edge.
         }
+        .padding(.vertical, SZAgentGraphLayout.footerVerticalPad)
         .padding(.horizontal, 12)
-        .frame(height: SZAgentGraphLayout.statsFooterHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             UnevenRoundedRectangle(bottomLeadingRadius: SZNodeLayout.cornerRadius,
@@ -206,20 +244,19 @@ struct SZAgentGraphCardView: View {
     /// A RUNNING visit ticks its own elapsed on a row-local `TimelineView`, so only this
     /// card re-renders each second, and the number freezes into the settled duration when
     /// the visit ends.
+    /// The footer's lower lines start where the clock's text does, not under the chevron.
+    private var footerIndent: CGFloat {
+        SZAgentGraphLayout.activityChevronWidth + SZAgentGraphLayout.activityFooterGap
+    }
+
     @ViewBuilder private func statLine(_ stats: SZAgentGraphCardStats) -> some View {
+        if let onToggleActivity { activityChevron(onToggleActivity) }
         if let duration = stats.duration {
             statText(SZTurnBreakdown.format(duration))
-            // The settled visit's receipt after the wall time — middle-truncated to one
-            // line, full string in the tooltip. Text only: the footer's height stays constant.
-            if let generation = stats.generation {
+            // What it cost, beside how long it took.
+            if showsTokenLine, let store, let turnID {
                 statText("·")
-                Text(generation)
-                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.45))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .contentTransition(.identity)
-                    .help(generation)
+                SZAgentGraphActivityTokens(store: store, turnID: turnID)
             }
         } else {
             SZAgentGraphCardDots()
@@ -231,6 +268,10 @@ struct SZAgentGraphCardView: View {
                     .contentTransition(.identity)
             }
         }
+    }
+
+    private func activityChevron(_ toggle: @escaping () -> Void) -> some View {
+        SZAgentGraphActivityChevron(open: activityOpen, action: toggle)
     }
 
     private func statText(_ text: String) -> some View {
@@ -476,6 +517,115 @@ enum SZAgentGraphClock {
 /// The chat panel's typing-indicator recipe at card scale: three dots on a traveling wave.
 /// Duplicated rather than shared on the chat panel's own reasoning — the chrome in common
 /// is ten lines against unrelated hosts.
+/// The footer's disclosure: opens this visit's own words under the outcome rows. Sits where
+/// the clock is because that is the line that already says what the visit is doing.
+private struct SZAgentGraphActivityChevron: View {
+    let open: Bool
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            // Open points UP, at what clicking it folds away — the same rule the run strip's
+            // fold line follows, so the two disclosures read as one gesture.
+            Image(systemName: "chevron.right")
+                .font(.system(size: 7, weight: .bold))
+                .rotationEffect(.degrees(open ? -90 : 0))
+                .foregroundStyle(Color.white.opacity(hover ? 1 : 0.55))
+                .frame(width: SZAgentGraphLayout.activityChevronWidth,
+                       height: SZAgentGraphLayout.footerRowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .trackingHover($hover)
+        // `.help` is inert under the canvas's scale transform, so the tip is drawn by hand.
+        .hoverTip(open ? "Hide what this agent said" : "Show what this agent is doing", edge: .bottom)
+    }
+}
+
+/// What this turn spent, beside the clock. Its own view so the transcript read lands here and
+/// not in the canvas's body. Silent for a CLI that reports no usage.
+private struct SZAgentGraphActivityTokens: View {
+    let store: SZStore
+    let turnID: UUID
+
+    var body: some View {
+        if let usage = store.chatMessage(id: turnID)?.usage {
+            // The unit once, up front: after each number it no longer fitted beside the clock.
+            Text("tok \(szFormatTokensCompact(usage.inputTokens)) in / \(szFormatTokensCompact(usage.outputTokens)) out")
+                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.45))
+                .lineLimit(1)
+                .contentTransition(.identity)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help("\(usage.inputTokens) tokens in, \(usage.outputTokens) out")
+        }
+    }
+}
+
+/// What the agent said on this visit, in a box of its own. THE leaf that reads the live
+/// transcript: the thunk is called in here and nowhere above, so a streaming turn re-renders
+/// this band instead of the whole canvas. Fixed height (the frame reserved exactly
+/// `activityBandHeight`), so the text scrolls rather than growing the card.
+private struct SZAgentGraphActivityBand: View {
+    let store: SZStore
+    let turnID: UUID
+    private static let bottomID = "bottom"
+
+    /// THE read, and the reason this is its own view: it touches the live transcript, so the
+    /// observation lands here and a streaming turn re-renders this band instead of the canvas.
+    private var turn: SZChatMessage? { store.chatMessage(id: turnID) }
+
+    var body: some View {
+        let turn = turn
+        let steps = SZAgentActivityStep.steps(thinking: turn?.thinking ?? "")
+        let reply = (turn?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(steps) { step in
+                        switch step.kind {
+                        case .tool:
+                            // A tool call is a step: its own row, so the trace reads as a
+                            // list of what the agent did, not one paragraph.
+                            HStack(alignment: .top, spacing: 5) {
+                                Text("→").foregroundStyle(SZAgentGraphStyle.running.opacity(0.9))
+                                Text(step.text).foregroundStyle(Color.white.opacity(0.72))
+                            }
+                        case .thought:
+                            Text(step.text).foregroundStyle(Color.white.opacity(0.42))
+                        }
+                    }
+                    if !reply.isEmpty {
+                        if !steps.isEmpty { Divider().opacity(0.12).padding(.vertical, 2) }
+                        Text(reply).foregroundStyle(Color.white.opacity(0.85))
+                    }
+                    if steps.isEmpty, reply.isEmpty {
+                        Text(turn == nil ? "no turn to read" : "working…")
+                            .foregroundStyle(Color.white.opacity(0.3))
+                    }
+                    Color.clear.frame(height: 1).id(Self.bottomID)
+                }
+                .font(.system(size: 8.5, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+            }
+            // Newest at the bottom, and pinned WITHOUT animation: at flush cadence an
+            // interruptible scroll restarted per chunk reads as a jitter, not as a follow.
+            .onAppear { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            .onChange(of: (turn?.thinking.count ?? 0) + (turn?.text.count ?? 0)) {
+                proxy.scrollTo(Self.bottomID, anchor: .bottom)
+            }
+        }
+        .frame(height: SZAgentGraphLayout.activityBandHeight)
+        .background(Color.black.opacity(0.18))
+        .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1) }
+    }
+}
+
 private struct SZAgentGraphCardDots: View {
     @State private var bright = false
     var body: some View {

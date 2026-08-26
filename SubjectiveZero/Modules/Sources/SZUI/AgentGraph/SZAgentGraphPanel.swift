@@ -76,6 +76,11 @@ public struct SZAgentGraphPanel: View {
     /// Graph) — same consume handshake as the run focus above, but by agent id.
     private let planFocusRequest: String?
     private let onConsumePlanFocus: () -> Void
+    /// The transcripts a card's band reads its own turn out of. The one model this panel
+    /// takes (`SZChatPanel` takes it too) — everything else still arrives as values and
+    /// closures, and the read itself happens in the band, never in this view's body.
+    /// nil = the surface isn't wired, and no card can show its agent's words.
+    private let store: SZStore?
 
     @State private var mode: SZAgentGraphPanelMode = .plan
     /// The run the user PICKED, if any. nil = follow the head of the list, which is how the
@@ -107,6 +112,9 @@ public struct SZAgentGraphPanel: View {
     /// layout is computed, and these exist so a graph can be pulled apart to read it, not
     /// to author a picture. Reset by switching graph.
     @State private var nudges: [String: CGSize] = [:]
+    /// Which visits of the SELECTED run have their activity band open, by ordinal. Session-only
+    /// and reset by switching run: a band is something you opened to watch, not a saved view.
+    @State private var openActivity: Set<Int> = []
     /// The two SECTIONS collapse too: AGENTS starts folded (the plans are reference
     /// material), RUNS starts open (the live surface).
     @State private var agentsSectionOpen = false
@@ -150,7 +158,8 @@ public struct SZAgentGraphPanel: View {
                 openStepSource: ((String, SZAgentGraphFace.Source) -> Void)? = nil,
                 focusRequest: UUID? = nil, onConsumeFocus: @escaping () -> Void = {},
                 planFocusRequest: String? = nil,
-                onConsumePlanFocus: @escaping () -> Void = {}) {
+                onConsumePlanFocus: @escaping () -> Void = {},
+                store: SZStore? = nil) {
         self.planAgents = planAgents
         self.runs = runs
         self.resolveGraph = resolveGraph
@@ -160,6 +169,7 @@ public struct SZAgentGraphPanel: View {
         self.onConsumeFocus = onConsumeFocus
         self.planFocusRequest = planFocusRequest
         self.onConsumePlanFocus = onConsumePlanFocus
+        self.store = store
     }
 
     /// No runs, nothing to list — force Plan rather than a Run view with no canvas.
@@ -434,6 +444,9 @@ public struct SZAgentGraphPanel: View {
                     let target = camera.zoom * (1 + scroll.deltaY * 0.01)
                     camera.applyZoom(target, pivot: scroll.location, from: camera)
                 } else {
+                    // An open band scrolls its own text: the monitor observes without
+                    // swallowing, so panning too would drag the graph out from under it.
+                    guard !isOverOpenActivityBand(scroll.location) else { return }
                     following = false
                     camera.pan(by: CGSize(width: scroll.deltaX, height: scroll.deltaY))
                 }
@@ -464,6 +477,8 @@ public struct SZAgentGraphPanel: View {
             // the old one happened to be.
             .onChange(of: displayed?.key) { _, _ in
                 nudges = [:]
+                // Ordinals are per-record, so a leftover one would open an unrelated visit.
+                openActivity = []
                 centred = false; centreIfNeeded()
                 followActiveEntry()
                 landFinalEntryIfNeeded()
@@ -516,7 +531,13 @@ public struct SZAgentGraphPanel: View {
                                   },
                                   mode: effectiveMode,
                                   zoom: camera.zoom, nudges: nudges,
-                                  onNudge: { id, delta in nudges[id, default: .zero] = delta })
+                                  onNudge: { id, delta in nudges[id, default: .zero] = delta },
+                                  openActivity: openActivity,
+                                  onToggleActivity: { ordinal in
+                                      if openActivity.contains(ordinal) { openActivity.remove(ordinal) }
+                                      else { openActivity.insert(ordinal) }
+                                  },
+                                  store: store)
     }
 
     /// Two honest nothings: a plan selection that resolves to no library, and an archived
@@ -630,7 +651,29 @@ public struct SZAgentGraphPanel: View {
         centre(on: frame)
     }
 
-    /// The chain's last card, in world points — nil until the record is laid out.
+    /// Whether a canvas point lands inside an open card's band. The catcher reports in canvas
+    /// space and frames are world space, so the camera is undone first.
+    private func isOverOpenActivityBand(_ point: CGPoint) -> Bool {
+        guard !openActivity.isEmpty, effectiveMode == .run, camera.zoom > 0,
+              let displayed, let record = displayed.record else { return false }
+        let world = CGPoint(x: (point.x - camera.offset.width) / camera.zoom,
+                            y: (point.y - camera.offset.height) / camera.zoom)
+        let frames = SZAgentGraphLayout.runFrames(for: record, graph: displayed.graph,
+                                                  stepOutcomes: displayed.stepOutcomes,
+                                                  opened: openActivity)
+        for (position, entry) in record.trace.enumerated()
+        where openActivity.contains(entry.ordinal) && position < frames.count {
+            let face = SZAgentGraphLayout.runFace(for: entry, in: displayed.graph,
+                                                  stepOutcomes: displayed.stepOutcomes)
+            let band = SZAgentGraphLayout.activityBandRect(
+                in: frames[position], extraFooterLines: SZAgentGraphLayout.extraFooterLines(face))
+            if band.contains(world) { return true }
+        }
+        return false
+    }
+
+    /// The chain's last card, in world points — nil until the record is laid out. The CLOSED
+    /// frame: the camera centres on a card's middle, which an open band would pull downward.
     private func finalEntryFrame() -> CGRect? {
         guard viewSize.height > 0, let displayed, let record = displayed.record else { return nil }
         return SZAgentGraphLayout.runFrames(for: record, graph: displayed.graph,

@@ -305,6 +305,26 @@ dispatch card carries a band of its sub-agents: one lane per work child, each na
 node that agent is on right now, its running clock, and a pulsing `live` badge — swapped
 for a conclusion badge as each settles.
 
+A **turn card opens its own activity**: the chevron beside the clock unfolds what that agent
+said on that visit — its tool calls as steps, its reasoning between them, then its reply.
+Closed by default, session-only, reset by switching run (ordinals are per record). Only a
+visit that ran a turn offers it: `Entry.turnID` names the transcript message the turn streamed
+into, and the host reports that id (with the envelope the router picked) the moment the message
+opens, so the band follows a turn as it works rather than appearing once it is over.
+
+The **footer runs two lines**: the wall time with the spend beside it
+(`2m 45s · tok 230.9k in / 13.1k out`), then the envelope receipt on its own
+(`claude · claude-opus-5 · high`), indented to share the clock's left edge. The receipt takes a
+line because beside the clock it truncated to "cla…opus-5", hiding the model it names. Both
+lines are reserved by FORM — every turn card has them — never by whether the numbers have
+arrived, so a card cannot resize under the pointer mid-turn.
+
+The band is a FIXED height that scrolls inside itself and grows the card DOWNWARD from its
+closed frame, so streaming text neither resizes its own card nor moves the ports and wires you
+read it against. The forecast and the follow-cam measure against the CLOSED frame for the same
+reason. The band reads the transcript itself, never the canvas: reading it higher up would
+re-render the whole canvas at streaming cadence.
+
 ## Termination
 
 Two vocabularies, deliberately: **outcomes route** (the graph's open set — an outcome

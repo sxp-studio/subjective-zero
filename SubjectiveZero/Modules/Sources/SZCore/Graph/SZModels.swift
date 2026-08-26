@@ -507,10 +507,10 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// Show the welcome/home window on cold launch (Help ▸ Welcome reopens it any time). Optional
     /// for the same decode-compatibility reason; nil means ON (show by default).
     public var showWelcomeAtStartup: Bool?
-    /// Show per-turn token counts next to the duration under chat replies (View ▸ Show Token
-    /// Counts). Optional for the same decode-compatibility reason; nil means OFF. Display-only:
-    /// usage is always captured into the transcript regardless.
-    public var showTokenCounts: Bool?
+    /// Show each coding agent's own turns in the conversation while it builds (View ▸ Show Agent
+    /// Activity). Optional for the same decode-compatibility reason; nil means OFF. Display-only:
+    /// the turns are always captured into the node transcripts regardless.
+    public var showAgentActivity: Bool?
     /// Anonymous usage telemetry (the welcome screen's "Share anonymous usage data"). Optional
     /// for the same decode-compatibility reason; nil means ON.
     public var telemetryEnabled: Bool?
@@ -552,7 +552,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         recentProjectPaths: [String]? = nil,
         providerGenerationSettings: [String: SZProviderGenerationSettings]? = nil,
         showWelcomeAtStartup: Bool? = nil,
-        showTokenCounts: Bool? = nil,
+        showAgentActivity: Bool? = nil,
         telemetryEnabled: Bool? = nil,
         showTurnBreakdown: Bool? = nil,
         poppedOutPanels: [SZPoppedOutPanel]? = nil,
@@ -576,7 +576,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.recentProjectPaths = recentProjectPaths
         self.providerGenerationSettings = providerGenerationSettings
         self.showWelcomeAtStartup = showWelcomeAtStartup
-        self.showTokenCounts = showTokenCounts
+        self.showAgentActivity = showAgentActivity
         self.telemetryEnabled = telemetryEnabled
         self.showTurnBreakdown = showTurnBreakdown
         self.poppedOutPanels = poppedOutPanels

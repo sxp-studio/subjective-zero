@@ -318,10 +318,10 @@ final class SZHost {
     // `showWelcomeAtStartup` (default ON) gates the auto-present on cold launch.
     internal(set) var showWelcomeAtStartup: Bool = SZAppStateIO.load()?.showWelcomeAtStartup ?? true
 
-    // Per-turn token counts under chat replies — same app-state.json + restore story, mutated via
-    // setShowTokenCounts. Toggled from the View menu (SZApp). Defaults OFF; display-only — usage is
-    // always captured into the transcript, so turning it on later reveals past turns too.
-    internal(set) var showTokenCounts: Bool = SZAppStateIO.load()?.showTokenCounts ?? false
+    // Each coding agent's own turns in the conversation while it builds — same app-state.json +
+    // restore story, mutated via setShowAgentActivity. Toggled from the View menu (SZApp). Defaults
+    // OFF; display-only — the turns are always captured, so turning it on later reveals past builds.
+    internal(set) var showAgentActivity: Bool = SZAppStateIO.load()?.showAgentActivity ?? false
     /// Debug ▸ Show Turn Breakdown — the expandable per-turn phase breakdown under replies.
     /// Gated like the Profiler surface: a DEBUG session's saved `true` must not resurface debug
     /// chrome in a release build.

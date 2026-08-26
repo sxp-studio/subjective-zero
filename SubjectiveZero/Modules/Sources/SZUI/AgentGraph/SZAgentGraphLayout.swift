@@ -79,31 +79,68 @@ public enum SZAgentGraphLayout {
     static let layerGap: CGFloat = SZGraphLayout.layerGap
     static let nodeGap: CGFloat = SZGraphLayout.nodeGap
 
-    // Width is content-driven: a card grows only until its own header fits whole — the chip
-    // must never cost the title its words. Char-count heuristics keep sizing pure and testable.
+    // Width is content-driven: a card grows until its own header fits WHOLE — the chip must
+    // never cost the title its words, and no ceiling clips it. The text is measured with the
+    // fonts the header actually draws (`SZCardText`), not estimated per character: a
+    // char-count average is wrong by a word on exactly the strings that matter, and it was
+    // what cropped "Implement" to "Implem…" on a card with a slot chip.
     public static let minCardWidth: CGFloat = 200
-    public static let maxCardWidth: CGFloat = 320
-    static let titleCharWidth: CGFloat = 6.8   // 12pt semibold, average glyph
-    static let chipCharWidth: CGFloat = 5.2    // the slot chip's 8pt monospaced
 
-    /// The header-fit width, clamped: paddings 12+12, glyph 22+7, the title's estimate, the
-    /// slot chip (7 gap + 8 pad) when worn, and a 21pt reserve for the Run view's finished badge.
+    /// The header's anatomy, in the order `SZAgentGraphCardView.header` stacks it: 12pt
+    /// padding, the 22pt glyph, the title, a Spacer, the slot chip (its own 4+4 padding), the
+    /// finished badge, 12pt padding.
+    ///
+    /// The SPACER takes a spacing slot of its own — that is the gap the old estimate dropped,
+    /// and being one gap short is what cropped "Implement" to "Implem…" on a slotted card.
     public static func width(of face: SZAgentGraphFace) -> CGFloat {
-        var width: CGFloat = 12 + 22 + 7 + CGFloat(face.title.count) * titleCharWidth + 21 + 12
+        // glyph|title, title|spacer, spacer|(chip or badge).
+        var width = 12 + 22 + SZCardText.titleWidth(face.title) + statusBadgeWidth + 12
+            + headerGap * 3
         if let slot = face.slot {
-            width += 7 + 8 + CGFloat(slot.count) * chipCharWidth
+            width += SZCardText.chipWidth(slot) + 8 + headerGap   // + the chip|badge gap
         }
-        return min(maxCardWidth, max(minCardWidth, width))
+        return max(minCardWidth, (width + headerSlack).rounded(.up))
     }
+
+    /// `SZAgentGraphCardView.header`'s HStack spacing.
+    static let headerGap: CGFloat = 7
+
+    /// A hair of slack on the measured fit. CoreText reports the advance a line WOULD take;
+    /// SwiftUI lays the same string out with its own rounding, and landing within a fraction
+    /// of a point of exact still ellipsized. Small enough to be invisible, big enough that
+    /// the header never loses a character to a rounding difference.
+    static let headerSlack: CGFloat = 4
+
+    /// The Run view's finished badge — a fixed 15pt disc, reserved whether or not this card
+    /// wears one yet, so a card does not resize when its visit settles.
+    static let statusBadgeWidth: CGFloat = 15
 
     /// The Run view's second header line — `visit N` and the dispatch tally, on their own
     /// line under the title (in the title row they cropped it to "Imple…").
     public static let subheaderHeight: CGFloat = 14
 
+    /// One line of the footer, and the breathing room above and below the block. Text used to
+    /// sit on the card's bottom edge with nothing around it, which read as cramped whether or
+    /// not the card was open.
+    public static let footerRowHeight: CGFloat = 17
+    public static let footerVerticalPad: CGFloat = 4
+
     /// The stats strip under the outcome rows — what the visit COST in wall time. Below the
     /// ports rather than on the subheader: the rows are the card's contract and must not be
     /// pushed around by a number that arrives mid-traversal.
-    public static let statsFooterHeight: CGFloat = 16
+    public static let statsFooterHeight: CGFloat = footerRowHeight + footerVerticalPad * 2
+
+    /// The opened activity band — the agent's own words for this visit, scrolling inside a
+    /// fixed height. Fixed on purpose: streaming text that resized its card would drag the
+    /// chain's wires around for the whole turn.
+    public static let activityBandHeight: CGFloat = 96
+
+
+    /// The disclosure's column in the footer — its glyph plus the row's spacing. The spend
+    /// line indents by it so its text starts where the clock's does, rather than hanging out
+    /// under the chevron.
+    public static let activityChevronWidth: CGFloat = 12
+    public static let activityFooterGap: CGFloat = 5
 
     // MARK: - Faces
 
@@ -175,14 +212,16 @@ public enum SZAgentGraphLayout {
     /// One anatomy for every node — a form differs by COLOUR, not by shape. `subheader`
     /// reserves the Run view's second header line; `stats` reserves the footer. A Plan card
     /// keeps the plain anatomy, so the two modes stay byte-identical where they can.
+    /// - Parameter extraFooterLines: footer lines under the clock's (the envelope receipt).
     public static func size(of face: SZAgentGraphFace, subheader: Bool = false,
-                            stats: Bool = false) -> CGSize {
+                            stats: Bool = false, extraFooterLines: Int = 0) -> CGSize {
         let rows = max(1, face.outcomes.count)
         return CGSize(width: width(of: face),
                       height: SZNodeLayout.headerHeight + (subheader ? subheaderHeight : 0)
                             + SZNodeLayout.bodyTopPadding
                             + CGFloat(rows) * SZNodeLayout.rowHeight + SZNodeLayout.bodyBottomPadding
-                            + (stats ? statsFooterHeight : 0))
+                            + (stats ? statsFooterHeight : 0)
+                            + (stats ? CGFloat(max(0, extraFooterLines)) * footerRowHeight : 0))
     }
 
     /// Whether a Run entry's card carries the subheader line (visit mark / dispatch tally).
@@ -200,6 +239,20 @@ public enum SZAgentGraphLayout {
         spends && entry.startedAt != nil
     }
 
+    /// The footer lines under the clock's — the envelope receipt. Its own line because beside
+    /// the clock it truncated to "cla…opus-5", hiding the model it names. Read from the FORM,
+    /// not from `entry.generation`: the receipt lands mid-turn, and sizing by it grew the card
+    /// under the pointer.
+    public static func extraFooterLines(_ face: SZAgentGraphFace) -> Int {
+        face.form == .turn ? 1 : 0
+    }
+
+    /// Whether a visit's footer says what the turn spent — it has a transcript message behind
+    /// it. A step settled in noise and owes nothing.
+    public static func hasTokenLine(_ entry: SZAgentGraphRun.Entry) -> Bool {
+        entry.turnID != nil
+    }
+
     /// Which forms SPEND — the ones whose cards carry wall time. A mid-graph step settles
     /// in sub-millisecond noise; the door may ask the model, so it counts.
     public static func spends(_ form: SZAgentGraphFace.Form) -> Bool {
@@ -212,16 +265,38 @@ public enum SZAgentGraphLayout {
     /// y = 0 so mixed heights share a spine. Sized by the same `size(of:)` the plan uses.
     /// Pure and here (not in the renderer) so the panel's follow-cam and the canvas content
     /// can never disagree about where the live card sits.
+    /// The scrolling region of an OPEN card, in the same space its frame is in. The band
+    /// scrolls its own text, so a scroll landing here must not also pan the canvas — the
+    /// panel reads this to leave the camera alone. Measured from the bottom: the footer sits
+    /// under the band, and carries a second line while the band is open.
+    /// - Parameter extraFooterLines: the same count the frame was sized with, so the band
+    ///   stops where the footer block starts.
+    public static func activityBandRect(in frame: CGRect, extraFooterLines: Int) -> CGRect {
+        let bottom = frame.maxY - statsFooterHeight
+            - CGFloat(max(0, extraFooterLines)) * footerRowHeight
+        return CGRect(x: frame.minX, y: bottom - activityBandHeight,
+                      width: frame.width, height: activityBandHeight)
+    }
+
+    /// - Parameter opened: the entries whose activity band is showing, by ordinal. View state,
+    ///   unlike the subheader and footer, so it arrives as an argument — and BOTH readers (the
+    ///   canvas and the panel's follow-cam) must pass the same set or the camera lands wrong.
     public static func runFrames(for record: SZAgentGraphRun, graph: SZAgentGraph?,
-                                 stepOutcomes: [String: [String]] = [:]) -> [CGRect] {
+                                 stepOutcomes: [String: [String]] = [:],
+                                 opened: Set<Int> = []) -> [CGRect] {
         var x: CGFloat = 0
         var frames: [CGRect] = []
         for entry in record.trace {
             let face = runFace(for: entry, in: graph, stepOutcomes: stepOutcomes)
-            let size = size(of: face, subheader: hasSubheader(entry, in: record, face: face),
-                            stats: hasStats(entry, spends: spends(face.form)))
-            frames.append(CGRect(origin: CGPoint(x: x, y: -size.height / 2), size: size))
-            x += size.width + layerGap
+            let closed = size(of: face, subheader: hasSubheader(entry, in: record, face: face),
+                              stats: hasStats(entry, spends: spends(face.form)),
+                              extraFooterLines: extraFooterLines(face))
+            // Opening a band grows the card DOWNWARD: y stays on the closed height, so the
+            // header, the ports and every wire into them hold still while you read.
+            let height = closed.height + (opened.contains(entry.ordinal) ? activityBandHeight : 0)
+            frames.append(CGRect(origin: CGPoint(x: x, y: -closed.height / 2),
+                                 size: CGSize(width: closed.width, height: height)))
+            x += closed.width + layerGap
         }
         return frames
     }

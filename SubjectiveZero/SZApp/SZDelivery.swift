@@ -16,7 +16,7 @@ final class SZDelivery: SZTraversalServing {
     private let queries: SZQueryService
     /// Live world projection for this delivery's binding — read fresh per node visit.
     private let world: @MainActor () -> SZWorld
-    private let turn: @MainActor (SZTurnOrder) async -> SZTurnReport
+    private let turn: @MainActor (SZTurnOrder, @escaping @MainActor @Sendable (UUID, String?) -> Void) async -> SZTurnReport
     /// The fleet seam — only the build delivery carries one. nil at a dispatch node is an
     /// honest defect (the gate keeps dispatch nodes wired to a seat; the lane must serve it).
     var fleet: (@MainActor (_ orders: [SZWorkOrder], _ seat: String,
@@ -31,7 +31,7 @@ final class SZDelivery: SZTraversalServing {
     init(agent: String, message: String, extras: SZBriefExtras = SZBriefExtras(),
          renderer: SZBriefRenderer, queries: SZQueryService,
          world: @escaping @MainActor () -> SZWorld,
-         turn: @escaping @MainActor (SZTurnOrder) async -> SZTurnReport,
+         turn: @escaping @MainActor (SZTurnOrder, @escaping @MainActor @Sendable (UUID, String?) -> Void) async -> SZTurnReport,
          effect: @escaping @MainActor (SZEffect) async -> Void,
          onNote: @escaping @MainActor (SZTraversalNote) -> Void) {
         self.agent = agent
@@ -63,8 +63,9 @@ final class SZDelivery: SZTraversalServing {
             nodes: (snapshot.graph?.nodes ?? []).map { (id: $0.id, title: $0.title) })
     }
 
-    func runTurn(_ order: SZTurnOrder) async -> SZTurnReport {
-        await turn(order)
+    func runTurn(_ order: SZTurnOrder,
+                 opened: @escaping @MainActor @Sendable (UUID, String?) -> Void) async -> SZTurnReport {
+        await turn(order, opened)
     }
 
     func deliver(orders: [SZWorkOrder], to seat: String,

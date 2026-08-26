@@ -229,6 +229,6 @@ private extension SZAgentGraphRun.Entry {
         }
         self.init(ordinal: note.ordinal, node: note.node, phase: phase,
                   outcome: note.outcome, detail: note.detail, tally: note.tally,
-                  generation: note.generation)
+                  generation: note.generation, turnID: note.turnID)
     }
 }

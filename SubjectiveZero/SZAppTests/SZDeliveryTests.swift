@@ -34,7 +34,7 @@ struct SZDeliveryTests {
             agent: "director", message: "", renderer: renderer, queries: queries,
             world: { SZWorld(run: SZRun(workSet: [], round: round, roundCap: 3,
                                         steers: [], instruction: "")) },
-            turn: { _ in SZTurnReport(failed: true, detail: "no turns in this test") },
+            turn: { _, _ in SZTurnReport(failed: true, detail: "no turns in this test") },
             effect: { _ in }, onNote: { _ in })
 
         _ = delivery.facts()   // the evaluation starts: round 1 is pinned
@@ -58,7 +58,7 @@ struct SZDeliveryTests {
         let delivery = SZDelivery(
             agent: "director", message: "", renderer: renderer, queries: queries,
             world: { SZWorld(conversation: messages) },
-            turn: { _ in SZTurnReport(failed: true, detail: "no turns in this test") },
+            turn: { _, _ in SZTurnReport(failed: true, detail: "no turns in this test") },
             effect: { _ in }, onNote: { _ in })
         #expect(delivery.conversation() == nil)
         messages = [SZChatMessage(role: .user, text: "hello")]
@@ -83,7 +83,7 @@ struct SZDeliveryTests {
             agent: "director", message: "", renderer: renderer, queries: queries,
             world: { SZWorld(graph: SZGraph(nodes: [glow]),
                              conversation: [SZChatMessage(role: .user, text: text)]) },
-            turn: { _ in SZTurnReport(failed: true, detail: "no turns in this test") },
+            turn: { _, _ in SZTurnReport(failed: true, detail: "no turns in this test") },
             effect: { _ in }, onNote: { _ in })
         let recap = delivery.conversation() ?? ""
         #expect(recap.contains("user: tweak @Glow"))

@@ -132,6 +132,24 @@ private func temporaryURL() -> URL {
     #expect(loaded?.defaultProviderID == "claude")
 }
 
+@Test func roundTripPreservesShowAgentActivity() throws {
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try SZAppStateIO.save(SZAppState(showAgentActivity: true), to: url)
+    #expect(SZAppStateIO.load(from: url)?.showAgentActivity == true)
+}
+
+@Test func fileWithoutShowAgentActivityStillDecodes() throws {
+    // An app-state.json predating the switch → nil, which the host reads as OFF.
+    let url = temporaryURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"windowSize":{"width":1440,"height":900},"theme":"system"}"#.utf8).write(to: url)
+    let loaded = SZAppStateIO.load(from: url)
+    #expect(loaded != nil)
+    #expect(loaded?.showAgentActivity == nil)
+}
+
 @Test func roundTripPreservesTelemetryEnabled() throws {
     let url = temporaryURL()
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

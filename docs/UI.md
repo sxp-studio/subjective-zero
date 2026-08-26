@@ -159,16 +159,23 @@ the right-click menu's job. Suggestion derivation is host-side
 **One conversation.** There are no tabs: every message goes to the Director's door, which
 triages it and routes the work. What you see is one feed of what agents said to YOU — the whole
 Director conversation, plus each node agent's own replies, attributed by node. The fleet's
-implementation turns are not in it: they carry the run they belong to and are read in the Agent
-Graph panel.
+implementation turns are not in it by default: they carry the run they belong to and are read in
+the Agent Graph panel, or in the conversation under **View ▸ Display ▸ Show Agent Activity**.
 
 - The feed is DERIVED (`SZHost.chatFeed`) from the per-scope transcripts, which remain the
   storage — sessions and cold-start recaps are per scope and stay that way. A node's messages join
-  the feed only if they are unstamped AND newer than the project's `feedEpoch` (a `.staging`
-  marker written the first time the project opens under this build): older builds wrote their
-  implementation turns into node transcripts with nothing marking them as fleet work, so without
-  the epoch an old project's first open would fill the conversation with every coding turn it ever
-  ran.
+  the feed if they are unstamped (or activity is on) AND newer than the project's `feedEpoch` (a
+  `.staging` marker written the first time the project opens under this build): older builds wrote
+  their implementation turns into node transcripts with nothing marking them as fleet work, so
+  without the epoch an old project's first open would fill the conversation with every coding turn
+  it ever ran. The epoch therefore gates BOTH ways — activity on never reaches prehistory.
+- **Show Agent Activity** (off by default, persisted per machine in `SZAppState`) puts each coding
+  agent's own turn in the feed WHILE it builds, under the node's name and glyph, its tool calls and
+  reasoning behind the same `THINKING` chevron the Director's turns use — so a ten-minute build is
+  something to read rather than a bare clock. Nothing new is captured: the stream already lands in
+  the node's transcript, so turning it on reveals past builds too. The turns persist after the
+  build settles, alongside its receipt: the receipt says what a build did, the turns say what its
+  agents tried.
 - **An empty transcript asks a question.** "What are we making?" over a quieter line about nodes
   getting created, wired and coded for you — centred in the panel, outside the ScrollView, since a
   placeholder has nothing to scroll. While a project opens (its nodes compile off the main thread,
@@ -218,9 +225,11 @@ Graph panel.
   growing text field on top; a bottom bar with `+` attach and the ⋯ menu (left) and the circular
   send (right). The provider pill is GONE: the forward-looking selection lives in the **AI
   Settings sheet** (⌘,, or the ⋯ menu's "AI Settings…"), and the backward-looking truth is the
-  **receipt caption** under each finished reply — `Worked for 12s · gpt-5.6-terra · fast` —
-  whose hover reveals the full envelope (provider · model · effort · fast) and the routing rule
-  that chose it (`via`). A provider *switch* still resets agent sessions (transcripts stay) and
+  **receipt caption** under each finished reply — `Worked for 12s · gpt-5.6-terra · fast · tok
+  21.5k in / 1.2k out` — whose hover reveals the full envelope (provider · model · effort · fast)
+  and the routing rule that chose it (`via`). Tokens ride the caption unconditionally, carry `tok`
+  as their unit so the numbers cannot read as anything else a turn counts, and are simply absent
+  for a CLI that reports no usage. A provider *switch* still resets agent sessions (transcripts stay) and
   is refused while agents are busy; with a routing profile active, different graph positions may
   run different envelopes, and the receipts are how you see what actually ran
   ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)).

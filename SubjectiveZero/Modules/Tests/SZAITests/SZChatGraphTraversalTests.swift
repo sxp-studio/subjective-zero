@@ -114,7 +114,8 @@ private final class DirectorDelivery: SZTraversalServing {
                             message: message, world: world)
     }
     func conversation() -> String? { SZConversationRecap.render(world.conversation, nodes: []) }
-    func runTurn(_ order: SZTurnOrder) async -> SZTurnReport {
+    func runTurn(_ order: SZTurnOrder,
+                 opened: @escaping @MainActor @Sendable (UUID, String?) -> Void) async -> SZTurnReport {
         turns.append((order.brief, order.session))
         return SZTurnReport(failed: false)
     }

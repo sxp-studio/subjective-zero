@@ -9,6 +9,18 @@ extension SZStore {
     /// The transcript for a scope (empty if none yet).
     public func messages(for scope: SZChatScope) -> [SZChatMessage] { chat[scope.key] ?? [] }
 
+    /// One turn by its message id, whichever conversation it landed in. A run card knows the
+    /// id its visit streamed into but not the scope: a dispatched work child serves a node, a
+    /// chat run names none whatever scope it is answering in, so deriving the scope from the
+    /// record read a node's own chat out of the Director's transcript. Ids are unique, so the
+    /// search cannot be ambiguous.
+    public func chatMessage(id: UUID) -> SZChatMessage? {
+        for messages in chat.values {
+            if let hit = messages.first(where: { $0.id == id }) { return hit }
+        }
+        return nil
+    }
+
     /// Append a message to a scope's transcript. Returns its id (handy for streaming text into it).
     @discardableResult
     public func appendChatMessage(_ message: SZChatMessage, to scope: SZChatScope) -> UUID {

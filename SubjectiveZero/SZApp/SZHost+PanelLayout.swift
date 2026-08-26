@@ -113,9 +113,9 @@ extension SZHost {
         persistAppState()
     }
 
-    /// View ▸ Show Token Counts — a live pref, persisted like every layout change.
-    func setShowTokenCounts(_ on: Bool) {
-        showTokenCounts = on
+    /// View ▸ Show Agent Activity — a live pref, persisted like every layout change.
+    func setShowAgentActivity(_ on: Bool) {
+        showAgentActivity = on
         persistAppState()
     }
 
@@ -147,7 +147,7 @@ extension SZHost {
                                              providerGenerationSettings: providerGenerationSettings.isEmpty
                                                 ? nil : providerGenerationSettings,
                                              showWelcomeAtStartup: showWelcomeAtStartup,
-                                             showTokenCounts: showTokenCounts,
+                                             showAgentActivity: showAgentActivity,
                                              telemetryEnabled: telemetryEnabled,
                                              showTurnBreakdown: showTurnBreakdown,
                                              poppedOutPanels: poppedOutPanels.isEmpty

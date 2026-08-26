@@ -107,6 +107,7 @@ public struct SZGraphEngine {
             var noteDetail: String?
             var noteTally: SZAgentGraphRun.Tally?
             var noteGeneration: String?
+            var noteTurnID: UUID?
             switch node.form {
             case .step(let name):
                 // The snapshot is pinned HERE: the evaluation and every ask it makes see
@@ -174,9 +175,16 @@ public struct SZGraphEngine {
                 }
                 let choice = router.resolve(SZModelCall(
                     class: .turn, agent: agent, slot: turn.slot))
-                let report = await host.runTurn(SZTurnOrder(
-                    agent: agent, brief: prompt, session: turn.session,
-                    tools: turn.tools, choice: choice))
+                // The visit is already noted running; re-note it the moment the turn's
+                // message exists so its card can read along while the agent works.
+                let visitOrdinal = ordinal
+                let report = await host.runTurn(
+                    SZTurnOrder(agent: agent, brief: prompt, session: turn.session,
+                                tools: turn.tools, choice: choice)
+                ) { [host] turnID, envelope in
+                    host.note(SZTraversalNote(ordinal: visitOrdinal, node: id, phase: .running,
+                                              generation: envelope, turnID: turnID))
+                }
                 if Task.isCancelled {
                     note(SZTraversalNote(ordinal: ordinal, node: id, phase: .done))
                     conclusion = .cancelled(node: id)
@@ -187,6 +195,7 @@ public struct SZGraphEngine {
                 outcome = report.failed ? "error" : "ok"
                 if report.failed { turnFailure = report.detail ?? "the turn failed" }
                 noteGeneration = report.generation
+                noteTurnID = report.turnID
 
             case .dispatch(let dispatch):
                 // A dispatch sends the run's work set — the only dispatchable list.
@@ -221,7 +230,8 @@ public struct SZGraphEngine {
             note(SZTraversalNote(ordinal: ordinal, node: id,
                                  phase: turnFailure == nil ? .done : .failed,
                                  outcome: outcome, detail: turnFailure ?? noteDetail,
-                                 tally: noteTally, generation: noteGeneration))
+                                 tally: noteTally, generation: noteGeneration,
+                                 turnID: noteTurnID))
 
             // How this traversal ends when nothing routes onward from `outcome` — shared
             // by the edge-less exit and the spent leash, so neither can launder a failed

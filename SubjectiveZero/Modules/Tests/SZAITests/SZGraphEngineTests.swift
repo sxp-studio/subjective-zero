@@ -33,11 +33,20 @@ private final class StubHost: SZTraversalServing {
     var conversationValue: String?
 
     func facts() -> SZFacts { factsValue }
+    /// The message id the stub reports a turn opened with — what the running note carries so
+    /// a card can read along before the turn is over.
+    let openedTurnID = UUID()
+    /// The envelope the stub reports a turn opened WITH — decided at dispatch, so a card can
+    /// name its model while the turn generates.
+    let openedEnvelope: String? = "stub · m · high"
+
     func render(template: String) throws -> String { "rendered:" + template }
     func conversation() -> String? { conversationValue }
-    func runTurn(_ order: SZTurnOrder) async -> SZTurnReport {
+    func runTurn(_ order: SZTurnOrder,
+                 opened: @escaping @MainActor @Sendable (UUID, String?) -> Void) async -> SZTurnReport {
         turnsSeen.append(order)
         events.append("turn:\(order.brief)")
+        opened(openedTurnID, openedEnvelope)
         return turnReports.isEmpty ? SZTurnReport(failed: false) : turnReports.removeFirst()
     }
     func serveAsk(step: String, slot: String?, requestJSON: String) async throws -> String {
@@ -179,6 +188,23 @@ struct SZGraphEngineTests {
                                                     phase: .done, outcome: "yes")))
         let landing = host.notes.last { $0.node == "implement" && $0.phase == .done }
         #expect(landing?.tally == SZAgentGraphRun.Tally(settled: 2, total: 2, failed: 0))
+    }
+
+    @Test func aTurnsMessageIsNotedWhileTheTurnStillRuns() async throws {
+        // The point of a card's activity band: it must be able to read the agent's words
+        // WHILE it works. The settle note carries the id too, but it arrives when the turn is
+        // already over — the RUNNING note is what makes the band live.
+        let host = StubHost()
+        host.summaries = [SZSettledSummary(setID: 1, from: "coding", outcomes: [:], round: 1)]
+        let engine = makeEngine(host: host, steps: StubSteps(scripts: buildScripts()))
+        _ = await engine.run()
+
+        let running = host.notes.filter { $0.node == "plan" && $0.phase == .running }
+        #expect(running.contains { $0.turnID == host.openedTurnID })
+        // And the model it is running, which the router decided before the turn began.
+        #expect(running.contains { $0.generation == host.openedEnvelope })
+        // And a step never claims one — it has no transcript message behind it.
+        #expect(host.notes.filter { $0.node == "work-left" }.allSatisfy { $0.turnID == nil })
     }
 
     @Test func aSettledEdgeRoutesTheTraversalOnwardAfterTheFleet() async throws {
@@ -418,7 +444,10 @@ struct SZGraphEngineTests {
             func facts() -> SZFacts { SZFacts(message: "") }
             func render(template: String) throws -> String { throw Broken() }
             func conversation() -> String? { nil }
-            func runTurn(_ order: SZTurnOrder) async -> SZTurnReport { SZTurnReport(failed: false) }
+            func runTurn(_ order: SZTurnOrder,
+                         opened: @escaping @MainActor @Sendable (UUID, String?) -> Void) async -> SZTurnReport {
+                SZTurnReport(failed: false)
+            }
             func serveAsk(step: String, slot: String?, requestJSON: String) async throws -> String {
                 throw CancellationError()
             }

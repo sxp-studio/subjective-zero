@@ -12,8 +12,9 @@ import UniformTypeIdentifiers
 extension SZHost {
 
     /// THE feed the one chat panel shows: every Director message, plus each node agent's own
-    /// conversation, in the order they were said. A node's fleet turns are left out — they carry
-    /// the run they belong to and are read in that task's drill-in, not in the conversation.
+    /// conversation, in the order they were said. A node's build turns join it only under View ▸
+    /// Show Agent Activity — off, they carry the run they belong to and are read in that task's
+    /// drill-in.
     ///
     /// Derived per body evaluation from the per-scope transcripts (a few hundred messages at
     /// most); the transcripts stay the storage, so sessions and recaps are untouched.
@@ -22,10 +23,11 @@ extension SZHost {
         for node in store.project?.graph.nodes ?? [] {
             let scope = SZChatScope.node(node.id)
             items += store.messages(for: scope)
-                // A fleet turn belongs to its task, not to us — and anything from before this
-                // project's `feedEpoch` predates that stamp, so it is fleet work until proven
-                // otherwise rather than conversation until proven otherwise.
-                .filter { $0.graphRunID == nil && $0.timestamp >= feedEpoch }
+                // A build turn belongs to its task unless you asked to watch the agents work.
+                // `feedEpoch` gates BOTH ways: anything older predates the stamp, so it is build
+                // work of unknown provenance and stays out even with activity on — otherwise an old
+                // project's first open would pour every coding turn it ever ran into the feed.
+                .filter { ($0.graphRunID == nil || showAgentActivity) && $0.timestamp >= feedEpoch }
                 .map { SZChatFeedItem(scope: scope, message: $0) }
         }
         return items.sorted { $0.message.timestamp < $1.message.timestamp }

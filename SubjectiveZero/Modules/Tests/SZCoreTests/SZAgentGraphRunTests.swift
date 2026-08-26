@@ -271,6 +271,42 @@ private func entry(_ ordinal: Int, node: String = "step",
 
 // MARK: - Entry wire tolerance for the stamps
 
+// MARK: - The turn a visit ran
+
+@Test func aTurnVisitsIdRidesItsEntryAndSurvivesReEmits() {
+    // `turnID` is what a card's activity band hangs off, so it must outlive the phase
+    // change that settles the visit — a re-emit without one never erases it, exactly as
+    // the tally and the receipt behave.
+    let id = UUID()
+    var record = run(0, live: true)
+    var running = entry(1, node: "implement", phase: .running)
+    running.turnID = id
+    record.note(running)
+    record.note(entry(1, node: "implement", phase: .running))
+    #expect(record.trace[0].turnID == id)
+    record.note(entry(1, node: "implement", phase: .done, outcome: "ok"))
+    #expect(record.trace[0].turnID == id)
+}
+
+@Test func aRevisitCarriesItsOwnTurnNotTheFirstVisits() {
+    // Two visits of one turn node are two turns, and a card reads the words of the visit
+    // it draws — keying by ordinal is what keeps a loop's second pass off the first card.
+    let first = UUID(), second = UUID()
+    var record = run(0, live: true)
+    var a = entry(1, node: "implement", phase: .done, outcome: "ok"); a.turnID = first
+    var b = entry(2, node: "implement", phase: .done, outcome: "ok"); b.turnID = second
+    record.note(a); record.note(b)
+    #expect(record.trace.map(\.turnID) == [first, second])
+}
+
+@Test func entryTurnIDRoundTrips() throws {
+    var stamped = entry(1, phase: .done, outcome: "ok")
+    stamped.turnID = UUID()
+    let decoded = try JSONDecoder().decode(SZAgentGraphRun.Entry.self,
+                                           from: JSONEncoder().encode(stamped))
+    #expect(decoded.turnID == stamped.turnID)
+}
+
 @Test func entryWithoutOptionalsEncodesWithoutTheirKeys() throws {
     // An absent value must not be encoded — no key that says nothing.
     let data = try JSONEncoder().encode(entry(1, phase: .done))
@@ -279,6 +315,7 @@ private func entry(_ ordinal: Int, node: String = "step",
     #expect(!text.contains("endedAt"))
     #expect(!text.contains("outcome"))
     #expect(!text.contains("detail"))
+    #expect(!text.contains("turnID"))
 }
 
 @Test func entryStampsRoundTrip() throws {

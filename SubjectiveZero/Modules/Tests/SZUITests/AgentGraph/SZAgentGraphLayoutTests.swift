@@ -177,9 +177,120 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     let run = record([entry(1, "implement", started: 100)])
     #expect(SZAgentGraphLayout.hasStats(run.trace[0], spends: true))
     let frames = SZAgentGraphLayout.runFrames(for: run, graph: graph)
-    #expect(frames[0].height == SZAgentGraphLayout.size(of: turnFace, stats: true).height)
-    #expect(frames[0].height
-        == SZAgentGraphLayout.size(of: turnFace).height + SZAgentGraphLayout.statsFooterHeight)
+    // A turn card's footer is the clock's line plus the receipt's, both reserved up front.
+    #expect(frames[0].height == SZAgentGraphLayout.size(of: turnFace, stats: true,
+                                                        extraFooterLines: 1).height)
+    #expect(frames[0].height == SZAgentGraphLayout.size(of: turnFace).height
+                              + SZAgentGraphLayout.statsFooterHeight
+                              + SZAgentGraphLayout.footerRowHeight)
+}
+
+// MARK: - Header fit
+
+@Test func aSlottedCardIsWideEnoughForItsWholeHeader() {
+    // The regression: a title beside a slot chip lost its tail ("Implement" → "Implem…").
+    // The width must cover every piece the header stacks, INCLUDING the Spacer's own spacing
+    // slot — being one 7pt gap short is all it took.
+    let face = SZAgentGraphFace(form: .turn, title: "Implement", symbol: "message",
+                                outcomes: ["ok", "error"], slot: "Build – Normal")
+    // The exact case that clipped: this pair needs more than the 223pt the old estimate gave.
+    #expect(SZAgentGraphLayout.width(of: face) > 223)
+    let needed = 12 + 22 + SZCardText.titleWidth("Implement")
+        + SZAgentGraphLayout.statusBadgeWidth + 12
+        + SZAgentGraphLayout.headerGap * 4
+        + SZCardText.chipWidth("Build – Normal") + 8
+    #expect(SZAgentGraphLayout.width(of: face) >= needed)
+}
+
+@Test func aLongTitleWidensTheCardRatherThanLosingWords() {
+    // No ceiling: a card scales to its content. A longer title must buy more width, never
+    // hit a cap and ellipsize.
+    let short = SZAgentGraphFace(form: .turn, title: "Implement", symbol: "message",
+                                 outcomes: ["ok"])
+    let long = SZAgentGraphFace(form: .turn, title: String(repeating: "Implement ", count: 8),
+                                symbol: "message", outcomes: ["ok"])
+    #expect(SZAgentGraphLayout.width(of: long) > SZAgentGraphLayout.width(of: short))
+    #expect(SZAgentGraphLayout.width(of: long) > 320)   // past the ceiling that used to clip
+}
+
+@Test func aShortTitleStillTakesTheMinimumWidth() {
+    // The floor stands — a two-letter node must not draw as a stub.
+    let face = SZAgentGraphFace(form: .turn, title: "Go", symbol: "message", outcomes: ["ok"])
+    #expect(SZAgentGraphLayout.width(of: face) == SZAgentGraphLayout.minCardWidth)
+}
+
+@Test func anOpenedActivityBandGrowsTheCardDownwardOnly() {
+    // The band is fixed height, so a streaming turn cannot resize its own card; and the
+    // card's ORIGIN stays on the closed height, so opening one holds the header, the ports
+    // and every wire into them still while you read.
+    let run = record([entry(1, "implement", started: 100)])
+    let closed = SZAgentGraphLayout.runFrames(for: run, graph: graph)[0]
+    let open = SZAgentGraphLayout.runFrames(for: run, graph: graph, opened: [1])[0]
+    #expect(open.height == closed.height + SZAgentGraphLayout.activityBandHeight)
+    #expect(open.origin == closed.origin)
+    #expect(open.width == closed.width)
+}
+
+@Test func openingOneCardLeavesTheChainsOtherCardsWhereTheyWere() {
+    // The x advance spends the CLOSED width, and every card keeps its own spine position,
+    // so opening a band in the middle of a traversal must not shove its neighbours.
+    let run = record([entry(1, "implement", started: 100),
+                      entry(2, "check", phase: .done, outcome: "yes", started: 130)])
+    let closed = SZAgentGraphLayout.runFrames(for: run, graph: graph)
+    let open = SZAgentGraphLayout.runFrames(for: run, graph: graph, opened: [1])
+    #expect(open[1] == closed[1])
+}
+
+@Test func aTurnCardIsTheSameHeightBeforeAndAfterItsTurnOpens() {
+    // Everything the footer says lands mid-turn — the id, the receipt, the spend. Sizing by
+    // any of them grew the card under the pointer, so the lines are reserved by FORM and only
+    // opening the band changes the height.
+    var turn = entry(1, "implement", started: 100)
+    turn.turnID = UUID()
+    turn.generation = "claude · claude-opus-5 · high"
+    let started = SZAgentGraphLayout.runFrames(for: record([turn]), graph: graph)[0]
+    let bare = SZAgentGraphLayout.runFrames(for: record([entry(1, "implement", started: 100)]),
+                                             graph: graph)[0]
+    #expect(started.height == bare.height)
+    // Opening the band adds the band ALONE.
+    let open = SZAgentGraphLayout.runFrames(for: record([turn]), graph: graph, opened: [1])[0]
+    #expect(open.height == started.height + SZAgentGraphLayout.activityBandHeight)
+}
+
+@Test func aStepCardCarriesNeitherFooterLine() {
+    // Only a turn has a transcript message behind it; a step settled in noise and owes nothing.
+    #expect(!SZAgentGraphLayout.hasTokenLine(entry(1, "check", phase: .done, outcome: "yes")))
+    #expect(SZAgentGraphLayout.extraFooterLines(stepFace) == 0)
+    #expect(SZAgentGraphLayout.extraFooterLines(turnFace) == 1)
+}
+
+@Test func theBandRectIsTheSliceAboveTheFooterAndBelowTheRows() {
+    // What the panel checks a scroll against: over the band the canvas must not pan, or the
+    // graph slides out from under the text being read.
+    var turn = entry(1, "implement", started: 100)
+    turn.turnID = UUID()
+    turn.generation = "claude · claude-opus-5 · high"
+    let run = record([turn])
+    let extra = SZAgentGraphLayout.extraFooterLines(turnFace)
+    let frame = SZAgentGraphLayout.runFrames(for: run, graph: graph, opened: [1])[0]
+    let band = SZAgentGraphLayout.activityBandRect(in: frame, extraFooterLines: extra)
+    #expect(band.height == SZAgentGraphLayout.activityBandHeight)
+    #expect(band.width == frame.width)
+    // It stops exactly where the two footer lines begin, and never runs past the card.
+    #expect(band.maxY == frame.maxY - SZAgentGraphLayout.statsFooterHeight
+                - CGFloat(extra) * SZAgentGraphLayout.footerRowHeight)
+    #expect(band.minY > frame.minY)
+    // The band is exactly what opening ADDED: it starts where the closed card's footer did.
+    let closed = SZAgentGraphLayout.runFrames(for: run, graph: graph)[0]
+    #expect(band.height == frame.height - closed.height)
+}
+
+@Test func anOrdinalNoEntryCarriesOpensNothing() {
+    // Ordinals are the producer's naming: a stale one left over from another record must
+    // size nothing rather than grow whichever card happens to sit there.
+    let run = record([entry(1, "implement", started: 100)])
+    #expect(SZAgentGraphLayout.runFrames(for: run, graph: graph, opened: [7])
+        == SZAgentGraphLayout.runFrames(for: run, graph: graph))
 }
 
 @Test func aStampedStepStaysStatFree() {
@@ -190,16 +301,17 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     #expect(frames[0].size == SZAgentGraphLayout.size(of: stepFace))
 }
 
-@Test func aSettledReceiptJoinsTheFooterLineNeverItsHeight() {
-    // The envelope receipt is TEXT on the strip the visit already earned — a stamped
-    // generation must not grow the card, or the receipt's arrival would shift the ports.
+@Test func aTurnCardReservesTheReceiptsOwnLine() {
+    // Beside the clock the envelope truncated to "cla…opus-5", hiding the model it names, so
+    // it takes a line — reserved from the first frame, whether or not one has been stamped.
     var settled = entry(1, "implement", phase: .done, outcome: "ok", started: 100)
     settled.endedAt = Date(timeIntervalSinceReferenceDate: 130)
     settled.generation = "codex · gpt-5.6-terra · fast"
     let run = record([settled])
     #expect(SZAgentGraphLayout.hasStats(run.trace[0], spends: true))
     let frames = SZAgentGraphLayout.runFrames(for: run, graph: graph)
-    #expect(frames[0].height == SZAgentGraphLayout.size(of: turnFace, stats: true).height)
+    #expect(frames[0].height == SZAgentGraphLayout.size(of: turnFace, stats: true).height
+                              + SZAgentGraphLayout.footerRowHeight)
 }
 
 @Test func subheaderAndFooterStackIndependently() {
@@ -211,7 +323,8 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     #expect(SZAgentGraphLayout.hasStats(run.trace[0], spends: true))
     let frames = SZAgentGraphLayout.runFrames(for: run, graph: graph)
     #expect(frames[0].height
-        == SZAgentGraphLayout.size(of: turnFace, subheader: true, stats: true).height)
+        == SZAgentGraphLayout.size(of: turnFace, subheader: true, stats: true,
+                                   extraFooterLines: 1).height)
     // The outcome rows sit where they always did: the footer is additive at the BOTTOM.
     #expect(SZAgentGraphLayout.outcomePoint(frames[0], outcome: "ok", in: turnFace, subheader: true)
         == SZAgentGraphLayout.outcomePoint(
@@ -294,7 +407,7 @@ private func record(_ entries: [SZAgentGraphRun.Entry]) -> SZAgentGraphRun {
     let translated = CGPoint(x: planPoint.x + offset.width, y: planPoint.y + offset.height)
     #expect(start != translated)
     #expect(start.y == translated.y - SZAgentGraphLayout.statsFooterHeight / 2)
-    #expect(SZAgentGraphLayout.statsFooterHeight / 2 == 8)
+    #expect(SZAgentGraphLayout.statsFooterHeight / 2 == 12.5)
 }
 
 @Test func anEdgeBetweenTwoFutureNodesIsThePlanPointPlusTheOffset() {

@@ -90,6 +90,9 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         /// A settled turn visit's envelope receipt ("codex · gpt-5.6-terra · fast");
         /// nil on other visits and on records that predate receipts.
         public var generation: String?
+        /// The transcript message this turn streamed into — where a card reads the agent's
+        /// activity and its tokens. nil on every non-turn visit.
+        public var turnID: UUID?
         /// HOST-stamped wall clock (`note` stamps on first sight / settle) — never
         /// engine-stamped. Persisted with the trace.
         public var startedAt: Date?
@@ -105,7 +108,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
 
         public init(ordinal: Int, node: String, phase: Phase, outcome: String? = nil,
                     detail: String? = nil, tally: Tally? = nil, generation: String? = nil,
-                    startedAt: Date? = nil, endedAt: Date? = nil) {
+                    turnID: UUID? = nil, startedAt: Date? = nil, endedAt: Date? = nil) {
             self.ordinal = ordinal
             self.node = node
             self.phase = phase
@@ -113,6 +116,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             self.detail = detail
             self.tally = tally
             self.generation = generation
+            self.turnID = turnID
             self.startedAt = startedAt
             self.endedAt = endedAt
         }
@@ -125,7 +129,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
 
         // An absent value is NOT encoded — no key that says nothing.
         private enum CodingKeys: String, CodingKey {
-            case ordinal, node, phase, outcome, detail, tally, generation, startedAt, endedAt
+            case ordinal, node, phase, outcome, detail, tally, generation, turnID, startedAt, endedAt
         }
 
         public init(from decoder: Decoder) throws {
@@ -139,6 +143,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             detail = try c.decodeIfPresent(String.self, forKey: .detail)
             tally = try c.decodeIfPresent(Tally.self, forKey: .tally)
             generation = try c.decodeIfPresent(String.self, forKey: .generation)
+            turnID = try c.decodeIfPresent(UUID.self, forKey: .turnID)
             startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
             endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
         }
@@ -152,6 +157,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             try c.encodeIfPresent(detail, forKey: .detail)
             try c.encodeIfPresent(tally, forKey: .tally)
             try c.encodeIfPresent(generation, forKey: .generation)
+            try c.encodeIfPresent(turnID, forKey: .turnID)
             try c.encodeIfPresent(startedAt, forKey: .startedAt)
             try c.encodeIfPresent(endedAt, forKey: .endedAt)
         }
@@ -236,6 +242,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             // receipt the settle stamped.
             if merged.tally == nil { merged.tally = trace[i].tally }
             if merged.generation == nil { merged.generation = trace[i].generation }
+            if merged.turnID == nil { merged.turnID = trace[i].turnID }
             if merged.phase != .running, merged.endedAt == nil { merged.endedAt = now }
             trace[i] = merged
         } else {

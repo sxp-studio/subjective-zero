@@ -24,7 +24,6 @@ public struct SZChatPanel: View {
     private let streamingIDs: Set<UUID>            // the messages actually being written right now
     private let isRunning: Bool                    // a build is in flight → the strip shows it
     private let isLoading: Bool                    // a project is opening → the transcript's spinner
-    private let showTokenCounts: Bool              // View ▸ Show Token Counts — the usage caption under replies
     private let showTurnBreakdown: Bool            // Debug ▸ Show Turn Breakdown — expandable phase rows under replies
     private let agentAccents: SZChatAgentAccents   // pack-declared speaker symbols/tints; empty = the built-in palette
     private let workingScopes: Set<String>         // scopes with a streaming turn → the typing dots
@@ -135,7 +134,6 @@ public struct SZChatPanel: View {
                 streaming: Bool, streamingIDs: Set<UUID> = [],
                 isRunning: Bool = false,
                 isLoading: Bool = false,
-                showTokenCounts: Bool = false,
                 showTurnBreakdown: Bool = false,
                 agentAccents: SZChatAgentAccents = SZChatAgentAccents(),
                 workingScopes: Set<String> = [],
@@ -163,7 +161,6 @@ public struct SZChatPanel: View {
         self.streamingIDs = streamingIDs
         self.isRunning = isRunning
         self.isLoading = isLoading
-        self.showTokenCounts = showTokenCounts
         self.showTurnBreakdown = showTurnBreakdown
         self.agentAccents = agentAccents
         self.workingScopes = workingScopes
@@ -480,7 +477,6 @@ public struct SZChatPanel: View {
             // Queued rides in as a VALUE (not the closure) so the row's `.equatable()` skip keeps
             // working: the chip flips exactly when the prop flips.
             queued: isUser && isQueued(message.id),
-            showTokenCounts: showTokenCounts,
             showTurnBreakdown: showTurnBreakdown,
             accent: isUser ? Self.userColor
                 : (isDebugReply ? (agentAccents.debugColor ?? Self.debugColor)
@@ -661,8 +657,12 @@ public struct SZChatPanel: View {
     /// its own in-flight assistant message's start (accurate, and survives tab switches — the same
     /// source the transcript's working row uses); a whole run / split-merge (no in-flight message on
     /// this tab) falls back to `stopSince`, stamped when the lock began.
+    ///
+    /// THIS conversation's turn, like `activeStop`: with Show Agent Activity on, the feed also
+    /// carries the builds' turns, and the newest of those would otherwise time a composer that is
+    /// not waiting on it.
     private var runningSince: Date? {
-        if let live = feed.last(where: { streamingIDs.contains($0.message.id) })?.message {
+        if let live = feed.last(where: { $0.scope == scope && streamingIDs.contains($0.message.id) })?.message {
             return live.timestamp
         }
         return stopSince
@@ -913,7 +913,6 @@ private struct SZChatTurnRow: View, Equatable {
     let message: SZChatMessage
     let working: Bool               // this turn is still in flight → dots + live elapsed timer
     let queued: Bool                // user message still waiting in the mailbox → queued chip
-    let showTokenCounts: Bool
     let showTurnBreakdown: Bool
     let accent: Color
     let label: String
@@ -970,12 +969,14 @@ private struct SZChatTurnRow: View, Equatable {
                 } else if let duration = message.duration, message.role == .assistant {
                     // Final time + the turn's receipt + tokens, kept below the reply. The receipt
                     // names what ACTUALLY ran (model, else provider; "· fast" when it was); hover
-                    // carries the full envelope + the routing rule that picked it. Tokens are
-                    // opt-in (View ▸ Show Token Counts), and not every CLI reports usage. A turn
-                    // without a receipt renders exactly as before receipts existed.
-                    let tokens = showTokenCounts ? message.usage.map {
-                        " · \(szFormatTokensCompact($0.inputTokens)) in / \(szFormatTokensCompact($0.outputTokens)) out"
-                    } ?? "" : ""
+                    // carries the full envelope + the routing rule that picked it. Not every CLI
+                    // reports usage, so the tokens are absent rather than zero. A turn without a
+                    // receipt renders exactly as before receipts existed.
+                    // "tok" once, up front, so the numbers read as tokens rather than as
+                    // anything else a turn counts. Same wording the Agent Graph's cards wear.
+                    let tokens = message.usage.map {
+                        " · tok \(szFormatTokensCompact($0.inputTokens)) in / \(szFormatTokensCompact($0.outputTokens)) out"
+                    } ?? ""
                     let ran = message.generation.map {
                         " · \($0.model ?? $0.providerID)\($0.fastMode ? " · fast" : "")"
                     } ?? ""

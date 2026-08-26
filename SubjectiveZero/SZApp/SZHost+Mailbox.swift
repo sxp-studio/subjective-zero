@@ -157,7 +157,7 @@ extension SZHost {
         // the turn node declares (so tool-free-ness is the debug pack's `"tools": []`
         // rather than a scope branch here), and `choice` is the router's verdict.
         func runDeliveredTurn(_ order: SZTurnOrder, prompt: String) async throws
-            -> (result: SZAgentRunResult, generation: String) {
+            -> (result: SZAgentRunResult, generation: String, turnID: UUID) {
             let turn = order.resolved(against: existing)
             guard let turnProvider = SZProviderRegistry.shared.provider(id: turn.choice.providerID) else {
                 throw SZMCPError.message("unknown provider: \(turn.choice.providerID)")
@@ -185,7 +185,8 @@ extension SZHost {
             }
             return (result, SZTurnGeneration(
                 providerID: turnProvider.id, model: request.model,
-                reasoningEffort: request.reasoningEffort, fastMode: request.fastMode).label)
+                reasoningEffort: request.reasoningEffort, fastMode: request.fastMode).label,
+                assistantID)
         }
         do {
             // EVERY delivery flows through its agent's graph: the door decides what the
@@ -219,9 +220,12 @@ extension SZHost {
             }
             let (result, turnless, mintedTaskIDs) = try await runProseDelivery(
                 scope: scope, message: expanded, existing: existing, providerID: providerID,
-                extras: extras, priorConversationExcluding: ownBubbles.union(queuedBubbles)) { order in
+                extras: extras, priorConversationExcluding: ownBubbles.union(queuedBubbles)) { order, opened in
                     var prompt = order.brief
                     if !messageAttachments.isEmpty { prompt += Self.attachmentManifest(messageAttachments) }
+                    // This lane opened its message before the traversal began, so the card can
+                    // read along from the first chunk. The envelope rides `deliver`'s own call.
+                    opened(assistantID, nil)
                     return try await runDeliveredTurn(order, prompt: prompt)
                 }
             if Task.isCancelled {
@@ -327,8 +331,8 @@ extension SZHost {
     func runProseDelivery(
         scope: SZChatScope, message: String, existing: SZAgentSession?, providerID: String,
         extras: SZBriefExtras, priorConversationExcluding: Set<UUID> = [],
-        turn: @escaping @MainActor (SZTurnOrder) async throws
-            -> (result: SZAgentRunResult, generation: String)
+        turn: @escaping @MainActor (SZTurnOrder, @escaping @MainActor @Sendable (UUID, String?) -> Void)
+            async throws -> (result: SZAgentRunResult, generation: String, turnID: UUID)
     ) async throws -> (result: SZAgentRunResult, turnless: Bool, scheduled: [UUID]) {
         guard let packsRoot = Self.graphAgentPacksRoot() else {
             throw SZChatTraversalFailure(detail: "no agent packs — the bundled packs did not "
@@ -405,13 +409,13 @@ extension SZHost {
                                conversation: self.conversation(for: scope,
                                                                excluding: priorConversationExcluding))
             },
-            turn: { order in
+            turn: { order, opened in
                 do {
-                    let (result, generation) = try await turn(order)
+                    let (result, generation, turnID) = try await turn(order, opened)
                     capture.result = result
                     return SZTurnReport(failed: result.outcome.failed,
                                         detail: result.outcome.message,
-                                        generation: generation)
+                                        generation: generation, turnID: turnID)
                 } catch {
                     capture.error = error
                     return SZTurnReport(failed: true, detail: String(describing: error))

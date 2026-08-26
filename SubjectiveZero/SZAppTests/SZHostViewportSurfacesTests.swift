@@ -11,6 +11,15 @@ import SZCore
 @MainActor
 struct SZHostViewportSurfacesTests {
 
+    /// `SZHost()` reads this machine's real app-state.json, so a window arrangement with no
+    /// viewport in it would fail these on a developer's desk rather than on their change.
+    /// The layout each test means is stated, never inherited.
+    private func host() -> SZHost {
+        let fresh = SZHost()
+        fresh.panelLayout = .default
+        return fresh
+    }
+
     private func attach(_ id: SZPanelID, to host: SZHost) -> CAMetalLayer {
         let layer = CAMetalLayer()
         host.viewportSurfaces.append(SZViewportSurface(id: id, layer: layer, view: nil))
@@ -23,7 +32,7 @@ struct SZHostViewportSurfacesTests {
         // The default layout holds the primary viewport (0), but only a clone's (1) view is in a
         // window — the primary is maximized-away. The primary would win by the ladder; it has no
         // surface, so it can't.
-        let host = SZHost()
+        let host = host()
         #expect(host.panelLayout.contains(SZPanelID(.viewport, instance: 0)))
         #expect(host.viewportDriver.driver == nil)
         _ = attach(SZPanelID(.viewport, instance: 1), to: host)
@@ -31,7 +40,7 @@ struct SZHostViewportSurfacesTests {
     }
 
     @Test func detachingTheLastSurfaceLeavesNoDriver() {
-        let host = SZHost()
+        let host = host()
         let id = SZPanelID(.viewport, instance: 0)
         let layer = attach(id, to: host)
         #expect(host.viewportDriver.driver == 0)

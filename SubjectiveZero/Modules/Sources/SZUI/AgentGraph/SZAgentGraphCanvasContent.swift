@@ -33,6 +33,14 @@ struct SZAgentGraphCanvasContent: View {
     let zoom: CGFloat
     let nudges: [String: CGSize]
     let onNudge: (String, CGSize) -> Void
+    /// Which visits have their activity band open, by ordinal — the panel's state, passed in
+    /// because `runFrames` must be given the same set or the frames and the pixels disagree.
+    var openActivity: Set<Int> = []
+    /// Open/close one visit's band, by ordinal.
+    var onToggleActivity: ((Int) -> Void)? = nil
+    /// The transcripts a card's band and spend read their turn out of. Passed down, never read
+    /// here: the read belongs in those leaf views, or the canvas re-renders per chunk.
+    var store: SZStore? = nil
 
     @State private var dragging: (id: String, from: CGSize)?
 
@@ -53,10 +61,23 @@ struct SZAgentGraphCanvasContent: View {
 
     private func card(_ face: SZAgentGraphFace, state: SZAgentGraphCardState, frame: CGRect,
                       visitLabel: String? = nil,
-                      stats: SZAgentGraphCardStats? = nil) -> some View {
-        SZAgentGraphCardView(face: face, openSource: openSource,
+                      stats: SZAgentGraphCardStats? = nil,
+                      entry: SZAgentGraphRun.Entry? = nil) -> some View {
+        // A chevron only where there is a turn to read: `turnID` is what a visit's words hang
+        // off, so a step or a dispatch card never grows one.
+        let readable = entry.flatMap { e in e.turnID == nil ? nil : e }
+        return SZAgentGraphCardView(face: face, openSource: openSource,
                              drawsFileSources: drawsFileSources, state: state,
-                             visitLabel: visitLabel, stats: stats)
+                             visitLabel: visitLabel, stats: stats,
+                             store: readable == nil ? nil : store,
+                             turnID: readable?.turnID,
+                             activityOpen: readable.map { openActivity.contains($0.ordinal) } ?? false,
+                             onToggleActivity: readable.flatMap { e in
+                                 onToggleActivity.map { toggle in { toggle(e.ordinal) } }
+                             },
+                             showsTokenLine: entry.map(SZAgentGraphLayout.hasTokenLine) ?? false,
+                             showsReceiptLine: entry != nil
+                                 && SZAgentGraphLayout.extraFooterLines(face) > 0)
             .frame(width: frame.width, height: frame.height)
             .offset(x: frame.minX, y: frame.minY)
     }
@@ -148,7 +169,12 @@ struct SZAgentGraphCanvasContent: View {
     private var runView: some View {
         if let record {
             let frames = SZAgentGraphLayout.runFrames(for: record, graph: graph,
-                                                      stepOutcomes: stepOutcomes)
+                                                      stepOutcomes: stepOutcomes,
+                                                      opened: openActivity)
+            // The forecast hangs off the last card's CENTRE, and an open band grows a card
+            // downward — measured against the open frame the whole projection slid with it.
+            let closedFrames = SZAgentGraphLayout.runFrames(for: record, graph: graph,
+                                                            stepOutcomes: stepOutcomes)
             // POSITIONS, not ordinals, index the frames: ordinals are the producer's naming
             // and nothing here may assume they are 1…n — the panel renders what it was
             // handed rather than crashing on a slipped invariant.
@@ -171,7 +197,7 @@ struct SZAgentGraphCanvasContent: View {
                     card(face, state: entryState(entry, record), frame: frame,
                          visitLabel: record.visits(of: entry.node) > 1
                              ? "visit \(record.visitNumber(of: entry))" : nil,
-                         stats: stats(for: entry, face: face))
+                         stats: stats(for: entry, face: face), entry: entry)
                     // The fleet this dispatch sent, under the card that sent it.
                     if face.form == .dispatch { callBand(under: frame) }
                 }
@@ -186,7 +212,7 @@ struct SZAgentGraphCanvasContent: View {
                 if let firstFrame = frames.first {
                     origin(into: firstFrame)
                 }
-                if let last = record.trace.last, let lastFrame = frames.last {
+                if let last = record.trace.last, let lastFrame = closedFrames.last {
                     let lastFace = SZAgentGraphLayout.runFace(for: last, in: graph, stepOutcomes: stepOutcomes)
                     // The record's CONCLUSION picks the terminal — every ending is
                     // classified, and each classification gets its honest capsule. Still

@@ -33,7 +33,7 @@ struct SZHostChatGateTests {
             _ = try await host.runProseDelivery(
                 scope: .debug, message: "hi", existing: nil, providerID: "none",
                 extras: SZBriefExtras(),
-                turn: { _ in
+                turn: { _, _ in
                     Issue.record("a defective library must refuse before any turn runs")
                     throw SZChatTraversalFailure(detail: "unreachable")
                 })

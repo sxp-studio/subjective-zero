@@ -61,10 +61,15 @@ public struct SZTurnReport: Sendable {
     public var detail: String?
     /// "codex · gpt-5.6-terra · fast" — the run trace's receipt text. nil = unreported.
     public var generation: String?
-    public init(failed: Bool, detail: String? = nil, generation: String? = nil) {
+    /// The transcript message this turn streamed into — what a run card reads its activity and
+    /// tokens from. nil = the lane did not report one.
+    public var turnID: UUID?
+    public init(failed: Bool, detail: String? = nil, generation: String? = nil,
+                turnID: UUID? = nil) {
         self.failed = failed
         self.detail = detail
         self.generation = generation
+        self.turnID = turnID
     }
 }
 
@@ -131,9 +136,11 @@ public struct SZTraversalNote: Sendable, Equatable {
     /// A settled turn visit's envelope receipt ("codex · gpt-5.6-terra · fast"); nil on
     /// every other visit and on turns that predate receipts.
     public var generation: String?
+    /// The transcript message a turn visit streamed into; nil on every other visit.
+    public var turnID: UUID?
     public init(ordinal: Int, node: String, phase: Phase, outcome: String? = nil,
                 detail: String? = nil, tally: SZAgentGraphRun.Tally? = nil,
-                generation: String? = nil) {
+                generation: String? = nil, turnID: UUID? = nil) {
         self.ordinal = ordinal
         self.node = node
         self.phase = phase
@@ -141,6 +148,7 @@ public struct SZTraversalNote: Sendable, Equatable {
         self.detail = detail
         self.tally = tally
         self.generation = generation
+        self.turnID = turnID
     }
 }
 
@@ -156,8 +164,13 @@ public protocol SZTraversalServing: AnyObject, Sendable {
     /// The scope's prior conversation, formatted for a cold turn; nil = nothing to catch up
     /// on. Read fresh like `render`. Only a turn declaring `context: conversation` receives it.
     func conversation() -> String?
-    /// Run one full agent turn (session, tools, streaming — all host business).
-    func runTurn(_ order: SZTurnOrder) async -> SZTurnReport
+    /// Run one full agent turn (session, tools, streaming — all host business). `opened`
+    /// fires as soon as the turn's transcript message exists, BEFORE the agent has said
+    /// anything, carrying that message's id and the envelope the turn is running: a card can
+    /// only offer its activity once it knows which message to read, and the model is decided
+    /// at dispatch, so waiting for the report would hide both until the turn was already over.
+    func runTurn(_ order: SZTurnOrder,
+                 opened: @escaping @MainActor @Sendable (UUID, String?) -> Void) async -> SZTurnReport
     /// Deliver one dispatch set and WAIT for it: send `orders` to the seat, report the
     /// live tally as items land, and return the set's one summary. nil ⇔ cancelled (or no
     /// fleet behind this delivery — the engine records that as a defect).
