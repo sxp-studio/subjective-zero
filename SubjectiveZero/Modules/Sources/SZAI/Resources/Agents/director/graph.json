@@ -18,8 +18,8 @@
     { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
     { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume", "slot": "planner" } },
     { "id": "amend", "title": "Amend scheduled work", "turn": { "brief": "amend", "slot": "planner", "context": "conversation" } },
-    { "id": "chat", "title": "Cold turn", "turn": { "brief": "chat", "slot": "assistant", "context": "conversation" } },
-    { "id": "chat-resumed", "title": "Resumed turn", "turn": { "brief": "chat-resumed", "session": "resume", "slot": "assistant" } }
+    { "id": "chat", "title": "Catch up and answer", "turn": { "brief": "chat", "slot": "assistant", "context": "conversation" } },
+    { "id": "chat-resumed", "title": "Answer", "turn": { "brief": "chat-resumed", "session": "resume", "slot": "assistant" } }
   ],
   "edges": [
     { "from": "door", "outcome": "build", "to": "decompose" },
