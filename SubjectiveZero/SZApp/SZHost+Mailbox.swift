@@ -217,16 +217,13 @@ extension SZHost {
                     extras.nodeSource! += "\n\n// ===== Card.swift (this node's custom card) =====\n" + card
                 }
             }
-            let (result, ack, mintedTaskIDs) = try await runProseDelivery(
+            let (result, turnless, mintedTaskIDs) = try await runProseDelivery(
                 scope: scope, message: expanded, existing: existing, providerID: providerID,
                 extras: extras, priorConversationExcluding: ownBubbles.union(queuedBubbles)) { order in
                     var prompt = order.brief
                     if !messageAttachments.isEmpty { prompt += Self.attachmentManifest(messageAttachments) }
                     return try await runDeliveredTurn(order, prompt: prompt)
                 }
-            // A turn-less ruling's one line — the door's `requestBuild` ack, in the bubble
-            // the delivery already opened.
-            if let ack { reply(ack) }
             if Task.isCancelled {
                 // The per-turn Stop: a user choice, not a failure — the killed resume is still
                 // resumable, and the message WAS delivered (its turn ran).
@@ -236,6 +233,18 @@ extension SZHost {
                 // Only the DIRECTOR turn's Stop discards the tasks IT scheduled — never a task
                 // someone else queued while this turn was streaming.
                 for id in mintedTaskIDs { withdrawTask(id) }
+                markProcessed()
+                return
+            }
+            if turnless {
+                // The door ruled the prose a build and no turn ran: the RUN is the reply (its
+                // lanes in the strip now, its receipt in this transcript when it settles), so the
+                // bubble the delivery opened has nothing to say. Drop it rather than leave an
+                // empty speaker row, and drop its queue-wait row with it.
+                store.removeChatMessage(assistantID, in: scope)
+                flushTranscript(scope)
+                SZTrace.discard(turnID: assistantID)
+                status = "build requested"
                 markProcessed()
                 return
             }
@@ -313,13 +322,14 @@ extension SZHost {
     /// delivery's own bubbles and the ones still queued behind it are not history.
     /// Returns the turn's own run result so `performChatTurn`'s post-processing stays as
     /// it was. A traversal that never reached its turn throws instead — except the honest
-    /// turn-less ending after `requestBuild` fired, which returns the ack line.
+    /// turn-less ending after `requestBuild` fired, which returns `turnless: true` (the run
+    /// is the reply, so the caller drops the bubble instead of writing one).
     func runProseDelivery(
         scope: SZChatScope, message: String, existing: SZAgentSession?, providerID: String,
         extras: SZBriefExtras, priorConversationExcluding: Set<UUID> = [],
         turn: @escaping @MainActor (SZTurnOrder) async throws
             -> (result: SZAgentRunResult, generation: String)
-    ) async throws -> (result: SZAgentRunResult, ack: String?, scheduled: [UUID]) {
+    ) async throws -> (result: SZAgentRunResult, turnless: Bool, scheduled: [UUID]) {
         guard let packsRoot = Self.graphAgentPacksRoot() else {
             throw SZChatTraversalFailure(detail: "no agent packs — the bundled packs did not "
                 + "materialize and no valid SZ_AGENT_PACKS override is set")
@@ -438,7 +448,7 @@ extension SZHost {
                     return (SZAgentRunResult(
                         process: SZProcessResult(exitCode: 0, output: ""),
                         outcome: SZAgentOutcome(sessionID: nil, failed: false)),
-                        ack: "(build requested — starting a run)", scheduled: capture.mintedTasks)
+                        turnless: true, scheduled: capture.mintedTasks)
                 }
                 throw SZChatTraversalFailure(detail:
                     "the graph ended at '\(node)' (\(endOutcome)) without running a turn")
@@ -457,7 +467,7 @@ extension SZHost {
                 to: scope)
             flushTranscript(scope)
         }
-        return (result, ack: nil, scheduled: capture.mintedTasks)
+        return (result, turnless: false, scheduled: capture.mintedTasks)
     }
 }
 

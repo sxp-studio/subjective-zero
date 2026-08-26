@@ -67,6 +67,15 @@ extension SZStore {
         chat = transcripts
     }
 
+    /// Drop one message from a scope's transcript (a bubble that turned out to have nothing to
+    /// say). No-op if absent. The whole array is reassigned, like `appendChatText`, so the
+    /// @Observable change fires for the chat panel.
+    public func removeChatMessage(_ messageID: UUID, in scope: SZChatScope) {
+        guard var messages = chat[scope.key], messages.contains(where: { $0.id == messageID }) else { return }
+        messages.removeAll { $0.id == messageID }
+        chat[scope.key] = messages
+    }
+
     /// Drop a scope's transcript entirely (node delete, split/merge purge, the clear button).
     /// No-op if absent; `messages(for:)` reads a removed scope as empty.
     public func removeChat(scopeKey: String) {
