@@ -93,19 +93,42 @@ struct SZProcessTests {
     /// halves with U+FFFD permanently, and a mangled byte inside a JSONL line can cost the whole
     /// assistant message (the parse just fails). Only the live stream is affected — the accumulated
     /// `SZProcessResult.output` is decoded once, at the end — so nothing downstream of `parse()` shows it.
-    @Test func aCodepointSplitAcrossPipeReadsSurvivesTheLiveStream() async throws {
+    @Test func aCodepointSplitAcrossReadsSurvivesTheLiveStream() {
+        // A 4-byte codepoint cut down the middle (f0 9f | 8e 89) across two reads. Fed to the buffer
+        // directly rather than through a real pipe: whether two writes land as one read is the
+        // scheduler's business, and under load they coalesce — the split is what is under test, so
+        // it is stated, not hoped for. `normalExitDoesNotBlockOnAnOrphanHoldingThePipe` and the
+        // round trip below still cover the real pipe.
+        let line = ##"{"type":"assistant","message":{"content":[{"type":"text","text":"done 🎉"}]}}"## + "\n"
+        let bytes = Array(line.utf8)
+        let trailer = Array(##""}]}}"##.utf8).count + 1        // the closing quote/braces, plus \n
+        let cut = bytes.count - trailer - 4 + 2                // two bytes into the emoji's four
+        let first = Data(bytes[..<cut]), second = Data(bytes[cut...])
+        #expect(String(data: first, encoding: .utf8) == nil, "the cut must land inside the codepoint")
+
+        let lineBuffer = SZLineBuffer()
+        let consumer = SZClaudeStreamConsumer()
+        var events: [SZAgentStreamEvent] = []
+        for chunk in [first, second] {
+            for line in lineBuffer.appendAndExtractLines(chunk) {
+                events.append(contentsOf: consumer.consume(line))
+            }
+        }
+        events.append(contentsOf: consumer.finish())
+        #expect(events == [.reply("done 🎉")])
+    }
+
+    /// The same line over a REAL pipe, asserting only what the pipe guarantees: the bytes arrive and
+    /// decode. How many reads they take is the scheduler's call and is not asserted.
+    @Test func aStreamedLineDecodesOverARealPipe() async throws {
         let chunks = Mutex<[Data]>([])
-        // One claude stream-json line carrying "done 🎉", written as two printf calls 0.3s apart that
-        // cut the emoji (f0 9f | 8e 89) down the middle — two reads, guaranteed.
         let head = ##"{"type":"assistant","message":{"content":[{"type":"text","text":"done \360\237"##
         let tail = ##"\216\211"}]}}\n"##
         let result = try await runner.run(
             "/bin/sh", ["-c", "/usr/bin/printf '\(head)'; sleep 0.3; /usr/bin/printf '\(tail)'"],
             onOutput: { chunk in chunks.withLock { $0.append(chunk) } })
         #expect(result.exitCode == 0)
-        #expect(chunks.withLock { $0.count } >= 2, "the writes coalesced — nothing was split")
 
-        // Exactly what SZHost's agent streaming does with the chunks.
         let lineBuffer = SZLineBuffer()
         let consumer = SZClaudeStreamConsumer()
         var events: [SZAgentStreamEvent] = []
