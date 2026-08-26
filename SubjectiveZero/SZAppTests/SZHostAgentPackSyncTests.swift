@@ -88,17 +88,29 @@ private func hash(_ text: String) -> String { SZHost.contentHash(Data(text.utf8)
     #expect(try f.sync(previous: manifest) == manifest)
 }
 
-/// Two apps never write one copy: the key follows the app bundle's path, so a worktree build
+/// Two dev builds never write one copy: their key follows the bundle path, so a worktree build
 /// and the app xcodebuild launches to host these tests cannot overwrite each other's packs.
-@Test func eachAppBundleGetsItsOwnPackCopy() {
+@Test func eachDevBuildGetsItsOwnPackCopy() {
+    let a = URL(filePath: "/Users/x/w1/DerivedData/Build/Products/Debug/SubjectiveZero.app")
+    let b = URL(filePath: "/Users/x/w2/DerivedData/Build/Products/Debug/SubjectiveZero.app")
+    #expect(SZHost.packInstallKey(forAppAt: a, dev: true) != SZHost.packInstallKey(forAppAt: b, dev: true))
+    #expect(SZHost.packInstallKey(forAppAt: a, dev: true) == SZHost.packInstallKey(forAppAt: a, dev: true))
+    #expect(SZHost.packInstallKey(forAppAt: a, dev: true)
+            == SZHost.packInstallKey(forAppAt: URL(filePath: "/Users/x/w1/DerivedData/Build/Products/Debug/./SubjectiveZero.app"), dev: true))
+    #expect(SZHost.packInstallKey(forAppAt: a, dev: true).count == 8)
+}
+
+/// A shipped build answers the same key wherever it sits, so moving or renaming the app — or
+/// running it from a disk image, which repaths it every launch — never strands the user's edits.
+@Test func aShippedBuildKeepsOneCopyWhereverTheAppSits() {
     let installed = URL(filePath: "/Applications/SubjectiveZero.app")
-    let built = URL(filePath: "/Users/x/DerivedData/Build/Products/Debug/SubjectiveZero.app")
-    #expect(SZHost.packInstallKey(forAppAt: installed) != SZHost.packInstallKey(forAppAt: built))
-    // Stable for one app, so its copy — and the user's edits in it — survive an update.
-    #expect(SZHost.packInstallKey(forAppAt: installed) == SZHost.packInstallKey(forAppAt: installed))
-    #expect(SZHost.packInstallKey(forAppAt: installed)
-            == SZHost.packInstallKey(forAppAt: URL(filePath: "/Applications/./SubjectiveZero.app")))
-    #expect(SZHost.packInstallKey(forAppAt: installed).count == 8)
+    let moved = URL(filePath: "/Users/x/Applications/SubjectiveZero Beta.app")
+    let translocated = URL(filePath: "/private/var/folders/aa/AppTranslocation/UUID/d/SubjectiveZero.app")
+    for url in [installed, moved, translocated] {
+        #expect(SZHost.packInstallKey(forAppAt: url, dev: false) == "app")
+    }
+    // And a dev build still keys apart from it, or the worktree isolation is gone.
+    #expect(SZHost.packInstallKey(forAppAt: installed, dev: true) != "app")
 }
 
 /// The packs root and its manifest carry the same key, and the manifest stays beside the root
@@ -112,14 +124,13 @@ private func hash(_ text: String) -> String { SZHost.contentHash(Data(text.utf8)
     #expect(!manifest.path.hasPrefix(root.path))
 }
 
-/// An override root is the user's own tree: the host reads it and never writes it.
+/// An override root is the user's own tree: the host reads it and never writes it. Stated as an
+/// environment, never set on the process: SZHostChatGateTests sets the same variable, and these
+/// suites run in parallel.
 @Test func anOverriddenPacksRootIsNeverMaterializedInto() {
-    #expect(!SZHost.packsRootIsOverridden)
-    setenv("SZ_AGENT_PACKS", "/tmp/sz-packs-of-my-own", 1)
-    defer { unsetenv("SZ_AGENT_PACKS") }
-    #expect(SZHost.packsRootIsOverridden)
-    setenv("SZ_AGENT_PACKS", "", 1)
-    #expect(!SZHost.packsRootIsOverridden)   // set-but-empty is not an override
+    #expect(!SZHost.packsRootIsOverridden(in: [:]))
+    #expect(SZHost.packsRootIsOverridden(in: ["SZ_AGENT_PACKS": "/tmp/sz-packs-of-my-own"]))
+    #expect(!SZHost.packsRootIsOverridden(in: ["SZ_AGENT_PACKS": ""]))   // set-but-empty is not one
 }
 
 @Test func aUserEditStaysAndKeepsItsRecordedHash() throws {

@@ -29,21 +29,35 @@ extension SZHost {
             .appending(path: "SubjectiveZero")
     }
 
-    /// Which app a materialized pack belongs to: eight hex of the app bundle's path. Every
-    /// worktree build, and the app xcodebuild launches to host SZAppTests, sits at its own path,
-    /// so no two of them write one copy and the result never depends on which launched last. An
-    /// installed app keeps its path across updates, so an edit made against it survives one.
-    nonisolated static func packInstallKey(forAppAt bundle: URL) -> String {
-        String(contentHash(Data(bundle.standardizedFileURL.path.utf8)).prefix(8))
+    /// Which app a materialized pack belongs to. A shipped build always answers `app`: the copy,
+    /// and the user's edits in it, then stay put when the app is moved, renamed, or run from a disk
+    /// image (which hands a quarantined app a fresh path every launch). A dev build answers eight
+    /// hex of its bundle path instead, so every worktree build — and the app xcodebuild launches to
+    /// host SZAppTests — has its own copy and none can write another's.
+    ///
+    /// `dev` is an argument rather than an `#if` inside, so both answers are testable from either
+    /// configuration: the shipped path must not be the one nobody's tests ever take.
+    nonisolated static func packInstallKey(forAppAt bundle: URL, dev: Bool) -> String {
+        guard dev else { return "app" }
+        // Symlinks resolved first: /var and /private/var are the same app, and must not key apart.
+        let path = bundle.resolvingSymlinksInPath().standardizedFileURL.path
+        return String(contentHash(Data(path.utf8)).prefix(8))
     }
 
     nonisolated static var packInstallKey: String {
-        packInstallKey(forAppAt: Bundle.main.bundleURL)
+        #if DEBUG
+        packInstallKey(forAppAt: Bundle.main.bundleURL, dev: true)
+        #else
+        packInstallKey(forAppAt: Bundle.main.bundleURL, dev: false)
+        #endif
     }
 
-    /// Whether `SZ_AGENT_PACKS` names the packs root instead (see `graphAgentPacksRoot`).
-    nonisolated static var packsRootIsOverridden: Bool {
-        !(ProcessInfo.processInfo.environment["SZ_AGENT_PACKS"] ?? "").isEmpty
+    /// Whether `SZ_AGENT_PACKS` names the packs root instead (see `graphAgentPacksRoot`). Takes the
+    /// environment rather than reading it, so a test states one instead of mutating the process's.
+    nonisolated static func packsRootIsOverridden(
+        in environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        !(environment["SZ_AGENT_PACKS"] ?? "").isEmpty
     }
 
     /// `~/Library/Application Support/SubjectiveZero/agents/<install>` — where this app's bundled
@@ -57,7 +71,7 @@ extension SZHost {
     /// the step watchers. Called once at `start`, before anything reads packs.
     func materializeAgentPacks() {
         // An override root is the user's own tree: read it, never write it.
-        guard !Self.packsRootIsOverridden else {
+        guard !Self.packsRootIsOverridden() else {
             armAgentPackStepWatchers()
             return
         }
@@ -67,6 +81,10 @@ extension SZHost {
         }
         let fm = FileManager.default
         let root = Self.materializedAgentPacksRoot
+        // Which folder is this build's: a dev build's key is a hash, and an author editing
+        // prompts cannot otherwise tell two builds' copies apart.
+        print("[SZHost] agent packs root: \(root.path)")
+        Self.reportPreKeyPacks(beside: root)
         for agent in ((try? fm.contentsOfDirectory(atPath: bundled.path)) ?? []).sorted() {
             let bundledAgent = bundled.appending(path: agent)
             var isDirectory: ObjCBool = false
@@ -157,6 +175,26 @@ extension SZHost {
             }
         }
         return manifest
+    }
+
+    /// What else is sitting beside this build's copy. Nothing is ever deleted: an edit may be in
+    /// any of them, so they are reported once and left alone.
+    nonisolated private static func reportPreKeyPacks(beside root: URL) {
+        let fm = FileManager.default
+        let parent = root.deletingLastPathComponent()
+        let entries = ((try? fm.contentsOfDirectory(atPath: parent.path)) ?? []).sorted()
+        // An agent folder holds an agent.json; a key folder holds agent folders. So a copy from
+        // before packs were keyed by app is the one sitting directly under `agents/`.
+        let preKey = entries.filter { fm.fileExists(atPath: parent.appending(path: "\($0)/agent.json").path) }
+        if !preKey.isEmpty {
+            print("[SZHost] agent packs: a pre-key copy is still here (\(preKey.joined(separator: ", ")))"
+                + " — nothing reads it; an edit in it is yours to move or delete")
+        }
+        let others = entries.filter { !preKey.contains($0) && $0 != root.lastPathComponent }
+        if !others.isEmpty {
+            print("[SZHost] agent packs: \(others.count) other cop\(others.count == 1 ? "y" : "ies") here from"
+                + " other builds — never deleted for you, since an edit may be in one")
+        }
     }
 
     nonisolated static func contentHash(_ data: Data) -> String {
