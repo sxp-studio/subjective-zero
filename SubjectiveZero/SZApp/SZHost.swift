@@ -630,15 +630,11 @@ final class SZHost {
                 ?? "busy — stop the run / wait for chat before switching projects"
             return false
         }
-        // Resolve symlinks too (e.g. /tmp vs /private/tmp): reopening the SAME bundle through a
-        // different-but-equivalent path is a no-op, not a self-conflict — without this the lock
-        // acquire below would EWOULDBLOCK on our own fd and misreport "open in another instance".
-        if let current = loadedProjectURL,
-           current.resolvingSymlinksInPath().standardizedFileURL
-             == newURL.resolvingSymlinksInPath().standardizedFileURL {
-            status = "already open: \(newURL.lastPathComponent)"
-            return false
-        }
+        // Reopening the same bundle through an equivalent URL is a no-op, not a self-conflict:
+        // without this the lock acquire below would EWOULDBLOCK on our own fd and misreport "open in
+        // another instance". Compared on the canonical path (SZProjectLocation), because those URLs
+        // are the everyday ones: an open panel gives `…/A.subz/`, a remembered path `…/A.subz`.
+        if reopenedLiveProject(at: newURL) { return false }
         // From here the open is under way: the flag names it for the UI and closes the door behind us.
         // The defer clears it on every exit, throws included.
         openingProject = newURL.deletingPathExtension().lastPathComponent
@@ -733,12 +729,8 @@ final class SZHost {
         }
         status = "loaded \(newURL.lastPathComponent)"
         print("[SZHost] loaded project — edit any node's Node.swift to hot-reload:\n  \(newURL.path)")
-        // A project is now live — leave the welcome/home surface (the one common exit for New / Open /
-        // Open Recent / continue). SZHost+Welcome. Leaving welcome is also where a first run finally
-        // meets provider setup: the sheet cannot open over welcome, so it waits for this moment.
-        let leftWelcome = welcomePresented
-        welcomePresented = false
-        if leftWelcome { autoPresentProviderSetupIfNeeded() }   // SZHost+ProviderHealth
+        // A project is now live — leave the welcome/home surface (SZHost+Welcome).
+        leaveWelcomeForLiveProject()
         return true
     }
 
@@ -750,10 +742,9 @@ final class SZHost {
     @discardableResult
     func relocateProject(to newURL: URL, recordInHistory: Bool = true) throws -> Bool {
         guard let oldURL = loadedProjectURL else { return false }
-        // Resolve symlinks too (/tmp vs /private/tmp): relocating onto our own path is a no-op, and
-        // without this the acquire below would EWOULDBLOCK on our own fd and misreport "open elsewhere".
-        guard oldURL.resolvingSymlinksInPath().standardizedFileURL
-                != newURL.resolvingSymlinksInPath().standardizedFileURL else { return false }
+        // Relocating onto our own path is a no-op, and without this the acquire below would
+        // EWOULDBLOCK on our own fd and misreport "open elsewhere".
+        guard !SZProjectLocation.isSame(oldURL, newURL) else { return false }
         // The only fallible step, and it runs before anything live is disturbed: a contested
         // destination leaves the project exactly where it was, still ours, still rendering.
         let newLock: SZProjectDirectoryLock

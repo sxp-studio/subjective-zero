@@ -8,6 +8,7 @@
 // state (`showWelcomeAtStartup`) rides the same app-state.json single-writer (persistAppState) as the
 // other prefs.
 import Foundation
+import SZCore
 
 @MainActor
 extension SZHost {
@@ -51,6 +52,29 @@ extension SZHost {
         } else {
             welcomePresented = false
         }
+    }
+
+    /// A project is live, so the home surface has nothing left to decide: leave it. The one exit for
+    /// New / Open / Open Recent / continue, and for picking the project already open. A first run
+    /// meets provider setup here, since that sheet cannot open over welcome (SZHost+ProviderHealth).
+    func leaveWelcomeForLiveProject() {
+        guard welcomePresented else { return }
+        welcomePresented = false
+        autoPresentProviderSetupIfNeeded()
+    }
+
+    /// Picking the project already open. Not an open and not a refusal: from Home it means "take me
+    /// back to it", so the answer is to leave Home. True when this URL names the live project.
+    ///
+    /// It sits ahead of the busy guards because nothing is torn down, so it must hold mid-run, which
+    /// is exactly when a user can be on Home looking at their project. Answering here also keeps the
+    /// open path away from the instance lock, which reads our own held `flock` as another app.
+    @discardableResult
+    func reopenedLiveProject(at url: URL) -> Bool {
+        guard let current = loadedProjectURL, SZProjectLocation.isSame(current, url) else { return false }
+        status = "already open: \(url.lastPathComponent)"
+        leaveWelcomeForLiveProject()
+        return true
     }
 
     /// The "Show this window at startup" checkbox.

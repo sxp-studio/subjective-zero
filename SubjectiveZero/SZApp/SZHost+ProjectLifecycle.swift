@@ -168,6 +168,11 @@ extension SZHost {
     /// pruned from the menu's backing list (it is also existence-filtered at menu build — this
     /// covers the race where it disappears between build and click).
     func openProject(at url: URL) {
+        // The project already open is answered ahead of the busy guard: from Home, picking it means
+        // "take me back", and nothing is loaded, so a run in flight is no reason to refuse. An open
+        // in flight is: the document is mid-swap, so `loadedProjectURL` still names the project we
+        // are leaving, and answering for it would dismiss Home moments before the other one lands.
+        if openingProject == nil, reopenedLiveProject(at: url) { return }
         guard !isBusyForProjectSwitch else { return }
         Task { @MainActor in
             guard FileManager.default.fileExists(atPath: url.path) else {
@@ -232,8 +237,9 @@ extension SZHost {
         let source = sourceURL.resolvingSymlinksInPath().standardizedFileURL
         let target = dest.resolvingSymlinksInPath().standardizedFileURL
         // Saving onto ourselves is a Save, not a copy — the removeItem below would delete the live
-        // bundle and the copy would then have nothing to read.
-        guard target != source else { saveInPlace(); return true }
+        // bundle and the copy would then have nothing to read. Canonical paths, not URLs: the panel
+        // and the loaded URL disagree about the directory flag for one and the same bundle.
+        guard !SZProjectLocation.isSame(target, source) else { saveInPlace(); return true }
         // A destination under whatever this save will REMOVE afterwards: inside the bundle it would
         // recurse the copy, and for an untitled rescue the cleanup takes the whole `Projects/<uuid>/`
         // wrapper, so a sibling picked in that folder would be deleted moments after being written.
