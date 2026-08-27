@@ -138,7 +138,15 @@ extension SZHost {
         let assistantID = store.appendChatMessage(SZChatMessage(role: .assistant, text: ""), to: scope)
         ownBubbles.insert(assistantID)
         deliveringBubbles[scope.key] = ownBubbles
-        defer { deliveringBubbles[scope.key] = nil }
+        // Mark the turn in-flight the moment its bubble exists, not only when `deliver` opens it:
+        // the door's triage runs in between, and without this the header sits with no working dots
+        // for that whole gap. `deliver` re-sets the same id; the clears are ownership-checked, so a
+        // later turn that repins the scope keeps its own marker.
+        inFlightAssistantIDs[scope.key] = assistantID
+        defer {
+            deliveringBubbles[scope.key] = nil
+            if inFlightAssistantIDs[scope.key] == assistantID { inFlightAssistantIDs[scope.key] = nil }
+        }
         @discardableResult
         func reply(_ note: String) -> Void {
             store.appendChatText(note, to: assistantID, in: scope)
