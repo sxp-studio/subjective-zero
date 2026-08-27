@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The host-owned kit compiled into every node dylib beside the author's `Node.swift` (ABI v8,
+// The host-owned kit compiled into every node dylib beside the author's `Node.swift` (ABI v9,
 // `SZNodeABI`). Defines the ergonomic `SZNode` protocol + typed setup/frame contexts over the C-flat
 // context in SZNodeABI.swift, and exports the `@_cdecl` entry points the loader dlsym's. Node authors
 // must NOT redeclare these symbols or touch the raw struct (RUNTIME.md). The mirror of
@@ -38,6 +38,7 @@ enum SZNodeKit {
     typealias SZOutputValueResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32) -> Void
     typealias SZFrameHoldFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
     typealias SZOutputStringResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32) -> Void
+    typealias SZReportErrorFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int32) -> Void
 
     // Must byte-match SZRuntimeContextRaw in the host (SZNode.swift).
     struct SZRuntimeContextRaw {
@@ -56,6 +57,7 @@ enum SZNodeKit {
         var outputValueFn: SZOutputValueResolver?
         var frameHoldFn: SZFrameHoldFn?
         var outputStringFn: SZOutputStringResolver?
+        var reportErrorFn: SZReportErrorFn?
     }
 
     private func szObject<T>(_ pointer: UnsafeMutableRawPointer?) -> T? {
@@ -91,6 +93,7 @@ enum SZNodeKit {
         private let outputValueFn: SZOutputValueResolver?
         private let frameHoldFn: SZFrameHoldFn?
         private let outputStringFn: SZOutputStringResolver?
+        private let reportErrorFn: SZReportErrorFn?
 
         init?(_ raw: UnsafeMutableRawPointer?) {
             guard let raw else { return nil }
@@ -113,6 +116,7 @@ enum SZNodeKit {
             self.outputValueFn = c.outputValueFn
             self.frameHoldFn = c.frameHoldFn
             self.outputStringFn = c.outputStringFn
+            self.reportErrorFn = c.reportErrorFn
         }
 
         private func resolve(_ fn: SZTextureResolver?, _ port: String) -> (any MTLTexture)? {
@@ -203,6 +207,15 @@ enum SZNodeKit {
                 if Int(full) > capacity { capacity = Int(full); continue }   // truncated → grow & retry
                 return String(decoding: buffer.prefix(Int(full)).map { UInt8(bitPattern: $0) }, as: UTF8.self)
             }
+        }
+
+        /// Say why this node is producing nothing: a file that opened but would not decode, a pipeline
+        /// that would not build. The host shows it on the node. It describes this frame, so call it every
+        /// frame the fault holds and the first quiet frame clears it. One message per node, last call
+        /// wins; name the file. Truncated past 512 bytes.
+        public func reportError(_ message: String) {
+            guard let fn = reportErrorFn else { return }
+            message.withCString { fn(resolverContext, $0, Int32(message.utf8.count)) }
         }
 
         /// Keep `object` alive until THIS frame's command buffer has executed on the GPU. Use it for

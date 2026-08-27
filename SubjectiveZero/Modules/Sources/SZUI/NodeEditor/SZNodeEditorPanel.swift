@@ -32,6 +32,7 @@ public struct SZNodeEditorPanel: View {
     private let isRunning: Bool
     private let isPaused: Bool                     // HUD Pause/Play toggle state (owned by SZHost)
     private let nodeAgentState: [SZNodeID: SZNodeAgentState]   // typed per-node agent state (pill / lock / error popover)
+    private let nodeRuntimeErrors: [SZNodeID: String]          // what each node last said about itself
     private let graphOpStatus: [SZNodeID: String]   // original node id → "Splitting"/"Merging"
     private let runWorkSet: Set<SZNodeID>   // the run's captured work (host-owned) — members read Coding
     private let lockedNodes: Set<SZNodeID>  // ledger-held nodes (host-owned) — the lock affordance's source
@@ -124,6 +125,7 @@ public struct SZNodeEditorPanel: View {
     public init(store: SZStore, project: SZProject?, status: String, isRunning: Bool,
                 isPaused: Bool = false,
                 nodeAgentState: [SZNodeID: SZNodeAgentState] = [:],
+                nodeRuntimeErrors: [SZNodeID: String] = [:],
                 graphOpStatus: [SZNodeID: String] = [:], runWorkSet: Set<SZNodeID> = [],
                 lockedNodes: Set<SZNodeID> = [], hiddenPieces: Set<SZNodeID> = [],
                 chatShown: Bool,
@@ -169,6 +171,7 @@ public struct SZNodeEditorPanel: View {
         self.isRunning = isRunning
         self.isPaused = isPaused
         self.nodeAgentState = nodeAgentState
+        self.nodeRuntimeErrors = nodeRuntimeErrors
         self.graphOpStatus = graphOpStatus
         self.runWorkSet = runWorkSet
         self.lockedNodes = lockedNodes
@@ -815,6 +818,7 @@ public struct SZNodeEditorPanel: View {
             connectedSockets: SZGraphCanvasModel.connectedSocketIDs(in: graph, excluding: wire?.picked?.id),
             connectedInputsByNode: Self.connectedInputsByNode(graph),
             nodeAgentState: nodeAgentState,
+            nodeRuntimeErrors: nodeRuntimeErrors,
             graphOpStatus: graphOpStatus,
             isRunning: isRunning,
             runWorkSet: runWorkSet,

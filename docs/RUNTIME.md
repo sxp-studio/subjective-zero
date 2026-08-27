@@ -54,6 +54,7 @@ protocol SZNode {
     func teardown()                            // called on reload / removal
     func setPaused(_ paused: Bool)             // optional (v7): the runtime paused / resumed
 }
+// ctx.reportError("…")  - (v9) why this node produced nothing; see the threading contract below
 ```
 
 - **`setup()` / `teardown()`** bracket a module's life. They run on hot reload and whenever the
@@ -96,6 +97,11 @@ paces it for the node editor's live thumbnails; with nothing to see it idles.
 - **Non-texture outputs flow over value channels:** floats/vectors via `ctx.setOutputFloats` (ABI v5),
   `enum`/`string` via `ctx.setOutputString` (ABI v8). The host reads the last encoded frame's values
   (`readOutputFloats` / `readOutputString`) for card telemetry and controller learn.
+- **A node says why it produced nothing** with `ctx.reportError("…")` (ABI v9) - the fault nothing outside
+  the node can see: a file present, readable and of the declared kind that the loader still refuses, which
+  the host's own path check (`SZFileInputAudit` → `SZNode.unreadableInputs`) cannot reach. The message
+  describes one frame, so a node re-reports while the fault holds and the first quiet frame clears it; the
+  runtime publishes only on a change (`setNodeErrorCallback` → `SZNode.runtimeError`), not per frame.
 - **`setup()` / `teardown()` run on the main thread** (load/reload paths), serialized against
   frames - a frame never interleaves a half-swapped graph.
 - **`dynamicOptions(for:)` may run CONCURRENTLY with `update()`** (it's called from the UI when a

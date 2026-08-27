@@ -4,7 +4,8 @@
 // is (re)built only when `path` changes; `rate`/`loop` are read live.
 //
 // The app is NOT sandboxed (no app-sandbox entitlement), so an absolute path from the `filePicker`
-// input is read directly. Safe headless: outputs black until the first decoded frame arrives.
+// input is read directly. Safe headless: outputs black until the first decoded frame arrives, and a clip
+// that never decodes says why (`ctx.reportError`).
 @preconcurrency import AVFoundation
 @preconcurrency import CoreVideo
 import QuartzCore
@@ -30,6 +31,8 @@ final class Node: SZNode {
     }
 
     func update(_ ctx: SZFrameContext) {
+        // Above the guards, for the reason `image-file` says: a report below an early return never happens.
+        if pipeline == nil || textureCache == nil { ctx.reportError("video pipeline failed to build") }
         guard let out = ctx.outputTexture("output") else { return }
 
         loopEnabled = ctx.inputBool("loop") ?? true
@@ -45,6 +48,7 @@ final class Node: SZNode {
         if ctx.time < lastClockTime { player?.seek(to: .zero) }
         lastClockTime = ctx.time
         applyRate(ctx.inputFloat("rate") ?? 1)
+        reportFailedItem(ctx)
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = out
@@ -81,6 +85,15 @@ final class Node: SZNode {
         encoder.setFragmentBytes(&uvScale, length: MemoryLayout<SIMD2<Float>>.stride, index: 0)
         encoder.setFragmentBytes(&rot, length: MemoryLayout<Int32>.stride, index: 1)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+    }
+
+    /// Say why the clip is not playing, on every frame it isn't. `AVPlayerItem` fails asynchronously, long
+    /// after `reloadIfNeeded` returned, so there is no throw to catch; polling `currentItem.error` is the
+    /// only way the failure becomes visible.
+    private func reportFailedItem(_ ctx: SZFrameContext) {
+        guard let error = player?.currentItem?.error else { return }
+        let name = URL(fileURLWithPath: loadedPath ?? "").lastPathComponent
+        ctx.reportError("could not play \(name): \(error.localizedDescription)")
     }
 
     /// Maps the `rotation` enum ("0"/"90"/"180"/"270", clockwise) to a shader code 0–3.

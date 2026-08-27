@@ -91,7 +91,10 @@ another machine. None of that changes your code: `ctx.inputString` hands you an 
 every frame, exactly as before. Open it with `URL(fileURLWithPath:)` and never build a path yourself.
 The default you write is a value, not a promise the file exists — if it cannot be read, the host says
 so on the node, and `agent_read_node` reports it as `inputFileErrors`. To check a path before you
-rely on it, use `agent_check_path`.
+rely on it, use `agent_check_path`. That check is from outside, though: a file that is present,
+readable and of the right kind can still be refused by the loader you hand it to, and only your code
+sees that. Say so with `ctx.reportError` (see `agent_docs_read { "topic": "node-abi" }`); it reaches
+`agent_read_node` as `nodeError`.
 
 ## What a promote keeps — the live contract merges with yours
 

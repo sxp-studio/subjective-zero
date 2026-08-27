@@ -8,12 +8,17 @@
 // - `.sourceMismatch` — the code names an undeclared port (those reads resolve to nil, so the node silently runs
 //   on hardcoded defaults) or owns a live AV resource with no `setPaused`. `agent_compile_node` refuses to promote.
 //
+// Two faults sit beside it because they answer the same question ("why is this node black?") from evidence
+// the rebuild classifier cannot reach: `unreadableInputs` is the host's file audit, and `runtimeError` is
+// what the node said about itself (`ctx.reportError`, ABI v9).
+//
 // Classified by CONDITION, not by cause: a port the Director removed and one a human deleted by hand leave the
 // node equally broken. Either way it heals the same two ways: a run picks it up (`runWorkSet` is built from
 // `needsImplementation`; a promote re-stamps it), or `stageRebuildFix` composes a message to the node's own
 // Coding Agent (never auto-sent — host-drafted messages COMPOSE).
 import Foundation
 import SZCore
+import SZRuntime
 import SZUI
 
 @MainActor
@@ -115,6 +120,29 @@ extension SZHost {
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
             project.graph.nodes[i].unreadableInputs = faults
         }
+    }
+
+    /// Install the node→host fault sink (once, from `start()`, beside the preview one). The runtime fires
+    /// it only when the reported set changes, off the main actor.
+    func installNodeErrorSink(_ runtime: SZRuntime) {
+        runtime.setNodeErrorCallback { [weak self] errors in
+            Task { @MainActor [weak self] in self?.applyNodeErrors(errors) }
+        }
+    }
+
+    /// Record what nodes reported. The whole live set arrives each time, so absence is the clear and
+    /// nothing has to remember to erase a fixed node. Kept to nodes that are still in the graph, because
+    /// the publish races project switches and deletes.
+    ///
+    /// This writes host state rather than the project on purpose. A node may report on every frame, and a
+    /// per-frame `store.mutate` would re-arm the preview watch debounce (`SZHost+NodePreviews`) before it
+    /// could ever fire. Writing beside `nodeAgentState` keeps the render loop out of the document, so no
+    /// coalescing delay is needed and there is no window to tune.
+    func applyNodeErrors(_ errors: [SZNodeID: String]) {
+        guard let graph = store.project?.graph else { return }
+        let live = errors.filter { id, _ in graph.node(id: id) != nil }
+        guard live != nodeRuntimeErrors else { return }
+        nodeRuntimeErrors = live
     }
 
     /// The pill's one-click fix: compose (never send) a message to the node's Coding Agent, and reveal that tab.

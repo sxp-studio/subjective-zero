@@ -72,6 +72,14 @@ public final class SZRuntime: @unchecked Sendable {
         var lastOutputValues: [String: [Float]] = [:]
         /// String output values from the same frame (the v8 channel) — same lifecycle as `lastOutputValues`.
         var lastOutputStrings: [String: String] = [:]
+        /// Faults nodes reported on the most recently encoded frame (the v9 channel), by node.
+        var nodeErrors: [SZNodeID: String] = [:]
+        /// The set last queued for the sink, so an unchanged frame queues nothing.
+        var lastQueuedNodeErrors: [SZNodeID: String] = [:]
+        /// A queued delivery, run by `drainErrorPublish` once the lock is released.
+        var pendingErrorPublish: (() -> Void)?
+        /// Where a change is published (`setNodeErrorCallback`).
+        var onNodeErrors: (@Sendable ([SZNodeID: String]) -> Void)?
         /// Offscreen render size; the loop overrides it each tick with the driver surface's drawable size.
         var renderSize: (width: Int, height: Int)
         /// The zero-copy node-preview stream (watched set + IOSurface target pairs). A class ref so
@@ -269,7 +277,9 @@ public final class SZRuntime: @unchecked Sendable {
                     setupContext: UnsafeMutableRawPointer(pointer))
                 state.loaderDylibs[id] = dylib
             }
+            Self.retireErrors(for: [id], &state)
         }
+        drainErrorPublish()
     }
 
     /// Request every entitlement declared by the project's node contracts (camera, …), prompting once
@@ -449,7 +459,35 @@ public final class SZRuntime: @unchecked Sendable {
                 state.inputValues[node.id] = floats
                 state.inputStrings[node.id] = strings
             }
+            Self.retireErrors(for: removed.union(added), &state)
         }
+        drainErrorPublish()
+    }
+
+    /// Drop `ids` from the reported-fault set (v9). A reloaded or unloaded node earns its reason again
+    /// from its next frame, and the host has to hear that even when no frame follows.
+    private static func retireErrors(for ids: Set<SZNodeID>, _ state: inout EngineState) {
+        state.nodeErrors = state.nodeErrors.filter { !ids.contains($0.key) }
+        queueErrorPublish(&state)
+    }
+
+    /// Queue the reported-fault set for the sink if it moved. Frames and lifecycle edges share this one
+    /// path, so the host can never be handed an older set after a newer one. Caller holds the lock.
+    private static func queueErrorPublish(_ state: inout EngineState) {
+        guard let sink = state.onNodeErrors, state.nodeErrors != state.lastQueuedNodeErrors else { return }
+        state.lastQueuedNodeErrors = state.nodeErrors
+        let errors = state.nodeErrors
+        state.pendingErrorPublish = { sink(errors) }
+    }
+
+    /// Deliver a queued publish with no lock held, since the sink is host code. Called after every
+    /// critical section that can queue one.
+    private func drainErrorPublish() {
+        let publish = engine.withLock { state -> (() -> Void)? in
+            defer { state.pendingErrorPublish = nil }
+            return state.pendingErrorPublish
+        }
+        publish?()
     }
 
     /// Which live-value channel a port's by-value state lives in: numeric kinds + `bool` ride the float
@@ -529,6 +567,20 @@ public final class SZRuntime: @unchecked Sendable {
         engine.withLock { $0.lastOutputStrings[SZScheduler.textureID(node: node, port: port)] }
     }
 
+    /// Install the sink for node-reported faults (v9, `ctx.reportError`). Fires only when the reported set
+    /// changes, and carries the whole set: a node dropping out of it is how the host clears that node.
+    /// Runs with no lock held, on whichever thread encoded the frame or made the graph edit, so hop to the
+    /// main actor and don't re-enter runtime APIs synchronously.
+    public func setNodeErrorCallback(_ callback: (@Sendable ([SZNodeID: String]) -> Void)?) {
+        engine.withLock { $0.onNodeErrors = callback }
+    }
+
+    /// The faults reported on the most recently encoded frame, for a reader that wants the current set
+    /// rather than the change (tests, a fresh observer).
+    public func nodeErrors() -> [SZNodeID: String] {
+        engine.withLock { $0.nodeErrors }
+    }
+
     /// Re-point the live render endpoint without a reload (the host op behind `ui_toggle_display`). The
     /// scheduler reads this each frame → the viewport switches next frame. `nil` clears it (black
     /// viewport). The host should only point it at a currently-rendered (generated) node's texture output.
@@ -575,6 +627,7 @@ public final class SZRuntime: @unchecked Sendable {
         let buffer = engine.withLock { state in
             encodeAndCommitFrame(&state, width: state.renderSize.width, height: state.renderSize.height).buffer
         }
+        drainErrorPublish()
         buffer?.waitUntilCompleted()
     }
 
@@ -588,13 +641,15 @@ public final class SZRuntime: @unchecked Sendable {
         guard let scheduler = state.scheduler else { return (nil, nil) }
         guard let commandBuffer = assets.commandQueue.makeCommandBuffer() else { return (nil, nil) }
         let timing = state.timeline.nextFrame(now: CACurrentMediaTime())
-        let (endpoint, outputValues, outputStrings) = scheduler.encodeFrame(
+        let (endpoint, outputValues, outputStrings, nodeErrors) = scheduler.encodeFrame(
             device: assets.device, commandBuffer: commandBuffer, assets: assets, loaders: state.loaders,
             inputValues: state.inputValues, inputStrings: state.inputStrings, frameIndex: timing.frameIndex,
             time: timing.timeSeconds,
             width: width, height: height)
         state.lastOutputValues = outputValues
         state.lastOutputStrings = outputStrings
+        state.nodeErrors = nodeErrors
+        Self.queueErrorPublish(&state)
         beforeCommit(commandBuffer, endpoint)
         // The live thumb pass rides THIS buffer (throttled inside) — after the schedule's writes,
         // before the commit, so hazard tracking orders the downscales behind the frame's renders.
@@ -768,6 +823,7 @@ public final class SZRuntime: @unchecked Sendable {
             }
             return (frame.buffer != nil, frame.endpoint, driver, mirrors)
         }
+        drainErrorPublish()
         if !encoded { framesInFlight.signal() }   // nothing on the GPU this beat
         // `endpoint` is retained by this frame, so a concurrent pool reset can't free it under a blit.
         driver?.presentNow(endpoint, via: self)
@@ -879,6 +935,9 @@ public final class SZRuntime: @unchecked Sendable {
             guard let buffer, let capture else { return nil }
             return CaptureJob(buffer: buffer, capture: capture)
         }
+        // `agent_view_frame` is often the only frame a headless or idle session encodes, and it is exactly
+        // when someone is asking why a node looks black — so it publishes what that frame reported.
+        drainErrorPublish()
         return readBack(job)
     }
 

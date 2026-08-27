@@ -303,6 +303,10 @@ final class SZHost {
     internal(set) var bindingLearn: SZBindingLearnController?
     /// Debounce for store-observation-triggered watch-set recomputes.
     var previewWatchDebounce: Task<Void, Never>?
+    /// What each node last said about why it produced nothing (`ctx.reportError`, ABI v9), by node.
+    /// Host state beside `nodeAgentState`, deliberately NOT on `SZNode`: it is rewritten at frame rate,
+    /// and a per-frame write to `project` would re-arm the preview watch debounce forever.
+    var nodeRuntimeErrors: [SZNodeID: String] = [:]
     /// The editor's latest visible-node report; nil = no editor report yet ⇒ no culling (headless
     /// and MCP sessions keep streaming without a mounted panel).
     var visiblePreviewNodes: Set<SZNodeID>?
@@ -566,6 +570,7 @@ final class SZHost {
         popoutManager.host = self   // the windows' back-channel (dock intents, frame persistence)
         syncViewportDriver()        // the driver follows surface attach events from here on
         installPreviewFrameSink(runtime)
+        installNodeErrorSink(runtime)   // a node saying why it rendered nothing (SZHost+Rebuild)
         armPreviewGraphObservation()
 
         // Route the launch: on a cold launch we show the welcome/home surface as the FIRST view and

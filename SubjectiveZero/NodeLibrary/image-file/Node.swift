@@ -12,6 +12,9 @@ final class Node: SZNode {
     private var pipeline: MTLRenderPipelineState?
     private var loaded: (any MTLTexture)?
     private var loadedPath: String?
+    /// Why the last load failed. The gate below attempts the load once per path, but `reportError`
+    /// describes a frame, so the reason is kept and said again on every one.
+    private var loadError: String?
 
     func setup(_ ctx: SZSetupContext) {
         let source = """
@@ -47,6 +50,9 @@ final class Node: SZNode {
     }
 
     func update(_ ctx: SZFrameContext) {
+        // Above the guard: a pipeline that failed to build in `setup` renders nothing for the rest of the
+        // node's life, and a report below an early return is a report that never happens.
+        if pipeline == nil { ctx.reportError("image pipeline failed to build") }
         guard let out = ctx.outputTexture("output"), let pipeline else { return }
 
         // (Re)load the image only when the path changes. Empty path ⇒ no image ⇒ clear to black.
@@ -54,16 +60,26 @@ final class Node: SZNode {
         if path != loadedPath {
             loadedPath = path
             loaded = nil
+            loadError = nil
             if !path.isEmpty {
+                let url = URL(fileURLWithPath: path)
                 let loader = MTKTextureLoader(device: ctx.device)
                 let options: [MTKTextureLoader.Option: Any] = [
                     .origin: MTKTextureLoader.Origin.topLeft,
                     .SRGB: false,
                     .textureUsage: NSNumber(value: MTLTextureUsage.shaderRead.rawValue),
                 ]
-                loaded = try? loader.newTexture(URL: URL(fileURLWithPath: path), options: options)
+                do {
+                    loaded = try loader.newTexture(URL: url, options: options)
+                } catch {
+                    // The host's audit covers missing/unreadable/wrong-extension. Only Image I/O knows a
+                    // file is all three and still won't decode: truncated, 16-bit TIFF, an absent codec.
+                    loadError = "could not decode \(url.lastPathComponent): \(error.localizedDescription)"
+                }
             }
         }
+        // Outside the gate, so it is said on every frame the fault holds, not just the one that found it.
+        if let loadError { ctx.reportError(loadError) }
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = out

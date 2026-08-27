@@ -46,6 +46,7 @@ struct SZFrameContext {
     func holdUntilFrameCompletes(_ object: AnyObject)        // pin an object until this frame's GPU work executes
                                                              // (framework/CF/host objects ONLY — never your own classes:
                                                              //  their deinit could run after your module was hot-reloaded)
+    func reportError(_ message: String)                      // say why you are producing nothing (see below)
 }
 ```
 
@@ -54,6 +55,39 @@ frames, not your resource, and `update()` isn't called while paused — so this 
 without it a paused graph keeps playing audio or holding the mic. Resume from your own state (the rate you
 were playing at) and don't block. A *rewind* needs nothing here: it always arrives with a frame. Creating
 one of those types without `setPaused` is a compile error.
+
+## Saying why you produced nothing
+
+A node that cannot do its job renders black, and black looks exactly like "no file chosen yet", like
+"still loading", and like "working as asked". `ctx.reportError("…")` breaks that tie: the host shows the
+message on the node and hands it to whoever reads the graph. Use it for the fault **only your code can
+see** — a file that opened and would not decode, a shader that would not compile, a model this Mac cannot
+run. Not for a missing or unreadable file: the host checks that from outside and would say it twice.
+
+**It describes the frame it is called on, so call it on every frame the fault holds.** The first frame you
+stay quiet, the message is gone. That is what clears a fixed node with nothing to remember, and why there
+is no `clearError`.
+
+So do not report from inside your reload gate: that gate runs on one frame, and the message would flash
+for a sixtieth of a second and vanish. Discover the fault in the gate, then report it outside:
+
+```swift
+private var loadError: String?          // discovered once in the gate, re-reported every frame
+
+func update(_ ctx: SZFrameContext) {
+    let path = ctx.inputString("path") ?? ""
+    if path != loadedPath {             // the usual gate: you only attempt the load when the path moves
+        loadedPath = path
+        loadError = nil                 // a new path is a clean slate
+        do { try load(path) } catch { loadError = "could not decode \(path): \(error.localizedDescription)" }
+    }
+    if let loadError { ctx.reportError(loadError) }   // outside the gate, so it is said every frame
+}
+```
+
+One message per node (the last call of a frame wins), so say it in one sentence and name the file.
+Reporting every frame costs nothing: the host notices only when the message changes. Truncated past 512
+bytes. `image-file` and `video-file` in the library both do exactly this.
 
 ## Rules
 
@@ -121,6 +155,10 @@ final class Node: SZNode {
     }
 
     func update(_ ctx: SZFrameContext) {
+        // Before any guard that can return: a pipeline that never built renders nothing forever, and a
+        // report placed below an early return is a report that never happens.
+        if pipeline == nil { ctx.reportError("contrast pipeline failed to build") }
+
         // Read EVERY declared input live, every frame — a hardcoded value is a dead knob in the editor.
         let amount = ctx.inputFloat("amount") ?? 1.0          // float
         let bypass = ctx.inputBool("bypass") ?? false         // bool

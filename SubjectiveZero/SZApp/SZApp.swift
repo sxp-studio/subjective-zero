@@ -785,6 +785,7 @@ struct SZApp: App {
                               status: host.status, isRunning: host.isRunning,
                               isPaused: host.isPaused,
                               nodeAgentState: host.nodeAgentState,
+                              nodeRuntimeErrors: host.nodeRuntimeErrors,
                               graphOpStatus: host.graphOpStatus, runWorkSet: host.runWorkSet,
                               lockedNodes: host.lockedNodes, hiddenPieces: host.hiddenPieces,
                               chatShown: host.chatVisible,

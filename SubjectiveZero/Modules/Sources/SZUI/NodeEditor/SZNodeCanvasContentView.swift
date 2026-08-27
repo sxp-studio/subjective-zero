@@ -38,6 +38,8 @@ struct SZNodeCanvasContentView: View, Equatable {
     let connectedSockets: Set<String>
     let connectedInputsByNode: [SZNodeID: Set<String>]
     let nodeAgentState: [SZNodeID: SZNodeAgentState]
+    /// What each node last reported about itself (`ctx.reportError`) — host state, like the above.
+    var nodeRuntimeErrors: [SZNodeID: String] = [:]
     let graphOpStatus: [SZNodeID: String]
     let isRunning: Bool
     let runWorkSet: Set<SZNodeID>     // the run's captured work — members read Coding; a user's mid-run draft isn't in it
@@ -89,6 +91,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             && lhs.connectedSockets == rhs.connectedSockets
             && lhs.connectedInputsByNode == rhs.connectedInputsByNode
             && lhs.nodeAgentState == rhs.nodeAgentState
+            && lhs.nodeRuntimeErrors == rhs.nodeRuntimeErrors
             && lhs.graphOpStatus == rhs.graphOpStatus
             && lhs.isRunning == rhs.isRunning
             && lhs.runWorkSet == rhs.runWorkSet
@@ -171,12 +174,14 @@ struct SZNodeCanvasContentView: View, Equatable {
     private func nodeCard(_ node: SZNode) -> some View {
         Self.card(
             for: node,
-            status: Self.pillStatus(for: node, agentState: nodeAgentState, ops: graphOpStatus,
+            status: Self.pillStatus(for: node, agentState: nodeAgentState,
+                                    runtimeError: nodeRuntimeErrors[node.id], ops: graphOpStatus,
                                     isRunning: isRunning, workSet: runWorkSet),
             isSelected: selectedNodeID == node.id || multiSelection.contains(node.id),
             locked: Self.isLocked(node.id, ops: graphOpStatus, lockedNodes: lockedNodes),
             isRunning: isRunning,
             diagnostic: Self.nodeDiagnostic(for: node, agentState: nodeAgentState[node.id],
+                                            runtimeError: nodeRuntimeErrors[node.id],
                                             inFlight: isRunning && runWorkSet.contains(node.id)),
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputsByNode[node.id] ?? [],
@@ -263,22 +268,27 @@ struct SZNodeCanvasContentView: View, Equatable {
         }
     }
 
-    /// What the node's error pill should say, or nil when there is nothing wrong. One winner: a build or
-    /// agent report outranks a file fault, because a node that doesn't compile has no business opening
-    /// files yet. The file case names the port, so a node with two file inputs says which one.
-    /// `inFlight` (the live run is working this node) silences the build/agent case, the same way
-    /// `pillStatus` does: a fault an agent is mid-repair on is not the user's problem yet, and the detail
-    /// is only held back, so it returns at run end if the repair didn't land.
+    /// What the node's error pill should say, or nil when there is nothing wrong. One winner, in the order
+    /// a repair would be attempted: a build or agent report first, because a node that doesn't compile has
+    /// no business opening files yet; then a file the host could not read at all, which names the port so a
+    /// node with two file inputs says which one; then what the node reported itself, which is narrowest of
+    /// the three. `inFlight` (the live run is working this node) silences the build/agent case, the same
+    /// way `pillStatus` does: a fault an agent is mid-repair on is not the user's problem yet, and the
+    /// detail is only held back, so it returns at run end if the repair didn't land.
     static func nodeDiagnostic(for node: SZNode, agentState: SZNodeAgentState?,
+                               runtimeError: String? = nil,
                                inFlight: Bool = false) -> (detail: String, title: String)? {
         if let detail = agentState?.errorDetail, !inFlight {
             // It compiled; what's wrong is that its source and its contract disagree.
             return (detail, node.rebuildReason == .sourceMismatch ? "Contract mismatch" : "Build error")
         }
-        guard !node.unreadableInputs.isEmpty else { return nil }
-        let detail = node.unreadableInputs.sorted { $0.key < $1.key }
-            .map { "\($0.key) — \($0.value)" }.joined(separator: "\n")
-        return (detail, "Input file")
+        if !node.unreadableInputs.isEmpty {
+            let detail = node.unreadableInputs.sorted { $0.key < $1.key }
+                .map { "\($0.key) — \($0.value)" }.joined(separator: "\n")
+            return (detail, "Input file")
+        }
+        guard let reported = runtimeError else { return nil }
+        return (reported, "Node error")
     }
 
     /// Show the status pill only when it's informative: any non-ready state, or any state while the run
@@ -304,6 +314,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     /// node is Ready (or Rebuild, if its contract moved since that build), then a prompt node being worked on
     /// is Coding, else Draft.
     static func pillStatus(for node: SZNode, agentState: [SZNodeID: SZNodeAgentState],
+                           runtimeError: String? = nil,
                            ops: [SZNodeID: String], isRunning: Bool,
                            workSet: Set<SZNodeID> = []) -> SZNodeStatus {
         // An original node being split/merged wears that label (not "Ready"/"Coding") until the swap.
@@ -329,7 +340,9 @@ struct SZNodeCanvasContentView: View, Equatable {
             // built node with a clean stamp reads Ready even while its agent codes, so yielding to
             // work-in-flight would put the node back to claiming Ready with a file it cannot open —
             // the exact lie this exists to end. No rebuild fixes it; the repair is a different file.
-            if !node.unreadableInputs.isEmpty { return .error }
+            // A fault the node reported about itself sits here for the same reasons, and is unconditional
+            // for the same one: no agent rewriting this node's source makes an undecodable file decode.
+            if !node.unreadableInputs.isEmpty || runtimeError != nil { return .error }
             // It has a build and still renders — but if its contract's ports moved, that build no longer honours
             // them, so "Ready" would be a lie. Which pill depends on HOW it fails to honour them: code that
             // names ports the contract dropped reads nil every frame (a fault, red), while a contract that

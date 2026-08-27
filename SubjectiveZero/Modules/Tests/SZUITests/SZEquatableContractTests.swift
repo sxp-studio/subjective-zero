@@ -81,7 +81,8 @@ private func storedProperties(of subject: Any) -> Set<String> {
         // compared in ==
         "graph", "strokeZoom", "space", "selectedNodeID", "multiSelection", "selectedConnectionID",
         "hiddenConnectionID", "ghostedNodeIDs", "raisedTiers", "connectedSockets", "connectedInputsByNode",
-        "nodeAgentState", "graphOpStatus", "isRunning", "runWorkSet", "lockedNodes", "previewsEnabled", "zoomedOut",
+        "nodeAgentState", "nodeRuntimeErrors", "graphOpStatus", "isRunning", "runWorkSet", "lockedNodes",
+        "previewsEnabled", "zoomedOut",
         "wireRevealNodeIDs",
         // the app's card host — stable ref, excluded like previewFrames
         "cardProvider",

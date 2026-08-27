@@ -13,6 +13,8 @@
 // is the scalar-input channel: it resolves a port name to its float value(s) (an unconnected input's
 // default, live-overridable from the host) so a node reads e.g. `ctx.inputFloat("speed")` at runtime.
 // Output channels mirror the input ones: floats (v5) and strings (v8) a node emits flow downstream.
+// A fourth write channel carries no value: `reportError` (v9) tells the host why the node produced
+// nothing this frame.
 // `persistentTexture` is still not in the ABI (earned, not scheduled).
 import Foundation
 
@@ -49,6 +51,12 @@ typealias SZFrameHoldFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutabl
 /// `SZStringResolver`. Host-side, called node-side. `(resolverContext, portName, in, byteCount) -> Void`.
 typealias SZOutputStringResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32) -> Void
 
+/// Reports why this node produced nothing (v9): `byteCount` UTF-8 bytes from `in`. No port name, because
+/// this is about the node, not one of its ports. It describes one frame: the node re-reports while the
+/// fault holds, and the first quiet frame clears it. Host-side, called node-side.
+/// `(resolverContext, in, byteCount) -> Void`.
+typealias SZReportErrorFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int32) -> Void
+
 enum SZNodeABI {
     /// Bumped on a breaking ABI change. The loader rejects a mismatch. v2 = binding-table context;
     /// v3 = scalar-input value channel; v4 = string-input channel; v5 = output value channel
@@ -57,8 +65,9 @@ enum SZNodeABI {
     /// v7 = setPaused (the one transport event `update()` can't deliver, because pause means no more
     /// frames — so a node's self-driving resource can stop when the graph does); v8 = string output
     /// channel (a `string`/`enum` output flowing across a data edge, and host-readable — the learn key
-    /// carrier for controller nodes).
-    static let version: Int32 = 8
+    /// carrier for controller nodes); v9 = the node→host error channel (`reportError`), for a decode or
+    /// pipeline failure the host cannot see from outside.
+    static let version: Int32 = 9
 
     static let apiVersionSymbol = "SZPluginAPIVersion"
     static let setupSymbol = "SZNodeSetup"
@@ -100,4 +109,5 @@ struct SZRuntimeContextRaw {
     var outputValueFn: SZOutputValueResolver?        // v5: scalar OUTPUT values (appended → layout-compatible)
     var frameHoldFn: SZFrameHoldFn?                  // v6: frame-lifetime hold (appended → layout-compatible)
     var outputStringFn: SZOutputStringResolver?      // v8: string OUTPUT values (appended → layout-compatible)
+    var reportErrorFn: SZReportErrorFn?              // v9: node→host fault reason (appended → layout-compatible)
 }

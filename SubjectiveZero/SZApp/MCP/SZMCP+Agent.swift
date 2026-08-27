@@ -210,6 +210,9 @@ extension SZHostBridge {
         // A node can be perfectly built and still render black because a file input points at nothing.
         // Say so here: it is the first thing anyone asks when a node looks dead, and it is not a rebuild.
         if !node.unreadableInputs.isEmpty { json["inputFileErrors"] = node.unreadableInputs }
+        // And a node can open its file and still not use it: a missing codec, a pipeline that would not
+        // build. Only the node sees that, so this is its own words (`ctx.reportError`).
+        if let reported = host.nodeRuntimeErrors[id] { json["nodeError"] = reported }
         guard let reason = node.rebuildReason else { return json }
         json["rebuildReason"] = reason.rawValue
         if let detail = host.rebuildDetail(node: id) { json["rebuildDetail"] = detail }

@@ -245,3 +245,78 @@ extension SZAgentCheckPathTests {
         #expect((out["reason"] as? String)?.hasPrefix("not an absolute path") == true)
     }
 }
+
+/// The other half of the same question: a file the host CAN read, that the node still cannot use. The
+/// host has no way to see that from outside — only the code that called `MTKTextureLoader` / `AVPlayer`
+/// knows — so the node reports it (`ctx.reportError`, ABI v9) and the host writes it onto the node here.
+/// Same home as `unreadableInputs`, for the same reason: every status writer clears the transient state.
+@MainActor
+struct SZHostNodeErrorTests {
+
+    private static func host(node id: SZNodeID) -> SZHost {
+        let host = SZHost()
+        var project = SZProject(name: "Patch")
+        project.graph.nodes = [SZNode(id: id, kind: .generated, title: "Image File",
+                                      contract: SZNodeContract(title: "Image File", sfSymbol: "photo",
+                                                               summary: ""),
+                                      position: SZPoint(x: 0, y: 0))]
+        host.store.setProject(project)
+        return host
+    }
+
+    private static func reported(_ host: SZHost, _ id: SZNodeID) -> String? {
+        host.nodeRuntimeErrors[id]
+    }
+
+    @Test func whatTheNodeReportedIsWrittenOntoIt() {
+        let id = SZNodeID()
+        let host = Self.host(node: id)
+        host.applyNodeErrors([id: "could not decode cat.tiff: unsupported format"])
+        #expect(Self.reported(host, id) == "could not decode cat.tiff: unsupported format")
+    }
+
+    /// The runtime publishes the whole live set, so a node's ABSENCE from it is the clear. Nothing has
+    /// to remember to erase a node whose input was replaced with one that works.
+    @Test func aNodeMissingFromThePublishIsCleared() {
+        let id = SZNodeID()
+        let host = Self.host(node: id)
+        host.applyNodeErrors([id: "could not decode cat.tiff: unsupported format"])
+        host.applyNodeErrors([:])
+        #expect(Self.reported(host, id) == nil)
+    }
+
+    /// The reason a run must not wipe it: the fleet reporting on this node says nothing about whether
+    /// its file decodes, and a cleared reason would put the node back to claiming Ready.
+    @Test func itSurvivesEveryStatusWriter() {
+        let id = SZNodeID()
+        let host = Self.host(node: id)
+        host.applyNodeErrors([id: "could not decode cat.tiff: unsupported format"])
+        host.recordNodeStatus(node: id, phase: .ok, message: "built")
+        host.retireHostFailure(id)
+        host.clearTransientAgentStateAfterPromote(id)
+        #expect(Self.reported(host, id) != nil)
+    }
+
+    /// A publish races project switches and deletes, so it names nodes that may be gone. That must not
+    /// touch the store at all — a mutation per stray frame would churn every observer on the canvas.
+    @Test func aPublishForNodesThatAreGoneChangesNothing() throws {
+        let id = SZNodeID()
+        let host = Self.host(node: id)
+        let before = try #require(host.store.project?.graph.nodes)
+        host.applyNodeErrors([SZNodeID(): "from a project that already closed"])
+        #expect(host.store.project?.graph.nodes == before)
+    }
+
+    /// A report must never touch the document: it is rewritten at frame rate, and a per-frame write to
+    /// `project` would re-arm the preview watch debounce before it could ever fire. Living beside
+    /// `nodeAgentState` rather than on `SZNode` is what makes that structural, so this asserts the store
+    /// is untouched rather than merely that the field is not encoded.
+    @Test func aReportNeverTouchesTheDocument() throws {
+        let id = SZNodeID()
+        let host = Self.host(node: id)
+        let before = try #require(host.store.project)
+        host.applyNodeErrors([id: "could not decode cat.tiff: unsupported format"])
+        #expect(Self.reported(host, id) != nil)
+        #expect(host.store.project == before, "the project must be byte-identical after a report")
+    }
+}

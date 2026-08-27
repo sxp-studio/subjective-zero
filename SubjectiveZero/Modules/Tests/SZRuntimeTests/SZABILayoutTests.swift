@@ -35,13 +35,14 @@ private let canonicalFields: [(name: String, type: String)] = [
     ("inputStringFn", "SZStringResolver?"),
     ("outputValueFn", "SZOutputValueResolver?"),   // v5
     ("frameHoldFn", "SZFrameHoldFn?"),             // v6
-    ("outputStringFn", "SZOutputStringResolver?"), // v8 — last field
+    ("outputStringFn", "SZOutputStringResolver?"), // v8
+    ("reportErrorFn", "SZReportErrorFn?"),         // v9 — last field
 ]
 
 @Test func abiHostStructMatchesCanonicalLayout() {
-    // Size/stride pinned: appending the v8 fn pointer grew the struct to 112 bytes (8-aligned).
+    // Size/stride pinned: appending the v9 fn pointer grew the struct to 120 bytes (8-aligned).
     // Any insert/reorder of the pointer block, or a field type change, moves this.
-    #expect(MemoryLayout<SZRuntimeContextRaw>.stride == 112)
+    #expect(MemoryLayout<SZRuntimeContextRaw>.stride == 120)
     #expect(MemoryLayout<SZRuntimeContextRaw>.alignment == 8)
 
     // Pin the offsets of the same-width fn-pointer fields — the exact case stride alone can't catch.
@@ -52,6 +53,7 @@ private let canonicalFields: [(name: String, type: String)] = [
     #expect(MemoryLayout<SZRuntimeContextRaw>.offset(of: \.outputValueFn) == 88)
     #expect(MemoryLayout<SZRuntimeContextRaw>.offset(of: \.frameHoldFn) == 96)
     #expect(MemoryLayout<SZRuntimeContextRaw>.offset(of: \.outputStringFn) == 104)
+    #expect(MemoryLayout<SZRuntimeContextRaw>.offset(of: \.reportErrorFn) == 112)
 
     // Reflect the host struct's field NAMES + order and assert they match the canonical list.
     let hostNames = Mirror(reflecting: SZRuntimeContextRaw()).children.map { $0.label ?? "?" }

@@ -313,8 +313,8 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     }
 
     /// `sourceMismatch` and `unreadableInputs` are host state, not document state: both stay out of
-    /// `project.json` (a file missing on THIS machine is not a fact about the project). A legacy stored
-    /// `rebuildReason` key is ignored on decode — the reason is derived now.
+    /// `project.json` (a file missing on THIS machine is not a fact about the project). A legacy stored `rebuildReason` key is ignored on decode — the reason is
+    /// derived now.
     private enum CodingKeys: String, CodingKey {
         case id, kind, title, sfSymbol, prompt, contract, position, buildStamp, body
     }

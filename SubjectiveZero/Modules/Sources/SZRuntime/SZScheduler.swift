@@ -23,6 +23,11 @@ final class SZFrameBindings {
     var outputValues: [String: [Float]] = [:]   // v5: scalar OUTPUT values the node emits this frame
     var outputStrings: [String: String] = [:]   // v8: string OUTPUT values the node emits this frame
     var holds: SZFrameHolds?              // v6: the FRAME-wide hold list (one per encodeFrame, shared)
+    /// v9: why the node produced nothing this frame (`reportError`). One per node, last call wins.
+    var reportedError: String?
+
+    /// Cap on a reported reason: it lands in a pill and in an agent's JSON, and it crosses every frame.
+    static let maxErrorBytes = 512
 }
 
 /// Objects pinned for one frame's GPU lifetime (v6, `holdUntilFrameCompletes`): accumulated across every
@@ -89,6 +94,15 @@ let szResolveOutputString: SZOutputStringResolver = { ctx, name, in_, count in
     bindings.outputStrings[String(cString: name)] = String(decoding: bytes, as: UTF8.self)
 }
 
+/// Records why a node produced nothing (v9): decodes up to `maxErrorBytes` UTF-8 bytes from `in` into the
+/// node's bindings, read back after the frame. A truncation splitting a codepoint decodes as U+FFFD.
+let szReportError: SZReportErrorFn = { ctx, in_, count in
+    guard let ctx, let in_ else { return }
+    let bindings = Unmanaged<SZFrameBindings>.fromOpaque(ctx).takeUnretainedValue()
+    let n = min(Int(count), SZFrameBindings.maxErrorBytes)
+    bindings.reportedError = String(decoding: UnsafeRawBufferPointer(start: in_, count: n), as: UTF8.self)
+}
+
 /// Pins an object until the frame's command buffer completes (v6). OWNERSHIP TRANSFER: the node side
 /// passed a +1-retained pointer (`passRetained`), balanced here by `takeRetainedValue` into the frame's
 /// hold list. Dropped (released immediately) if the frame has no hold list — nothing to pin against.
@@ -124,7 +138,8 @@ struct SZScheduler: Sendable {
     /// texture (nil if the graph has no endpoint) plus every scalar (v5) and string (v8) output value
     /// emitted this frame, keyed `"<nodeID>:<port>"` (`textureID`) — the same channels downstream inputs
     /// read, surfaced so the host can observe a node's emitted values (`SZRuntime.readOutputFloats` /
-    /// `readOutputString`). Does not commit — the caller owns commit/present/wait.
+    /// `readOutputString`) — and every fault a node reported (v9), keyed by node. Does not commit — the
+    /// caller owns commit/present/wait.
     func encodeFrame(
         device: any MTLDevice,
         commandBuffer: any MTLCommandBuffer,
@@ -136,12 +151,16 @@ struct SZScheduler: Sendable {
         time: Double,
         width: Int,
         height: Int
-    ) -> (endpoint: (any MTLTexture)?, outputValues: [String: [Float]], outputStrings: [String: String]) {
+    ) -> (endpoint: (any MTLTexture)?, outputValues: [String: [Float]], outputStrings: [String: String],
+          nodeErrors: [SZNodeID: String]) {
         // Scalar (v5) and string (v8) output values emitted by nodes earlier this frame, keyed
         // "<nodeID>:<port>" — the connected value channels. Topo order runs producers first, so a downstream
         // node's connected value input is already populated here by the time we bind it. Frame-scoped.
         var valueOutputs: [String: [Float]] = [:]
         var stringOutputs: [String: String] = [:]
+        // Faults reported this frame (v9), by node. Rebuilt every frame, so a node that stops reporting
+        // drops out here — that is the clear.
+        var nodeErrors: [SZNodeID: String] = [:]
         // Frame-lifetime holds (v6) — one list for the whole frame, shared by every node's bindings.
         let holds = SZFrameHolds()
 
@@ -189,6 +208,7 @@ struct SZScheduler: Sendable {
                 ctx.outputValueFn = szResolveOutputValue
                 ctx.frameHoldFn = szFrameHold
                 ctx.outputStringFn = szResolveOutputString
+                ctx.reportErrorFn = szReportError
                 withUnsafeMutablePointer(to: &ctx) { pointer in
                     _ = loader.renderFrame(context: UnsafeMutableRawPointer(pointer))
                 }
@@ -201,6 +221,7 @@ struct SZScheduler: Sendable {
             for (port, string) in bindings.outputStrings {
                 stringOutputs[Self.textureID(node: nodeID, port: port)] = string
             }
+            if let reason = bindings.reportedError { nodeErrors[nodeID] = reason }
         }
 
         // The completed-handler's capture keeps every held object alive until the GPU has executed
@@ -209,10 +230,10 @@ struct SZScheduler: Sendable {
             commandBuffer.addCompletedHandler { _ in _ = holds }
         }
 
-        guard let endpoint = renderEndpoint else { return (nil, valueOutputs, stringOutputs) }
+        guard let endpoint = renderEndpoint else { return (nil, valueOutputs, stringOutputs, nodeErrors) }
         return (assets.texture(
             id: Self.textureID(node: endpoint.node, port: endpoint.port), width: width, height: height),
-            valueOutputs, stringOutputs)
+            valueOutputs, stringOutputs, nodeErrors)
     }
 
     /// The pooled texture the CURRENT `renderEndpoint` points at, WITHOUT encoding a frame and

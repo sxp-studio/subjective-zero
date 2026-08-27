@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The pill for a node whose file input can't be used — the case that used to be INVISIBLE. Such a
-// node builds fine, renders black, and (before this) showed no pill at all, because `showPill` hides
-// a `.ready` node's. Both halves are asserted: the status, and that it is actually shown.
+// The pill for a node that renders black — the case that used to be INVISIBLE. Such a node builds
+// fine and (before this) showed no pill at all, because `showPill` hides a `.ready` node's. Both
+// halves are asserted throughout: the status, and that it is actually shown.
+//
+// Two faults land here, and their ranking is the point. `unreadableInputs` is the HOST's file audit
+// (missing, unreadable, wrong kind); `runtimeError` is what the NODE said about itself once it had
+// the file open (ABI v9, `ctx.reportError`) — the fault nothing outside the node can see.
 import Testing
 import SZCore
 @testable import SZUI
@@ -93,4 +97,56 @@ private func fileFaultNode(_ reasons: [String: String] = ["path": "no file at /U
     let node = fileFaultNode(["modelPath": "no file at /a", "lutPath": "no file at /b"])
     #expect(SZNodeCanvasContentView.nodeDiagnostic(for: node, agentState: nil)?.detail
             == "lutPath — no file at /b\nmodelPath — no file at /a")
+}
+
+// MARK: - What the node said about itself (ABI v9, `ctx.reportError`)
+
+private let reportedReason = "could not decode cat.tiff: unsupported format"
+private func reportingNode() -> SZNode {
+    SZNode(kind: .generated, title: "Image File", position: SZPoint(x: 0, y: 0))
+}
+
+/// The case the file audit cannot reach: the file is there, readable, of the declared kind, and the
+/// loader still refused it. Only the node knows, and until it could say so this node read Ready.
+@MainActor
+@Test func aNodeThatReportedItsOwnFaultShowsAnErrorPill() {
+    let node = reportingNode()
+    let status = SZNodeCanvasContentView.pillStatus(for: node, agentState: [:], runtimeError: reportedReason,
+                                                    ops: [:], isRunning: false)
+    #expect(status == .error)
+    #expect(SZNodeCanvasContentView.showPill(status, isRunning: false))
+    let diagnostic = SZNodeCanvasContentView.nodeDiagnostic(for: node, agentState: nil,
+                                                            runtimeError: reportedReason)
+    #expect(diagnostic?.title == "Node error")
+    #expect(diagnostic?.detail == reportedReason)
+}
+
+/// The order a repair would be attempted: a build error first, then a file the host could not read at
+/// all, and the node's own report last — it is the narrowest claim of the three, and a file that isn't
+/// there explains a node that could not decode it.
+@MainActor
+@Test func aPathFaultOutranksWhatTheNodeReported() {
+    var node = reportingNode()
+    node.unreadableInputs = ["path": "no file at /nope"]
+    #expect(SZNodeCanvasContentView.nodeDiagnostic(for: node, agentState: nil,
+                                                   runtimeError: reportedReason)?.title == "Input file")
+
+    var built = SZNodeAgentState()
+    built.errorDetail = "error: cannot find 'foo'"
+    #expect(SZNodeCanvasContentView.nodeDiagnostic(for: reportingNode(), agentState: built,
+                                                   runtimeError: reportedReason)?.title == "Build error")
+}
+
+/// Unconditional, for the reason the file fault is: no work the fleet is doing on this node's SOURCE
+/// makes a file it cannot decode decodable, so hiding it would put the node back to claiming Ready.
+@MainActor
+@Test func workInFlightDoesNotHideWhatTheNodeReported() {
+    let node = reportingNode()
+    #expect(SZNodeCanvasContentView.pillStatus(for: node, agentState: [:], runtimeError: reportedReason,
+                                               ops: [:], isRunning: true, workSet: [node.id]) == .error)
+    var built = SZNodeAgentState()
+    built.errorDetail = "error: cannot find 'foo'"
+    #expect(SZNodeCanvasContentView.nodeDiagnostic(for: node, agentState: built,
+                                                   runtimeError: reportedReason, inFlight: true)?.title
+            == "Node error")
 }
