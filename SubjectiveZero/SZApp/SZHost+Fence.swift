@@ -69,23 +69,24 @@ extension SZHost {
 
     /// THE user-lock rule, stated once — shared by `fenceDenial` (enforcement) and `lockedNodes`
     /// (the canvas/panel affordance), so what the UI dims and what the fence refuses cannot drift.
-    /// A held node locks against the user, with one exception: the run holds every work-set node
-    /// to run end (a reconcile turn can flip a promoted node back to needsImplementation), but a
-    /// SETTLED generated node is the user's again — the canvas unlocks it at promote, and the
-    /// fence agrees. Only in-flight (`.prompt`) run work refuses the user.
-    private func userLockDenies(holder: SZClaimToken, node id: SZNodeID) -> Bool {
-        if isRunClaim(holder),
-           store.project?.graph.node(id: id)?.kind == .generated { return false }
-        return true
+    ///
+    /// The card greys only when there is nothing on it to work: a node with no build yet, being written
+    /// for the FIRST time. A node that RENDERS stays the user's — its knobs, wires, position and viewport
+    /// toggle — no matter who holds it or what they are doing to its source. Who holds it decides whether
+    /// it can be DELETED (`deleteDenies`), not whether it can be touched: the two questions used to be one,
+    /// which is why a node with a chat open froze while it was still making pixels.
+    private func userLockDenies(holder _: SZClaimToken, node id: SZNodeID) -> Bool {
+        store.project?.graph.node(id: id)?.kind != .generated
     }
 
-    /// A user DELETE is refused: everything the lock already refuses, plus a node an agent still has
-    /// work to do on. A rebuild leaves the card live (it renders, and its knobs and wires are the
-    /// user's), but the node itself must survive until the agent that is rewriting it is done, because
-    /// there is no undo. Releases per node at its own promote, not at run end — `needsImplementation`
-    /// goes false the moment the build stamp catches up with the contract.
+    /// A user DELETE is refused while an agent is actually working this node — losing that work to a
+    /// keystroke is unrecoverable, there being no undo. "Actually working" reads differently per holder:
+    /// a per-turn claim (a node chat) exists ONLY for the length of its turn, so holding it is the work;
+    /// a RUN holds its whole work set to run end, so there the work is the node still needing
+    /// implementation, and the hold releases at that node's own promote rather than at the run's end.
     private func deleteDenies(holder: SZClaimToken, node id: SZNodeID) -> Bool {
-        if userLockDenies(holder: holder, node: id) { return true }
+        if userLockDenies(holder: holder, node: id) { return true }   // no build to lose yet
+        guard isRunClaim(holder) else { return true }                 // a turn's claim IS its work
         return store.project?.graph.node(id: id)?.needsImplementation ?? false
     }
 

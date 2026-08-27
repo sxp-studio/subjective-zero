@@ -99,8 +99,9 @@ struct SZHostMutationJournalTests {
 
     @Test func aRefusedMutationLeavesNoEntry() {
         let host = host()
-        let hold = SZClaimToken(label: "chat turn")
-        #expect(host.ledger.tryAcquire([.node(effectID), .transcript(.node(effectID))], as: hold))
+        // Mid-split, not merely held: a claim alone no longer refuses a node that RENDERS — the card
+        // stays the user's whoever is working its source, and only the delete is held (SZHost+Fence).
+        host.graphOpStatus[effectID] = "Splitting"
         let (from, to) = edge
         #expect(host.addConnection(from: from, to: to, kind: .data, origin: .user) == nil)
         #expect(host.mutationJournal.entries.isEmpty)

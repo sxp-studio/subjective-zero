@@ -118,10 +118,14 @@ A classic node-graph editor rendered natively over the viewport. Two node kinds
   Nothing re-lays-out: `controlWidth` reserves by port type and never asks what the build knows, so
   no socket or edge moves when a port is declared.
 - **A node an agent is working on wears a padlock and cannot be deleted.** The badge means held, not
-  frozen: a node being rebuilt keeps rendering, and its knobs, wires, position and viewport toggle
-  stay the user's. The hold lifts at that node's own promote, not at the end of the run. A node that
-  needs a rebuild with nobody on it is not held and deletes normally. A first build, a node chat and
-  a split/merge lock the card outright, as before.
+  frozen: the node keeps rendering, and its knobs, wires, position and viewport toggle stay the
+  user's, whoever is rewriting its source. What counts as work depends on the holder: a node chat's
+  claim lasts exactly as long as its turn, so holding it IS the work, while a run holds its whole
+  work set to the end, so there the work is the node still needing implementation and the hold lifts
+  at that node's own promote. A node that needs a rebuild with nobody on it is not held and deletes
+  normally. **Greying the card is the separate, stricter state**, and it means only one thing: there
+  is no build to touch yet. A node being built for the first time greys; so does an original mid
+  split/merge. A node that renders never does.
 - **Folding the plugs:** a card with a body can put its port rows away (chevron pill under the card,
   or right-click → **Hide Plugs**), so the preview or the custom card IS the card. The card keeps its
   **top edge** and folds up under its header; the fold always drops a whole number of grid cells, so

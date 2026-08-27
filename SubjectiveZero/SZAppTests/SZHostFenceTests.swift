@@ -198,15 +198,31 @@ struct SZHostDeleteHoldTests {
         #expect(host.deleteDenial(nodes: [n.id], origin: .agent) == nil)
     }
 
-    @Test func everythingTheLockAlreadyRefusedIsStillRefused() {
-        let n = node(ports: ["amount"], built: ["amount"])   // settled, so only the lock can hold it
+    @Test func aChatOnARenderingNodeHoldsDeleteButLeavesTheCardLive() {
+        // A node chat rewrites the node's source exactly as a run's coding agent does, so it must hold
+        // the node against deletion — but the node RENDERS, and a card that is making pixels stays the
+        // user's. These used to be one question, which is why a chat froze a live card.
+        let n = node(ports: ["amount"], built: ["amount"])   // settled: nothing needs implementing
         let host = SZHost()
         host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [n])))
-        // A chat turn's claim is not a run claim, so the card locks outright.
+        let turn = SZClaimToken(label: "chat turn 'Plasma'")
+        #expect(host.ledger.tryAcquire([.node(n.id), .transcript(.node(n.id))], as: turn))
+        #expect(!host.lockedNodes.contains(n.id))                        // not greyed
+        #expect(host.fenceDenial(nodes: [n.id], origin: .user) == nil)   // knobs and wires still work
+        #expect(host.deleteHeldNodes.contains(n.id))                     // but it cannot be deleted
+        #expect(host.deleteDenial(nodes: [n.id], origin: .user) != nil)
+    }
+
+    @Test func aNodeWithNoBuildYetLocksOutright() {
+        // The one case that still greys the card: nothing has been built, so there is nothing to touch.
+        var n = node(ports: ["amount"], built: ["amount"])
+        n.kind = .prompt
+        let host = SZHost()
+        host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [n])))
         let turn = SZClaimToken(label: "chat turn 'Plasma'")
         #expect(host.ledger.tryAcquire([.node(n.id), .transcript(.node(n.id))], as: turn))
         #expect(host.lockedNodes.contains(n.id))
-        #expect(host.deleteHeldNodes.contains(n.id))
+        #expect(host.fenceDenial(nodes: [n.id], origin: .user) != nil)
         #expect(host.deleteDenial(nodes: [n.id], origin: .user) != nil)
     }
 }
