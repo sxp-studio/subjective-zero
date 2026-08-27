@@ -132,22 +132,18 @@ private func temporaryURL() -> URL {
     #expect(loaded?.defaultProviderID == "claude")
 }
 
-@Test func roundTripPreservesShowAgentActivity() throws {
-    let url = temporaryURL()
-    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-    try SZAppStateIO.save(SZAppState(showAgentActivity: true), to: url)
-    #expect(SZAppStateIO.load(from: url)?.showAgentActivity == true)
-}
-
-@Test func fileWithoutShowAgentActivityStillDecodes() throws {
-    // An app-state.json predating the switch → nil, which the host reads as OFF.
+@Test func aKeyTheStateNoLongerCarriesDoesNotBreakTheLoad() throws {
+    // A pref that is retired leaves its key behind in everyone's app-state.json. Decoding stays
+    // lenient about keys it does not know, so the rest of the file survives.
     let url = temporaryURL()
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
     try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try Data(#"{"windowSize":{"width":1440,"height":900},"theme":"system"}"#.utf8).write(to: url)
+    try Data(#"""
+    {"windowSize":{"width":1440,"height":900},"theme":"system",
+     "showAgentActivity":true,"defaultProviderID":"claude"}
+    """#.utf8).write(to: url)
     let loaded = SZAppStateIO.load(from: url)
-    #expect(loaded != nil)
-    #expect(loaded?.showAgentActivity == nil)
+    #expect(loaded?.defaultProviderID == "claude")
 }
 
 @Test func roundTripPreservesTelemetryEnabled() throws {

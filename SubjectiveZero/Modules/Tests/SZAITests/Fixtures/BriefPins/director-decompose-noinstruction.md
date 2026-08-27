@@ -19,6 +19,12 @@ Render endpoint (blitted to the viewport): 22222222.output
 ## The user's instruction
 (none — make the current graph as drawn ready to implement)
 
+## A node another build is holding
+If an edit is refused because a node is being built by another request, do not wait for it: a turn
+cannot wait. Send your note for that node with `ui_send_chat` (its id as `scope`), leave the node
+alone, and say so in your closing line. The note lands in that build if its order has not gone out
+yet, or runs as its own build after it. Either way nothing is lost and nobody has to ask again.
+
 ## Your job — work entirely through the MCP `ui_*` tools (the edits a human makes in the editor)
 MCP tools may be revealed lazily. The tool names listed here are authoritative; if one is not visible,
 search for its exact name or `ui_` prefix before assuming it is unavailable.
@@ -158,5 +164,7 @@ true of the node beyond this run belongs in its prompt instead.
 Do NOT call `ui_run`. This turn is already inside the run that dispatches the fleet; asking for
 another one schedules the same work twice.
 
-When the graph's contracts + wiring express the user's intent, **stop** — say one short line about what you
-set up. The Coding Agents implement each node next; you do not write or compile any `Node.swift`.
+When the graph's contracts + wiring express the user's intent, **stop** — say one short line about what
+you set up AND that the rebuild is now running, so the picture will not change until it lands. Describing
+the new behaviour in the present tense without that reads as a claim about what is on screen, which is
+still the old code. The Coding Agents implement each node next; you do not write or compile any `Node.swift`.

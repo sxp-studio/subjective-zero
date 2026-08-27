@@ -451,9 +451,6 @@ struct SZApp: App {
                     // Appearance — squares just the viewport tile.
                     Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
                                                                      set: { host.setViewportRoundedCorners($0) }))
-                    // Chat display — each coding agent's own turns while it builds.
-                    Toggle("Show Agent Activity", isOn: Binding(get: { host.showAgentActivity },
-                                                                set: { host.setShowAgentActivity($0) }))
                 }
                 Divider()
             }
@@ -646,8 +643,6 @@ struct SZApp: App {
                                                                 set: { host.setAutoHidePanelHeaders($0) }))
                 Toggle("Rounded Viewport Corners", isOn: Binding(get: { host.viewportRoundedCorners },
                                                                  set: { host.setViewportRoundedCorners($0) }))
-                Toggle("Show Agent Activity", isOn: Binding(get: { host.showAgentActivity },
-                                                            set: { host.setShowAgentActivity($0) }))
             }
         }
         Menu("Graph") {

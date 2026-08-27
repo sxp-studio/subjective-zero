@@ -175,85 +175,17 @@ the right-click menu's job. Suggestion derivation is host-side
 ## Chat panel
 
 **One conversation.** There are no tabs: every message goes to the Director's door, which
-triages it and routes the work. What you see is one feed of what agents said to YOU — the whole
-Director conversation, plus each node agent's own replies, attributed by node. The fleet's
-implementation turns are not in it by default: they carry the run they belong to and are read in
-the Agent Graph panel, or in the conversation under **View ▸ Display ▸ Show Agent Activity**.
+triages it and routes the work. What you see is one feed of everything the agents said — the whole
+Director conversation, each node agent's own replies, and each coding agent's build turns as they
+happen, attributed by node. A Director note written into a node's conversation is labelled with
+the agent it is for.
 
 - The feed is DERIVED (`SZHost.chatFeed`) from the per-scope transcripts, which remain the
   storage — sessions and cold-start recaps are per scope and stay that way. A node's messages join
-  the feed if they are unstamped (or activity is on) AND newer than the project's `feedEpoch` (a
-  `.staging` marker written the first time the project opens under this build): older builds wrote
-  their implementation turns into node transcripts with nothing marking them as fleet work, so
-  without the epoch an old project's first open would fill the conversation with every coding turn
-  it ever ran. The epoch therefore gates BOTH ways — activity on never reaches prehistory.
-- **Show Agent Activity** (off by default, persisted per machine in `SZAppState`) puts each coding
-  agent's own turn in the feed WHILE it builds, under the node's name and glyph, its tool calls and
-  reasoning behind the same `THINKING` chevron the Director's turns use — so a ten-minute build is
-  something to read rather than a bare clock. Nothing new is captured: the stream already lands in
-  the node's transcript, so turning it on reveals past builds too. The turns persist after the
-  build settles, alongside its receipt: the receipt says what a build did, the turns say what its
-  agents tried.
-- **An empty transcript asks a question.** "What are we making?" over a quieter line about nodes
-  getting created, wired and coded for you — centred in the panel, outside the ScrollView, since a
-  placeholder has nothing to scroll. While a project opens (its nodes compile off the main thread,
-  see RUNTIME's build & hot reload) that slot shows a spinner and "Loading conversation" instead;
-  a feed that already has messages keeps showing them rather than blanking.
-- The panel has NO header row. One conversation had nothing to name, so its actions —
-  **AI Settings…** (the provider + routing sheet) and **Clear Transcript & Reset Agent**, which
-  clears every scope the feed is made of — moved into a ⋯ menu beside the composer's +.
-- **@mentions** are the addressing substrate turned into a targeting HINT: `@project`, `@all`,
-  `@<node title>` — typed via an autocomplete (`@` at a word boundary), inserted as atomic accent
-  tokens, stored as canonical markup (`@[Blur](node:UUID)`, SZCore `SZMentionMarkup`), expanded
-  for the CLI at every egress, and rendered as accent chips (a deleted node's mention dims +
-  strikes through). A mention no longer routes: the Director's triage reads it.
-- **A node card's chat button MENTIONS that node** — it inserts the token at the caret (through
-  the composer's own relay, so it lands in the sentence you were already writing) and focuses the
-  field. The context-menu row is "Mention in Chat".
-- **The run strip** sits between the transcript and the composer, outside the ScrollView (a run
-  is a state, not a message — it must not enter the LazyVStack the bottom-pin anchor drives). It
-  draws a small process tree: one group per LIVE BUILD — the Director's own lane, then the coding
-  agents it dispatched, indented on a drawn connector (`├─`/`└─`), live children first so the
-  cap never hides the agents actually working. A live Director lane carries the ■ that stops THAT
-  build; it is the only per-build stop (the HUD has none, and Graph ▸ Stop All Builds / ⌘. stops
-  everything). Under the groups sit the SCHEDULED tasks: what was asked, what it is behind, and a
-  ✕ to drop it. Every row is a door into the Agent Graph panel. Presence, not a lock. The lanes are
-  the strip's own, not `SZAgentSubagentLane`: inside a dispatch card a lane fills the card's width,
-  which out here read as a stack of full-width buttons. The shared thing is the vocabulary
-  (`SZRunBadge`: running / end / stopped / declined / failed).
-- **A finished build settles into the transcript as a RECEIPT** — the same lane, at the point in
-  time where it ended (`SZChatReceipt`, rendered by `SZChatReceiptRow` over the shared
-  `SZLanePill`). A run is a state while it happens and a receipt once it is over: presence, then
-  record. The host says nothing at the start (the strip is already there, saying more) and nothing
-  about queueing (a scheduled row says it, and names the blocker) — **only the ending is news**.
-  The receipt names the WORK, not a count — `built Warm Orange`, `built 3 nodes`, `built 2 of 3`,
-  `1 node unfinished` — because concurrent one-node builds used to finish as the same sentence
-  repeated. It wears the `hammer` (a work lane; `eyeglasses` stays the Director's own lane), takes
-  the `SZRunBadge` vocabulary only for endings that are NOT clean, carries a failure's reason as a
-  quiet line beneath, and is the transcript's jump into the Agent Graph via `graphRunID`. It is
-  deliberately NOT a turn: no rail, no `DIRECTOR AGENT` header — the host is not the Director, and
-  a host line dressed as one is what this replaced. Its label aligns with the turns' text column,
-  not their rails.
-- **The send slot is THE action slot** (one place, two states): per-turn **Stop** while an
-  interactive turn streams (session + partial reply survive); else send. It never stops a BUILD —
-  with several in flight a composer button cannot say which one it means, so that lives on the
-  build's own lane in the strip. Click only — Return never stops anything. The composer is never disabled:
-  a send while something streams simply queues, with a chip on its bubble.
-- The **composer** is a Codex-style rounded two-row card floating on the panel background: the
-  growing text field on top; a bottom bar with `+` attach and the ⋯ menu (left) and the circular
-  send (right). The provider pill is GONE: the forward-looking selection lives in the **AI
-  Settings sheet** (⌘,, or the ⋯ menu's "AI Settings…"), and the backward-looking truth is the
-  **receipt caption** under each finished reply — `Worked for 12s · gpt-5.6-terra · fast · tok
-  21.5k in / 1.2k out` — whose hover reveals the full envelope (provider · model · effort · fast)
-  and the routing rule that chose it (`via`). Tokens ride the caption unconditionally, carry `tok`
-  as their unit so the numbers cannot read as anything else a turn counts, and are simply absent
-  for a CLI that reports no usage. A provider *switch* still resets agent sessions (transcripts stay) and
-  is refused while agents are busy; with a routing profile active, different graph positions may
-  run different envelopes, and the receipts are how you see what actually ran
-  ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)).
-- A **streaming turn's working row** shows dots + elapsed only; stopping lives in the composer's
-  action slot. A stopped turn keeps its session and partial reply.
-- This is a **from-scratch** design - keep it clean and native.
+  the feed if they are newer than the project's `feedEpoch` (a `.staging` marker written the first
+  time the project opens under this build): older builds wrote their implementation turns into node
+  transcripts with nothing marking them as fleet work, so without the epoch an old project's first
+  open would fill the conversation with every coding turn it ever ran.
 
 ## HUD
 

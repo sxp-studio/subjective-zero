@@ -245,13 +245,25 @@ public struct SZChatReceipt: Equatable, Sendable {
     // when the run had exactly one — naming it is what stops three concurrent one-node builds from
     // finishing as the same sentence three times.
 
-    /// The run reached its own end.
-    public static func forEnding(implemented: Int, failed: Int, work: String?) -> SZChatReceipt {
+    /// The run reached its own end. `busy` names the nodes it was asked to change and could not
+    /// reach, because another request was building them.
+    public static func forEnding(implemented: Int, failed: Int, work: String?,
+                                 busy: [String] = []) -> SZChatReceipt {
         // Some of the work did not land: say the shortfall, and badge it as such even though the
         // TRAVERSAL ended cleanly — the receipt reports on the work, not on the graph walk.
         if failed > 0 {
             return SZChatReceipt(label: shortfallLabel(implemented: implemented, failed: failed, work: work),
                                  conclusion: .failed(reason: "\(failed) unfinished"))
+        }
+        // A shortfall outranks a busy node: a node that failed needs the user, an ask that is
+        // waiting acts on its own. "nothing needed building" is a claim about the world, so it
+        // must never stand in for an ask that has not run: a run that built nothing and handed
+        // its ask on is declined, not ended. One that built part keeps its ending and says the rest.
+        if !busy.isEmpty {
+            let reason = busyReason(busy)
+            return SZChatReceipt(label: busyLabel(implemented, busy: busy),
+                                 conclusion: implemented > 0 ? .ended : .declined(reason: reason),
+                                 detail: reason)
         }
         return SZChatReceipt(label: builtLabel(implemented, work: work), conclusion: .ended)
     }
@@ -319,6 +331,23 @@ extension SZChatReceipt {
         if implemented == 0 { return "nothing needed building" }
         if implemented == 1, let work, !work.isEmpty { return "built \(work)" }
         return "built \(implemented) node\(implemented == 1 ? "" : "s")"
+    }
+
+    /// "waiting on Warm Orange", and what to say when part of the build did land.
+    private static func busyLabel(_ implemented: Int, busy: [String]) -> String {
+        let target = busy.count == 1 && !busy[0].isEmpty ? busy[0] : "\(busy.count) nodes"
+        if implemented > 0 {
+            return "built \(implemented) node\(implemented == 1 ? "" : "s"), waiting on \(target)"
+        }
+        return "waiting on \(target)"
+    }
+
+    /// The quiet line under the pill: where that part of the ask went, and that nobody has to
+    /// ask again. Says what happens, not more: it lands in that build if the order has not gone
+    /// out, or runs after it. A Stop on that build drops it, by that build's own rule.
+    private static func busyReason(_ busy: [String]) -> String {
+        let who = busy.count == 1 && !busy[0].isEmpty ? "\(busy[0]) is" : "\(busy.count) nodes are"
+        return "\(who) being built by another request. That part was sent to it: it lands there, or runs after it."
     }
 }
 

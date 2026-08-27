@@ -43,6 +43,41 @@ struct SZChatReceiptTests {
         #expect(receipt.conclusion == .ended)
     }
 
+    /// An ask that could not reach the node it was about is not an ask that found nothing to do.
+    /// "nothing needed building" is a claim about the world; this is a claim about the ask.
+    @Test func aBuildThatHandedItsAskOnSaysWhichNodeHasIt() {
+        let receipt = SZChatReceipt.forEnding(implemented: 0, failed: 0, work: nil,
+                                              busy: ["Pixel Morph"])
+        #expect(receipt.label == "waiting on Pixel Morph")
+        #expect(receipt.conclusion == .declined(reason: receipt.detail ?? ""))
+        #expect(receipt.detail?.contains("sent to it") == true)
+    }
+
+    /// Part of the work landed and part went on: the receipt owes both halves, and a run that
+    /// built something reached its ending. Declined is for the one that built nothing at all.
+    @Test func aBuildThatLandedSomeWorkNamesTheBusyRemainder() {
+        let receipt = SZChatReceipt.forEnding(implemented: 2, failed: 0, work: nil,
+                                              busy: ["Pixel Morph"])
+        #expect(receipt.label == "built 2 nodes, waiting on Pixel Morph")
+        #expect(receipt.conclusion == .ended)
+        #expect(receipt.detail?.contains("Pixel Morph") == true)
+    }
+
+    /// Past one node no single name is true, so it counts — the rule the built labels already use.
+    @Test func severalBusyNodesFallBackToACount() {
+        let receipt = SZChatReceipt.forEnding(implemented: 0, failed: 0, work: nil,
+                                              busy: ["Pixel Morph", "Blur"])
+        #expect(receipt.label == "waiting on 2 nodes")
+    }
+
+    /// A node that FAILED needs the user; an ask that is waiting acts on its own. The one that
+    /// needs a person wins the badge.
+    @Test func aShortfallOutranksABusyNode() {
+        let receipt = SZChatReceipt.forEnding(implemented: 0, failed: 1, work: "Blur",
+                                              busy: ["Pixel Morph"])
+        #expect(receipt.conclusion == .failed(reason: "1 unfinished"))
+    }
+
     /// The receipt reports on the WORK, not on the graph walk: a traversal can end perfectly well
     /// having left a node unimplemented, and that is a shortfall the badge must show.
     @Test func aShortfallIsBadgedFailedEvenThoughTheTraversalEnded() {

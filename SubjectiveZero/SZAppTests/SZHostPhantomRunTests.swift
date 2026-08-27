@@ -89,20 +89,17 @@ struct SZHostPhantomRunTests {
 
     // MARK: - the ask that names nodes a run already holds
 
-    @Test func namedNodesAlreadyBuildingTakeTheWordsAsASteer() {
-        // Waiting for the holder used to admit the ask the moment the run released, find the
-        // nodes clean, and refuse with "Nothing to build there" beside that run's own receipt.
-        // Two contradictory lines a second apart. The words go to the agents instead.
+    @Test func namedNodesAlreadyBuildingParkTheAsk() {
+        // A change cannot be folded into a build that is already generating the old code, so an
+        // ask over nodes a live build holds WAITS: it stays in the queue, shows in the strip, and
+        // runs its own build the moment those nodes are free. No steer rides the current build.
         let node = SZNodeID()
         let pair = hostWithLiveRun(over: [node])
         let task = SZTask(title: "make it cooler", instruction: "make it cooler",
                           workSet: [node])
 
-        // `.refused` is what drops it from the queue; `.waiting` is what used to keep it, only
-        // to refuse it a minute later with a line contradicting the run's own receipt.
-        #expect(pair.host.startRun(task: task, narrateContention: false) == .refused)
-        let steers = pair.host.pendingDirectorMessages(dispatching: [node.uuidString])
-        #expect(steers[node.uuidString]?.text == "make it cooler")
+        #expect(pair.host.startRun(task: task, narrateContention: false) == .waiting)
+        #expect(pair.host.pendingDirectorMessages(dispatching: [node.uuidString]).isEmpty)
     }
 
     /// The line #48 is named for. A steer that comes back as its own ask lands here once its node
@@ -120,12 +117,14 @@ struct SZHostPhantomRunTests {
         #expect(host.store.messages(for: .director).isEmpty)
     }
 
-    @Test func aWordlessAskOverNodesAlreadyBuildingSendsNothing() {
+    @Test func aWordlessAskOverNodesAlreadyBuildingParksAndSendsNothing() {
         let node = SZNodeID()
         let pair = hostWithLiveRun(over: [node])
         let task = SZTask(title: "build", instruction: "", workSet: [node])
 
-        #expect(pair.host.startRun(task: task, narrateContention: false) == .refused)
+        // A repeat of work under way waits for it rather than starting a duplicate; when it is
+        // admitted the nodes are built and its own decompose settles cheaply. No steer either way.
+        #expect(pair.host.startRun(task: task, narrateContention: false) == .waiting)
         #expect(pair.host.pendingDirectorMessages(dispatching: [node.uuidString]).isEmpty)
     }
 }

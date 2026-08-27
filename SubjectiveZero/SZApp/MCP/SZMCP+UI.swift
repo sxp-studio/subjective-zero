@@ -267,6 +267,7 @@ extension SZHostBridge {
                 "created \(created.count) of \(specs.count) source nodes — read the graph to see which")
         }
 
+        host.noteRunCreatedWork(Set(created))   // added by the run's own tooling, so it joins its work set
         let nodes = zip(created, specs).map { id, spec -> [String: Any] in
             ["id": id.uuidString, "library": spec.libraryID, "x": spec.position.x, "y": spec.position.y]
         }
@@ -901,6 +902,7 @@ extension SZHostBridge {
         let y = (arguments["y"] as? NSNumber)?.doubleValue ?? 0
         let id = try host.instantiateLibraryNode(libraryID: library, position: SZPoint(x: x, y: y),
                                                  origin: .agent)
+        host.noteRunCreatedWork([id])   // added by the run's own tooling, so it joins its work set
         var response: [String: Any] = ["node": id.uuidString, "library": library]
         if let body = host.store.project?.graph.node(id: id)?.body { response["body"] = body.mode.rawValue }
         return SZJSONRPC.encode(response)

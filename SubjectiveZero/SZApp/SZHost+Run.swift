@@ -528,21 +528,6 @@ extension SZHost {
         mintRun(instruction: "", title: SZTask.title(fromInstruction: "", nodeCount: pendingNodeCount))
     }
 
-    /// Send an ask's words to the agents already building `held`, and drop the ask. A wordless
-    /// ask is satisfied by the run in flight, so it sends nothing.
-    func foldIntoLiveWork(instruction: String, held: Set<SZNodeID>) {
-        showChat()
-        let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            for node in held { recordDirectorMessage(node: node, message: trimmed) }
-        }
-        narrateDirector(trimmed.isEmpty
-            ? "That is already being built."
-            : "That is already being built. Your note goes to its agents, or comes back as its "
-                + "own build if it lands too late.")
-        status = trimmed.isEmpty ? "already building" : "folded into the work already building"
-    }
-
     /// Admit a SCHEDULED task: claim its work set and run it. The task carries the identity every
     /// per-run write is keyed by.
     @discardableResult
@@ -556,13 +541,14 @@ extension SZHost {
         // inferring it from "nothing else is running" denied ownership to the very run
         // implementing the pieces, and nothing else drains an op.
         let startedForGraphOp = adoptStagedGraphOp && hasStagedGraphOp && graphOpClaim != nil
-        // Every node this ask named is inside a live run, so it duplicates work under way.
-        // Waiting for the holder used to admit it the moment that run released, find the nodes
-        // clean, and refuse with "Nothing to build there" beside the run's own receipt. Needs
+        // Every node this ask named is inside a live build. It WAITS for that build rather than
+        // folding into it: a change cannot be applied to code that is already being generated, so
+        // the ask parks here, shows in the strip as waiting, and runs its own build the moment the
+        // nodes are free. A truly redundant ask parks too and settles cheaply once admitted. Needs
         // nothing from the graph, so it is decided before the graph is read.
         if !task.workSet.isEmpty, task.workSet.isSubset(of: runWorkSet) {
-            foldIntoLiveWork(instruction: instruction, held: task.workSet)
-            return .refused
+            status = "waiting for \(task.workSet.count) node(s) another build is using"
+            return .waiting
         }
         guard let mcpPort = agentMCPServer?.port, loadedProjectURL != nil else {
             // NOT-READY, not refused: print-only, and the slot survives — a mint that
@@ -704,9 +690,9 @@ extension SZHost {
             defer {
                 // The CAPTURED run, never a live lookup — after an eager `cancelRun` this is the
                 // zombie task's idempotent second settle, and the slot may hold a newer run.
-                let orphanedSteers = isLive(run) ? takeUnconsumedSteers(for: run) : []
-                ledger.releaseAll(of: claim)
-                if isLive(run) {
+                let live = isLive(run)
+                let orphanedSteers = live ? takeUnconsumedSteers(for: run) : []
+                if live {
                     activeRuns[taskID] = nil
                     // Only THIS run's dispatch prompts — a sibling run's are still live evidence.
                     dispatchPrompts = dispatchPrompts.filter {
@@ -716,6 +702,10 @@ extension SZHost {
                     // so the next run's cold start can't inherit a stale grade.
                     nodeGrades = nodeGrades.filter { !run.workSet.contains($0.key) }
                 }
+                // Deregister BEFORE the release, the rule `cancelRun` already follows: releasing
+                // re-enters the pump synchronously, and a run still registered makes its own
+                // freed nodes read as taken to the task waiting on them.
+                ledger.releaseAll(of: claim)
                 // Every traversal seals itself as its engine returns; this sweep is the belt
                 // for an abnormal unwind, thread-scoped so a zombie can't touch a newer run's.
                 sealLeakedAgentGraphRuns(thread: thread)
@@ -743,9 +733,13 @@ extension SZHost {
                     if !run.ownsGraphOp {
                         adoptRunRenderEndpoint(run)   // show what this run just built
                         let (done, failed) = surfaceUnresolvedNodes(run)
+                        // Nodes this run handed on rather than built: the receipt says so, or a run
+                        // whose whole ask went to another build reports that nothing needed building.
+                        let busy = run.handedOff
+                            .compactMap { store.project?.graph.node(id: $0)?.title }.sorted()
                         let narrationID = narrateRunReceipt(
                             SZChatReceipt.forEnding(implemented: done, failed: failed,
-                                                    work: soleWorkTitle(run)),
+                                                    work: soleWorkTitle(run), busy: busy),
                             seconds: elapsed(run), thread: thread)
                         attachRunRollup(to: narrationID, run: run)
                     }
@@ -1381,8 +1375,10 @@ extension SZHost {
     /// that never happened. It rejoins the tally on a promote, or a re-brief that leaves it dirty.
     private func accountedWork(_ run: SZRunState) -> Set<SZNodeID> {
         run.workSet.filter { id in
-            guard run.wiringOnly.contains(id), !run.promoted.contains(id),
-                  let node = store.project?.graph.node(id: id) else { return true }
+            // A node that is gone speaks for nothing: a declared node the run then deleted would
+            // otherwise be counted, and `soleWorkTitle` could no longer name a one-node run.
+            guard let node = store.project?.graph.node(id: id) else { return false }
+            guard run.wiringOnly.contains(id), !run.promoted.contains(id) else { return true }
             return node.needsImplementation
         }
     }

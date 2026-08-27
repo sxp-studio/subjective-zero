@@ -113,11 +113,6 @@ extension SZHost {
         persistAppState()
     }
 
-    /// View ▸ Show Agent Activity — a live pref, persisted like every layout change.
-    func setShowAgentActivity(_ on: Bool) {
-        showAgentActivity = on
-        persistAppState()
-    }
 
     /// Debug ▸ Show Turn Breakdown — a live pref, persisted like every layout change.
     func setShowTurnBreakdown(_ on: Bool) {
@@ -147,7 +142,6 @@ extension SZHost {
                                              providerGenerationSettings: providerGenerationSettings.isEmpty
                                                 ? nil : providerGenerationSettings,
                                              showWelcomeAtStartup: showWelcomeAtStartup,
-                                             showAgentActivity: showAgentActivity,
                                              telemetryEnabled: telemetryEnabled,
                                              showTurnBreakdown: showTurnBreakdown,
                                              poppedOutPanels: poppedOutPanels.isEmpty

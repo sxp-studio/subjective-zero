@@ -44,9 +44,13 @@ import SZCore
     /// the user draws mid-run is theirs. Read back against the live graph each turn, so a wired arrow
     /// drops out on its own.
     let unwiredIntent: Set<SZConnectionID>
-    /// Of `workSet`, the nodes admitted for their arrows alone — nothing about them needed building.
-    /// The accounting speaks for the rest, or the receipt claims a build that never happened.
-    let wiringOnly: Set<SZNodeID>
+    /// Of `workSet`, the nodes claimed and briefed but never dispatched: wiring targets, and nodes
+    /// the run's own tooling added that needed nothing built. The accounting speaks for the rest, or
+    /// the receipt claims a build that never happened.
+    var wiringOnly: Set<SZNodeID>
+    /// Nodes another build owned when this run's Director sent it a note (`sendChat`, agent origin).
+    /// The receipt names them, so a run that handed its ask on never reports there was nothing to do.
+    var handedOff: Set<SZNodeID> = []
     /// Nodes `promoteStagedNode` landed for their LATEST dispatch — this run's success evidence.
     /// Cleared per node at each redispatch: a redispatch says the previous build did not settle it.
     var promoted: Set<SZNodeID> = []

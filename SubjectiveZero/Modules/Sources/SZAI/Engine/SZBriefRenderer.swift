@@ -222,7 +222,8 @@ public struct SZBriefRenderer: Sendable {
         add("mutations") { SZPromptTemplate.defused(
             SZDirectorPrompt.mutationLines(world.mutations, graph: world.graph)) }
         add("tasks") { SZPromptTemplate.defused(SZDirectorPrompt.taskLines(
-            (world.runningTasks + world.pendingTasks).sorted { $0.createdAt < $1.createdAt })) }
+            (world.runningTasks + world.pendingTasks).sorted { $0.createdAt < $1.createdAt },
+            graph: world.graph)) }
 
         // — the sender's instruction: a staged op's steer, else the run's standing one —
         add("instruction") {

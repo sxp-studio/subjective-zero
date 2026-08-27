@@ -467,6 +467,11 @@ public struct SZChatPanel: View {
         let isDebugReply = isDebug && !isUser   // the debug chat agent's reply (its own tab)
         let isDirector = !isDebugReply
             && (message.role == .director || (message.role == .assistant && originNode == nil))
+        // A note the Director writes into a node's conversation is addressed to that node's agent.
+        // Unlabelled it reads as an instruction to you, which is how "do the freezing yourself"
+        // arrived as an order in someone's chat.
+        let directorLabel = originNode.map { "director agent → \($0.title)'s agent" }
+            ?? "director agent"
         return SZChatTurnRow(
             message: message,
             // Dots = this turn is still in flight (works for codex's preamble-then-tools order, not
@@ -484,7 +489,7 @@ public struct SZChatPanel: View {
                       : (agentAccents.codingColor ?? Self.agentColor))),
             label: isUser ? "you"
                 : (isDebugReply ? "debug agent"
-                   : (isDirector ? "director agent"
+                   : (isDirector ? directorLabel
                       : (originNode.map { "\($0.title) · coding agent" } ?? "coding agent"))),
             // Symbol next to the label (accessibility — not color-only): the Director's own
             // pack glyph (matching its tab), the node's own sfSymbol for its Coding Agent,
@@ -658,9 +663,8 @@ public struct SZChatPanel: View {
     /// source the transcript's working row uses); a whole run / split-merge (no in-flight message on
     /// this tab) falls back to `stopSince`, stamped when the lock began.
     ///
-    /// THIS conversation's turn, like `activeStop`: with Show Agent Activity on, the feed also
-    /// carries the builds' turns, and the newest of those would otherwise time a composer that is
-    /// not waiting on it.
+    /// THIS conversation's turn, like `activeStop`: the feed also carries the builds' turns, and
+    /// the newest of those would otherwise time a composer that is not waiting on it.
     private var runningSince: Date? {
         if let live = feed.last(where: { $0.scope == scope && streamingIDs.contains($0.message.id) })?.message {
             return live.timestamp

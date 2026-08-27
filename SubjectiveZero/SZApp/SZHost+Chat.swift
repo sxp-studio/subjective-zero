@@ -12,9 +12,7 @@ import UniformTypeIdentifiers
 extension SZHost {
 
     /// THE feed the one chat panel shows: every Director message, plus each node agent's own
-    /// conversation, in the order they were said. A node's build turns join it only under View ▸
-    /// Show Agent Activity — off, they carry the run they belong to and are read in that task's
-    /// drill-in.
+    /// conversation and its build turns, in the order they were said.
     ///
     /// Derived per body evaluation from the per-scope transcripts (a few hundred messages at
     /// most); the transcripts stay the storage, so sessions and recaps are untouched.
@@ -23,11 +21,9 @@ extension SZHost {
         for node in store.project?.graph.nodes ?? [] {
             let scope = SZChatScope.node(node.id)
             items += store.messages(for: scope)
-                // A build turn belongs to its task unless you asked to watch the agents work.
-                // `feedEpoch` gates BOTH ways: anything older predates the stamp, so it is build
-                // work of unknown provenance and stays out even with activity on — otherwise an old
-                // project's first open would pour every coding turn it ever ran into the feed.
-                .filter { ($0.graphRunID == nil || showAgentActivity) && $0.timestamp >= feedEpoch }
+                // Anything older than the stamp is build work of unknown provenance: without this
+                // an old project's first open would pour every coding turn it ever ran into the feed.
+                .filter { $0.timestamp >= feedEpoch }
                 .map { SZChatFeedItem(scope: scope, message: $0) }
         }
         return items.sorted { $0.message.timestamp < $1.message.timestamp }
@@ -208,8 +204,13 @@ extension SZHost {
         // semaphore until we return). Neither path steals the tab. A USER's mid-run message falls
         // through instead.
         if origin == .agent, isRunning {
-            // Director → a node the run owns: folded into that node's reconcile retry.
-            if let nodeID = scope.nodeID, isRunClaim(ledger.holder(of: .node(nodeID))) {
+            // Director → a node a run owns: folded into that node's next brief. When the owner is
+            // ANOTHER run, the caller's run just handed part of its ask on, and its receipt must say
+            // so rather than that nothing needed building.
+            if let nodeID = scope.nodeID, let holder = ledger.holder(of: .node(nodeID)), isRunClaim(holder) {
+                if let mine = activeRun(for: SZToolCaller.claim), mine.claim != holder {
+                    mine.handedOff.insert(nodeID)
+                }
                 return .recordedForReconcile(recordDirectorMessage(node: nodeID, message: trimmed))
             }
             // Coding agent → the Director: rendered into the next reconcile turn's prompt

@@ -322,10 +322,6 @@ final class SZHost {
     // `showWelcomeAtStartup` (default ON) gates the auto-present on cold launch.
     internal(set) var showWelcomeAtStartup: Bool = SZAppStateIO.load()?.showWelcomeAtStartup ?? true
 
-    // Each coding agent's own turns in the conversation while it builds — same app-state.json +
-    // restore story, mutated via setShowAgentActivity. Toggled from the View menu (SZApp). Defaults
-    // OFF; display-only — the turns are always captured, so turning it on later reveals past builds.
-    internal(set) var showAgentActivity: Bool = SZAppStateIO.load()?.showAgentActivity ?? false
     /// Debug ▸ Show Turn Breakdown — the expandable per-turn phase breakdown under replies.
     /// Gated like the Profiler surface: a DEBUG session's saved `true` must not resurface debug
     /// chrome in a release build.
@@ -871,6 +867,12 @@ final class SZHost {
         }
         guard !mine.isEmpty else { return }
         run.workSet.formUnion(mine)
+        // Joined but not dispatched: a node that needs nothing built (a library node the run
+        // added, a clean one it touched) is briefed, never sent to an agent, so the receipt
+        // must not count it as a build.
+        for id in mine where store.project?.graph.node(id: id)?.needsImplementation == false {
+            run.wiringOnly.insert(id)
+        }
         var resources: Set<SZResourceID> = []
         for id in mine {
             resources.insert(.node(id))

@@ -179,7 +179,7 @@ public enum SZDirectorPrompt {
     /// The triage/amend briefs' `{{tasks}}` value — the work in hand, oldest first, each line led
     /// by the id an amend or cancel names and marked with its state. Running work is listed too, or
     /// a message about what is being built can only schedule that same work a second time.
-    static func taskLines(_ tasks: [SZTask]) -> String {
+    static func taskLines(_ tasks: [SZTask], graph: SZGraph? = nil) -> String {
         guard !tasks.isEmpty else { return "- (nothing scheduled or running)" }
         return tasks.map { task in
             let nodes: String
@@ -187,9 +187,13 @@ public enum SZDirectorPrompt {
                 nodes = ""
             } else if task.state == .running {
                 // Running work is steered node by node, so the amend turn needs the ids: a
-                // count says there is something to message, not where to send it.
-                nodes = " — on " + task.workSet.map { "`\($0.uuidString)`" }
-                    .sorted().joined(separator: ", ")
+                // count says there is something to message, not where to send it. The title
+                // rides beside the id, or triage cannot tell that "make Pixel Morph cycle" is
+                // about the build already under way and rules it new work instead.
+                nodes = " — on " + task.workSet.map { id -> String in
+                    let title = graph?.node(id: id)?.title ?? ""
+                    return title.isEmpty ? "`\(id.uuidString)`" : "`\(id.uuidString)` (\(title))"
+                }.sorted().joined(separator: ", ")
             } else {
                 nodes = " — \(task.workSet.count) node" + (task.workSet.count == 1 ? "" : "s")
             }

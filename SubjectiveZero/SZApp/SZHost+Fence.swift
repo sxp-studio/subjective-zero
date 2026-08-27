@@ -62,7 +62,13 @@ extension SZHost {
                 if SZToolCaller.claim == nil, isRunClaim(holder) { continue }
             }
             if origin == .user, !userLockDenies(holder: holder, node: id) { continue }
-            return "node '\(title)' is held by \(holder.label) — wait for it to finish or stop it"
+            // Two readers, two remedies. A user can wait and can press Stop; an agent turn can do
+            // neither, so telling it to wait buys a promise the turn cannot keep. Its remedy is to
+            // hand the words to the build that holds the node, which `ui_send_chat` does.
+            return origin == .agent
+                ? "node '\(title)' is being built by another request. Send your note for it with "
+                    + "ui_send_chat, then leave the node alone."
+                : "node '\(title)' is held by \(holder.label) — wait for it to finish or stop it"
         }
         return nil
     }
