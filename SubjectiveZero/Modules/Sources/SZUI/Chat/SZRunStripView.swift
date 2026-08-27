@@ -8,7 +8,7 @@
 // - Past the cap the rest fold into ONE line that OPENS, so the strip stays short by default and
 //   the whole fleet is a click away. `SZStripPlan` lays the band out in one pass, spending a row
 //   budget read off the PANEL, not one per group.
-// - The ■ on a live Director lane stops THAT build; it is the only per-build stop.
+// - Hovering a live Director lane reveals a Cancel that stops that build; the only per-build stop.
 // - Lanes are the strip's own, not the canvas's `SZAgentSubagentLane` (which fills its card's
 //   width by design). Shared instead: `SZRunBadge`, one word per state.
 // - Deliberately OUTSIDE the transcript's ScrollView — a run is state, not a message, so it must
@@ -232,6 +232,11 @@ struct SZRunStrip: View {
     /// starts folded. Thread ids are never reused, so a leftover key cannot open a future group.
     @State private var expanded: Set<SZStripPlan.Group> = []
 
+    /// Per block (a build's thread), the furthest right edge its lanes want. Every lane grows its box
+    /// to end there, so a Director and the agents under it are flush on the right while their indents
+    /// stay put. Keyed, so two blocks size independently. Empty until the first measurement.
+    @State private var blockRight: [UUID: CGFloat] = [:]
+
     var body: some View {
         let rows = SZStripPlan.rows(threads: threads, runs: runs, scheduled: scheduled,
                                     expanded: expanded, extraBudget: extraBudget)
@@ -247,6 +252,9 @@ struct SZRunStrip: View {
             .padding(.horizontal, 12)
             .padding(.top, 10)
         }
+        // Each lane reports the right edge it wants for its block; the widest wins and is handed back
+        // as every lane's box, so the boxes end level without the indent moving.
+        .onPreferenceChange(SZBlockRightKey.self) { blockRight = $0 }
         // A dispatched agent grows an open group the way a click does, so follow the row COUNT.
         .onChange(of: rows.count) { onLayoutChange?() }
         // A fold with nothing behind it must not reopen itself when the next build overflows.
@@ -268,9 +276,7 @@ struct SZRunStrip: View {
         case .director(let run):
             laneRow(SZLaneModel(run: run, name: "Director", symbol: "eyeglasses",
                                 tint: SZEdgeStyle.intentViolet),
-                    stop: run.isLive
-                        ? onStopRun.map { stop in { stop(run.thread ?? run.id) } }
-                        : nil)
+                    stop: run.isLive ? onStopRun.map { s in { s(run.thread ?? run.id) } } : nil)
         case .lane(let run, let connector):
             laneRow(SZLaneModel(run: run, name: run.work.flatMap(title) ?? "work",
                                 symbol: "hammer", tint: SZAgentGraphStyle.running),
@@ -296,12 +302,17 @@ struct SZRunStrip: View {
     private func laneRow(_ model: SZLaneModel,
                          connector: SZLaneConnector.Kind? = nil,
                          stop: (() -> Void)? = nil) -> some View {
-        HStack(spacing: 0) {
+        // A Director and its coding lanes share the build's thread, which is the block key. The
+        // indent is the connector's width for a coding lane, zero for the Director; the box then
+        // grows to `blockRight - indent`, so every lane in the block ends at the same edge.
+        let blockID = model.run.thread ?? model.run.id
+        let indent: CGFloat = connector == nil ? 0 : SZLaneMetrics.connectorWidth
+        return SZStripLaneRow(stop: stop) {
             if let connector { SZLaneConnector(kind: connector) }
             SZStripLane(model: model,
                         onOpen: onOpen.map { open in { open(model.run.id) } },
-                        onStop: stop)
-            Spacer(minLength: 0)
+                        blockID: blockID, indent: indent,
+                        boxWidth: blockRight[blockID].map { $0 - indent })
         }
     }
 
@@ -472,7 +483,11 @@ struct SZLaneConnector: View {
 struct SZStripLane: View {
     let model: SZLaneModel
     var onOpen: (() -> Void)?
-    var onStop: (() -> Void)?
+    /// The block this lane belongs to, and how it sits in it: the strip resolves both so every lane
+    /// in a block ends level. nil = a receipt, which hugs.
+    var blockID: UUID?
+    var indent: CGFloat = 0
+    var boxWidth: CGFloat?
 
     private var isLive: Bool { model.run.isLive }
 
@@ -484,17 +499,29 @@ struct SZStripLane: View {
                 clock: model.run.endedAt
                     .map { SZTurnBreakdown.format($0.timeIntervalSince(model.run.startedAt)) }
                     ?? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(model.run.startedAt)),
-                onOpen: onOpen, onStop: onStop, rowHeight: SZLaneMetrics.rowHeight
+                onOpen: onOpen, rowHeight: SZLaneMetrics.rowHeight,
+                blockID: blockID, indent: indent, boxWidth: boxWidth
             ) {
                 if isLive {
+                    // A pulsing dot in the lane's own tint stands in for the "running" chip: it says
+                    // live without the loud word, and leaves the chip free to mean an exception.
                     SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
-                        SZRunBadge.running()
+                        Circle().fill(model.tint).frame(width: 5, height: 5)
                     }
                 } else {
                     SZRunBadge.forRun(model.run)
                 }
             }
         }
+    }
+}
+
+/// The widest right edge any lane in a block wants (keyed by thread), so every lane can grow its
+/// box to end there. Reduces by max.
+struct SZBlockRightKey: PreferenceKey {
+    static let defaultValue: [UUID: CGFloat] = [:]
+    static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) {
+        for (id, right) in nextValue() { value[id] = Swift.max(value[id] ?? 0, right) }
     }
 }
 
@@ -515,7 +542,6 @@ struct SZLanePill<Badge: View>: View {
     let isLive: Bool
     let clock: String
     var onOpen: (() -> Void)?
-    var onStop: (() -> Void)?
     /// The height the lane OCCUPIES, when that is more than the pill it draws. A strip row is
     /// taller than its pill and the difference is the gap `SZLaneConnector` draws through — and
     /// that band is part of the lane: at `groupGap == 0` the rows tile the strip contiguously, so
@@ -525,6 +551,15 @@ struct SZLanePill<Badge: View>: View {
     /// down a group. nil = take the pill flush, which is what a receipt in the transcript wants:
     /// no connector, no neighbours, nothing to tile with.
     var rowHeight: CGFloat?
+    /// The block this lane belongs to (its build's thread), for the right-edge match; nil for a
+    /// receipt in the transcript, which keeps its own hugging layout.
+    var blockID: UUID?
+    /// How far this lane sits from the block's left: the connector width for a coding lane, 0 for a
+    /// Director. Its box grows to `blockRight - indent` so all lanes in the block end level.
+    var indent: CGFloat = 0
+    /// The block's widest right edge, resolved by the strip. nil hugs (before measurement, or a
+    /// receipt). Never narrower than the content, so a lane only ever grows, never clips.
+    var boxWidth: CGFloat?
     @ViewBuilder let badge: () -> Badge
     @State private var hover = false
 
@@ -534,6 +569,30 @@ struct SZLanePill<Badge: View>: View {
     private var lit: Bool { hover && interactive }
 
     var body: some View {
+        content
+            // Fill the block's shared width so the metadata group lands flush right; nil hugs (a
+            // receipt, or before the block is measured). Always >= the content, so never a clip.
+            .frame(width: boxWidth, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: SZLaneMetrics.radius)
+                .fill(isLive ? tint.opacity(lit ? 0.20 : 0.14)
+                             : Color.white.opacity(lit ? 0.075 : 0.04)))
+            // A hidden twin at its own natural width reports the block's right edge — measured apart
+            // from the display copy, so the width it later fills never feeds back into the measure.
+            .background(measureLayer)
+            .frame(height: rowHeight ?? SZLaneMetrics.pillHeight)
+            // Tap gesture, not a Button: the stop control sits outside the pill now (in the row), so
+            // the two no longer nest.
+            .contentShape(Rectangle())
+            .onTapGesture { onOpen?() }
+            .trackingHover($hover)
+            .help(interactive ? "Open this run in the Agent Graph" : "")
+    }
+
+    /// Name and what it is doing on the left ("Director decompose"); the live signal and the clock
+    /// pushed to the right by the spacer, so in a block those line up on the shared right edge. No
+    /// "running" chip: the ticking clock and the pulsing dot already say live, and the chip is spent
+    /// only on the exception (a failed or stopped lane), where it carries information.
+    private var content: some View {
         HStack(spacing: 6) {
             Image(systemName: symbol)
                 .font(.system(size: 8))
@@ -548,32 +607,85 @@ struct SZLanePill<Badge: View>: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
-            // State, then how long it has been in it, then the control: the badge is what you
-            // read first, and the clock qualifies it.
+            // The gap only opens in the strip; a receipt keeps its content tight (minLength 0).
+            Spacer(minLength: blockID != nil ? 10 : 0)
             badge()
             Text(clock)
                 .font(.system(size: 8.5, design: .monospaced))
                 .foregroundStyle(.secondary)
-                // Beside a pulsing badge: swap the string, never cross-fade it.
+                // Beside a pulsing dot: swap the string, never cross-fade it.
                 .contentTransition(.identity)
-            if let onStop {
-                SZLaneActionButton(symbol: "stop.fill",
-                                   help: "Stop this build. The others keep going",
-                                   action: onStop)
-            }
         }
-        .padding(.leading, SZLaneMetrics.padH)
-        .padding(.trailing, onStop == nil ? SZLaneMetrics.padH : 3)
+        .padding(.horizontal, SZLaneMetrics.padH)
         .frame(height: SZLaneMetrics.pillHeight)
-        .background(RoundedRectangle(cornerRadius: SZLaneMetrics.radius)
-            .fill(isLive ? tint.opacity(lit ? 0.20 : 0.14)
-                         : Color.white.opacity(lit ? 0.075 : 0.04)))
-        .frame(height: rowHeight ?? SZLaneMetrics.pillHeight)
-        // Tap gesture, not a Button: the ■ inside is its own button and the two must not nest.
-        .contentShape(Rectangle())
-        .onTapGesture { onOpen?() }
+    }
+
+    /// The strip lane's width probe: the same content at its natural width, hidden, reporting
+    /// `indent + width` for its block. A receipt (no block) contributes nothing.
+    @ViewBuilder private var measureLayer: some View {
+        if let blockID {
+            content
+                .fixedSize(horizontal: true, vertical: false)
+                .hidden()
+                .background(GeometryReader { proxy in
+                    Color.clear.preference(key: SZBlockRightKey.self,
+                                           value: [blockID: indent + proxy.size.width])
+                })
+        }
+    }
+}
+
+/// A lane row that reveals a stop control off the right of the box while the pointer is over it —
+/// nothing at rest, so a live build stays calm and the ■ is there the moment you reach for it. Only
+/// a Director lane is given a `stop`; a coding lane passes nil and is just its connector + pill.
+private struct SZStripLaneRow<Content: View>: View {
+    let stop: (() -> Void)?
+    @ViewBuilder let content: () -> Content
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            content()
+            if let stop, hover {
+                SZCancelControl(action: stop)
+                    .padding(.leading, 5)
+                    .transition(.opacity)
+            }
+            Spacer(minLength: 0)
+        }
+        .animation(.easeOut(duration: 0.12), value: hover)
+        .onHover { hover = $0 }
+    }
+}
+
+/// The hover-revealed stop: the ■ and the word "Cancel" in a small pill that matches the lanes —
+/// same height, radius and wash, the glyph on the text's own line — so it reads as part of the
+/// strip rather than a control bolted onto it.
+private struct SZCancelControl: View {
+    let action: () -> Void
+    @State private var hover = false
+
+    /// Neutral at rest, a soft red under the pointer — enough to read as "stop" without shouting
+    /// on a quiet strip.
+    private static let red = Color(red: 0.93, green: 0.43, blue: 0.40)
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                // Inherits the row's font, so it sits on "Cancel"'s line instead of dropping low.
+                Image(systemName: "stop.fill").imageScale(.small)
+                Text("Cancel")
+            }
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(hover ? Self.red : Color.secondary)
+            .padding(.horizontal, SZLaneMetrics.padH)
+            .frame(height: SZLaneMetrics.pillHeight)
+            .background(RoundedRectangle(cornerRadius: SZLaneMetrics.radius)
+                .fill(hover ? Self.red.opacity(0.15) : Color.white.opacity(0.045)))
+        }
+        .buttonStyle(.plain)
         .trackingHover($hover)
-        .help(interactive ? "Open this run in the Agent Graph" : "")
+        .help("Stop this build. Any others keep going")
     }
 }
 
