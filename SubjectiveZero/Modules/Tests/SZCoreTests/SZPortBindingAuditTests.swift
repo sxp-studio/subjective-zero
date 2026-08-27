@@ -201,3 +201,76 @@ private func node(_ contract: SZNodeContract?, title: String = "T", symbol: Stri
     #expect(a.contract == nil)
     #expect(a.result == SZPortBindingAudit.Result(errors: [], warnings: []))
 }
+
+// MARK: - Channel mismatch
+// The name check waves a declared port through, so a port read off the WRONG runtime wire used to pass
+// green: the read resolves to nil every frame, the node falls back to its hardcoded default, and the card
+// still says Ready. `SZNodeKit` gives a node three wires per direction, and every numeric accessor shares
+// one of them — so the audit compares CHANNELS, never exact types.
+
+@Test func flagsATextureInputReadAsANumber() {
+    let c = contract(inputs: [input("src", .texture)], outputs: [output("out")])
+    let src = """
+    let amount = ctx.inputFloat("src") ?? 0     // src is a texture: nil every frame
+    _ = (amount, ctx.outputTexture("out"))
+    """
+    let r = SZPortBindingAudit.audit(contract: c, source: src)
+    #expect(r.errors.count == 1)
+    #expect(r.errors[0].contains("\"src\""))
+    #expect(r.errors[0].contains("texture"))
+    #expect(r.errors[0].contains("ctx.inputTexture"))
+}
+
+@Test func flagsANumericInputReadAsATexture() {
+    let c = contract(inputs: [input("amount", .float)], outputs: [output("out")])
+    let src = """
+    _ = ctx.inputTexture("amount")
+    _ = ctx.outputTexture("out")
+    """
+    #expect(SZPortBindingAudit.audit(contract: c, source: src).errors.count == 1)
+}
+
+@Test func flagsATextureOutputWrittenAsANumber() {
+    let c = contract(inputs: [], outputs: [output("out", .texture)])
+    let r = SZPortBindingAudit.audit(contract: c, source: #"ctx.setOutputFloat("out", 1)"#)
+    #expect(r.errors.count == 1)
+    #expect(r.errors[0].contains("ctx.outputTexture"))
+}
+
+@Test func flagsAnEventPortAsNeverDelivered() {
+    let c = contract(inputs: [input("trigger", .event)], outputs: [output("out")])
+    let r = SZPortBindingAudit.audit(contract: c, source: #"_ = (ctx.inputFloat("trigger"), ctx.outputTexture("out"))"#)
+    #expect(r.errors.count == 1)
+    #expect(r.errors[0].contains("event"))
+}
+
+// The false positives an exact-type map would produce. All four ride the same wire, so all four are fine.
+
+@Test func acceptsEveryNumericAccessorOnTheValueChannel() {
+    let c = contract(inputs: [input("loop", .bool), input("amount", .float),
+                              input("tint", .colorRGB), input("spectrum", .floatArray)],
+                     outputs: [output("out")])
+    let src = """
+    _ = ctx.inputFloat("loop")            // a bool read as a float: same wire, 0/1
+    _ = ctx.inputBool("amount")           // and the reverse
+    _ = ctx.inputFloats("tint")
+    _ = ctx.inputFloats("spectrum")       // capped at 16, but the same channel
+    _ = ctx.inputFloatArray("amount")
+    _ = ctx.outputTexture("out")
+    """
+    #expect(SZPortBindingAudit.audit(contract: c, source: src).errors.isEmpty)
+}
+
+@Test func acceptsAnEnumReadAsAString() {
+    let c = contract(inputs: [input("blend", .enumeration)], outputs: [output("out")])
+    let src = #"_ = (ctx.inputString("blend"), ctx.outputTexture("out"))"#
+    #expect(SZPortBindingAudit.audit(contract: c, source: src).errors.isEmpty)
+}
+
+@Test func anUndeclaredPortIsReportedOnceNotTwice() {
+    // The name is undeclared, so there is no type to disagree with — one error, not one of each.
+    let c = contract(inputs: [], outputs: [output("out")])
+    let r = SZPortBindingAudit.audit(contract: c, source: #"_ = (ctx.inputFloat("ghost"), ctx.outputTexture("out"))"#)
+    #expect(r.errors.count == 1)
+    #expect(r.errors[0].contains("declares no such input"))
+}

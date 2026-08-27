@@ -206,8 +206,13 @@ fields that aren't in the contract: `tags`, `purpose`, `useWhen`, `avoidWhen`, `
 
 When a *generated* node is compiled, `agent_compile_node` cross-checks the contract against `Node.swift`
 (`SZPortBindingAudit`): a port the code reads/writes that the contract doesn't declare is a **hard error**
-(the source isn't promoted); a port declared in the contract that the code never touches is a **warning**
-(usually a dead control). Hand-added library nodes don't pass through this tool, so keep the contract and
+(the source isn't promoted); so is a declared port named off the wrong **channel**. The runtime carries a
+port on one of three wires per direction - values, textures, strings - and the accessor picks the wire, so
+`ctx.inputFloat` on a `texture` port resolves to nil every frame and the node silently falls back to its
+hardcoded default. The numeric accessors all share one wire (`inputFloat` is `inputFloats(port)?.first`,
+`inputBool` reads the same floats), so a `bool` read as a float is fine; an `event` port is never delivered
+at all. A port declared in the contract that the code never touches is a **warning** (usually a dead
+control). Hand-added library nodes don't pass through this tool, so keep the contract and
 `Node.swift` in agreement yourself - copying a clean node is the easiest way.
 
 ## Authoring guidelines

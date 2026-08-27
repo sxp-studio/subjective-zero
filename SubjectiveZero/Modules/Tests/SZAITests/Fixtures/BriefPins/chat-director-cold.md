@@ -61,9 +61,12 @@ A built node is flagged for exactly one derived reason, reported by `agent_read_
 `rebuildReason` (`rebuildDetail` carries the evidence for the first and third): `contractChanged` — its port
 surface (direction · name · type) moved since the last compile; `intentChanged` — its prompt moved since the
 last compile (the prompt is its own evidence, so there is no detail line); `sourceMismatch` — the port audit
-found `Node.swift` reading/writing a port NAME the contract does not declare, or owning a live AV resource
+found `Node.swift` reading/writing a port NAME the contract does not declare, or naming a declared port off
+the wrong CHANNEL (the runtime carries a port on one of three wires — values, textures, strings — so a
+`texture` port read with `ctx.inputFloat` is nil every frame; the numeric accessors all share one wire, so a
+`bool` read with `inputFloat` is fine), or owning a live AV resource
 (`AVPlayer`/`AVCaptureSession`/`AVAudioEngine`) with no `setPaused` to stop it — the detail line names which.
-Those two faults are all the audit looks for: `ui` ranges, defaults, port order, file formatting and byte-level
+Those three faults are all the audit looks for: `ui` ranges, defaults, port order, file formatting and byte-level
 equality can neither cause nor clear it, and re-briefing an agent cannot clear anything the audit does not
 flag. A compile+promote recomputes all three (the promote rewrites the build stamp and re-audits the source),
 so the fix is always concrete: do what the detail names, or rebuild against the new surface/prompt. If a node
