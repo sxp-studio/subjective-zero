@@ -36,6 +36,7 @@ public struct SZNodeEditorPanel: View {
     private let graphOpStatus: [SZNodeID: String]   // original node id → "Splitting"/"Merging"
     private let runWorkSet: Set<SZNodeID>   // the run's captured work (host-owned) — members read Coding
     private let lockedNodes: Set<SZNodeID>  // ledger-held nodes (host-owned) — the lock affordance's source
+    private let deleteHeldNodes: Set<SZNodeID>  // nodes the user can't delete (host-owned) — superset of the above
     private let hiddenPieces: Set<SZNodeID>          // staged split/merge pieces hidden until commit
     private let chatShown: Bool                   // for the HUD icon state; chat/tab state is owned by SZApp
     private let agentsWorking: Bool               // any run/turn in flight → the closed-panel chat-toggle dot
@@ -127,7 +128,8 @@ public struct SZNodeEditorPanel: View {
                 nodeAgentState: [SZNodeID: SZNodeAgentState] = [:],
                 nodeRuntimeErrors: [SZNodeID: String] = [:],
                 graphOpStatus: [SZNodeID: String] = [:], runWorkSet: Set<SZNodeID> = [],
-                lockedNodes: Set<SZNodeID> = [], hiddenPieces: Set<SZNodeID> = [],
+                lockedNodes: Set<SZNodeID> = [], deleteHeldNodes: Set<SZNodeID> = [],
+                hiddenPieces: Set<SZNodeID> = [],
                 chatShown: Bool,
                 agentsWorking: Bool = false,
                 pendingWorkHint: Bool = false,
@@ -175,6 +177,7 @@ public struct SZNodeEditorPanel: View {
         self.graphOpStatus = graphOpStatus
         self.runWorkSet = runWorkSet
         self.lockedNodes = lockedNodes
+        self.deleteHeldNodes = deleteHeldNodes
         self.hiddenPieces = hiddenPieces
         self.chatShown = chatShown
         self.agentsWorking = agentsWorking
@@ -250,6 +253,13 @@ public struct SZNodeEditorPanel: View {
     /// gesture guards), fed by the host's ledger-backed `lockedNodes`.
     private func isLocked(_ id: SZNodeID) -> Bool {
         SZNodeCanvasContentView.isLocked(id, ops: graphOpStatus, lockedNodes: lockedNodes)
+    }
+
+    /// Whether deleting this node would be refused — the same shape as `isLocked`, over the host's wider
+    /// `deleteHeldNodes`. Mirrors `SZHost.deleteDenial`, so what the trash dims and what the host refuses
+    /// can't drift.
+    private func isDeleteHeld(_ id: SZNodeID) -> Bool {
+        SZNodeCanvasContentView.isHeld(id, ops: graphOpStatus, in: deleteHeldNodes)
     }
 
     public var body: some View {
@@ -503,7 +513,12 @@ public struct SZNodeEditorPanel: View {
         } else if !selectedNodeIDs.isEmpty {
             // Through the host, as ONE batch: node removal + chat-artifact purge + a single
             // persist/reload for the whole selection.
-            onDeleteNodes(selectedNodeIDs.filter { !isLocked($0) })   // can't delete mid-implementation
+            // Mixed selection: delete what is free and leave the held ones. Nothing free: send the
+            // selection anyway so the host's fence refuses it and writes the reason to the status line,
+            // rather than ⌫ appearing to be broken.
+            let free = Array(selectedNodeIDs.filter { !isDeleteHeld($0) })
+            onDeleteNodes(free.isEmpty ? Array(selectedNodeIDs) : free)
+            guard !free.isEmpty else { return }        // nothing went; keep the selection to act on
             selectedNodeID = nil
             multiSelection = []
         }
@@ -520,15 +535,15 @@ public struct SZNodeEditorPanel: View {
     private var hasSelection: Bool { !selectedNodeIDs.isEmpty || selectedConnectionID != nil }
 
     /// Whether the current selection has anything the user is actually allowed to delete right now — mirrors
-    /// `deleteSelected`'s own guards so the HUD trash button dims (rather than silently no-opping) when the
-    /// whole selection is locked mid-run: a connection is deletable only if neither endpoint is locked; a
-    /// node selection is deletable only if at least one selected node is unlocked.
+    /// `deleteSelected`'s own guards so the HUD trash button dims (rather than silently no-opping) when an
+    /// agent holds the whole selection: a connection is deletable only if neither endpoint is locked; a
+    /// node selection is deletable only if at least one selected node is not delete-held.
     private var canDeleteSelection: Bool {
         if let id = selectedConnectionID {
             guard let c = project?.graph.connections.first(where: { $0.id == id }) else { return false }
             return !isLocked(c.from.node) && !isLocked(c.to.node)
         }
-        return selectedNodeIDs.contains { !isLocked($0) }
+        return selectedNodeIDs.contains { !isDeleteHeld($0) }
     }
 
     /// Whether a node card is drawn selected (the primary single selection OR a member of the multi-set).
@@ -823,6 +838,7 @@ public struct SZNodeEditorPanel: View {
             isRunning: isRunning,
             runWorkSet: runWorkSet,
             lockedNodes: lockedNodes,
+            deleteHeldNodes: deleteHeldNodes,
             previewsEnabled: livePreviews,
             // Compared as a Bool, so pinch ticks keep skipping the subtree — it flips only when the
             // zoom crosses the LOD threshold, re-rendering the cards once per crossing.
@@ -893,9 +909,11 @@ public struct SZNodeEditorPanel: View {
                 }
                 // Member-scoped socket enumeration: only the dragged nodes' dots move, so don't build
                 // (and discard) the whole graph's socket array every tick.
+                let notInBuild = SZGraphCanvasModel.socketIDsNotInBuild(in: members)
                 ForEach(SZGraphCanvasModel.sockets(in: SZGraph(nodes: members),
                                                    previewsEnabled: livePreviews)) { socket in
-                    SZPortSocket(kind: socket.kind, isConnected: connected.contains(socket.id))
+                    SZPortSocket(kind: socket.kind, isConnected: connected.contains(socket.id),
+                                 notInBuild: notInBuild.contains(socket.id))
                         .frame(width: 22, height: 22)
                         .position(socket.point)
                 }
@@ -918,6 +936,7 @@ public struct SZNodeEditorPanel: View {
                                                        workSet: runWorkSet),
             isSelected: isSelected(node.id),
             locked: isLocked(node.id),
+            deleteHeld: isDeleteHeld(node.id),
             isRunning: isRunning,
             diagnostic: SZNodeCanvasContentView.nodeDiagnostic(
                 for: node, agentState: nodeAgentState[node.id],

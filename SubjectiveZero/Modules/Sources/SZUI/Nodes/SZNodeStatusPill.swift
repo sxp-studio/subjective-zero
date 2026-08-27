@@ -115,14 +115,51 @@ extension View {
     func graphOpGlow(_ status: SZNodeStatus, cornerRadius: CGFloat) -> some View {
         modifier(SZGraphOpGlow(status: status, cornerRadius: cornerRadius))
     }
+
+    /// Mute a port row the running build has no code for, and breathe it while an agent writes that code.
+    func pendingRowFade(notInBuild: Bool, status: SZNodeStatus) -> some View {
+        modifier(SZPendingRowFade(notInBuild: notInBuild, building: status.isWorking))
+    }
+}
+
+/// The whole treatment for a port row the running build has no code for: one opacity over label AND
+/// control. It has to reach the control, not just the label — a disabled macOS switch still paints its
+/// blue track, so a `.disabled` toggle alone reads exactly like a live one.
+///
+/// While an agent is writing that code the row breathes, phase-locked to the status pill off `SZPulse`
+/// rather than running its own animation. Only while something is actually working the node: a declared
+/// port can sit unbuilt for hours after a run ends, and a row breathing forever on a canvas that may be
+/// projected claims work that is not happening. The cycle stays below full paint at its peak, so a
+/// pending row never momentarily reads as live.
+struct SZPendingRowFade: ViewModifier {
+    let notInBuild: Bool
+    let building: Bool
+    private static let resting = 0.55
+    private static let low = 0.35, high = 0.75
+
+    func body(content: Content) -> some View {
+        if notInBuild {
+            // One TimelineView across both states: paused it renders once, and starting or stopping the
+            // breath keeps the row's identity, so a control inside it is not torn down mid-cycle.
+            TimelineView(.animation(paused: !building)) { ctx in
+                content.opacity(building
+                    ? Self.low + (Self.high - Self.low) * SZPulse.phase(at: ctx.date)
+                    : Self.resting)
+            }
+        } else {
+            content
+        }
+    }
 }
 
 /// The badges that float above a node card: the status pill (shown only when informative) and a lock
-/// badge while the node is locked (a run is in flight). Shared by the generated + prompt node views.
+/// badge while an agent holds the node. Shared by the generated + prompt node views.
 struct SZNodeBadges: View {
     let status: SZNodeStatus
     var showPill: Bool = true
-    var locked: Bool = false
+    /// An agent owns this node, so it cannot be deleted (`SZHost.deleteHeldNodes`). Wider than the card's
+    /// `locked`: a node being rebuilt wears the badge while its controls and wires stay the user's.
+    var held: Bool = false
     /// The full build diagnostic for this node, when it failed. Non-nil → the pill becomes the clickable
     /// `SZNodeErrorPill` (copyable popover); nil → the plain status pill. Cleared when the error is fixed.
     var errorDetail: String? = nil
@@ -136,7 +173,7 @@ struct SZNodeBadges: View {
         // The pill stays centered over the card; the lock hangs off its leading edge as an overlay so it
         // never shifts the pill (an HStack would re-center pill+lock together).
         pill.overlay(alignment: .leading) {
-            if locked {
+            if held {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(.white)

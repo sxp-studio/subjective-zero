@@ -108,6 +108,20 @@ A classic node-graph editor rendered natively over the viewport. Two node kinds
   when it ships a `Card.swift` and the body is set to custom ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md#custom-card-cardswift)).
   A backdrop card (corner-pin) shows the output under its handles and sizes the region to the
   render aspect; the inputs the card owns (`card.plumbing`) get no row while it shows.
+- **A row the running build has no port for is read-only.** An agent declares a node's ports before
+  its code exists, so a card can grow a row minutes before anything reads it. Those rows (the ports
+  in the contract that the build stamp never saw) dim their label, hollow their socket dot, and show
+  their control in the card's read-only form until the node is rebuilt. A knob that changes nothing
+  is worse than one you cannot turn. While an agent is actually writing that code the row breathes,
+  phase-locked to the status pill off the shared `SZPulse`; a row nobody is building sits still,
+  because a declared port can stay unbuilt for hours after a run ends and a canvas may be on a wall.
+  Nothing re-lays-out: `controlWidth` reserves by port type and never asks what the build knows, so
+  no socket or edge moves when a port is declared.
+- **A node an agent is working on wears a padlock and cannot be deleted.** The badge means held, not
+  frozen: a node being rebuilt keeps rendering, and its knobs, wires, position and viewport toggle
+  stay the user's. The hold lifts at that node's own promote, not at the end of the run. A node that
+  needs a rebuild with nobody on it is not held and deletes normally. A first build, a node chat and
+  a split/merge lock the card outright, as before.
 - **Folding the plugs:** a card with a body can put its port rows away (chevron pill under the card,
   or right-click → **Hide Plugs**), so the preview or the custom card IS the card. The card keeps its
   **top edge** and folds up under its header; the fold always drops a whole number of grid cells, so

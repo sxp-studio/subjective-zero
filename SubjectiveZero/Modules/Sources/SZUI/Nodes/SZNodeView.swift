@@ -13,6 +13,9 @@ struct SZNodeView: View, Equatable {
     let status: SZNodeStatus
     var isSelected: Bool = false
     var locked: Bool = false
+    /// An agent owns this node, so deleting it is refused. Wider than `locked` (which also greys the
+    /// card): a node the fleet is rebuilding is held but fully live.
+    var deleteHeld: Bool = false
     var showPill: Bool = true
     var errorDetail: String? = nil   // full diagnostic → clickable error pill
     var errorTitle: String = ""      // what that pill's popover calls it (SZNodeCanvasContentView.nodeDiagnostic)
@@ -58,6 +61,7 @@ struct SZNodeView: View, Equatable {
             && lhs.status == rhs.status
             && lhs.isSelected == rhs.isSelected
             && lhs.locked == rhs.locked
+            && lhs.deleteHeld == rhs.deleteHeld
             && lhs.showPill == rhs.showPill
             && lhs.errorDetail == rhs.errorDetail && lhs.errorTitle == rhs.errorTitle
             && lhs.renderEndpoint == rhs.renderEndpoint
@@ -68,6 +72,13 @@ struct SZNodeView: View, Equatable {
 
     private var inputs: [SZPort] { node.contract?.inputs ?? [] }
     private var outputs: [SZPort] { node.contract?.outputs ?? [] }
+
+    /// Ports declared since the running build was compiled (`SZNode.portsNotInBuild`) — their rows read
+    /// muted. Derived from `node`, which `==` already covers, so it costs the card no extra state.
+    private func notInBuild(_ port: SZPort, _ direction: SZNodeContract.PortSignature.Direction,
+                            _ pending: Set<SZNodeContract.PortSignature>) -> Bool {
+        pending.contains(SZNodeContract.PortSignature(direction: direction, name: port.name, type: port.type))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -99,9 +110,12 @@ struct SZNodeView: View, Equatable {
                 // what holds them intact for that — the default would dissolve them in place.
                 if tier == .full {
                     let fieldWidth = SZNodeLayout.numericFieldWidth(of: node)
+                    let pending = node.portsNotInBuild
                     VStack(spacing: SZNodeLayout.rowSpacing) {
-                        ForEach(SZNodeLayout.rowInputs(of: node), id: \.name) { inputRow($0, fieldWidth: fieldWidth) }
-                        ForEach(outputs, id: \.name) { outputRow($0) }
+                        ForEach(SZNodeLayout.rowInputs(of: node), id: \.name) {
+                            inputRow($0, fieldWidth: fieldWidth, notInBuild: notInBuild($0, .input, pending))
+                        }
+                        ForEach(outputs, id: \.name) { outputRow($0, notInBuild: notInBuild($0, .output, pending)) }
                     }
                     .transition(.identity)
                     .padding(.top, SZNodeLayout.bodyTopPadding)
@@ -132,7 +146,7 @@ struct SZNodeView: View, Equatable {
         // buttons below or the status pill above must not light the card; those have their own.
         .trackingHover($cardHover, duration: 0.12)
         .overlay(alignment: .top) {
-            SZNodeBadges(status: status, showPill: showPill, locked: locked, errorDetail: errorDetail,
+            SZNodeBadges(status: status, showPill: showPill, held: deleteHeld, errorDetail: errorDetail,
                          errorTitle: errorTitle, onFix: onFix)
                 .offset(y: -(SZNodeLayout.statusPillHeight + 4))
         }
@@ -213,7 +227,7 @@ struct SZNodeView: View, Equatable {
         .frame(height: SZNodeLayout.headerHeight)
     }
 
-    private func inputRow(_ port: SZPort, fieldWidth: CGFloat) -> some View {
+    private func inputRow(_ port: SZPort, fieldWidth: CGFloat, notInBuild: Bool) -> some View {
         HStack(spacing: 8) {
             Text(port.name)
                 .font(SZNodeCardStyle.labelFont)
@@ -221,7 +235,7 @@ struct SZNodeView: View, Equatable {
                 .lineLimit(1)
             Spacer(minLength: 0)
             if !connectedInputs.contains(port.name) {
-                SZPortControl(port: port, locked: locked,
+                SZPortControl(port: port, locked: locked, notInBuild: notInBuild,
                               // Why this port's file can't be used, if it can't — the chip says which
                               // port is at fault, so a node with two file inputs isn't a guessing game.
                               fault: node.unreadableInputs[port.name],
@@ -235,9 +249,10 @@ struct SZNodeView: View, Equatable {
         }
         .padding(.horizontal, 12)
         .frame(height: SZNodeLayout.rowHeight)
+        .pendingRowFade(notInBuild: notInBuild, status: status)
     }
 
-    private func outputRow(_ port: SZPort) -> some View {
+    private func outputRow(_ port: SZPort, notInBuild: Bool) -> some View {
         HStack(spacing: 6) {
             Spacer(minLength: 0)
             if port.type == .texture {
@@ -260,6 +275,7 @@ struct SZNodeView: View, Equatable {
         }
         .padding(.horizontal, 12)
         .frame(height: SZNodeLayout.rowHeight)
+        .pendingRowFade(notInBuild: notInBuild, status: status)
     }
 
     /// A texture-row toggle glyph — photo (preview) and display (endpoint) share one look: cyan when

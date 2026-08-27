@@ -276,6 +276,14 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// This node has a build that no longer fits its contract or intent.
     public var needsRebuild: Bool { rebuildReason != nil }
 
+    /// Ports the contract declares that the running build was not compiled against — the same comparison
+    /// `rebuildReason` makes, one level finer, so the card can say which rows are not live yet. Empty for a
+    /// node with no build to be ahead of; it empties itself when a promote re-stamps.
+    public var portsNotInBuild: Set<SZNodeContract.PortSignature> {
+        guard kind == .generated, let stamp = buildStamp else { return [] }
+        return (contract?.portSurface ?? []).subtracting(stamp.portSurface)
+    }
+
     /// The identity a drawn node wears until someone names it. A promote treats these as unset — the
     /// agent's authored title/symbol fill them once — where a chosen identity is kept.
     public static let placeholderTitle = "New Node"

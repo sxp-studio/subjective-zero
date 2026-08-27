@@ -38,7 +38,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
     let view = SZNodeView(node: node, status: .ready, renderEndpoint: nil, previewsEnabled: true)
     #expect(storedProperties(of: view) == [
         // compared in ==
-        "node", "status", "isSelected", "locked", "showPill", "errorDetail", "errorTitle",
+        "node", "status", "isSelected", "locked", "deleteHeld", "showPill", "errorDetail", "errorTitle",
         "renderEndpoint", "connectedInputs", "previewsEnabled", "tier",
         // the app's card host — a stable ref like previewFrame, excluded from == (the card region
         // observes its per-node mount box directly)
@@ -76,13 +76,13 @@ private func storedProperties(of subject: Any) -> Set<String> {
         graph: SZGraph(), strokeZoom: 1, space: "s", selectedNodeID: nil, multiSelection: [],
         selectedConnectionID: nil, hiddenConnectionID: nil, ghostedNodeIDs: [], raisedTiers: [:],
         connectedSockets: [], connectedInputsByNode: [:], nodeAgentState: [:], graphOpStatus: [:],
-        isRunning: false, runWorkSet: [], lockedNodes: [], previewsEnabled: true)
+        isRunning: false, runWorkSet: [], lockedNodes: [], deleteHeldNodes: [], previewsEnabled: true)
     #expect(storedProperties(of: view) == [
         // compared in ==
         "graph", "strokeZoom", "space", "selectedNodeID", "multiSelection", "selectedConnectionID",
         "hiddenConnectionID", "ghostedNodeIDs", "raisedTiers", "connectedSockets", "connectedInputsByNode",
         "nodeAgentState", "nodeRuntimeErrors", "graphOpStatus", "isRunning", "runWorkSet", "lockedNodes",
-        "previewsEnabled", "zoomedOut",
+        "deleteHeldNodes", "previewsEnabled", "zoomedOut",
         "wireRevealNodeIDs",
         // the app's card host — stable ref, excluded like previewFrames
         "cardProvider",
@@ -114,13 +114,14 @@ private let portRef = SZPortRef(node: node.id, port: "output")
 @MainActor
 private func nodeView(
     node n: SZNode = node, status: SZNodeStatus = .ready, isSelected: Bool = false, locked: Bool = false,
-    showPill: Bool = true, errorDetail: String? = nil, errorTitle: String = "",
+    deleteHeld: Bool = false, showPill: Bool = true, errorDetail: String? = nil, errorTitle: String = "",
     renderEndpoint: SZPortRef? = nil,
     previewsEnabled: Bool = true, tier: SZCardTier = .full,
     connectedInputs: Set<String> = [], previewFrame: SZNodePreviewFrame? = nil,
     cardProvider: (any SZCustomCardProvider)? = nil
 ) -> SZNodeView {
-    SZNodeView(node: n, status: status, isSelected: isSelected, locked: locked, showPill: showPill,
+    SZNodeView(node: n, status: status, isSelected: isSelected, locked: locked,
+               deleteHeld: deleteHeld, showPill: showPill,
                errorDetail: errorDetail, errorTitle: errorTitle, renderEndpoint: renderEndpoint,
                previewsEnabled: previewsEnabled, tier: tier,
                connectedInputs: connectedInputs, previewFrame: previewFrame,
@@ -146,6 +147,8 @@ private final class StubCardProvider: SZCustomCardProvider {
     #expect(nodeView(status: .building) != nodeView())
     #expect(nodeView(isSelected: true) != nodeView())
     #expect(nodeView(locked: true) != nodeView())
+    // The padlock is its own state: a rebuilding card wears it while staying unlocked.
+    #expect(nodeView(deleteHeld: true) != nodeView())
     #expect(nodeView(showPill: false) != nodeView())
     #expect(nodeView(errorDetail: "boom") != nodeView())
     // The pill's popover heading is chosen per fault kind (build vs input file), so it must invalidate.
@@ -222,6 +225,7 @@ private func canvasView(
     nodeAgentState: [SZNodeID: SZNodeAgentState] = [:], graphOpStatus: [SZNodeID: String] = [:],
     isRunning: Bool = false, runWorkSet: Set<SZNodeID> = [], lockedNodes: Set<SZNodeID> = [],
     autoEditNodeID: SZNodeID? = nil,
+    deleteHeldNodes: Set<SZNodeID> = [],
     previewsEnabled: Bool = true, zoomedOut: Bool = false,
     wireRevealNodeIDs: Set<SZNodeID> = [], previewFrames: SZNodePreviewFrames? = nil,
     cardProvider: (any SZCustomCardProvider)? = nil
@@ -232,7 +236,8 @@ private func canvasView(
         hiddenConnectionID: hiddenConnectionID, ghostedNodeIDs: ghostedNodeIDs, raisedTiers: raisedTiers,
         connectedSockets: connectedSockets, connectedInputsByNode: connectedInputsByNode,
         nodeAgentState: nodeAgentState, graphOpStatus: graphOpStatus, isRunning: isRunning,
-        runWorkSet: runWorkSet, lockedNodes: lockedNodes, previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
+        runWorkSet: runWorkSet, lockedNodes: lockedNodes, deleteHeldNodes: deleteHeldNodes,
+        previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
         wireRevealNodeIDs: wireRevealNodeIDs,
         previewFrames: previewFrames, cardProvider: cardProvider)
     v.autoEditNodeID = autoEditNodeID
@@ -242,6 +247,8 @@ private func canvasView(
 @MainActor
 @Test func canvasContentViewEqualityComparesEveryPropItClaimsTo() {
     #expect(canvasView() == canvasView())
+    // The delete-hold set drives the padlock; if it stays out of `==` the badge never repaints.
+    #expect(canvasView(deleteHeldNodes: [node.id]) != canvasView())
 
     let id = node.id, cid = SZConnectionID()
     #expect(canvasView(graph: SZGraph(nodes: [otherNode])) != canvasView())

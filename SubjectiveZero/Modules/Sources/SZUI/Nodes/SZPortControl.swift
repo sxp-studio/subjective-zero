@@ -14,6 +14,11 @@ import SZCore
 struct SZPortControl: View {
     let port: SZPort
     var locked: Bool = false
+    /// The port is declared but the running build was never compiled against it, so nothing reads it yet
+    /// and the control is read-only until the node is rebuilt. Card width is unaffected:
+    /// `SZNodeLayout.controlWidth` reserves by port type and never asks what the build knows, so the
+    /// read-only form sits inside the same column and no socket moves when a port is declared.
+    var notInBuild: Bool = false
     /// Set when the host's audit says this port's file can't be read (`SZNode.unreadableInputs`): the
     /// file chip turns red and carries the reason as its tooltip. nil for every healthy port.
     var fault: String? = nil
@@ -30,7 +35,14 @@ struct SZPortControl: View {
     var freshOptions: (() -> [SZEnumOption])? = nil
     var onSet: ((SZPortValue, _ persist: Bool) -> Void)? = nil
 
-    private var editable: Bool { onSet != nil && !locked }
+    private var editable: Bool { Self.isEditable(hasSetter: onSet != nil, locked: locked, notInBuild: notInBuild) }
+
+    /// The one rule for whether this control accepts input: it needs a setter, an unheld card, and a port
+    /// the running build actually reads. A port declared ahead of the code is read-only rather than a knob
+    /// that changes nothing.
+    static func isEditable(hasSetter: Bool, locked: Bool, notInBuild: Bool) -> Bool {
+        hasSetter && !locked && !notInBuild
+    }
 
     /// Debounced ColorPicker disk commit — see `colorWell`.
     @State private var pendingColorCommit: Task<Void, Never>? = nil

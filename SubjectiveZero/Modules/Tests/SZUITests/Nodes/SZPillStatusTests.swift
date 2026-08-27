@@ -139,3 +139,56 @@ private func built(_ reason: SZRebuildReason?) -> SZNode {
     #expect(SZNodeCanvasContentView.pillStatus(for: n, agentState: state, ops: [:],
                                                isRunning: true, workSet: [n.id]) == .needsInput)
 }
+
+/// A port the running build has no code for is READ-ONLY: an agent declares ports ahead of the code,
+/// and a knob that changes nothing is worse than one you cannot turn (Clem, on feel, 2026-08-27).
+@MainActor
+struct SZPortControlEditableTests {
+
+    @Test func aPortTheBuildAlreadyReadsIsEditable() {
+        #expect(SZPortControl.isEditable(hasSetter: true, locked: false, notInBuild: false))
+    }
+
+    @Test func aPortDeclaredAheadOfTheCodeIsNot() {
+        #expect(!SZPortControl.isEditable(hasSetter: true, locked: false, notInBuild: true))
+    }
+
+    @Test func aHeldCardIsNotEditableEither() {
+        #expect(!SZPortControl.isEditable(hasSetter: true, locked: true, notInBuild: false))
+    }
+
+    @Test func noSetterIsAlwaysReadOnly() {
+        #expect(!SZPortControl.isEditable(hasSetter: false, locked: false, notInBuild: false))
+        #expect(!SZPortControl.isEditable(hasSetter: false, locked: true, notInBuild: true))
+    }
+}
+
+/// The pending row breathes only while an agent is actually working the node. A port can sit declared
+/// and unbuilt for hours after a run ends, and a row animating forever on a projected canvas would
+/// claim work that is not happening.
+@MainActor
+struct SZPendingRowFadeTests {
+
+    private func breathes(notInBuild: Bool, _ status: SZNodeStatus) -> Bool {
+        notInBuild && status.isWorking
+    }
+
+    @Test func aPendingRowBreathesWhileItsNodeIsBeingBuilt() {
+        #expect(breathes(notInBuild: true, .building))
+        #expect(breathes(notInBuild: true, .planning))
+        #expect(breathes(notInBuild: true, .reloading))
+    }
+
+    @Test func aPendingRowNobodyIsBuildingIsStill() {
+        #expect(!breathes(notInBuild: true, .outdated))   // the run ended, nothing was rebuilt
+        #expect(!breathes(notInBuild: true, .error))
+        #expect(!breathes(notInBuild: true, .needsInput))
+        #expect(!breathes(notInBuild: true, .ready))
+    }
+
+    @Test func aRowTheBuildAlreadyReadsNeverBreathes() {
+        for status in [SZNodeStatus.building, .planning, .reloading, .ready, .outdated] {
+            #expect(!breathes(notInBuild: false, status))
+        }
+    }
+}

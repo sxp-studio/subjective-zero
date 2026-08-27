@@ -13,6 +13,8 @@
 //   updates, input defaults, display toggle, node body, split/merge target.
 // - OPEN by documented design: move/tidy (a locked node stays repositionable —
 //   SZNodeCanvasContentView) and add (a new node can't be held by anyone).
+// Delete is fenced one notch tighter than the rest (`deleteDenial`): a node the fleet is still
+// implementing keeps its card live but cannot be removed, because there is no undo.
 import Foundation
 import SZCore
 
@@ -77,18 +79,52 @@ extension SZHost {
         return true
     }
 
+    /// A user DELETE is refused: everything the lock already refuses, plus a node an agent still has
+    /// work to do on. A rebuild leaves the card live (it renders, and its knobs and wires are the
+    /// user's), but the node itself must survive until the agent that is rewriting it is done, because
+    /// there is no undo. Releases per node at its own promote, not at run end — `needsImplementation`
+    /// goes false the moment the build stamp catches up with the contract.
+    private func deleteDenies(holder: SZClaimToken, node id: SZNodeID) -> Bool {
+        if userLockDenies(holder: holder, node: id) { return true }
+        return store.project?.graph.node(id: id)?.needsImplementation ?? false
+    }
+
+    /// The delete fence: never looser than `fenceDenial`, and additionally holds a node the fleet is
+    /// still implementing. Called by the delete funnel in place of `fenceDenial`.
+    func deleteDenial(nodes: some Sequence<SZNodeID>, origin: SZMutationOrigin) -> String? {
+        // Materialized once: this reads the ids twice, and a single-pass sequence would arrive empty
+        // for the second read and wave the delete through.
+        let ids = Array(nodes)
+        if let denial = fenceDenial(nodes: ids, origin: origin) { return denial }
+        guard origin == .user else { return nil }
+        for id in ids {
+            guard let holder = ledger.holder(of: .node(id)), deleteDenies(holder: holder, node: id) else { continue }
+            let title = store.project?.graph.node(id: id)?.title ?? String(id.uuidString.prefix(8))
+            return "node '\(title)' is being rebuilt. Stop the run to delete it."
+        }
+        return nil
+    }
+
+    /// Node ids the user cannot delete right now — the padlock badge's source. A superset of
+    /// `lockedNodes`: a rebuilding card wears the lock (it cannot be deleted) while staying editable.
+    var deleteHeldNodes: Set<SZNodeID> { heldNodes(deleteDenies(holder:node:)) }
+
+    /// The ledger's node claims filtered by one refusal rule — the single loop behind both affordance
+    /// sets, so they cannot drift apart in how they read the ledger.
+    private func heldNodes(_ denies: (SZClaimToken, SZNodeID) -> Bool) -> Set<SZNodeID> {
+        var held: Set<SZNodeID> = []
+        for (resource, holder) in ledger.holders {
+            guard let id = resource.nodeID, denies(holder, id) else { continue }
+            held.insert(id)
+        }
+        return held
+    }
+
     /// Node ids a user-origin mutation would be refused on right now — THE ledger-backed source for
     /// the canvas/panel lock affordances (`SZNodeCanvasContentView.isLocked`), derived through the
     /// same `userLockDenies` predicate the fence enforces. (Mid-split/merge originals are covered
     /// by `graphOpStatus`, which the view checks alongside this.)
-    var lockedNodes: Set<SZNodeID> {
-        var locked: Set<SZNodeID> = []
-        for (resource, holder) in ledger.holders {
-            guard let id = resource.nodeID, userLockDenies(holder: holder, node: id) else { continue }
-            locked.insert(id)
-        }
-        return locked
-    }
+    var lockedNodes: Set<SZNodeID> { heldNodes(userLockDenies(holder:node:)) }
 
     /// Endpoint node ids of a connection — what wiring mutations are fenced on.
     func connectionEndpoints(_ id: SZConnectionID) -> [SZNodeID] {

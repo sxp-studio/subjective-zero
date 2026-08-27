@@ -44,6 +44,9 @@ struct SZNodeCanvasContentView: View, Equatable {
     let isRunning: Bool
     let runWorkSet: Set<SZNodeID>     // the run's captured work — members read Coding; a user's mid-run draft isn't in it
     let lockedNodes: Set<SZNodeID>    // ledger-held nodes (host-owned) — the lock affordance's source
+    /// Nodes the user cannot delete (host-owned, `SZHost.deleteHeldNodes`) — a superset of `lockedNodes`
+    /// that also holds a node the fleet is rebuilding. Drives the padlock badge and the delete guards.
+    let deleteHeldNodes: Set<SZNodeID>
     let previewsEnabled: Bool         // Graph ▸ Live Previews — no default: card geometry derives from it
     var zoomedOut: Bool = false       // semantic-zoom tier: cards render as preview-only tiles, socket dots hide
     /// Nodes holding a legal target for the in-flight wire — their folded cards show their dots so you
@@ -96,6 +99,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             && lhs.isRunning == rhs.isRunning
             && lhs.runWorkSet == rhs.runWorkSet
             && lhs.lockedNodes == rhs.lockedNodes
+            && lhs.deleteHeldNodes == rhs.deleteHeldNodes
             && lhs.previewsEnabled == rhs.previewsEnabled
             && lhs.zoomedOut == rhs.zoomedOut
             && lhs.wireRevealNodeIDs == rhs.wireRevealNodeIDs
@@ -140,9 +144,11 @@ struct SZNodeCanvasContentView: View, Equatable {
         let tier = self.tier(for: node)
         let revealed = selectedNodeID == node.id || multiSelection.contains(node.id)
             || wireRevealNodeIDs.contains(node.id)
+        let notInBuild = SZGraphCanvasModel.socketIDsNotInBuild(in: [node])
         return ForEach(SZGraphCanvasModel.sockets(of: node, previewsEnabled: previewsEnabled)) { socket in
             let shown = shows(socket, tier: tier, revealed: revealed)
-            SZPortSocket(kind: socket.kind, isConnected: connectedSockets.contains(socket.id))
+            SZPortSocket(kind: socket.kind, isConnected: connectedSockets.contains(socket.id),
+                         notInBuild: notInBuild.contains(socket.id))
                 .frame(width: 22, height: 22)            // forgiving hit target around the 12pt dot
                 .contentShape(Circle())
                 .position(socket.point)
@@ -179,6 +185,7 @@ struct SZNodeCanvasContentView: View, Equatable {
                                     isRunning: isRunning, workSet: runWorkSet),
             isSelected: selectedNodeID == node.id || multiSelection.contains(node.id),
             locked: Self.isLocked(node.id, ops: graphOpStatus, lockedNodes: lockedNodes),
+            deleteHeld: Self.isHeld(node.id, ops: graphOpStatus, in: deleteHeldNodes),
             isRunning: isRunning,
             diagnostic: Self.nodeDiagnostic(for: node, agentState: nodeAgentState[node.id],
                                             runtimeError: nodeRuntimeErrors[node.id],
@@ -216,7 +223,8 @@ struct SZNodeCanvasContentView: View, Equatable {
     /// rest. Gestures/menus are the caller's business; closures default to no-ops for passive copies.
     @ViewBuilder
     static func card(
-        for node: SZNode, status: SZNodeStatus, isSelected: Bool, locked: Bool, isRunning: Bool,
+        for node: SZNode, status: SZNodeStatus, isSelected: Bool, locked: Bool,
+        deleteHeld: Bool, isRunning: Bool,
         diagnostic: (detail: String, title: String)?, renderEndpoint: SZPortRef?, connectedInputs: Set<String>,
         previewsEnabled: Bool,
         tier: SZCardTier = .full,
@@ -247,6 +255,7 @@ struct SZNodeCanvasContentView: View, Equatable {
                 .equatable()
         case .generated:
             SZNodeView(node: node, status: status, isSelected: isSelected, locked: locked,
+                       deleteHeld: deleteHeld,
                        showPill: showPill(status, isRunning: isRunning),
                        errorDetail: diagnostic?.detail, errorTitle: diagnostic?.title ?? "",
                        renderEndpoint: renderEndpoint,
@@ -376,6 +385,13 @@ struct SZNodeCanvasContentView: View, Equatable {
     /// parts that matter (contracts/wiring/values).
     static func isLocked(_ id: SZNodeID, ops: [SZNodeID: String],
                          lockedNodes: Set<SZNodeID>) -> Bool {
-        ops[id] != nil || lockedNodes.contains(id)
+        isHeld(id, ops: ops, in: lockedNodes)
+    }
+
+    /// The shape both guards share: held by an agent, or an original of an in-flight split/merge. The
+    /// LOCK reads it over `lockedNodes` and the DELETE guard over the wider `deleteHeldNodes`, so
+    /// neither has to pass one set through a parameter named for the other.
+    static func isHeld(_ id: SZNodeID, ops: [SZNodeID: String], in held: Set<SZNodeID>) -> Bool {
+        ops[id] != nil || held.contains(id)
     }
 }

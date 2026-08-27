@@ -128,7 +128,7 @@ struct SZPromptNodeView: View, Equatable {
                             lineWidth: isSelected ? 1.6 : (cardHover ? 1 : 0.75)))
             .trackingHover($cardHover, duration: 0.12)
             .overlay(alignment: .top) {
-                SZNodeBadges(status: status, showPill: showPill, locked: locked, errorDetail: errorDetail)
+                SZNodeBadges(status: status, showPill: showPill, held: locked, errorDetail: errorDetail)
                     .offset(y: -(SZNodeLayout.statusPillHeight + 4))
             }
             .graphOpGlow(status, cornerRadius: Self.cornerRadius)

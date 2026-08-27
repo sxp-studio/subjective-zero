@@ -651,3 +651,56 @@ private func zooNode() -> SZNode {
     #expect(on.topmostNode(at: CGPoint(x: 10_000, y: 0), in: graph) == nil)
     #expect(on.topmostNode(at: .zero, in: SZGraph(nodes: [], connections: [])) == nil)
 }
+
+/// Which socket dots draw as rings: the ports the running build was never compiled against. Keyed the
+/// same way `SZSocket.id` is, so the canvas layer and the drag ghost can both just test membership and
+/// a dragged card's dots can't look different from itself at rest.
+@MainActor
+struct SZSocketsNotInBuildTests {
+
+    /// A node declaring `mirror` + `camera`, built against `mirror` alone.
+    private func halfBuilt() -> SZNode {
+        var node = cameraNode()
+        node.buildStamp = SZBuildStamp(
+            portSurface: SZNodeContract(
+                title: "MacBook Camera", sfSymbol: "camera", summary: "",
+                inputs: [SZPort(name: "mirror", type: .bool)],
+                outputs: [SZPort(name: "texture", type: .texture)]).portSurface,
+            prompt: nil)
+        return node
+    }
+
+    @Test func onlyThePortsTheBuildNeverSawAreRings() {
+        let node = halfBuilt()
+        let rings = SZGraphCanvasModel.socketIDsNotInBuild(in: [node])
+        #expect(rings == [SZSocket.key(nodeID: node.id, side: .input, kind: .data, port: "camera")])
+    }
+
+    @Test func everyRingIsASocketTheCanvasActuallyDraws() {
+        let node = halfBuilt()
+        let drawn = Set(SZGraphCanvasModel.sockets(of: node, previewsEnabled: true).map(\.id))
+        #expect(SZGraphCanvasModel.socketIDsNotInBuild(in: [node]).isSubset(of: drawn))
+    }
+
+    @Test func aPendingOUTPUTRingsOnTheOutputSide() {
+        // The direction-to-side mapping has two arms and inputs alone exercise one of them: an output
+        // keyed to the input side would ring a dot that is not there and leave the real one solid.
+        var node = cameraNode()
+        node.buildStamp = SZBuildStamp(
+            portSurface: SZNodeContract(
+                title: "MacBook Camera", sfSymbol: "camera", summary: "",
+                inputs: [SZPort(name: "mirror", type: .bool),
+                         SZPort(name: "camera", type: .enumeration)]).portSurface,
+            prompt: nil)     // every input built; the texture OUTPUT is the one the build never saw
+        let rings = SZGraphCanvasModel.socketIDsNotInBuild(in: [node])
+        #expect(rings == [SZSocket.key(nodeID: node.id, side: .output, kind: .data, port: "texture")])
+        let drawn = Set(SZGraphCanvasModel.sockets(of: node, previewsEnabled: true).map(\.id))
+        #expect(rings.isSubset(of: drawn))
+    }
+
+    @Test func aNodeInStepWithItsBuildHasNoRings() {
+        var node = cameraNode()
+        node.buildStamp = SZBuildStamp(portSurface: node.contract!.portSurface, prompt: nil)
+        #expect(SZGraphCanvasModel.socketIDsNotInBuild(in: [node]).isEmpty)
+    }
+}

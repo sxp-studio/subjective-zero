@@ -64,6 +64,21 @@ public enum SZGraphCanvasModel {
         }
     }
 
+    /// Socket ids for ports the running build was never compiled against (`SZNode.portsNotInBuild`) —
+    /// what the canvas and the drag ghost draw as rings. Keyed the same way `SZSocket.id` is, so a draw
+    /// site only has to test membership.
+    public static func socketIDsNotInBuild(in nodes: [SZNode]) -> Set<String> {
+        var result: Set<String> = []
+        for node in nodes {
+            for port in node.portsNotInBuild {
+                result.insert(SZSocket.key(nodeID: node.id,
+                                           side: port.direction == .input ? .input : .output,
+                                           kind: .data, port: port.name))
+            }
+        }
+        return result
+    }
+
     /// Every interactive socket in the graph — `sockets(of:)` over every node.
     public static func sockets(in graph: SZGraph, previewsEnabled: Bool) -> [SZSocket] {
         graph.nodes.flatMap { sockets(of: $0, previewsEnabled: previewsEnabled) }

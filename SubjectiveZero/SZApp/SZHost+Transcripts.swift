@@ -212,8 +212,9 @@ extension SZHost {
     @discardableResult
     func deleteNodes(ids: [SZNodeID], origin: SZMutationOrigin = .user) -> Bool {
         // The fence, not the view filter, is what actually stops a delete of a held node — the
-        // keyboard path's isLocked filter is an affordance any future caller can forget.
-        if let denial = fenceDenial(nodes: ids, origin: origin) {
+        // keyboard path's filter is an affordance any future caller can forget. `deleteDenial` is the
+        // stricter of the two rules: it also holds a node the fleet is still implementing.
+        if let denial = deleteDenial(nodes: ids, origin: origin) {
             status = denial
             return false
         }
