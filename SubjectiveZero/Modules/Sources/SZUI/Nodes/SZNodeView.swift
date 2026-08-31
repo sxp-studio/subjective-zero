@@ -195,7 +195,7 @@ struct SZNodeView: View, Equatable {
             // One button for the node's sources: Node.swift, and Card.swift alongside when the node has one.
             if let onOpenSource {
                 let hasCard = cardProvider?.hasCardSource(for: node.id) ?? false
-                SZCardPillButton(symbol: "doc.text",
+                SZCardPillButton(symbol: "curlybraces",
                                  help: hasCard ? "Open Node.swift and Card.swift" : "Open Node.swift",
                                  action: onOpenSource)
             }

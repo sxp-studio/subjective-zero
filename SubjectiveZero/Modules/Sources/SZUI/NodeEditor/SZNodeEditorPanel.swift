@@ -712,7 +712,7 @@ public struct SZNodeEditorPanel: View {
                                            sfSymbol: "text.bubble")]
             if node.kind == .generated {
                 actions.append(SZContextAction(kind: .openSource(id), label: "Open Node.swift",
-                                               sfSymbol: "doc.text"))
+                                               sfSymbol: "curlybraces"))
                 // A node that ships a Card.swift can flip between its custom card and plain rows —
                 // an explicit body commit either way; the file on disk is never touched — and open
                 // the card's source (saving hot-reloads it). A node without one can start a card

@@ -155,7 +155,8 @@ struct SZAgentGraphCardView: View {
         if let source = face.source, let openSource,
            drawsFileSources || { if case .dispatch = source { true } else { false } }() {
             SZCardPillButton(
-                symbol: "doc.text",
+                // Braces = the pill opens code; prose (brief, sent prompt) keeps the document glyph.
+                symbol: { if case .step = source { "curlybraces" } else { "doc.text" } }(),
                 help: {
                     switch source {
                     case .step: "Open the step's Step.swift"
