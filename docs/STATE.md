@@ -72,6 +72,10 @@ raw and resolved at delivery time, and a stale active name (its profile deleted 
 as routing off, like every other preference. Also live: `routingSeededStarterNames` - the
 shipped starter profiles already seeded, so deleting one stays deleted - and
 `routingLastProfileName` - the arm the Routing toggle released, restored when it flips back on.
+Also live: `recordPrefs` - the sticky recording settings (resolution tier, frame rate, format,
+ratio, normalized crop, sound source, and whether the settings sheet has auto-opened once);
+every field is
+optional and unknown raw values degrade to defaults at read, so any older file decodes.
 `windowSize`/`theme` remain dormant placeholders.
 
 **Project lifecycle.** The launch chain is `SZ_PROJECT` env (dev override - never recorded in

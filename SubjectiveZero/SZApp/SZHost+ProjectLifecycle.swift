@@ -256,7 +256,10 @@ extension SZHost {
             // not suspending is what makes the copy atomic against the agents still working in it.
 
             // Freeze the source COMPLETELY — the new location has to carry the whole recovery set
-            // (transcripts, both queues, run history, graph), not the graph alone.
+            // (transcripts, both queues, run history, graph), not the graph alone. A rolling take
+            // finalizes first: an AVAssetWriter cannot re-point its file, so the copy must carry a
+            // finished take, not a half-written one that keeps growing at the old path.
+            finalizeActiveTakeBlocking()
             flushPendingPromptEdit()
             flushEverything()
 

@@ -51,6 +51,11 @@ extension SZHost {
             viewportSurfaces.remove(at: index)
             runtime?.detach(layer)
             syncViewportDriver()
+            // the framing editor's tile is gone (not a pop-out/dock transition, which briefly
+            // holds two surfaces per id): close so the crop persists instead of dangling
+            if framingEditorViewport == id, !viewportSurfaces.contains(where: { $0.id == id }) {
+                closeFramingEditor()
+            }
         }
     }
 

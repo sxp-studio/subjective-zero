@@ -63,6 +63,12 @@ public struct SZNodeEditorPanel: View {
     private let onBuild: () -> Void                  // HUD Build button → host.startRun() (headless whole-graph run)
     private let onTogglePause: () -> Void            // HUD Pause/Play → host.togglePlayback()
     private let onResetTime: () -> Void              // HUD Reset Time (rewind) → host.resetPlayback()
+    private let isRecording: Bool                    // a take is rolling → red dot + elapsed readout
+    private let recordingElapsed: String?            // host-owned "01:24" readout; nil hides it
+    private let onToggleRecord: () -> Void           // HUD record dot → host.toggleRecording()
+    private let recordSettingsSeen: Bool             // first-ever press opens settings, not a take
+    private let onRecordFirstUse: () -> Void         // that first press, reported for persistence
+    private let onOpenRecordSettings: () -> Void     // first press → the settings sheet
     private let onSetInputDefault: (SZNodeID, String, SZPortValue, Bool) -> Void  // node input control → host
     private let onToggleDisplay: (SZNodeID, String) -> Void   // texture output monitor icon → ui_toggle_display
     /// Inline prompt commit → the host's fenced content-update funnel. NOT `store.updateNode` directly:
@@ -95,6 +101,7 @@ public struct SZNodeEditorPanel: View {
     @State private var camera = SZCanvasCamera()   // zoom + pan offset + the screen↔world transforms
     @State private var pinchAnchor: SZCanvasCamera?   // camera at pinch start — the zoom-about-pivot base
     @State private var chatToggleHover = false   // HUD chat-toggle hover highlight
+    @State private var recordHover = false       // HUD record-dot hover highlight
     @State private var cursor: CGPoint?
     @State private var viewSize: CGSize = .zero
     @Binding private var selectedNodeID: SZNodeID?   // hoisted so the chat panel scopes to the selection
@@ -150,6 +157,12 @@ public struct SZNodeEditorPanel: View {
                 onBuild: @escaping () -> Void = {},
                 onTogglePause: @escaping () -> Void = {},
                 onResetTime: @escaping () -> Void = {},
+                isRecording: Bool = false,
+                recordingElapsed: String? = nil,
+                onToggleRecord: @escaping () -> Void = {},
+                recordSettingsSeen: Bool = true,
+                onRecordFirstUse: @escaping () -> Void = {},
+                onOpenRecordSettings: @escaping () -> Void = {},
                 onSetInputDefault: @escaping (SZNodeID, String, SZPortValue, Bool) -> Void,
                 onToggleDisplay: @escaping (SZNodeID, String) -> Void = { _, _ in },
                 onCommitPrompt: @escaping (SZNodeID, String) -> Void,
@@ -199,6 +212,12 @@ public struct SZNodeEditorPanel: View {
         self.onBuild = onBuild
         self.onTogglePause = onTogglePause
         self.onResetTime = onResetTime
+        self.isRecording = isRecording
+        self.recordingElapsed = recordingElapsed
+        self.onToggleRecord = onToggleRecord
+        self.recordSettingsSeen = recordSettingsSeen
+        self.onRecordFirstUse = onRecordFirstUse
+        self.onOpenRecordSettings = onOpenRecordSettings
         self.onSetInputDefault = onSetInputDefault
         self.onToggleDisplay = onToggleDisplay
         self.onCommitPrompt = onCommitPrompt
@@ -441,6 +460,14 @@ public struct SZNodeEditorPanel: View {
             SZHudIconButton(name: isPaused ? "play.fill" : "pause.fill",
                             help: isPaused ? "Play" : "Pause") { onTogglePause() }
             SZHudIconButton(name: "backward.end.fill", help: "Reset time") { onResetTime() }
+            recordButton
+            if isRecording, let recordingElapsed {
+                Text(recordingElapsed)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.38))
+                    .padding(.trailing, 2)
+            }
             RoundedRectangle(cornerRadius: 0.5)
                 .fill(.white.opacity(0.16))
                 .frame(width: 1, height: 20)          // divider before the settings gear
@@ -486,6 +513,7 @@ public struct SZNodeEditorPanel: View {
         .buttonStyle(.plain)
         .trackingHover($chatToggleHover)
         .help("Director Agent chat")
+        .hoverTip("Director Agent chat")
         .overlay(alignment: .topTrailing) {
             if agentsWorking, !chatShown { chatToggleDot(Color.orange) }
         }
@@ -501,6 +529,39 @@ public struct SZNodeEditorPanel: View {
         }
         .offset(x: -3, y: 3)
         .allowsHitTesting(false)
+    }
+
+    /// The record dot — idle a small white circle, rolling a pulsing red one on a red-tinted chip.
+    /// Pulses via SZPulsingOpacity (CA-animatable), never TimelineView (see chatToggleDot's note).
+    /// The first-ever press opens the settings sheet instead of rolling; every later press
+    /// records instantly.
+    private var recordButton: some View {
+        Button {
+            if recordSettingsSeen {
+                onToggleRecord()
+            } else {
+                onRecordFirstUse()
+                onOpenRecordSettings()
+            }
+        } label: {
+            Group {
+                if isRecording {
+                    SZPulsingOpacity(range: 0.45...1.0, halfPeriod: 0.8) {
+                        Circle().fill(Color.red)
+                    }
+                } else {
+                    Circle().fill(.white.opacity(0.9))
+                }
+            }
+            .frame(width: 11, height: 11)
+            .frame(width: 32, height: 32)
+            .background(Circle().fill(isRecording ? Color.red.opacity(0.22)
+                                                  : .white.opacity(recordHover ? 0.14 : 0.06)))
+        }
+        .buttonStyle(.plain)
+        .trackingHover($recordHover)
+        .help(isRecording ? "Stop recording" : "Record")
+        .hoverTip(isRecording ? "Stop recording" : "Record")
     }
 
     private func deleteSelected() {
@@ -1414,6 +1475,9 @@ private struct SZHudBuildButton: View {
         .help(hasWork
               ? "Build \(pendingCount) pending node\(pendingCount == 1 ? "" : "s")"
               : "Nothing to build — every node is up to date or already building")
+        .hoverTip(hasWork
+                  ? "Build \(pendingCount) pending node\(pendingCount == 1 ? "" : "s")"
+                  : "Nothing to build")
     }
 
     /// Notification-style count pill poking the top-right corner (white on the accent capsule).
@@ -1451,6 +1515,7 @@ private struct SZHudIconButton: View {
         .disabled(!enabled)
         .trackingHover($hover)
         .help(help)
+        .hoverTip(help)
     }
 }
 
@@ -1479,5 +1544,6 @@ private struct SZHudMenuButton<Content: View>: View {
         .fixedSize()
         .trackingHover($hover)
         .help(help)
+        // no hoverTip: the menu names itself
     }
 }

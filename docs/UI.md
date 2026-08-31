@@ -192,6 +192,21 @@ the agent it is for.
 - At-a-glance status: run/build state, fps, current display output, active agent count, errors.
 - A quick entry point to logs (build / agent / runtime) - diagnostics are first-class, reachable
   in one click.
+- **Record** (the dot in the playback group): one press starts a take with the saved settings;
+  the dot goes red with an elapsed readout and every viewport wears a thin red edge. The sticky
+  settings live in a Recording Options sheet (framing summary + Edit, resolution, frame rate,
+  format, sound) reached from the gear menu / app menu, auto-opened on the dot's first-ever use.
+  While a cropped take rolls the viewport outlines the recorded region and dims the rest. Edit
+  framing opens a crop overlay on the largest visible viewport (dimmed surround, handles, ratio
+  chips, Done/esc); the crop is global and picture-normalized. During a take the engine renders
+  at the crop-derived size (long side capped 4K-class) and viewports aspect-fit. Pause pauses
+  the writer with the clock - the paused span is absent from the file (the OBS/TouchDesigner
+  behavior). Takes land in the project bundle's `recordings/` as `Recording N` (fragment-written
+  .mov while rolling, so a crash leaves a playable file; h264/hevc rewrap to .mp4 on stop).
+  Stopping shows a toast with thumbnail, length, dimensions, fps and Reveal; project switch,
+  Save As, and quit finalize a rolling take. Sound is a source picker, Off by default: App
+  captures only this app's audio, System everything the Mac is playing (via ScreenCaptureKit;
+  needs the Screen Recording permission, and a refusal leaves the take video-only).
 
 ## File menu
 
@@ -219,7 +234,7 @@ the agent it is for.
 ## Settings
 
 - **Agent Providers** - the provider half of the AI Settings sheet, on ⌘,
-  (`CommandGroup(replacing: .appSettings)`), the chat ⋯ menu's "AI Settings…" item, and
+  (`CommandGroup(replacing: .appSettings)`), the chat ⋯ menu's "AI Settings" item, and
   auto-presented on first run until a default is confirmed. Provider cards with live status
   badges (Ready / Verified / Not Installed / Login Needed / Failing), inline remedies (copyable
   install command; "Open Terminal to Log In" - a `.command` file handed to Terminal.app, no

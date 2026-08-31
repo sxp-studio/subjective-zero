@@ -283,7 +283,7 @@ public struct SZChatPanel: View {
         // message (the feed gate belonged to the era when Clear was the menu's only item).
         Menu {
             Button { onOpenAISettings() } label: {
-                Label("AI Settings…", systemImage: "slider.horizontal.3")
+                Label("AI Settings", systemImage: "slider.horizontal.3")
             }
             Divider()
             // Clear = a FULL reset (transcript + the agent's session — the host side documents

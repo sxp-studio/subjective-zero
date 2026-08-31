@@ -91,6 +91,15 @@ public final class SZRuntime: @unchecked Sendable {
         /// The surface that defines `renderSize` and presents synchronously (`setDriver`). Resolved
         /// per tick; a stale key just keeps the last size.
         var driverKey: ObjectIdentifier?
+        /// The live-record tap: every encoded frame is offered to it (see encodeAndCommitFrame).
+        /// Installed/removed under the lock by the recording API (SZVideoRecording.swift).
+        var recorder: SZLiveVideoRecorder?
+        /// While a take rolls, the recording's full-frame render size. The loop skips the driver
+        /// drawable-size read so a viewport resize can't reshape the take.
+        var renderSizeOverride: (width: Int, height: Int)?
+        /// `renderSize` as it stood before the take, restored at remove — a driverless session
+        /// (thumbnails drive, headless) has no next tick to reassert it.
+        var renderSizeBeforeTake: (width: Int, height: Int)?
     }
 
     private let engine: Mutex<EngineState>
@@ -600,6 +609,8 @@ public final class SZRuntime: @unchecked Sendable {
             // pause means no more frames. So tell it. Inside the lock, serialized against frames like any
             // other graph mutation (the ABI tells nodes not to block here).
             for loader in state.loaders.values { loader.setPaused(paused) }
+            // a rolling take's audio leg pauses with the clock (video pauses by not encoding)
+            state.recorder?.setPaused(paused, now: CACurrentMediaTime())
         }
     }
 
@@ -651,6 +662,11 @@ public final class SZRuntime: @unchecked Sendable {
         state.nodeErrors = nodeErrors
         Self.queueErrorPublish(&state)
         beforeCommit(commandBuffer, endpoint)
+        // The record tap rides the same buffer, stamped with this frame's engine time — the one
+        // clock read above. It sees every encoded frame regardless of who asked for it.
+        if let endpoint, let recorder = state.recorder {
+            recorder.encodeCapture(on: commandBuffer, endpoint: endpoint, engineTime: timing.timeSeconds)
+        }
         // The live thumb pass rides THIS buffer (throttled inside) — after the schedule's writes,
         // before the commit, so hazard tracking orders the downscales behind the frame's renders.
         encodePreviewPass(state.previews, on: commandBuffer, now: CACurrentMediaTime())
@@ -808,7 +824,9 @@ public final class SZRuntime: @unchecked Sendable {
         let (encoded, endpoint, driver, mirrors) = engine.withLock {
             state -> (Bool, (any MTLTexture)?, SZRenderSurface?, [SZRenderSurface]) in
             let driver = state.driverKey.flatMap { state.surfaces[$0] }
-            if let driver {
+            if let override = state.renderSizeOverride {
+                state.renderSize = override   // a rolling take owns the render size
+            } else if let driver {
                 let size = driver.layer.drawableSize   // plain CA read; the view is its single writer (main)
                 if size.width > 0, size.height > 0 { state.renderSize = (Int(size.width), Int(size.height)) }
             }
@@ -907,6 +925,43 @@ public final class SZRuntime: @unchecked Sendable {
         return (scale, tx, ty)
     }
 
+    // MARK: - Live recording (tap install/remove; the public API is SZVideoRecording.swift)
+
+    /// Whether a take is rolling.
+    public var isRecording: Bool { engine.withLock { $0.recorder != nil } }
+
+    /// Install the record tap under the lock. The recorder is built by the caller so its file io
+    /// stays outside the lock. Sets `renderSize` immediately — headless sessions never tick.
+    func installRecorder(_ recorder: SZLiveVideoRecorder, renderSize: (width: Int, height: Int)) throws {
+        try engine.withLock { state in
+            guard state.recorder == nil else { throw SZRecordError.alreadyRecording }
+            guard state.scheduler != nil else { throw SZRecordError.nothingToRender }
+            state.recorder = recorder
+            state.renderSizeBeforeTake = state.renderSize
+            state.renderSizeOverride = renderSize
+            state.renderSize = renderSize
+            // a take started while paused must not record audio during the span with no video
+            if state.timeline.paused { recorder.setPaused(true, now: CACurrentMediaTime()) }
+        }
+    }
+
+    /// The rolling take's recorder, if any (read without removing — the sound attach).
+    var currentRecorder: SZLiveVideoRecorder? { engine.withLock { $0.recorder } }
+
+    /// Remove the tap; no further encode reaches the recorder after this returns. `renderSize`
+    /// restores to its pre-take value immediately (a driver reasserts its own next tick anyway).
+    func removeRecorder() -> SZLiveVideoRecorder? {
+        engine.withLock { state in
+            defer {
+                state.recorder = nil
+                state.renderSizeOverride = nil
+                if let prior = state.renderSizeBeforeTake { state.renderSize = prior }
+                state.renderSizeBeforeTake = nil
+            }
+            return state.recorder
+        }
+    }
+
     /// Real framebuffer readback of the render-endpoint texture (`agent_view_frame`). Renders a fresh
     /// frame and blits the endpoint into a fresh `.shared` capture texture INSIDE the same command
     /// buffer — immune to live frames re-encoding the endpoint — then waits and reads back OUTSIDE the
@@ -998,14 +1053,17 @@ public final class SZRuntime: @unchecked Sendable {
         return SZImageBytes(width: width, height: height, bgra: bytes)
     }
 
-    /// The one texture-to-texture copy both presentation (endpoint → drawable) and capture
-    /// (endpoint → capture target) encode — a single site so clamp/origin fixes can't drift apart.
-    private static func encodeCopy(_ source: any MTLTexture, into destination: any MTLTexture,
-                                   width: Int, height: Int, on commandBuffer: any MTLCommandBuffer) {
+    /// The one texture-to-texture copy presentation (endpoint → drawable), capture (endpoint →
+    /// capture target), and the record tap's crop fast path all encode — a single site so
+    /// clamp/origin fixes can't drift apart.
+    static func encodeCopy(_ source: any MTLTexture, into destination: any MTLTexture,
+                           width: Int, height: Int,
+                           sourceOrigin: MTLOrigin = MTLOrigin(x: 0, y: 0, z: 0),
+                           on commandBuffer: any MTLCommandBuffer) {
         guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
         blit.copy(
             from: source, sourceSlice: 0, sourceLevel: 0,
-            sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+            sourceOrigin: sourceOrigin,
             sourceSize: MTLSize(width: width, height: height, depth: 1),
             to: destination, destinationSlice: 0, destinationLevel: 0,
             destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))

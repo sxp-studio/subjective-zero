@@ -31,6 +31,18 @@ public struct SZSize: Codable, Equatable, Sendable {
     public init(width: Double, height: Double) { self.width = width; self.height = height }
 }
 
+public struct SZRect: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x; self.y = y; self.width = width; self.height = height
+    }
+    /// The unit rect — a full-frame crop in normalized picture coordinates.
+    public static let unit = SZRect(x: 0, y: 0, width: 1, height: 1)
+}
+
 // MARK: - Viewport
 
 public enum SZPixelFormat: String, Codable, Sendable {
@@ -468,6 +480,37 @@ public struct SZPoppedOutPanel: Codable, Equatable, Sendable {
     }
 }
 
+/// Sticky recording settings (the Recording Options sheet + framing overlay). Every field is
+/// optional so any older file decodes; unknown raw values degrade to defaults at resolution.
+public struct SZRecordPrefs: Codable, Equatable, Sendable {
+    /// Resolution tier — the output's short side (720/1080/2160).
+    public var resolution: Int?
+    /// Take frame rate (30/60).
+    public var frameRate: Int?
+    /// Codec raw value (SZRecordFraming.Codec).
+    public var codec: String?
+    /// Ratio chip raw value (SZRecordFraming.Ratio).
+    public var ratio: String?
+    /// Picture-normalized crop.
+    public var crop: SZRect?
+    /// Sound source raw value (SZRecordFraming.SoundSource); nil/unknown means off.
+    public var soundSource: String?
+    /// The settings sheet auto-opened once (first-ever use of the record dot).
+    public var seenSettings: Bool?
+
+    public init(resolution: Int? = nil, frameRate: Int? = nil, codec: String? = nil,
+                ratio: String? = nil, crop: SZRect? = nil, soundSource: String? = nil,
+                seenSettings: Bool? = nil) {
+        self.resolution = resolution
+        self.frameRate = frameRate
+        self.codec = codec
+        self.ratio = ratio
+        self.crop = crop
+        self.soundSource = soundSource
+        self.seenSettings = seenSettings
+    }
+}
+
 /// App-level preferences (docs/STATE.md), persisted per-machine by SZAppStateIO (app-state.json in
 /// Application Support — never in a project). `panelLayout` is live; windowSize/theme are still
 /// dormant placeholders.
@@ -537,6 +580,9 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// The profile that was active when routing was last toggled off — the toggle's memory,
     /// so flipping back on restores the same arm.
     public var routingLastProfileName: String?
+    /// Sticky recording settings. Optional for the same decode-compatibility reason; nil means
+    /// defaults (full frame, 1080, 60 fps, H.264).
+    public var recordPrefs: SZRecordPrefs?
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
 
@@ -562,7 +608,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         routingProfiles: [SZRoutingProfile]? = nil,
         activeRoutingProfileName: String? = nil,
         routingSeededStarterNames: [String]? = nil,
-        routingLastProfileName: String? = nil
+        routingLastProfileName: String? = nil,
+        recordPrefs: SZRecordPrefs? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -586,6 +633,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.activeRoutingProfileName = activeRoutingProfileName
         self.routingSeededStarterNames = routingSeededStarterNames
         self.routingLastProfileName = routingLastProfileName
+        self.recordPrefs = recordPrefs
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

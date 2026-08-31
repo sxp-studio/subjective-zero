@@ -101,6 +101,7 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     /// Last-chance flush — the quit-path counterpart of the per-message/run-end flush points. A
     /// SIGKILL/crash skips this and loses only messages since the last completion flush (bounded).
     func applicationWillTerminate(_ notification: Notification) {
+        host?.finalizeActiveTakeBlocking()   // bounded; a timed-out rewrap still leaves a playable .mov
         host?.flushEverything()   // the same set ⌘S writes: queues redeliver, a live run restores as interrupted
         // Pop-out frame moves persist behind a debounce — a quit inside that window must not
         // restore a stale frame next launch (the in-memory record is already authoritative).
@@ -317,6 +318,18 @@ struct SZApp: App {
                         onTearOutPanel: { host.tearOutPanel($0) }) { id in
                             panelContent(id)
                         }
+                        // The finished-take toast, bottom-right of the workspace; auto-dismisses
+                        // (SZHost+Recording owns presentation).
+                        .overlay(alignment: .bottomTrailing) {
+                            if let toast = host.takeToast {
+                                SZTakeToastView(title: toast.title, subtitle: toast.subtitle,
+                                                thumbnail: toast.thumbnail,
+                                                onReveal: { host.revealTake(toast.url) })
+                                    .padding(16)
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            }
+                        }
+                        .animation(.easeInOut(duration: 0.2), value: host.takeToast != nil)
                 } else {
                     Color.black.overlay(Text(host.status).foregroundStyle(.white))
                 }
@@ -335,6 +348,22 @@ struct SZApp: App {
             // landing on Providers), reopened via ⌘, or the composer's ⋯ menu. A set-false
             // (Esc/swipe) is a Skip: dismiss without confirming, so first-run simply re-presents
             // next launch.
+            // The Recording Options sheet — the gear/app menus and the record dot's first-ever
+            // press. A sheet, not a popover: the rows need room.
+            .sheet(isPresented: Binding(get: { host.recordSettingsPresented },
+                                        set: { host.recordSettingsPresented = $0 })) {
+                SZRecordSettingsSheet(framingSummary: host.recordFramingSummary,
+                                      tier: host.recordTier,
+                                      fps: host.recordFPS,
+                                      codec: host.recordCodec,
+                                      outputSize: host.recordOutputSize,
+                                      sound: host.recordSoundSource,
+                                      onEditFraming: { host.openFramingEditor() },
+                                      onPickTier: { host.setRecordTier($0) },
+                                      onPickFPS: { host.setRecordFPS($0) },
+                                      onPickCodec: { host.setRecordCodec($0) },
+                                      onPickSound: { host.setRecordSoundSource($0) })
+            }
             .sheet(isPresented: Binding(get: { host.providerSetupPresented },
                                         set: { if !$0 { host.skipProviderSetup() } })) {
                 SZProviderSetupSheet(cards: host.providerSetupCards,
@@ -416,12 +445,17 @@ struct SZApp: App {
                 Button("Save As…") { host.saveProjectAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(host.isOpeningProject || !host.hasSavableProject)
+                Divider()
+                // the way back to recorded takes after the stop toast is gone
+                Button("Show Recordings in Finder") { host.revealTakes() }
+                    .disabled(!host.hasTakes)
             }
             // ⌘, — the app's only settings surface today; graduates into a real Settings window
             // once more prefs earn one (docs/UI.md).
             CommandGroup(replacing: .appSettings) {
-                Button("AI Settings…") { host.presentProviderSetup() }
+                Button("AI Settings") { host.presentProviderSetup() }
                     .keyboardShortcut(",", modifiers: .command)
+                Button("Recording Options") { host.recordSettingsPresented = true }
             }
             CommandGroup(after: .sidebar) {
                 Divider()
@@ -586,14 +620,16 @@ struct SZApp: App {
     }
 
     /// The HUD gear menu's items — the canvas-side mirror of the macOS menu bar. Mirrors the `.commands`
-    /// wiring verbatim (same host methods + bindings) so the two stay in lockstep, then adds AI Settings…
+    /// wiring verbatim (same host methods + bindings) so the two stay in lockstep, then adds AI Settings
     /// and the community links. Keyboard shortcuts are deliberately omitted here — the menu bar owns the
     /// canonical ⌘-shortcuts; duplicating them on these items would double-register the key equivalents.
     @ViewBuilder
     private var gearMenuContent: some View {
         // Return to the home/welcome screen from the editor (also in the Help menu). The project stays
         // loaded behind it — Esc / continue drops straight back into the workspace.
-        Button { host.presentWelcome() } label: { Label("Welcome Screen", systemImage: "house") }
+        // no icon: a single Label with one reserves an icon column for the whole menu,
+        // indenting every other row's text
+        Button("Welcome Screen") { host.presentWelcome() }
         Divider()
         Menu("Project") {
             Button("New Project") { host.newProject() }
@@ -618,6 +654,9 @@ struct SZApp: App {
             }
             Button("Save As…") { host.saveProjectAs() }
                 .disabled(host.isOpeningProject || !host.hasSavableProject)
+            Divider()
+            Button("Show Recordings in Finder") { host.revealTakes() }
+                .disabled(!host.hasTakes)
         }
         Menu("View") {
             // availableCases, like the menu bar — the Profiler toggle must not surface in a
@@ -664,7 +703,8 @@ struct SZApp: App {
                                                   set: { host.setLivePreviews($0) }))
         }
         Divider()
-        Button("AI Settings…") { host.presentProviderSetup() }
+        Button("AI Settings") { host.presentProviderSetup() }
+        Button("Recording Options") { host.recordSettingsPresented = true }
         Divider()
         // Collapse the community/support links into one Help submenu so the gear's top level stays light.
         // Mirrors the macOS menu bar's Help menu — both render `helpLinks`, so they never drift.
@@ -775,6 +815,36 @@ struct SZApp: App {
         switch id.kind {
         case .viewport:
             SZViewportPanel(device: host.runtime?.device, events: host.viewportEvents(for: id))
+                // Rolling-take edge: every viewport wears it (this closure also feeds pop-out
+                // windows), so a recording is visible wherever the picture is. A cropped take
+                // also outlines the recorded region on the picture itself.
+                .overlay {
+                    if host.isRecording {
+                        Rectangle()
+                            .strokeBorder(Color.red.opacity(0.8), lineWidth: 1.5)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .overlay {
+                    if host.isRecording, host.recordCrop != .unit {
+                        SZRecordedRegionOverlay(picture: host.runtime?.renderSize ?? (1280, 800),
+                                                crop: host.recordCrop)
+                    }
+                }
+                // The framing editor, on the one viewport the host picked (largest visible).
+                // Framing state lives on the host — this closure also builds pop-out windows.
+                .overlay {
+                    if host.framingEditorViewport == id {
+                        SZRecordFramingOverlay(
+                            picture: host.runtime?.renderSize ?? (1280, 800),
+                            crop: host.recordCrop,
+                            ratio: host.recordRatio,
+                            tier: host.recordTier,
+                            onCropChanged: { host.recordCrop = $0 },
+                            onRatioPicked: { host.pickFramingRatio($0) },
+                            onDone: { host.closeFramingEditor() })
+                    }
+                }
         case .nodeEditor:
             SZNodeEditorPanel(store: host.store, project: host.store.project,
                               status: host.status, isRunning: host.isRunning,
@@ -808,6 +878,12 @@ struct SZApp: App {
                               onBuild: { host.buildPressed() },
                               onTogglePause: { host.togglePlayback() },
                               onResetTime: { host.resetPlayback() },
+                              isRecording: host.isRecording,
+                              recordingElapsed: host.recordingElapsed,
+                              onToggleRecord: { host.toggleRecording() },
+                              recordSettingsSeen: host.recordSettingsSeen,
+                              onRecordFirstUse: { host.markRecordSettingsSeen() },
+                              onOpenRecordSettings: { host.recordSettingsPresented = true },
                               onSetInputDefault: { host.setInputDefault(node: $0, port: $1, value: $2, persist: $3) },
                               onToggleDisplay: { host.toggleDisplay(node: $0, port: $1) },
                               onCommitPrompt: { host.updateNodeContent(id: $0, prompt: $1) },
@@ -825,7 +901,7 @@ struct SZApp: App {
                               onCreateMediaNodes: { host.createMediaNodes($0) },
                               onNodeAdded: { host.noteNodeAdded($0) },
                               // The HUD gear menu — an in-canvas mirror of the macOS menu bar (Project /
-                              // View / Graph), plus AI Settings… and community links. Built here where
+                              // View / Graph), plus AI Settings and community links. Built here where
                               // `host`, panelVisibilityBinding, and the app-bundle Discord asset are in
                               // scope; erased to AnyView for the pure SZUI panel. Re-evaluates on host
                               // changes (Observation) so disabled states / toggles stay live.

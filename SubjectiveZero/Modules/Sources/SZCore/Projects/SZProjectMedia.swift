@@ -18,6 +18,28 @@ public enum SZProjectMedia {
     /// The bundle subdirectory holding files brought into the project.
     public static let directoryName = "media"
 
+    /// The bundle subdirectory holding recorded videos.
+    public static let recordingsDirectoryName = "recordings"
+
+    /// The next recording's number and file URL inside `recordings/`: one past the highest
+    /// existing "Recording N" of any extension, bumped further if the candidate name is somehow
+    /// taken. Pure path math plus one directory listing; the caller creates the directory.
+    public static func nextRecording(in projectURL: URL, fileExtension: String) -> (number: Int, url: URL) {
+        let dir = projectURL.appending(path: recordingsDirectoryName)
+        let existing = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        let taken = existing.compactMap { name -> Int? in
+            guard name.hasPrefix("Recording ") else { return nil }
+            return Int((name.dropFirst(10) as NSString).deletingPathExtension)
+        }
+        var number = (taken.max() ?? 0) + 1
+        var url = dir.appending(path: "Recording \(number).\(fileExtension)")
+        while FileManager.default.fileExists(atPath: url.path) {
+            number += 1
+            url = dir.appending(path: "Recording \(number).\(fileExtension)")
+        }
+        return (number, url)
+    }
+
     /// THE RULE. An empty value stays empty (unset is not a path); an absolute one is returned as
     /// itself (tilde expanded — the render loop has no home directory); anything else joins the bundle.
     public static func resolve(_ value: String, in projectURL: URL) -> String {

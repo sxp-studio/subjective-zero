@@ -151,7 +151,15 @@ extension SZHost {
                                              activeRoutingProfileName: activeRoutingProfileName,
                                              routingSeededStarterNames: routingSeededStarterNames.isEmpty
                                                 ? nil : routingSeededStarterNames,
-                                             routingLastProfileName: routingLastProfileName))
+                                             routingLastProfileName: routingLastProfileName,
+                                             recordPrefs: SZRecordPrefs(
+                                                resolution: recordTier.rawValue,
+                                                frameRate: recordFPS,
+                                                codec: recordCodec.rawValue,
+                                                ratio: recordRatio.rawValue,
+                                                crop: recordCrop,
+                                                soundSource: recordSoundSource == .off ? nil : recordSoundSource.rawValue,
+                                                seenSettings: recordSettingsSeen ? true : nil)))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

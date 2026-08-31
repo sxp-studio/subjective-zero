@@ -517,6 +517,42 @@ final class SZHost {
     /// project switch (`clearPerProjectState`).
     internal(set) var isPaused = false
 
+    /// A take is rolling — the HUD record dot's state and every viewport's red edge. Mirrors the
+    /// runtime; set only by SZHost+Recording.
+    internal(set) var isRecording = false
+    /// The rolling take's elapsed readout ("01:24"); freezes while playback is paused. nil when idle.
+    internal(set) var recordingElapsed: String?
+    /// The most recently finished take's file (the toast's Reveal target; re-rooted on Save As).
+    @ObservationIgnored var lastTakeURL: URL?
+    /// Sticky record settings — seeded from app-state.json's recordPrefs, persisted through
+    /// SZHost+Recording's setters (one writer: persistAppState). Unknown raws degrade to defaults.
+    var recordCrop = SZAppStateIO.load()?.recordPrefs?.crop ?? .unit
+    var recordRatio = SZRecordFraming.Ratio(rawValue: SZAppStateIO.load()?.recordPrefs?.ratio ?? "") ?? .free
+    var recordTier = SZRecordFraming.Tier(rawValue: SZAppStateIO.load()?.recordPrefs?.resolution ?? 0) ?? .p1080
+    // validated at seed: an out-of-set frame rate (a hand-edited or future file) must degrade to
+    // 60, not reach the writer, where AVFoundation raises uncatchably on a non-positive value
+    var recordFPS = { let v = SZAppStateIO.load()?.recordPrefs?.frameRate; return v == 30 || v == 60 ? v! : 60 }()
+    var recordCodec = SZRecordFraming.Codec(rawValue: SZAppStateIO.load()?.recordPrefs?.codec ?? "") ?? .h264
+    var recordSoundSource = SZRecordFraming.SoundSource(
+        rawValue: SZAppStateIO.load()?.recordPrefs?.soundSource ?? "") ?? .off
+    /// The settings sheet auto-opened once (first-ever press of the record dot shows the
+    /// defaults instead of instantly rolling).
+    var recordSettingsSeen = SZAppStateIO.load()?.recordPrefs?.seenSettings ?? false
+    /// The viewport tile hosting the framing editor; nil = closed. Opened on the largest visible
+    /// viewport purely for editing comfort — the crop itself is global (picture-normalized).
+    var framingEditorViewport: SZPanelID?
+    /// The Recording Options sheet (gear/app menus, and the record dot's first-ever press).
+    var recordSettingsPresented = false
+    /// Elapsed bookkeeping (SZHost+Recording): the ticker task and the accumulated unpaused time.
+    @ObservationIgnored var recordingTicker: Task<Void, Never>?
+    @ObservationIgnored var recordingAccumulated: TimeInterval = 0
+    @ObservationIgnored var recordingLastTick = Date()
+    /// The rolling take's number ("Recording N"), for the status line and the stop toast.
+    @ObservationIgnored var currentTakeNumber: Int?
+    /// The stop toast; nil = hidden. Auto-dismissed by `takeToastDismiss`.
+    var takeToast: SZTakeToast?
+    @ObservationIgnored var takeToastDismiss: Task<Void, Never>?
+
     /// The `SZ_PROJECT` env override — the dev recipe (`launchctl setenv SZ_PROJECT … && open -n`,
     /// GRAPH_AND_NODES.md). nil when unset; the launch chain then falls to the last open project,
     /// else a first-launch copy of the bundled sample (`openInitialProject`, SZHost+
@@ -680,7 +716,9 @@ final class SZHost {
         }
         // 3. Freeze the old project: the WHOLE durable set, not a subset — a coalesced runs.json
         //    write still sitting in its debounce is cancelled by the teardown below, so anything
-        //    left unflushed here is lost with the project.
+        //    left unflushed here is lost with the project. A rolling take finalizes first, while
+        //    its bundle is still the live document.
+        finalizeActiveTakeBlocking()
         if loadedProjectURL != nil { flushEverything() }
         // 4. Last fallible step: install what step 2 prepared, synchronously and atomically. On failure
         // drop the lock we took, leaving the old project rendering. The repaired graph is already in
@@ -785,6 +823,14 @@ final class SZHost {
         mailbox.rebaseAttachments(to: newURL)
         cardHostStorage?.rebindCardWatchers()
         repushMediaPaths(to: newURL)
+        // the finished take followed the bundle; its Reveal targets must follow too
+        if let takeURL = lastTakeURL, let relative = SZProjectMedia.relativePath(for: takeURL, in: oldURL) {
+            lastTakeURL = newURL.appending(path: relative)
+        }
+        if let toast = takeToast, let relative = SZProjectMedia.relativePath(for: toast.url, in: oldURL) {
+            takeToast = SZTakeToast(title: toast.title, subtitle: toast.subtitle,
+                                    url: newURL.appending(path: relative), thumbnail: toast.thumbnail)
+        }
     }
 
     /// A move leaves the runtime holding file-port paths resolved against the OLD bundle, and nothing
@@ -821,6 +867,7 @@ final class SZHost {
     /// project precisely because the url is nil.
     func discardUntitledProject() {
         guard isUntitledProject, let url = loadedProjectURL else { return }
+        cancelActiveTake()   // the writer's file dies with the project's home; release it first
         releaseProjectLock()
         stopAllNodeSourceWatchers()
         loadedProjectURL = nil   // `hasSavableProject` goes false with it: the save items grey out
@@ -930,6 +977,13 @@ final class SZHost {
         runtime?.setPaused(false)
         runtime?.resetTimeline()
         isPaused = false
+        // recording surfaces: the take itself was finalized before the point of no return
+        // (`finalizeActiveTakeBlocking`); the editor and toast belong to the old project's picture
+        framingEditorViewport = nil
+        takeToastDismiss?.cancel()
+        takeToast = nil
+        currentTakeNumber = nil
+        lastTakeURL = nil
     }
 
     /// Stop every node-source watcher (project switch). The per-node stop
