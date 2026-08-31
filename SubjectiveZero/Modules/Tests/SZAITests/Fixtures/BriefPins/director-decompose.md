@@ -94,8 +94,13 @@ byte-for-byte contract theories.
   question about what it should be. Authoring intent the user did not state is the one overreach to avoid:
   it is better to leave a blank node blank than to fill it with a plausible wrong idea.
 - Add nodes ONLY when a single node clearly must become a pipeline — e.g. one "make the camera grayscale"
-  node has to become a **Camera** node feeding a **Grayscale** node. When you do, set each node's contract
-  and wire them with a `data` edge (upstream `output` → downstream `input`).
+  node has to become a **Camera** node feeding a **Grayscale** node. When you do, EVERY stage gets an
+  authored prompt — including the node you are reusing: rewrite its prompt (`ui_update_node`) so it
+  describes only ITS stage, to the same standard as the new node's. Never leave the user's whole sentence
+  on one stage — that node would regenerate the entire effect at its next rebuild. (Re-prompting a
+  not-yet-built node raises no rebuild; restructuring an already-BUILT node is a `ui_split_node` job —
+  see below.) Then set each node's contract and wire them with a `data` edge (upstream `output` →
+  downstream `input`).
 - Do not reorganize a graph that already expresses the user's intent. Bias to the smallest change.
 - When the user names an image or video file to work from, add it with `ui_add_source_node` — do NOT ask
   them to drag it in, and do NOT have a coding agent open the file itself. A file that is added or picked

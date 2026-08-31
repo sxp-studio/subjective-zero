@@ -142,6 +142,27 @@ private func graphWithBlank() -> (SZGraph, SZNode) {
     #expect(out.contains("\(blank.id.uuidString)` \"New Node\" — prompt, no contract yet — prompt: (empty —"))
 }
 
+// MARK: - The split-into-pipeline rule (decompose + chat, through the shipped toolbelt)
+
+/// The reused node's prompt is re-authored to its one stage, never left carrying the user's whole
+/// sentence. Stated in the toolbelt, so both briefs that can split — decompose and chat — carry it.
+/// (Fragments never straddle the template's line wraps.)
+@Test func theToolbeltBriefsTellTheDirectorToReauthorTheReusedNodesPrompt() throws {
+    let (graph, _) = graphWithBlank()
+    let renderer = SZBriefRenderer(packRoot: shippedPacksRoot)
+    let decompose = try renderer.render(
+        agent: "director", template: "decompose", message: "",
+        world: SZWorld(graph: graph, run: SZRun(workSet: [], round: 1, roundCap: 1, steers: [], instruction: "")))
+    let chat = try renderer.render(
+        agent: "director", template: "chat", message: "make the camera grayscale",
+        world: SZWorld(graph: graph))
+    for out in [decompose, chat] {
+        #expect(out.contains("including the node you are reusing"))
+        #expect(out.contains("Never leave the user's whole sentence"))
+        #expect(out.contains("not-yet-built node raises no rebuild"))
+    }
+}
+
 /// The audit-semantics section is agent-facing truth: `agent_docs_read {topic:"node-contract"}` (and the
 /// cold-start brief that embeds it) must state BOTH faults the port audit raises (undeclared port names, a
 /// live AV resource with no `setPaused`) and the three derived rebuild reasons, so no agent theorizes about
