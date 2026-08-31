@@ -264,6 +264,17 @@ extension SZHost {
             url = root.appending(path: "\(agent)/steps/\(name)/Step.swift")
         case .brief(let path):
             url = root.appending(path: "\(agent)/\(path)")
+        case .sentPrompt(let turnID, let template):
+            // A capture ages out past the caps; the authored brief is then the honest
+            // fallback, not an error.
+            guard heldPrompt(for: turnID) != nil else {
+                status = "This turn's prompt is no longer kept. Only the last"
+                    + " \(SZHost.debugTurnCaptureCap) turns are. Showing the brief template instead."
+                openPackSource(agent: agent, source: .brief(path: template))
+                return
+            }
+            viewTurnPrompt(turnID)
+            return
         case .dispatch:
             // The panel navigates dispatch links itself; nothing reaches the host.
             return

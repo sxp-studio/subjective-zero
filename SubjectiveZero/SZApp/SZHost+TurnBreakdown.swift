@@ -44,7 +44,7 @@ extension SZHost {
     /// the default text editor. Loudly explains itself when the prompt has aged out of the ring.
     func viewTurnPrompt(_ turnID: UUID) {
         guard let prompt = heldPrompt(for: turnID) else {
-            status = "prompt no longer held — only the last \(SZHost.debugTurnCaptureCap) captured turns are kept"
+            status = "This prompt is no longer kept. Only the last \(SZHost.debugTurnCaptureCap) turns are."
             NSSound.beep()
             return
         }
@@ -58,12 +58,12 @@ extension SZHost {
         }
     }
 
-    /// What was ACTUALLY sent to the CLI: the rendered prompt, held in a fast in-memory ring AND
-    /// persisted under the turn's debug-capture folder (`debug-turns/<turnID>/prompt.txt`) so
-    /// prompt inspection survives relaunches — the whole point of the capture is debugging past
-    /// sessions. Also stamps a `prompt.size` row carrying the prompt's context weight.
+    /// What was ACTUALLY sent to the CLI: the rendered prompt, held in an in-memory ring and
+    /// persisted under `debug-turns/<turnID>/prompt.txt` so inspection survives relaunches.
+    /// Not gated on tracing — the run card's prompt pill ships everywhere — so the caps contain
+    /// it instead (`turnPromptCap` in memory, `debugTurnCaptureCap` folders on disk). The
+    /// `prompt.size` row below still self-gates in `SZTrace.record`; a release build pays nothing.
     func recordTurnPrompt(_ prompt: String, for assistantID: UUID) {
-        guard SZTrace.isEnabled else { return }
         SZTrace.record(SZTurnEvent(stage: SZTurnStage.promptSize,
                                    detail: "\(SZTurnBreakdown.formatTokens(prompt.count)) chars",
                                    addedTokens: prompt.count / 4),
@@ -229,7 +229,7 @@ extension SZHost {
             lines.append("")
             lines.append("━━ PROMPT — the rendered prompt this turn sent ━━")
             lines.append(heldPrompt(for: turnID)
-                ?? "(prompt no longer held — only the last \(SZHost.debugTurnCaptureCap) captured turns are kept)")
+                ?? "(This prompt is no longer kept. Only the last \(SZHost.debugTurnCaptureCap) turns are.)")
             let captureDir = SZHost.debugTurnDirectory(for: turnID)
             if FileManager.default.fileExists(atPath: captureDir.path(percentEncoded: false)) {
                 lines.append("")

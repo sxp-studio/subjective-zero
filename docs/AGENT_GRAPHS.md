@@ -286,8 +286,12 @@ you edited stays yours. Prompts need no
 watcher — briefs are read per render. Step sources are compiled code, so each
 `steps/<name>/Step.swift` is watched: save → recompile → swap on green, keep the old
 module on red. In the Agent Graph panel every card carries its **source pill**: a step —
-the door included — opens its `Step.swift`, a turn opens its brief, and a dispatch links
-into the target seat's graph.
+the door included — opens its `Step.swift`, and a dispatch links into the target seat's graph.
+A turn opens its brief, and which brief depends on what you are looking at. Browsing a
+graph there is no run, so the pill opens the mustache **template**. On a RUN card whose visit
+actually ran, it opens the **prompt that turn sent**, macros expanded: the visit's `turnID`
+resolves the rendered text captured per turn (20 in memory, 40 on disk, pruned). Past those
+caps, and on records written before the stamp existed, the template stands in.
 
 ## RUNS records and the panel
 

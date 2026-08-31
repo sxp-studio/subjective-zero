@@ -90,8 +90,8 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         /// A settled turn visit's envelope receipt ("codex · gpt-5.6-terra · fast");
         /// nil on other visits and on records that predate receipts.
         public var generation: String?
-        /// The transcript message this turn streamed into — where a card reads the agent's
-        /// activity and its tokens. nil on every non-turn visit.
+        /// The transcript message this turn streamed into — where a card reads its activity
+        /// and tokens, and the key to the prompt it actually sent. nil on every non-turn visit.
         public var turnID: UUID?
         /// HOST-stamped wall clock (`note` stamps on first sight / settle) — never
         /// engine-stamped. Persisted with the trace.

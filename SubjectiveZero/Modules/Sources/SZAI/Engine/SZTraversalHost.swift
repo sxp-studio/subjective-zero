@@ -61,8 +61,8 @@ public struct SZTurnReport: Sendable {
     public var detail: String?
     /// "codex · gpt-5.6-terra · fast" — the run trace's receipt text. nil = unreported.
     public var generation: String?
-    /// The transcript message this turn streamed into — what a run card reads its activity and
-    /// tokens from. nil = the lane did not report one.
+    /// The transcript message this turn streamed into — a run card's activity and tokens,
+    /// and the key to the prompt it actually sent. nil = the lane did not report one.
     public var turnID: UUID?
     public init(failed: Bool, detail: String? = nil, generation: String? = nil,
                 turnID: UUID? = nil) {
@@ -136,7 +136,8 @@ public struct SZTraversalNote: Sendable, Equatable {
     /// A settled turn visit's envelope receipt ("codex · gpt-5.6-terra · fast"); nil on
     /// every other visit and on turns that predate receipts.
     public var generation: String?
-    /// The transcript message a turn visit streamed into; nil on every other visit.
+    /// The transcript message a turn visit streamed into, and the key to the prompt it
+    /// actually sent; nil on every other visit.
     public var turnID: UUID?
     public init(ordinal: Int, node: String, phase: Phase, outcome: String? = nil,
                 detail: String? = nil, tally: SZAgentGraphRun.Tally? = nil,

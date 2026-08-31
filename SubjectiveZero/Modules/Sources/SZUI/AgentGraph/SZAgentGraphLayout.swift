@@ -24,11 +24,15 @@ public struct SZAgentGraphFace: Equatable, Sendable {
     /// payloads they don't read. `door` is the step at the reserved entry id — a step in
     /// every mechanical way, told apart so the card can wear the door's identity.
     public enum Form: Equatable, Sendable { case door, step, turn, dispatch }
-    /// What the card's source affordance opens: the step's authored Swift, or the brief
-    /// template that IS a turn's body. A value, not an action — the host resolves the file.
+    /// What the card's source affordance opens: the step's authored Swift, the brief template
+    /// that IS a turn's body, or — on a visit that actually ran — the prompt that turn SENT, macros
+    /// expanded. A value, not an action; the host resolves the file or the capture.
     public enum Source: Equatable, Sendable {
         case step(name: String)
         case brief(path: String)
+        /// The rendered prompt of one turn, by the id of the turn that ran it. Only a RUN card ever
+        /// carries this: browsing a graph there is no run, so there is nothing rendered to show.
+        case sentPrompt(turnID: UUID, template: String)
         /// A dispatch's "body" is the graph it calls into — the pill LINKS to the target
         /// seat's graph rather than opening a file.
         case dispatch(target: String)
@@ -198,7 +202,13 @@ public enum SZAgentGraphLayout {
         guard let graph, let node = graph.node(entry.node) else {
             return .fallback(node: entry.node, outcome: entry.outcome)
         }
-        return face(of: node, in: graph, stepOutcomes: stepOutcomes).ensuring(entry.outcome)
+        var face = face(of: node, in: graph, stepOutcomes: stepOutcomes).ensuring(entry.outcome)
+        // A visit that ran a turn shows what it SENT; the template rides along, so a visit
+        // without a turn keeps opening the file.
+        if case .brief(let path) = face.source, let turnID = entry.turnID {
+            face.source = .sentPrompt(turnID: turnID, template: path)
+        }
+        return face
     }
 
     /// A step's drawable outcome set: what its graph file wires, first-wire order, deduped.

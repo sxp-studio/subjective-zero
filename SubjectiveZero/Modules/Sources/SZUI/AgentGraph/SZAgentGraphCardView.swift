@@ -160,6 +160,7 @@ struct SZAgentGraphCardView: View {
                     switch source {
                     case .step: "Open the step's Step.swift"
                     case .brief: "Open the brief template"
+                    case .sentPrompt: "Open the prompt this turn sent"
                     case .dispatch(let target): "Open the \(target) seat's graph"
                     }
                 }(),
