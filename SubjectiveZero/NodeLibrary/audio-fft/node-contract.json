@@ -1,7 +1,7 @@
 {
   "title": "Audio FFT",
   "sfSymbol": "waveform.path.ecg",
-  "summary": "FFT of a PCM sample window into a power spectrum (floatArray of 1024 magnitude bins). Pure DSP — no audio device.",
+  "summary": "FFT of a PCM sample window into a power spectrum (floatArray of 1024 magnitude bins). Pure DSP, no audio device.",
   "inputs": [
     { "name": "samples", "type": "floatArray" },
     { "name": "window", "type": "enum", "ui": { "kind": "dropdown" },

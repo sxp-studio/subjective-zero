@@ -9,7 +9,8 @@
       "default": { "type": "enum", "value": "default" } }
   ],
   "outputs": [
-    { "name": "samples", "type": "floatArray" }
+    { "name": "samples", "type": "floatArray" },
+    { "name": "sampleRate", "type": "float" }
   ],
   "permissions": ["microphone"]
 }

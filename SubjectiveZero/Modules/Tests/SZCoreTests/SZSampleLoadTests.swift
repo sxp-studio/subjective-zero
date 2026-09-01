@@ -75,6 +75,50 @@ private var promptSampleURL: URL {
     }
 }
 
+/// The music-reactive sample: system audio → fft → onset → two impulses → cube over a gradient.
+private var audioCubeURL: URL {
+    URL(filePath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .appending(path: "Samples/audio-cube.subz")
+}
+
+@Test func audioCubeSampleLoadsFromDisk() throws {
+    let project = try SZProjectIO.load(from: audioCubeURL)
+    #expect(project.name == "Audio Cube")
+    #expect(project.graph.nodes.count == 8)
+    #expect(project.graph.connections.count == 8)
+
+    // The capture node's contract folded back in with its permission; the endpoint is the composite.
+    let capture = try #require(project.graph.nodes.first { $0.title == "Music In" })
+    #expect(capture.contract?.requiredPermissions == [.screenRecording])
+    let composite = try #require(project.graph.nodes.first { $0.title == "Composite" })
+    #expect(project.graph.renderEndpoint == SZPortRef(node: composite.id, port: "output"))
+
+    // Every node ships its Node.swift, byte-identical to its library source (the fixed UUIDs make the
+    // mapping a constant) — so sample/library drift fails here instead of shipping silently. The cube
+    // has no library entry: the sample IS its home.
+    let libraryIDs = [
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "system-audio.macos",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": "audio-fft",
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc": "audio-onset",
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd": "impulse-envelope",
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee": "impulse-envelope",
+        "11111111-1111-4111-8111-111111111111": "gradient",
+        "22222222-2222-4222-8222-222222222222": "blend",
+    ]
+    let libraryRoot = audioCubeURL.deletingLastPathComponent().deletingLastPathComponent()
+        .appending(path: "NodeLibrary")
+    for node in project.graph.nodes {
+        let src = SZProjectIO.nodeSourceURL(projectURL: audioCubeURL, nodeID: node.id)
+        #expect(FileManager.default.fileExists(atPath: src.path), "missing Node.swift for \(node.title)")
+        guard let libID = libraryIDs[node.id.uuidString.lowercased()] else { continue }
+        let library = libraryRoot.appending(path: libID).appending(path: "Node.swift")
+        #expect(try Data(contentsOf: src) == Data(contentsOf: library),
+                "\(node.title) drifted from NodeLibrary/\(libID)")
+    }
+}
+
 @Test func sampleRoundTripsThroughDisk() throws {
     let project = try SZProjectIO.load(from: sampleURL)
     let copy = FileManager.default.temporaryDirectory

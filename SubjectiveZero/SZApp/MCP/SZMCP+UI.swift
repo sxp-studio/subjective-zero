@@ -45,7 +45,7 @@ extension SZHostBridge {
                     "complexity": ["type": "string", "enum": ["light", "standard", "heavy"],
                                    "description": "your one-word read of the implementation task"],
                     "permissions": ["type": "array", "items": ["type": "string"],
-                                    "description": "entitlements the node needs (camera, microphone)"],
+                                    "description": "entitlements the node needs (camera, microphone, screenRecording)"],
                  ]),
             tool("ui_edit_ports", "Change a node's typed I/O. The ONLY way to add, retype, or remove a port — `ui_update_node` cannot touch the port surface. Omitted ports are left alone; removal is explicit, so you can never drop a control by forgetting to re-send it. `upsert` matches by name: re-sending a port rewrites its declaration (that is how you retype it, or move a slider's range) and keeps the value the port already holds, along with any control hint you leave out. `ui_set_input_default` is the only way to change a value. A retype, or withdrawing an `enum` option that is in use, drops the value and the reply lists it in `droppedValues`. Editing the surface of an already-implemented node marks it for rebuild (`needsRebuild`) and joins it to any run in flight — it keeps rendering its old build until its Coding Agent regenerates it. Data edges and the render endpoint that name a removed or retyped port are dropped.",
                  properties: [
@@ -417,7 +417,7 @@ extension SZHostBridge {
         let permissions = try (arguments["permissions"] as? [String]).map { raw -> [SZEntitlement] in
             try raw.map {
                 guard let e = SZEntitlement(rawValue: $0) else {
-                    throw SZMCPError.message("unknown permission \"\($0)\" — expected camera or microphone")
+                    throw SZMCPError.message("unknown permission \"\($0)\", expected camera, microphone, or screenRecording")
                 }
                 return e
             }

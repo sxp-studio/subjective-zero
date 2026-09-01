@@ -1,0 +1,72 @@
+{
+  "title": "Onset Detector",
+  "sfSymbol": "bolt.fill",
+  "summary": "Finds musical hits in an FFT power spectrum by spectral flux, emitting one-frame trigger pulses for kick, snare, hats and any onset, plus a continuous flux level.",
+  "inputs": [
+    {
+      "name": "magnitudes",
+      "type": "floatArray"
+    },
+    {
+      "name": "sensitivity",
+      "type": "float",
+      "ui": {
+        "kind": "slider",
+        "min": 0.25,
+        "max": 4,
+        "step": 0.05
+      },
+      "default": {
+        "type": "float",
+        "value": 1
+      }
+    },
+    {
+      "name": "refractory",
+      "type": "float",
+      "ui": {
+        "kind": "slider",
+        "min": 0.03,
+        "max": 0.5,
+        "step": 0.01
+      },
+      "default": {
+        "type": "float",
+        "value": 0.1
+      }
+    },
+    {
+      "name": "sampleRate",
+      "type": "float",
+      "ui": {
+        "kind": "field"
+      },
+      "default": {
+        "type": "float",
+        "value": 48000
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "name": "kick",
+      "type": "float"
+    },
+    {
+      "name": "snare",
+      "type": "float"
+    },
+    {
+      "name": "hats",
+      "type": "float"
+    },
+    {
+      "name": "onset",
+      "type": "float"
+    },
+    {
+      "name": "flux",
+      "type": "float"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "title": "Impulse",
+  "sfSymbol": "waveform.path",
+  "summary": "Shapes a trigger pulse into an attack and decay envelope in seconds, for punching a visual parameter on every hit.",
+  "inputs": [
+    { "name": "trigger", "type": "float", "ui": { "kind": "slider", "min": 0, "max": 1, "step": 1 },
+      "default": { "type": "float", "value": 0 } },
+    { "name": "attack", "type": "float", "ui": { "kind": "slider", "min": 0, "max": 0.5, "step": 0.005 },
+      "default": { "type": "float", "value": 0.01 } },
+    { "name": "decay", "type": "float", "ui": { "kind": "slider", "min": 0.05, "max": 3, "step": 0.01 },
+      "default": { "type": "float", "value": 0.35 } },
+    { "name": "amount", "type": "float", "ui": { "kind": "slider", "min": 0, "max": 2, "step": 0.01 },
+      "default": { "type": "float", "value": 1 } }
+  ],
+  "outputs": [ { "name": "value", "type": "float" } ]
+}

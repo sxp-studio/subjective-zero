@@ -79,7 +79,7 @@ public enum SZPortBindingAudit {
     /// that looks paused would still be playing audio or holding the mic. Constructing one without
     /// implementing `setPaused` is the "#knobs" bug's cousin: the control (Pause) is dead. A `ctx`
     /// accessor can't catch this, because the leak is in what the node OWNS, not what it reads.
-    private static let liveResourceTypes = ["AVPlayer", "AVCaptureSession", "AVAudioEngine"]
+    private static let liveResourceTypes = ["AVPlayer", "AVCaptureSession", "AVAudioEngine", "SCStream"]
 
     public static func audit(contract: SZNodeContract, source: String) -> Result {
         // Scan CODE only, not comments: an agent leaving a breadcrumb like `// TODO: ctx.inputFloat("x")`

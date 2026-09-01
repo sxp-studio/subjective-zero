@@ -112,6 +112,25 @@ private func output(_ name: String, _ type: SZPortType = .texture) -> SZPort { S
     #expect(SZPortBindingAudit.audit(contract: c, source: src).errors.isEmpty)
 }
 
+/// An SCStream keeps pulling system audio on its own clock, exactly like an engine or a player — the
+/// live-resource rule covers it too.
+@Test func flagsAnSCStreamThatIgnoresPause() {
+    let c = contract(outputs: [SZPort(name: "samples", type: .floatArray)])
+    let src = """
+    func update(_ ctx: SZFrameContext) {
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        ctx.setOutputFloats("samples", ring.latest(2048))
+    }
+    """
+    let r = SZPortBindingAudit.audit(contract: c, source: src)
+    #expect(r.errors.count == 1)
+    #expect(r.errors[0].contains("SCStream"))
+    #expect(r.errors[0].contains("setPaused"))
+
+    let handled = src + "\nfunc setPaused(_ paused: Bool) { }\n"
+    #expect(SZPortBindingAudit.audit(contract: c, source: handled).errors.isEmpty)
+}
+
 /// The near-miss the check has to survive: a node that CALLS `.pause()` on its own player but never
 /// implements `func setPaused` is still leaking. Matching the bare word would wave it through.
 @Test func callingPauseOnTheResourceIsNotImplementingIt() {

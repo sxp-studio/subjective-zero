@@ -1,0 +1,41 @@
+{
+  "title": "System Audio",
+  "sfSymbol": "speaker.wave.3",
+  "summary": "Captures what the Mac is playing, the whole mix or one app, as a 2048-sample mono PCM window for the audio pipeline.",
+  "inputs": [
+    {
+      "name": "gain",
+      "type": "float",
+      "ui": {
+        "kind": "slider",
+        "min": 0,
+        "max": 4,
+        "step": 0.05
+      },
+      "default": {
+        "type": "float",
+        "value": 1
+      }
+    },
+    {
+      "name": "source",
+      "type": "enum",
+      "ui": {
+        "kind": "dropdown"
+      },
+      "default": {
+        "type": "enum",
+        "value": "system"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "name": "samples",
+      "type": "floatArray"
+    }
+  ],
+  "permissions": [
+    "screenRecording"
+  ]
+}

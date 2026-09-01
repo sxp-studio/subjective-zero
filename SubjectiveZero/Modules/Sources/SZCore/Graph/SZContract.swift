@@ -241,6 +241,7 @@ public struct SZPort: Codable, Equatable, Sendable {
 public enum SZEntitlement: String, Codable, Sendable {
     case camera
     case microphone
+    case screenRecording
 }
 
 /// How a node's custom card (its `Card.swift`, when it ships one) wants to be mounted — the contract's

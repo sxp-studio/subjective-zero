@@ -14,8 +14,12 @@ your render/visualizer node. This is the node that satisfies a "10 frequency buc
   downstream with `ctx.inputFloat("hz…")`.
 - **Inputs (live knobs):** `sensitivity` (0.1–4, default 1 — scales the level; turn it down if a steady
   source like a fan pegs a low band), `attack` (0–1, default 0.15 — smaller = faster rise), `release`
-  (0–1, default 0.92 — larger = slower fall). All read live; defaults reproduce the built-in tuning.
-- **Contracts:** input `magnitudes` is the raw 1024-bin power spectrum; sample rate is assumed 48 kHz for
-  bin→Hz mapping (`fftSize = bins × 2`). Each output is a `float` in 0..1.
+  (0–1, default 0.92 — larger = slower fall), `sampleRate` (default 48000 — wire it from `microphone.macos`'s
+  `sampleRate` output so bin→Hz mapping is right on 44.1 kHz devices; `system-audio.macos` always
+  delivers 48 kHz, so the default already fits it). All read live; defaults
+  reproduce the built-in tuning. Smoothing is time-based (normalized to a 60 fps reference), so the
+  meter decays alike on 60 and 120 Hz displays.
+- **Contracts:** input `magnitudes` is the raw 1024-bin power spectrum (`fftSize = bins × 2`). Each
+  output is a `float` in 0..1.
 - **Gotchas:** the divisors are a reasonable default tuning, not calibrated SPL — use `sensitivity` to
   retune; with no spectrum the bands simply decay toward 0.

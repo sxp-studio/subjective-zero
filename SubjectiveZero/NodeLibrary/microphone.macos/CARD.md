@@ -20,9 +20,10 @@ frame). The **source** node of the composable audio pipeline: `microphone.macos`
   (`kAudioOutputUnitProperty_CurrentDevice`); an unplugged/absent selection falls back to the system
   default (an `AVAudioEngineConfigurationChange` observer reinstalls the tap on device drops). Read live.
 - **Hot-reload safe:** `teardown()` removes the tap and stops the engine **before** the module unloads.
-- **Output contract:** `samples` is exactly **2048** floats (a power-of-two FFT window); the sample rate is
-  assumed ~48 kHz (device native + synthetic). A downstream FFT node reads it with
-  `ctx.inputFloatArray("samples")`.
+- **Output contract:** `samples` is exactly **2048** floats (a power-of-two FFT window) at the device's
+  native rate; `sampleRate` emits that rate as a `float` (48 kHz for the synthetic fallback) — wire it
+  into `audio-bands`' `sampleRate` input so bin→Hz mapping stays honest on 44.1 kHz interfaces. A
+  downstream FFT node reads the window with `ctx.inputFloatArray("samples")`.
 - **Gotchas:** mono only (channel 0); fixed 2048-sample window (not yet a latency/FFT-size enum like the
   prior art). The `device` UID→CoreAudio-id match assumes `AVCaptureDevice.uniqueID` == the device UID
   (true on macOS); a mismatch degrades gracefully to the default input. `setPaused` follows the runtime's

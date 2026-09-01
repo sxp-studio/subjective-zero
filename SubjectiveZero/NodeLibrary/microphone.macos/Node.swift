@@ -15,8 +15,10 @@
 // so the whole pipeline still produces a non-zero spectrum without a real microphone. `teardown()` removes
 // the observer + tap and stops the engine BEFORE the loader dlcloses the dylib (the hot-reload hazard).
 //
-// Sample rate is assumed ~48 kHz. Capture + device-switch logic adapted from the original subjective
-// designer's SBMicInputNode / SBAudioManager, inlined and simplified into one node.
+// The tap runs at the device's native rate; the actual rate is emitted on the `sampleRate` output so
+// bin→Hz consumers (audio-bands) can map correctly on 44.1 kHz devices. Capture + device-switch logic
+// adapted from the original subjective designer's SBMicInputNode / SBAudioManager, inlined and
+// simplified into one node.
 @preconcurrency import AVFoundation
 import CoreAudio
 import AudioToolbox
@@ -28,7 +30,8 @@ final class Node: SZNode {
     private let engine = AVAudioEngine()
     private let ring = SampleRing(capacity: kFFTWindow * 2)
     private var running = false        // true once the real engine tap is live; false → synthetic fallback
-    private var clock = 0              // running sample index for the synthetic generator
+    private var syntheticWindow = [Float]()   // frozen fallback window, built once
+    private var captureRate = kSampleRate   // the live tap's actual device rate (synthetic stays 48 kHz)
 
     private var requestedDevice = "default"          // last-applied `device` selection value
     private var activeDeviceID: AudioDeviceID = 0     // CoreAudio id currently feeding the engine
@@ -80,6 +83,8 @@ final class Node: SZNode {
         let gain = ctx.inputFloat("gain") ?? 1   // live input-gain knob (boost a quiet mic)
         if gain != 1 { for i in frame.indices { frame[i] *= gain } }
         ctx.setOutputFloats("samples", frame)
+        // the device's real rate, so bin→Hz consumers stay honest on 44.1 kHz interfaces.
+        ctx.setOutputFloat("sampleRate", running ? captureRate : kSampleRate)
     }
 
     func teardown() {
@@ -138,6 +143,7 @@ final class Node: SZNode {
         Self.setInputDevice(input, deviceID)
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else { running = false; return }   // no input hardware → synthetic fallback
+        captureRate = Float(format.sampleRate)
         let ring = self.ring
         // AUDIO THREAD: copy channel 0 (mono) into the ring; no locks beyond the ring's, no allocations.
         input.installTap(onBus: 0, bufferSize: 512, format: format) { buffer, _ in
@@ -161,18 +167,21 @@ final class Node: SZNode {
     }
 
     /// Deterministic fallback signal (mix of sines at musical-ish bands) so headless / unauthorized runs
-    /// still drive a visible spectrum. Continuous across frames via `clock`.
+    /// still drive a visible spectrum. FROZEN — the identical window every frame — because a moving
+    /// phase makes low-bin FFT magnitudes wobble, which an onset detector reads as endless hits.
     private func synthesize(_ n: Int) -> [Float] {
-        let tones: [(hz: Float, amp: Float)] = [(80, 0.6), (220, 0.3), (880, 0.15), (3500, 0.08), (8000, 0.04)]
-        var out = [Float](repeating: 0, count: n)
-        for i in 0..<n {
-            let t = Float(clock + i) / kSampleRate
-            var s: Float = 0
-            for tone in tones { s += tone.amp * sinf(2 * .pi * tone.hz * t) }
-            out[i] = s
+        if syntheticWindow.count != n {
+            let tones: [(hz: Float, amp: Float)] = [(80, 0.6), (220, 0.3), (880, 0.15), (3500, 0.08), (8000, 0.04)]
+            var out = [Float](repeating: 0, count: n)
+            for i in 0..<n {
+                let t = Float(i) / kSampleRate
+                var s: Float = 0
+                for tone in tones { s += tone.amp * sinf(2 * .pi * tone.hz * t) }
+                out[i] = s
+            }
+            syntheticWindow = out
         }
-        clock &+= n
-        return out
+        return syntheticWindow
     }
 
     // MARK: CoreAudio helpers

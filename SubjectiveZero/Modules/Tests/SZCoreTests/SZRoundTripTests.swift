@@ -138,10 +138,11 @@ private func sampleProject() -> SZProject {
 }
 
 @Test func entitlementRawValuesRoundTrip() throws {
-    // Each SZEntitlement encodes as its lowercase name and decodes back. A contract carrying a
+    // Each SZEntitlement encodes as its raw-value name and decodes back. A contract carrying a
     // `microphone` permission survives the JSON the runtime broker pre-grants from.
     #expect(try JSONDecoder().decode(SZEntitlement.self, from: Data("\"camera\"".utf8)) == .camera)
     #expect(try JSONDecoder().decode(SZEntitlement.self, from: Data("\"microphone\"".utf8)) == .microphone)
+    #expect(try JSONDecoder().decode(SZEntitlement.self, from: Data("\"screenRecording\"".utf8)) == .screenRecording)
     #expect(String(decoding: try JSONEncoder().encode(SZEntitlement.microphone), as: UTF8.self) == "\"microphone\"")
 
     let contract = SZNodeContract(

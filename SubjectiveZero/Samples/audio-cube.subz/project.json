@@ -1,0 +1,205 @@
+{
+  "project": {
+    "name": "Audio Cube",
+    "author": "SXP Studio",
+    "viewport": {
+      "zoom": 1,
+      "translation": {
+        "x": 0,
+        "y": 0
+      },
+      "fps": 60,
+      "resolution": {
+        "width": 1280,
+        "height": 720
+      },
+      "pixelFormat": "bgra8Unorm"
+    },
+    "graph": {
+      "nodes": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "kind": "generated",
+          "title": "Music In",
+          "sfSymbol": "speaker.wave.3",
+          "position": {
+            "x": 60,
+            "y": 220
+          }
+        },
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "kind": "generated",
+          "title": "Spectrum",
+          "sfSymbol": "waveform.path.ecg",
+          "position": {
+            "x": 300,
+            "y": 220
+          }
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "kind": "generated",
+          "title": "Hit Detector",
+          "sfSymbol": "bolt.fill",
+          "position": {
+            "x": 540,
+            "y": 220
+          }
+        },
+        {
+          "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          "kind": "generated",
+          "title": "Kick Punch",
+          "sfSymbol": "waveform.path",
+          "position": {
+            "x": 780,
+            "y": 100
+          }
+        },
+        {
+          "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          "kind": "generated",
+          "title": "Snare Flash",
+          "sfSymbol": "waveform.path",
+          "position": {
+            "x": 780,
+            "y": 340
+          }
+        },
+        {
+          "id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+          "kind": "generated",
+          "title": "Cube",
+          "sfSymbol": "cube.fill",
+          "position": {
+            "x": 1020,
+            "y": 160
+          }
+        },
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "kind": "generated",
+          "title": "Backdrop",
+          "sfSymbol": "square.righthalf.filled",
+          "position": {
+            "x": 1020,
+            "y": 420
+          }
+        },
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "kind": "generated",
+          "title": "Composite",
+          "sfSymbol": "square.stack.3d.down.right",
+          "position": {
+            "x": 1260,
+            "y": 220
+          }
+        }
+      ],
+      "connections": [
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccc00",
+          "from": {
+            "node": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "port": "samples"
+          },
+          "to": {
+            "node": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "port": "samples"
+          },
+          "kind": "data"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccc01",
+          "from": {
+            "node": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "port": "magnitudes"
+          },
+          "to": {
+            "node": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "port": "magnitudes"
+          },
+          "kind": "data"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccc02",
+          "from": {
+            "node": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "port": "kick"
+          },
+          "to": {
+            "node": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            "port": "trigger"
+          },
+          "kind": "data"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccc03",
+          "from": {
+            "node": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "port": "snare"
+          },
+          "to": {
+            "node": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            "port": "trigger"
+          },
+          "kind": "data"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccc04",
+          "from": {
+            "node": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            "port": "value"
+          },
+          "to": {
+            "node": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+            "port": "punch"
+          },
+          "kind": "data"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccc05",
+          "from": {
+            "node": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            "port": "value"
+          },
+          "to": {
+            "node": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+            "port": "flash"
+          },
+          "kind": "data"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccc06",
+          "from": {
+            "node": "11111111-1111-4111-8111-111111111111",
+            "port": "output"
+          },
+          "to": {
+            "node": "22222222-2222-4222-8222-222222222222",
+            "port": "base"
+          },
+          "kind": "data"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccc07",
+          "from": {
+            "node": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+            "port": "output"
+          },
+          "to": {
+            "node": "22222222-2222-4222-8222-222222222222",
+            "port": "blend"
+          },
+          "kind": "data"
+        }
+      ],
+      "renderEndpoint": {
+        "node": "22222222-2222-4222-8222-222222222222",
+        "port": "output"
+      }
+    }
+  }
+}

@@ -282,7 +282,7 @@ rejects it (`{ok:false, errors}`) — it is never silently dropped.
   "summary": "One line describing what the node does.",
   "inputs":  [ <port>, ... ],
   "outputs": [ <port>, ... ],
-  "permissions": [ "camera" ],       // optional; omit if none. Valid values: "camera", "microphone".
+  "permissions": [ "camera" ],       // optional; omit if none. Valid values: "camera", "microphone", "screenRecording".
   "card": { "cols": 12, "rows": 8, "backdrop": "output" }   // optional; ONLY if the node ships a Card.swift
 }
 ```

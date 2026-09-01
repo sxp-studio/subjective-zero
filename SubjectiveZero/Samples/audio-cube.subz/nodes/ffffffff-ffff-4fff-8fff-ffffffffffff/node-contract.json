@@ -1,0 +1,84 @@
+{
+  "title": "Cube",
+  "sfSymbol": "cube.fill",
+  "summary": "A spinning 3D cube on black, sized, punched and colored live, made for beat-driven visuals over a gradient or camera layer.",
+  "inputs": [
+    {
+      "name": "spin",
+      "type": "float",
+      "ui": {
+        "kind": "slider",
+        "min": -2,
+        "max": 2,
+        "step": 0.01
+      },
+      "default": {
+        "type": "float",
+        "value": 0.25
+      }
+    },
+    {
+      "name": "size",
+      "type": "float",
+      "ui": {
+        "kind": "slider",
+        "min": 0.1,
+        "max": 1.5,
+        "step": 0.01
+      },
+      "default": {
+        "type": "float",
+        "value": 0.55
+      }
+    },
+    {
+      "name": "punch",
+      "type": "float",
+      "ui": {
+        "kind": "slider",
+        "min": 0,
+        "max": 2,
+        "step": 0.01
+      },
+      "default": {
+        "type": "float",
+        "value": 0
+      }
+    },
+    {
+      "name": "flash",
+      "type": "float",
+      "ui": {
+        "kind": "slider",
+        "min": 0,
+        "max": 2,
+        "step": 0.01
+      },
+      "default": {
+        "type": "float",
+        "value": 0
+      }
+    },
+    {
+      "name": "hue",
+      "type": "float",
+      "ui": {
+        "kind": "slider",
+        "min": 0,
+        "max": 1,
+        "step": 0.01
+      },
+      "default": {
+        "type": "float",
+        "value": 0.62
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output",
+      "type": "texture",
+      "display": true
+    }
+  ]
+}

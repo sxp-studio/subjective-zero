@@ -31,6 +31,21 @@
       "reuse": "copy-as-is"
     },
     {
+      "id": "audio-onset",
+      "tags": [
+        "audio",
+        "onset",
+        "beat",
+        "trigger",
+        "analysis"
+      ],
+      "purpose": "Finds musical hits in an FFT power spectrum by spectral flux: one-frame 1.0 pulses on kick/snare/hats/onset plus a continuous flux level.",
+      "platform": "any",
+      "useWhen": "Something should POP on the beat. Feed audio-fft's magnitudes in, wire the pulses into impulse-envelope, and drive visual parameters with the envelope — events read as hits where band levels only wobble.",
+      "avoidWhen": "You want continuous loudness/spectrum motion (use audio-bands), or true tempo/BPM tracking — this fires on energy jumps, it does not track a beat grid.",
+      "reuse": "copy-as-is"
+    },
+    {
       "id": "blend",
       "tags": [
         "compositor",
@@ -234,6 +249,21 @@
       "reuse": "copy-as-is"
     },
     {
+      "id": "impulse-envelope",
+      "tags": [
+        "control",
+        "envelope",
+        "trigger",
+        "animation",
+        "audio"
+      ],
+      "purpose": "Shapes a trigger pulse into an attack/decay envelope in seconds — the pop-on-the-beat curve between a hit detector and a visual parameter.",
+      "platform": "any",
+      "useWhen": "A pulse source (audio-onset, a MIDI pad, an OSC button) should punch a float input: wire the pulse into trigger and the value output into the parameter.",
+      "avoidWhen": "You want continuous level-following rather than one-shot hits (use audio-bands), or looping motion (drive the parameter from ctx.time in the target node).",
+      "reuse": "copy-as-is"
+    },
+    {
       "id": "microphone.macos",
       "tags": [
         "source",
@@ -329,6 +359,22 @@
       "platform": "any",
       "useWhen": "You need a saturation control, or a grayscale/desaturate pass (set amount 0).",
       "avoidWhen": "You need hue rotation or selective per-color saturation.",
+      "reuse": "copy-as-is"
+    },
+    {
+      "id": "system-audio.macos",
+      "tags": [
+        "source",
+        "audio",
+        "system",
+        "capture",
+        "music",
+        "macos"
+      ],
+      "purpose": "Captures what the Mac is playing (whole mix or one app) via ScreenCaptureKit as a 2048-sample mono PCM window, with a synthetic fallback when Screen Recording is not authorized.",
+      "platform": "macos",
+      "useWhen": "Visuals should react to music playing on this Mac (a browser, a music app): the clean source for an audio pipeline — no room reverb or mic smear. Feed `samples` into audio-fft; pick one app on the source dropdown if the mix is noisy.",
+      "avoidWhen": "You need room/live audio through a physical input (use microphone.macos), or the app cannot be granted Screen Recording access.",
       "reuse": "copy-as-is"
     },
     {
