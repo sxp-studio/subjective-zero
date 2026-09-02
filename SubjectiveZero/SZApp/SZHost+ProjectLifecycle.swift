@@ -47,7 +47,7 @@ extension SZHost {
     // MARK: - Launch chain
 
     /// The launch project: `SZ_PROJECT` env (dev override — never recorded in history) → the last
-    /// user-opened project if it still exists → a fresh first-launch copy of the bundled sample.
+    /// user-opened project if it still exists → a fresh empty untitled project.
     /// Each link falls through to the next on failure (a stale path silently, a corrupt project
     /// with an alert), so testers never boot into a dead app.
     func openInitialProject(preferred: URL? = nil) async {
@@ -74,7 +74,7 @@ extension SZHost {
                 print("[SZHost] SZ_PROJECT open failed (falling back): \(error)")
             }
         }
-        // Whether the fresh-sample fallback below should become the remembered reopen target. Off
+        // Whether the fresh-project fallback below should become the remembered reopen target. Off
         // only when the remembered project is healthy but locked by another instance — then we boot
         // a throwaway untitled here WITHOUT overwriting the shared `openProjectPath`.
         var recordFallbackInHistory = true
@@ -92,33 +92,30 @@ extension SZHost {
                 recordFallbackInHistory = false
             } catch {
                 presentProjectError("Couldn't reopen “\((path as NSString).lastPathComponent)”", error)
-                // Unloadable — forget it so the next launch goes straight to the sample.
+                // Unloadable — forget it so the next launch goes straight to a fresh project.
                 lastOpenProjectPath = nil
                 persistAppState()
             }
         } else if lastOpenProjectPath != nil {
-            // Stale path — forget it so the next launch goes straight to the sample.
+            // Stale path — forget it so the next launch goes straight to a fresh project.
             lastOpenProjectPath = nil
             persistAppState()
         }
         do {
-            try await switchProject(to: try makeFreshSampleProject(), recordInHistory: recordFallbackInHistory)
+            try await switchProject(to: try makeFreshUntitledProject(), recordInHistory: recordFallbackInHistory)
         } catch {
             status = "load failed: \(error)"
-            print("[SZHost] first-launch sample failed: \(error)")
-            presentProjectError("Couldn't create the starter project", error)
+            print("[SZHost] first-launch project failed: \(error)")
+            presentProjectError("Couldn't create a new project", error)
         }
     }
 
-    /// First-launch (and recovery) content: copy the bundled sample into a fresh untitled-project
-    /// directory. The copy is the user's to mutate; the bundled resource stays pristine.
-    private func makeFreshSampleProject() throws -> URL {
-        guard let bundled = Bundle.main.url(forResource: "grayscale-camera", withExtension: "subz") else {
-            throw SZProjectLifecycleError.sampleMissing
-        }
-        let dest = try SZUntitledProjects.newProjectDirectory().appending(path: "Grayscale Camera.subz")
-        try FileManager.default.copyItem(at: bundled, to: dest)
-        return dest
+    /// First-launch (and recovery) content: a fresh empty untitled project, the same one File ▸ New
+    /// makes. Nothing is bundled, and nothing asks for a permission until the user builds something.
+    private func makeFreshUntitledProject() throws -> URL {
+        let url = try SZUntitledProjects.newProjectDirectory().appending(path: "Untitled.subz")
+        try SZProjectIO.save(SZProject(name: "Untitled"), to: url)
+        return url
     }
 
     // MARK: - File menu flows
@@ -130,9 +127,7 @@ extension SZHost {
         guard !isBusyForProjectSwitch else { return }
         Task { @MainActor in
             do {
-                let url = try SZUntitledProjects.newProjectDirectory().appending(path: "Untitled.subz")
-                try SZProjectIO.save(SZProject(name: "Untitled"), to: url)
-                try await switchProject(to: url)
+                try await switchProject(to: try makeFreshUntitledProject())
             } catch {
                 presentProjectError("Couldn't create a new project", error)
             }
@@ -385,7 +380,6 @@ extension SZHost {
 
 /// Lifecycle-specific failures (the ones with no underlying thrown error to show).
 enum SZProjectLifecycleError: LocalizedError {
-    case sampleMissing
     case notAProject
     case projectMissing
     case alreadyOpenElsewhere
@@ -393,7 +387,6 @@ enum SZProjectLifecycleError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .sampleMissing: "The bundled sample project is missing from the app's resources."
         case .notAProject: "Choose a folder with the .subz extension."
         case .projectMissing: "It may have been moved or deleted. It was removed from Open Recent."
         case .alreadyOpenElsewhere: "This project is already open in another SubjectiveZero instance."

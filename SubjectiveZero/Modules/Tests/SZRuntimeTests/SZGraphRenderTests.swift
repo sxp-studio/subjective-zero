@@ -18,9 +18,7 @@ private var sampleURL: URL {
     URL(filePath: #filePath)
         .deletingLastPathComponent()   // SZRuntimeTests
         .deletingLastPathComponent()   // Tests
-        .deletingLastPathComponent()   // Modules
-        .deletingLastPathComponent()   // SubjectiveZero (umbrella root)
-        .appending(path: "Samples/grayscale-camera.subz")
+        .appending(path: "Fixtures/Projects/grayscale-camera.subz")
 }
 
 /// A stub source node: clears its output texture to a fixed color (so the grayscale node has a known

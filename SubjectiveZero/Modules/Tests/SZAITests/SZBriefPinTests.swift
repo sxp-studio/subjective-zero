@@ -29,13 +29,11 @@ private let shippedPacksRoot = testsDir
     .deletingLastPathComponent()   // Modules
     .appending(path: "Sources/SZAI/Resources/Agents")
 
-/// The sample's camera contract, read from the committed .subz exactly as the recorder does.
+/// The fixture project's camera contract, read from the committed .subz exactly as the recorder does.
 private let cameraContract: SZNodeContract = {
     let url = testsDir
         .deletingLastPathComponent()   // Tests
-        .deletingLastPathComponent()   // Modules
-        .deletingLastPathComponent()   // SubjectiveZero
-        .appending(path: "Samples/grayscale-prompt.subz/nodes/\(cameraID.uuidString)/node-contract.json")
+        .appending(path: "Fixtures/Projects/grayscale-prompt.subz/nodes/\(cameraID.uuidString)/node-contract.json")
     guard let data = try? Data(contentsOf: url),
           let contract = try? JSONDecoder().decode(SZNodeContract.self, from: data) else {
         fatalError("brief pins: cannot read the sample camera contract at \(url.path)")

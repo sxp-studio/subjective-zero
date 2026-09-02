@@ -6,16 +6,13 @@ import Foundation
 import Testing
 @testable import SZCore
 
-/// The checked-in sample, located relative to this test source (robust to the test's working directory).
-/// `#filePath` = …/SubjectiveZero/Modules/Tests/SZCoreTests/SZSampleLoadTests.swift → up 4 → umbrella root → Samples/….
-private var sampleURL: URL {
-    URL(filePath: #filePath)
-        .deletingLastPathComponent()   // SZCoreTests
-        .deletingLastPathComponent()   // Tests
-        .deletingLastPathComponent()   // Modules
-        .deletingLastPathComponent()   // SubjectiveZero (umbrella root)
-        .appending(path: "Samples/grayscale-camera.subz")
-}
+/// The checked-in fixture projects, located relative to this test source (robust to the test's working
+/// directory). `#filePath` = …/Modules/Tests/SZCoreTests/SZSampleLoadTests.swift → up 2 → Tests → Fixtures/Projects.
+private let fixtureProjects = URL(filePath: #filePath)
+    .deletingLastPathComponent()   // SZCoreTests
+    .deletingLastPathComponent()   // Tests
+    .appending(path: "Fixtures/Projects")
+private var sampleURL: URL { fixtureProjects.appending(path: "grayscale-camera.subz") }
 
 @Test func sampleLoadsFromDisk() throws {
     let project = try SZProjectIO.load(from: sampleURL)
@@ -49,12 +46,7 @@ private var sampleURL: URL {
 /// orchestrator dispatches a coding agent for each. The camera node keeps its `node-contract.json` (so
 /// the `camera` permission is still declared + granted at load), but it has no `Node.swift` — the
 /// camera is produced by an agent reusing `NodeLibrary/camera.macos`, not copied into the fixture.
-private var promptSampleURL: URL {
-    URL(filePath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .appending(path: "Samples/grayscale-prompt.subz")
-}
+private var promptSampleURL: URL { fixtureProjects.appending(path: "grayscale-prompt.subz") }
 
 @Test func promptFixtureShipsNoNodeSource() throws {
     let project = try SZProjectIO.load(from: promptSampleURL)
@@ -76,12 +68,7 @@ private var promptSampleURL: URL {
 }
 
 /// The music-reactive sample: system audio → fft → onset → two impulses → cube over a gradient.
-private var audioCubeURL: URL {
-    URL(filePath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .appending(path: "Samples/audio-cube.subz")
-}
+private var audioCubeURL: URL { fixtureProjects.appending(path: "audio-cube.subz") }
 
 @Test func audioCubeSampleLoadsFromDisk() throws {
     let project = try SZProjectIO.load(from: audioCubeURL)
@@ -107,7 +94,11 @@ private var audioCubeURL: URL {
         "11111111-1111-4111-8111-111111111111": "gradient",
         "22222222-2222-4222-8222-222222222222": "blend",
     ]
-    let libraryRoot = audioCubeURL.deletingLastPathComponent().deletingLastPathComponent()
+    let libraryRoot = fixtureProjects
+        .deletingLastPathComponent()   // Fixtures
+        .deletingLastPathComponent()   // Tests
+        .deletingLastPathComponent()   // Modules
+        .deletingLastPathComponent()   // SubjectiveZero (umbrella root)
         .appending(path: "NodeLibrary")
     for node in project.graph.nodes {
         let src = SZProjectIO.nodeSourceURL(projectURL: audioCubeURL, nodeID: node.id)

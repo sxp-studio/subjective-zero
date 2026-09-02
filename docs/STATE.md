@@ -79,7 +79,7 @@ optional and unknown raw values degrade to defaults at read, so any older file d
 `windowSize`/`theme` remain dormant placeholders.
 
 **Project lifecycle.** The launch chain is `SZ_PROJECT` env (dev override - never recorded in
-history) → `openProjectPath` if it still loads → a fresh copy of the bundled sample into the
+history) → `openProjectPath` if it still loads → a fresh empty untitled project in the
 **untitled projects' home**: `~/Library/Application Support/SubjectiveZero/Projects/<uuid>/
 <Name>.subz` (`SZUntitledProjects` - not "workspace"/"temp": these projects persist, they're
 merely unplaced). "Untitled" is derived - a project is untitled iff its URL is under that

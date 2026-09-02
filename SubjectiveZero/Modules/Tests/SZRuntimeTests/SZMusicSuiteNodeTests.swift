@@ -31,10 +31,10 @@ private func copyLibrarySource(_ id: String, to url: URL) throws {
     try FileManager.default.copyItem(at: libraryRoot.appending(path: id).appending(path: "Node.swift"), to: url)
 }
 
-/// The cube is demo-only — it ships inside the audio-cube sample, not the library.
+/// The cube is demo-only — it lives in the audio-cube fixture project, not the library.
 private var cubeSampleDir: URL {
     libraryRoot.deletingLastPathComponent()
-        .appending(path: "Samples/audio-cube.subz/nodes/ffffffff-ffff-4fff-8fff-ffffffffffff")
+        .appending(path: "Modules/Tests/Fixtures/Projects/audio-cube.subz/nodes/ffffffff-ffff-4fff-8fff-ffffffffffff")
 }
 
 private func cubeContract() throws -> SZNodeContract {

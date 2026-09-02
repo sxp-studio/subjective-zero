@@ -555,7 +555,7 @@ final class SZHost {
 
     /// The `SZ_PROJECT` env override — the dev recipe (`launchctl setenv SZ_PROJECT … && open -n`,
     /// GRAPH_AND_NODES.md). nil when unset; the launch chain then falls to the last open project,
-    /// else a first-launch copy of the bundled sample (`openInitialProject`, SZHost+
+    /// else a fresh empty untitled project (`openInitialProject`, SZHost+
     /// ProjectLifecycle.swift). An env-opened project is deliberately NEVER recorded in
     /// `openProjectPath`/recents — a debug launch must not clobber the user's history.
     static var envProjectURL: URL? {
@@ -577,7 +577,7 @@ final class SZHost {
     }
 
     /// Instantiate the runtime, vend the viewport render closure, open the launch project (env
-    /// override → last open → first-launch sample copy; SZHost+ProjectLifecycle.swift), and start
+    /// override → last open → fresh untitled project; SZHost+ProjectLifecycle.swift), and start
     /// the app-level services. Loading is delegated to `switchProject` — launch is just the first
     /// switch.
     func start(openingIfLaunchedWithFile launchFileURL: URL? = nil) async {
@@ -628,9 +628,6 @@ final class SZHost {
         // host with no MCP server, so every restored ask answered `.waiting` and nothing was
         // left to wake it.
         pumpMailboxes()
-        #if DEBUG
-        verifyGrayscale()
-        #endif
         // Independent of project load (a dead project must not hide a dead provider):
         // one cheap health pass, then first-run auto-present (SZHost+ProviderHealth.swift).
         checkProviderSetupOnLaunch()
@@ -683,7 +680,7 @@ final class SZHost {
         // 1. Validate first — a corrupt bundle must fail before the old project is touched. A
         //    persisted data cycle (a hand edit, an external writer) is repaired here — newest
         //    cycle-closing edges dropped — rather than left to throw out of the scheduler below,
-        //    which used to forget the project and boot the sample. Saved back to disk in step 4.
+        //    which used to forget the project and boot a fresh one. Saved back to disk in step 4.
         var project = try SZProjectIO.load(from: newURL)
         let repairedEdges = project.graph.repairDataCycles()
         // 2. Suspend the pump BEFORE the awaits, not after. The window below is now a whole project's
@@ -863,8 +860,8 @@ final class SZHost {
     /// so they mustn't fire on the delete), nils the loaded URL so the terminate-time flush can't
     /// resurrect the folder, then deletes its `Projects/<uuid>/` home and prunes its recents/session
     /// entries. The quit/close callers terminate right after; the Home caller doesn't, and there the
-    /// now-stale `store.project` is replaced by `continueFromWelcome`, which opens the last/sample
-    /// project precisely because the url is nil.
+    /// now-stale `store.project` is replaced by `continueFromWelcome`, which opens the last (or a
+    /// fresh) project precisely because the url is nil.
     func discardUntitledProject() {
         guard isUntitledProject, let url = loadedProjectURL else { return }
         cancelActiveTake()   // the writer's file dies with the project's home; release it first
@@ -1845,26 +1842,4 @@ final class SZHost {
         return line.trimmingCharacters(in: .whitespaces)
     }
 
-    #if DEBUG
-    /// In-app frame-capture self-check (the readback behind `agent_view_frame`): after the camera warms up, read back a frame and confirm
-    /// it's a plausible grayscale (R≈G≈B per pixel) and not uniform (the live camera produced content).
-    /// Logs the result so a run with camera access confirms the end-to-end path; harmless without it.
-    /// Debug-only, and log-only: it must never write `status`, which belongs to the user's own graph —
-    /// it assumes the grayscale sample is loaded, so its verdict is meaningless for any other project.
-    private func verifyGrayscale() {
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2))   // camera warmup
-            guard let frame = runtime?.captureFrame() else { return }
-            var grayscale = true
-            var values: [Int] = []
-            for (x, y) in [(8, 8), (frame.width / 2, frame.height / 2), (frame.width - 8, frame.height - 8)] {
-                guard let p = frame.pixel(x: x, y: y) else { continue }
-                if abs(Int(p.r) - Int(p.g)) > 2 || abs(Int(p.g) - Int(p.b)) > 2 { grayscale = false }
-                values.append(Int(p.r))
-            }
-            let varied = Set(values).count > 1
-            print("[SZHost] frame self-check — grayscale: \(grayscale), live(non-uniform): \(varied), samples: \(values)")
-        }
-    }
-    #endif
 }

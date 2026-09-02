@@ -21,11 +21,11 @@ xcuserdata/
 .staging/
 runtime-loads/
 
-# Chat transcript sidecars + attachment copies written into the TRACKED sample bundles at runtime —
-# user-session noise, not sample content. Deliberately Samples-scoped: in a real shared project these
+# Chat transcript sidecars + attachment copies written into the TRACKED fixture projects at runtime —
+# user-session noise, not fixture content. Deliberately fixture-scoped: in a real shared project these
 # dirs are meant to travel (they're the project's durable narrative).
-SubjectiveZero/Samples/*.subz/transcripts/
-SubjectiveZero/Samples/*.subz/attachments/
+SubjectiveZero/Modules/Tests/Fixtures/Projects/*.subz/transcripts/
+SubjectiveZero/Modules/Tests/Fixtures/Projects/*.subz/attachments/
 
 # Telemetry API key — real config never in the repo (JellystatConfig.example.json is the template);
 # absent file = telemetry fully off.

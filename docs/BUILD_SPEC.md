@@ -312,12 +312,13 @@ library/                  static node library (NODE_LIBRARY.md)
   index.json
   camera.macos/  { CARD.md, node-contract.json, Node.swift }
 
-samples/                  debug-only project fixtures (loaded from disk, not in-code)
-  grayscale-camera.subz/  project.json + nodes/<id>/{node-contract.json, Node.swift}   (the canonical demo)
+Modules/Tests/Fixtures/Projects/   test-only project fixtures (read from disk by the tests, never bundled)
+  grayscale-camera.subz/  project.json + nodes/<id>/{node-contract.json, Node.swift}
 ```
 
-The `samples/grayscale-camera.subz/` fixture (added at M2) is the canonical instance of the on-disk
-project layout - load/save must round-trip it byte-stably (modulo formatting), and it doubles as the
-reusable load → compile → render fixture for the closed-loop harness.
+The `grayscale-camera.subz` fixture is the canonical instance of the on-disk project layout - load/save
+must round-trip it byte-stably (modulo formatting), and it doubles as the reusable load → compile → render
+fixture for the headless render tests. The app bundles no sample project: a first launch opens an empty
+untitled project.
 
 Exact Metal/library contents grow per milestone.

@@ -40,13 +40,13 @@ extension SZHost {
     }
 
     /// Leave the home screen for the workspace (Esc / the window's implicit "continue"). If launch
-    /// routed here, no project is loaded yet — open the last (or a fresh sample) one NOW; that
-    /// `switchProject` is what finally requests the camera, on the user's action rather than at launch.
+    /// routed here, no project is loaded yet — open the last (or a fresh untitled) one NOW. A project
+    /// that needs the camera asks for it only once it is open, on the user's action rather than at launch.
     /// If a project is already live (manual reopen via Help ▸ Welcome), just hide.
     func continueFromWelcome() {
         guard welcomePresented else { return }
         // `loadedProjectURL == nil` covers both a launch with nothing opened yet AND an untitled
-        // project just Discarded on the way to Home — in either case open the last/sample project.
+        // project just Discarded on the way to Home — in either case open the last (or a fresh) project.
         if loadedProjectURL == nil {
             Task { await openInitialProject() }   // switchProject dismisses welcome on success
         } else {
