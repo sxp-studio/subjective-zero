@@ -3,7 +3,8 @@
 // (no API key on the argv — muse owns auth via `muse auth set --api-key-stdin` / `muse login`,
 // credentials in its own config-dir auth.json). All facts below measured against Muse Code 0.1.0
 // (0.1.0-R708.1), 2026-08-07 — the CLI shipped 2026-08-05 and its portal docs are account-gated,
-// so nothing here is taken from documentation. Distinct from the other providers in:
+// so nothing here is taken from documentation — and the model list re-measured against 1.0.1
+// (1.0.1-R2006.1) on 2026-09-03. Distinct from the other providers in:
 //
 //  1. STAGED CONFIG HOME. muse reads MCP servers from `<config>/muse/settings.json` — there is no
 //     per-invocation MCP flag, and the settings file also carries the user's own servers/defaults.
@@ -42,22 +43,28 @@ public struct SZMuseCodeProvider: SZProvider {
 
     public let id = Self.providerID
     public let displayName = "Muse Code"
-    /// The one served model. There is no enumeration command in 0.1.0 (`muse --help` offers only
-    /// `--model <MODEL>`); the id was read back from a live run's `run.model.configured` event
-    /// (`model_id: "muse-spark-1.2"`, the CLI's own startup default) and a turn on it completes
-    /// clean. Press coverage names a discounted data-sharing "-contributor" variant as a model id —
-    /// measured FALSE on 0.1.0: `--model muse-spark-1.2-contributor` is refused ("model
-    /// `muse-spark-1.2-contributor` is not in the catalog"), so the Contributor tier is an
-    /// account-level portal setting, not a CLI-selectable model, and there is nothing to list.
+    /// Pinned ids, newest first. Still no enumeration command in 1.0.1 (`--model <MODEL>` only),
+    /// so each id was read back from a live run's `run.model.configured` and completed a turn
+    /// (2026-09-03): `muse-spark-1.3` (shipped 2026-09-02), `muse-spark-1.3-contributor`,
+    /// `muse-spark-1.2`.
+    ///
+    /// The Contributor tier became a model id in 1.0.1 (0.1.0 refused `-contributor` ids as "not
+    /// in the catalog"), and it is what a run without `--model` configures on this account. Meta's
+    /// docs: heavily discounted, prompts and outputs may be used to improve Meta's products. So
+    /// argv always carries `--model`, the default is the standard id, and Contributor is listed
+    /// under its own name — data sharing is a visible choice, never the CLI's silent default.
     public let models = [
+        SZProviderModel(id: "muse-spark-1.3", displayName: "Muse Spark 1.3"),
+        SZProviderModel(id: "muse-spark-1.3-contributor", displayName: "Muse Spark 1.3 Contributor"),
         SZProviderModel(id: "muse-spark-1.2", displayName: "Muse Spark 1.2"),
     ]
-    public let defaultModel = "muse-spark-1.2"
+    public let defaultModel = "muse-spark-1.3"
     /// The CLI's own default (its `--help` prints "default: high").
     public let defaultReasoningEffort = "high"
     /// Recorded from 0.1.0's own rejection of a bad value: "--reasoning-effort none is not
     /// supported with --provider meta; choose minimal|low|medium|high|xhigh|ultra" (`none` exists
-    /// only for the offline echo provider). Provider-wide — one model, one menu.
+    /// only for the offline echo provider). Re-measured 1.0.1: `--help` now lists `none`, the meta
+    /// provider still refuses it; `ultra` completes on 1.3. Provider-wide menu.
     public let supportedReasoningEfforts = ["minimal", "low", "medium", "high", "xhigh", "ultra"]
     public let supportsFastMode = false   // no fast-mode concept in this CLI's argv
     public let healthArgs = ["muse", "--version"]

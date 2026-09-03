@@ -231,18 +231,22 @@ extension SZHost {
     }
 
     /// Re-fetch a dynamic provider's model catalog when its cheap status just transitioned to
-    /// ready (login/install landing is exactly when the served catalog changes), when it's ready
-    /// but serving nothing (first launch, or a fetch that failed), or when the snapshot is a day
-    /// old. Static-manifest providers no-op (their `refreshModelCatalog` returns nil, no spawn).
-    /// A failed fetch keeps the last-known catalog — never clobber cache with a failure; the poll
-    /// loop retries while the sheet is open, the next launch/transition retries after that.
+    /// ready (login/install landing is exactly when the served catalog changes), when no snapshot
+    /// has ever been persisted (first launch, or every fetch so far failed — codex serves a
+    /// built-in list meanwhile, so "serves nothing" is no longer the signal), or when the snapshot
+    /// is a day old. Static-manifest providers no-op (their `refreshModelCatalog` returns nil, no
+    /// spawn). A failed fetch keeps the last-known catalog — never clobber cache with a failure —
+    /// and is retried a minute later, not on every 3s poll tick (codex's fetch is a network call).
     func refreshProviderModelCatalogIfNeeded(_ id: String, transitioned: Bool) {
         guard let provider = SZProviderRegistry.shared.provider(id: id),
               !catalogRefreshesInFlight.contains(id) else { return }
         let staleAfter: TimeInterval = 24 * 3600
-        let stale = providerModelCatalogs[id].map { Date().timeIntervalSince($0.fetchedAt) > staleAfter } ?? false
-        guard transitioned || stale || provider.models.isEmpty else { return }
+        let retryAfter: TimeInterval = 60
+        let stale = providerModelCatalogs[id].map { Date().timeIntervalSince($0.fetchedAt) > staleAfter } ?? true
+        let coolingDown = catalogRefreshAttemptedAt[id].map { Date().timeIntervalSince($0) < retryAfter } ?? false
+        guard transitioned || ((stale || provider.models.isEmpty) && !coolingDown) else { return }
         catalogRefreshesInFlight.insert(id)
+        catalogRefreshAttemptedAt[id] = Date()
         Task { @MainActor in
             defer { catalogRefreshesInFlight.remove(id) }
             guard let snapshot = try? await provider.refreshModelCatalog(runner: SZSystemProcessRunner())

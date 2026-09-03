@@ -99,7 +99,7 @@ private let opencodeAuthLoggedOut = SZProcessResult(
     output: "Credentials ~/.local/share/opencode/auth.json\n\n0 credentials")
 private let opencodeMissing = SZProcessResult(
     exitCode: 127, output: "env: opencode: No such file or directory")
-private let museVersionOK = SZProcessResult(exitCode: 0, output: "Muse Code 0.1.0 (0.1.0-R708.1)")
+private let museVersionOK = SZProcessResult(exitCode: 0, output: "Muse Code 1.0.1 (1.0.1-R2006.1)")
 // A credential-less `muse exec` fails FAST with exit 1 before any network turn — the marker path
 // classifies it. (muse 0.1.0 has no token-free auth status command, so this only ever runs as the
 // tier-3 probe; the cheap pass reports "auth not checked".)
@@ -155,7 +155,7 @@ private let museMissing = SZProcessResult(
         .init(argvPrefix: ["muse", "--version"], result: museVersionOK),
     ]))
     #expect(muse.status == .ready)
-    #expect(muse.version == "Muse Code 0.1.0 (0.1.0-R708.1)")
+    #expect(muse.version == "Muse Code 1.0.1 (1.0.1-R2006.1)")
     #expect(muse.message.contains("auth not checked"))
     #expect(muse.diagnostics.map(\.tier) == [.install])   // no auth tier ran
 }

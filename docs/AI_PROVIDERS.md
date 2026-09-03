@@ -51,15 +51,17 @@ protocol SZProvider {
   model, not the provider default.
 - **muse** - CLI only (Meta's Muse Code, `muse`; added 2026-08, verified against 0.1.0-R708.1 —
   the beta released 2026-08-05, whose portal docs are account-gated, so every CLI-integration fact
-  is live-measured). Static single-model manifest (`muse-spark-1.2`, the id read back from a live
-  run's `run.model.configured` event; no enumeration command exists). Auth is `muse auth set
+  is live-measured; model list re-measured against 1.0.1-R2006.1 on 2026-09-03). Static manifest
+  (`muse-spark-1.3` default, `muse-spark-1.3-contributor`, `muse-spark-1.2`; each id read back from
+  a live run's `run.model.configured` event; no enumeration command exists). Auth is `muse auth set
   --api-key-stdin` (Meta developer account API key) or the `muse login` device flow. Distinct in
   its MCP attachment: a per-scope STAGED CONFIG HOME (`XDG_CONFIG_HOME` → a throwaway dot-dir in
   the agent's working directory, with settings.json naming an nc bridge script and an auth.json
   symlink into the user's real store) — no per-invocation MCP flag. CAUTION for users: the model
-  is metered, and Meta's launch coverage describes a data-sharing "Contributor" tier (unverified
-  here beyond the measured negative that no `…-contributor` model id is CLI-selectable, 0.1.0);
-  see APP_SETUP.md.
+  is metered, and the data-sharing "Contributor" tier is a model id: on 1.0.1 a run without
+  `--model` configures `muse-spark-1.3-contributor` (measured on one account, 2026-09-03), so the
+  app always passes an explicit `--model`, defaults to the standard id, and lists the Contributor
+  id under its own name; see APP_SETUP.md.
 
 For each, we wrap and surface to the UI:
 
@@ -70,28 +72,39 @@ For each, we wrap and surface to the UI:
 
 ### The capability manifest
 
-Each provider's Swift constants are its manifest. Facts are measured against the installed
-CLI, never inferred; a model id joins the list only once the manifest carries it AND a live
+Each provider's Swift constants are its manifest (for claude and muse the whole truth; for codex
+the built-in snapshot the runtime catalog starts from). Facts are measured against the installed
+CLI, never inferred; a model id joins the list only once the CLI's manifest carries it AND a live
 launch returns clean (GPT-5.6 Sol shipped announced-but-ungated for a window, 400ing every
-turn — a failure no in-process test can see).
+turn — a failure no in-process test can see; the CLI had no metadata for it then, which is why
+codex's manifest is a fair first gate). The in-app live gate is the setup sheet's Test probe and
+the run's own failure path; composer, routing, and MCP picks are not probed.
 
 - **`models`** — pinned version ids with display labels (`"claude-opus-4-8"` → "Opus 4.8"),
-  never floating aliases, so a label can't silently re-point. New models ship via app
-  updates; a type-any-model override stays deferred. grok's two ids come from the CLI's own
-  `grok models` enumeration (`grok-build` is unversioned; no versioned alternative exists).
+  never floating aliases, so a label can't silently re-point. claude (eight ids at 2.1.259,
+  Fable 5.1 first) and muse ship new models via app updates; a type-any-model override stays
+  deferred. codex reads its list from the CLI's own manifest (`codex debug models`, see
+  Capability discovery): visible rows in priority order, retiring rows (`upgrade`) kept under a
+  "(retiring)" label until the vendor hides them.
+  grok's ids come from `grok models` (`grok-build` is unversioned; no versioned alternative
+  exists).
 - **`supportedReasoningEfforts`** — `[]` means no effort menu (no CLI effort concept, or
-  per-model menus only). claude: low/medium/high/xhigh/max, uniform across its seven models
-  (recorded at 2.1.206, re-confirmed at 2.1.220). codex: low/medium/high/xhigh from
-  codex-cli 0.144.1's `models_cache.json`, with per-model overrides — Sol and Terra add
-  max/ultra, Luna adds max, Sol alone defaults to low. grok: no menu — its
+  per-model menus only). claude: low/medium/high/xhigh/max, uniform across its eight models
+  (recorded at 2.1.206, re-confirmed at 2.1.220; Fable 5.1 at 2.1.259). codex: each model's
+  menu and default come from the manifest row (`supported_reasoning_levels`,
+  `default_reasoning_level`) — Sol and Terra reach ultra, Luna stops at max, 5.5 at xhigh, Sol
+  alone defaults to low; the provider-level low/medium/high/xhigh is the stale-id fallback.
+  muse: minimal/low/medium/high/xhigh/ultra, provider-wide (`none` refused, re-measured 1.0.1).
+  grok: no menu — its
   `--reasoning-effort` accepts any token silently and measured comparisons (2026-07-12)
   showed no effect, so argv never carries it.
 - **`supportsFastMode`** — the provider flag says the CLI can express fast mode in argv;
   `supportsFastMode(for: model)` says the CLI will enable it for that model. claude reports
   it on only for Opus 5 and Opus 4.8, so the other models declare false and the toggle
-  hides (on Opus 4.7 the gate prevents a real 400). "Enabled" is not "served fast": the
-  account entitlement is reported per turn as `usage.speed` and is not modeled. codex's
-  models are unmeasured on this axis and inherit true. Argv shape: claude
+  hides (on Opus 4.7 the gate prevents a real 400; Fable 5.1 reads `off`). "Enabled" is not
+  "served fast": the account entitlement is reported per turn as `usage.speed` and is not
+  modeled. codex's per-model flag is the manifest's `additional_speed_tiers` (every listed
+  model but gpt-5.4-mini carries `fast`). Argv shape: claude
   `--settings {"fastMode":true}`, codex `-c service_tier="fast" -c features.fast_mode=true`.
 
 Picking a new model resets that provider's agent sessions (a thread is bound to the model
@@ -148,16 +161,17 @@ Settings, and the backward-looking truth is the
 - Failure recovery: a crashed/stalled session is restarted by the host; in-flight tree state
   decides whether to resume or re-prompt.
 
-## CLI integration (verified 2026-06-13; grok column 2026-07-12; pi column 2026-07-12; opencode column 2026-07-21; muse column 2026-08-07)
+## CLI integration (verified 2026-06-13; grok column 2026-07-12; pi column 2026-07-12; opencode column 2026-07-21; muse column 2026-08-07; model rows 2026-09-03)
 
 Concrete facts the adapters rely on, from the installed CLIs (claude code 2.1.177, codex-cli
-0.137.0, grok 0.2.93, pi 0.80.6, opencode 1.18.4, muse 0.1.0-R708.1):
+0.137.0, grok 0.2.93, pi 0.80.6, opencode 1.18.4, muse 0.1.0-R708.1; model selection re-verified
+on claude 2.1.259, codex-cli 0.144.5, muse 1.0.1-R2006.1):
 
 | Need | claude code | codex | grok | pi | opencode | muse |
 |---|---|---|---|---|---|---|
 | Non-interactive run | `claude -p/--print` | `codex exec` (alias `e`) | `grok -p/--single` | `pi -p --mode json` (prompt is a trailing positional; stdin MUST reach EOF or the CLI hangs with zero output — the runner wires /dev/null) | `opencode run` (prompt trailing positional; `--auto` bypasses permission prompts) | `muse exec` (prompt trailing positional; `--disable-approval` bypasses approvals, sandbox stays on; `--no-foreign-personal-context` keeps other CLIs' imported skills out) |
 | Structured / streamed output | `--output-format json\|stream-json`, `--json-schema <s>` | `--json` (JSONL), `--output-schema <file>` | `--output-format json\|streaming-json` (token-level `thought`/`text` chunks; NO tool events) | `--mode json` (JSONL events: session header, message/turn lifecycle, `tool_execution_*`); CAUTION: a FAILED turn still exits 0 — `parse()` reads the last assistant `stopReason` | `--format json` (JSONL: `step_start`/`reasoning`/`tool_use`/`text`/`step_finish`, each carrying `sessionID`); a failed turn exits nonzero AND emits a top-level `error` event | `--json` (the session EVENT LOG as JSONL envelopes: `run_output_delta` chunks, `task_lifecycle` per task with task_kind `tool.{name}`, final `run_terminal` with the authoritative text); reasoning is encrypted, per-turn usage rides only the durable log (`muse export`) |
-| Model selection | `--model <alias\|full>` | `-m/--model` or `-c model="…"` (`--oss` for local) | `-m/--model` (enumerable via `grok models`) | `--model <provider/id>` qualified (catalog enumerated at runtime via `--mode rpc` → `get_available_models`) | `-m <provider/model>` qualified (catalog enumerated at runtime via `opencode models --verbose`) | `--model <id>` (no enumeration command; single static id `muse-spark-1.2`, read back from `run.model.configured`) |
+| Model selection | `--model <alias\|full>` | `-m/--model` or `-c model="…"` (`--oss` for local; catalog enumerated at runtime via `codex debug models`, the CLI's own refreshed manifest) | `-m/--model` (enumerable via `grok models`) | `--model <provider/id>` qualified (catalog enumerated at runtime via `--mode rpc` → `get_available_models`) | `-m <provider/model>` qualified (catalog enumerated at runtime via `opencode models --verbose`) | `--model <id>` (no enumeration command; static ids `muse-spark-1.3` / `-1.3-contributor` / `-1.2`, each read back from `run.model.configured`; always passed explicitly because the CLI's own no-flag default is the Contributor tier) |
 | Thinking level | `--effort <low\|medium\|high\|xhigh\|max>` | `-c` reasoning config key | `--reasoning-effort` exists but is NOT honoured (measured) - never emitted | `--thinking <minimal\|low\|medium\|high\|xhigh\|max>`, per-model menus derived from the catalog's `thinkingLevelMap`; out-of-menu values silently clamp | `--variant <low\|medium\|high\|xhigh\|max>`, per-model menus from each model's `variants` map (maps to OpenAI's `reasoningEffort`); `none` dropped | `--reasoning-effort <minimal\|low\|medium\|high\|xhigh\|ultra>` (recorded from the CLI's own rejection of `none`, which is echo-provider-only; default high) |
 | Attach SubZ MCP server | `--mcp-config <json>` | `codex mcp` / config | `<cwd>/.grok/config.toml`, staged per run by `prepare()` (no per-invocation flag) | no built-in MCP: `prepare()` stages `<cwd>/.subz/mcp-bridge.mjs` (a pi extension speaking the host's TCP protocol), loaded via `--extension` | inline `OPENCODE_CONFIG_CONTENT` env carrying an `mcp.subz` local (nc) server; NO cwd file (opencode roots a session at the git repo and drops a cwd-staged `opencode.json`), no per-invocation flag | staged config HOME: `prepare()` writes a throwaway `XDG_CONFIG_HOME` (settings.json `mcp_servers.subz` stdio → an nc bridge script, `command` is a bare path with no args field; auth.json symlinks to the user's real store — the binary ignores `MUSE_AUTH_PATH`), no per-invocation flag |
 | Sessions | host-minted `--session-id`, `--resume <id>` | id parsed from `thread.started` | host-minted `--session-id`, `--resume <id>` | host-minted `--session-id` (one flag creates AND resumes; header echoes it) | id parsed from any event's `sessionID` (`ses_…`); `-s <id>` resumes | host-minted `--session-id` (one flag creates AND resumes — the second exec appends at sequence 2; `muse resume` is the interactive TUI, not a headless lane) |
@@ -231,10 +245,10 @@ codex's wrapper spawns the vendor binary as a grandchild, which used to leak).
 
 ## Capability discovery - resolved (2026-06-13)
 
-We investigated the real CLIs. **Neither claude code nor codex can enumerate models** (no
-`list-models` subcommand; you simply pass a model alias/name). claude's thinking levels *are*
-enumerable (`--effort` has a fixed set); codex's reasoning effort is a config key, not
-enumerable. So "ask the CLI for capabilities" is a dead end for the thing we cared about most.
+**claude and muse cannot enumerate models** (no list subcommand; you pass a model alias or
+name), so their lists are static. claude's thinking levels *are* enumerable (`--effort` has a
+fixed set); codex's reasoning effort is a config key, declared per model in its manifest. codex,
+grok, pi, and opencode enumerate through their own CLIs (see below).
 (grok, added later, is the exception that proves the manifest right: `grok models` DOES
 enumerate, which makes re-verifying its manifest one command - but the manifest stays static,
 and the CLI's own docs/flags still can't be trusted for capabilities: its effort flag parses
@@ -253,6 +267,17 @@ changes) or the snapshot is a day old. Model ids are stored qualified (`openai-c
 the exact `--model` argv token. Until a first successful fetch, pi serves an EMPTY catalog —
 the model menus dim and pre-flights refuse, which is the truthful state for a logged-out harness.
 Static manifests remain the rule for CLIs that can't enumerate.
+
+**codex: the CLI's own manifest is the catalog** (verified codex-cli 0.144.5, 2026-09-03).
+`codex debug models` refreshes the manifest its picker reads (slug, visibility, priority,
+per-model reasoning levels and default, speed tiers, an `upgrade` pointer on retiring rows) and
+prints it as JSON, token-free. `SZCodexProvider` maps that through the same catalog cell and
+host persistence as pi/opencode, starting from a built-in snapshot (the recorded manifest,
+pinned by a drift test) so the picker is never empty. Retiring rows stay listed with a
+"(retiring)" label so a stored pick keeps its model and thread; the default follows Terra's
+`upgrade` pointer once its replacement is listed. The manifest is the first half of the
+never-infer gate (a slug the CLI has no metadata for is absent, which is what the Sol 400 window
+was); the setup sheet's Test probe and the run's failure path are the live-launch half.
 
 **Decision:**
 

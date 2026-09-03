@@ -147,7 +147,8 @@ public struct SZOpenCodeProvider: SZProvider {
     }
 
     /// Map `opencode models --verbose` output into a snapshot. Internal for the recorded-fixture tests.
-    /// Each top-level `{ … }` is one model object; `Self.topLevelJSONObjects` extracts them
+    /// Each top-level `{ … }` is one model object; `Self.topLevelJSONObjects` (also codex's
+    /// manifest locator) extracts them
     /// string-state-aware (robust to the pretty formatting). Only `status == "active"` models are
     /// kept. The default is the user's `configuredDefaultModel` when opencode currently serves it
     /// (their explicit choice) — otherwise NONE: launch omits `-m` and opencode's own selection

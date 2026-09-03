@@ -178,8 +178,10 @@ public final class SZNullStreamConsumer: SZAgentStreamConsumer {
 }
 
 /// One model a provider can launch with: the exact token argv passes (PINNED version ids, not
-/// floating aliases — a version-labeled menu entry must never silently re-point; new models ship
-/// via app updates, the Sparkle story) plus the human label the picker shows.
+/// floating aliases — a version-labeled menu entry must never silently re-point) plus the human
+/// label the picker shows. Where the CLI vends its own catalog (grok, pi, opencode, codex), the
+/// list is fetched from it at runtime; where it can't (claude, muse), new models ship via app
+/// updates, the Sparkle story.
 ///
 /// The three capability fields are nil when the model shares its provider's surface, and set only
 /// where the CLI was OBSERVED to diverge — never where we merely suspect it, since an unmeasured
@@ -210,11 +212,12 @@ public struct SZProviderModel: Sendable, Equatable, Identifiable, Codable {
     }
 }
 
-/// A runtime-discovered model catalog snapshot — for a CLI whose served models depend on the
-/// user's own account/configuration and are enumerable from the CLI itself, so a static manifest
-/// cannot know them (a BYOK multi-provider harness). The snapshot is host-persisted (app-state)
-/// and re-seeded at launch, so the picker works offline from last-known truth. Static-manifest
-/// providers never produce one.
+/// A runtime-discovered model catalog snapshot — for a CLI that can enumerate its own served
+/// models: because they depend on the user's account/configuration (pi and opencode, BYOK
+/// multi-provider harnesses; grok's re-pointing backend), or simply because the CLI ships a
+/// manifest it refreshes itself (codex). The snapshot is host-persisted (app-state) and re-seeded
+/// at launch, so the picker works offline from last-known truth. Static-manifest providers
+/// (claude, muse) never produce one.
 public struct SZProviderModelCatalog: Codable, Sendable, Equatable {
     public var models: [SZProviderModel]
     public var defaultModelID: String?
