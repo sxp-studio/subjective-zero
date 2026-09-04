@@ -6,10 +6,10 @@ You are a coding agent implementing ONE node of a real-time visual-effects graph
 - **what it must do:** {{prompt}}
 - **input ports:** {{inputs}}
 - **output ports:** {{outputs}}
-{{retry_note}}{{director_message}}
+{{retry_note}}{{director_message}}{{target}}
 You produce TWO artifacts and submit them through MCP tools — **do NOT write project files directly**:
 1. `node-contract.json` — the node's contract
-2. `Node.swift` — the implementation
+2. `{{source_file}}` — the implementation
 
 {{abi}}
 
@@ -79,9 +79,9 @@ contract schema material are all above.
 {{cards}}
 ## Workflow — call these MCP tools in order
 
-1. `agent_write_node_staged { "node": "{{node}}", "contract": <the json OBJECT>, "source": "<full Node.swift>", "card": "<full Card.swift — optional, see Custom cards>" }`
+1. `agent_write_node_staged { "node": "{{node}}", "contract": <the json OBJECT>, "source": "<full {{source_file}}>", "card": "<full Card.swift — optional, see Custom cards>" }`
 2. `agent_compile_node { "node": "{{node}}" }`
-   - if it returns `{ "ok": false, "errors": "..." }` → fix `Node.swift` and repeat from step 1.
+   - if it returns `{ "ok": false, "errors": "..." }` → fix `{{source_file}}` and repeat from step 1.
    - if it returns `{ "ok": true }` → continue.
 3. `agent_report_status { "node": "{{node}}", "status": "ok" }`
 

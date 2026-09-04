@@ -56,7 +56,7 @@ import Metal
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source, target: .native), atomically: true, encoding: .utf8)
 
     try """
     import Metal
@@ -74,7 +74,7 @@ import Metal
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sink), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sink, target: .native), atomically: true, encoding: .utf8)
 
     try runtime.loadProject(at: dir)
 

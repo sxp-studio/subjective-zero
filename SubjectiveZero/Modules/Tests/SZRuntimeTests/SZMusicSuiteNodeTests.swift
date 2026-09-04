@@ -160,10 +160,10 @@ private func withLoadedProject(
     """
 
     try withLoadedProject(runtime: runtime, project: project, writeSources: { dir in
-        try copyLibrarySource("system-audio.macos", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source))
-        try copyLibrarySource("audio-fft", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: fft))
-        try copyLibrarySource("audio-bands", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: bands))
-        try inlineViz.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: viz),
+        try copyLibrarySource("system-audio.macos", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source, target: .native))
+        try copyLibrarySource("audio-fft", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: fft, target: .native))
+        try copyLibrarySource("audio-bands", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: bands, target: .native))
+        try inlineViz.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: viz, target: .native),
                             atomically: true, encoding: .utf8)
     }) {
         let frame = try #require(runtime.captureFrame())
@@ -255,12 +255,12 @@ private func withLoadedProject(
     """
 
     try withLoadedProject(runtime: runtime, project: project, writeSources: { dir in
-        try burstSource.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source),
+        try burstSource.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source, target: .native),
                               atomically: true, encoding: .utf8)
-        try copyLibrarySource("audio-fft", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: fft))
-        try copyLibrarySource("audio-onset", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: onset))
-        try copyLibrarySource("impulse-envelope", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: impulse))
-        try levelViz.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: viz),
+        try copyLibrarySource("audio-fft", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: fft, target: .native))
+        try copyLibrarySource("audio-onset", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: onset, target: .native))
+        try copyLibrarySource("impulse-envelope", to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: impulse, target: .native))
+        try levelViz.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: viz, target: .native),
                            atomically: true, encoding: .utf8)
     }) {
         // silence phase: 12 frames spaced ~30 ms so the onset warm-up window (0.25 s) genuinely passes.
@@ -309,7 +309,7 @@ private func withLoadedProject(
     try withLoadedProject(runtime: runtime, project: project, writeSources: { dir in
         try FileManager.default.copyItem(
             at: cubeSampleDir.appending(path: "Node.swift"),
-            to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: cube))
+            to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: cube, target: .native))
     }) {
         let frame = try #require(runtime.captureFrame())
         let center = try #require(frame.pixel(x: 64, y: 64))

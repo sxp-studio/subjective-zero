@@ -82,7 +82,7 @@ public enum SZProjectMedia {
 
 public extension SZGraph {
     /// This graph with every file port's default resolved to an absolute path — what the RUNTIME
-    /// loads. A projection, like `renderableSubgraph`: the model itself keeps the portable form, so
+    /// loads. A projection, like `SZGraph.renderable`: the model itself keeps the portable form, so
     /// only the code that opens files ever sees a machine path.
     func resolvingFilePaths(in projectURL: URL) -> SZGraph {
         var copy = self

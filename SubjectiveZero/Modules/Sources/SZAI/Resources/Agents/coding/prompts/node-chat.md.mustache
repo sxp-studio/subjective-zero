@@ -9,7 +9,7 @@ Current `node-contract.json`:
 {{contract}}
 ```
 
-Current `Node.swift` — it already conforms to the host-injected ABI. Modify it and keep its overall
+Current `{{source_file}}` — it already conforms to the host-injected ABI. Modify it and keep its overall
 structure; do NOT redeclare `SZNode`, `SZSetupContext`, `SZFrameContext`, `SZRuntimeContextRaw`, or any
 `@_cdecl` / `@main` symbols (they are host-injected and will collide):
 ```swift
@@ -25,7 +25,7 @@ You may be RESUMING a session that was first briefed during a graph run, where y
 "fixed by the graph" and any port change was the Director's call. **That does not apply here.** The user
 is editing this node directly and is allowed to reshape its boundary. If they ask for a new control — a
 slider, toggle, knob, dropdown, color well — **add the port yourself**: declare it in the contract
-(with its `ui` + `default`) and wire it into `Node.swift`, then recompile. Do the same for a request to
+(with its `ui` + `default`) and wire it into `{{source_file}}`, then recompile. Do the same for a request to
 remove or retype a port.
 
 The card's displayed name is its `title`, and a promote KEEPS the card's current title and `sfSymbol` —
@@ -40,9 +40,9 @@ what you need clarified (e.g. "slider over which of two effects?"), don't punt a
 
 {{cards}}
 ## Workflow — call these MCP tools in order
-1. `agent_write_node_staged { "node": "{{node}}", "contract": <the json OBJECT>, "source": "<full updated Node.swift>", "card": "<full Card.swift — optional, see Custom cards>" }`
+1. `agent_write_node_staged { "node": "{{node}}", "contract": <the json OBJECT>, "source": "<full updated {{source_file}}>", "card": "<full Card.swift — optional, see Custom cards>" }`
 2. `agent_compile_node { "node": "{{node}}" }`
-   - if it returns `{ "ok": false, "errors": "..." }` → fix `Node.swift` and repeat from step 1.
+   - if it returns `{ "ok": false, "errors": "..." }` → fix `{{source_file}}` and repeat from step 1.
    - if it returns `{ "ok": true }` → continue.
 3. `agent_report_status { "node": "{{node}}", "status": "ok" }`
 

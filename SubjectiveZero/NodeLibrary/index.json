@@ -421,6 +421,20 @@
       "useWhen": "You want classic edge darkening or a colored edge tint framing the subject.",
       "avoidWhen": "You need a centered spotlight/mask output rather than an edge blend, or a non-radial shape.",
       "reuse": "copy-as-is"
+    },
+    {
+      "id": "camera.web",
+      "tags": [
+        "source",
+        "camera",
+        "video",
+        "web"
+      ],
+      "purpose": "Provides the browser's camera feed as a texture.",
+      "platform": "web",
+      "useWhen": "You need live camera input as a texture source in a web project.",
+      "avoidWhen": "You need a still image, a non-camera video source, or a specific device by name.",
+      "reuse": "copy-as-is"
     }
   ]
 }

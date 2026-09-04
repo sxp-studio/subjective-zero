@@ -210,7 +210,7 @@ extension SZHost {
             // (after an edit, a session's memory of the files is stale by construction).
             // The renderer computes only what a brief mentions, so lanes that don't ask
             // (the bare resumed chat) cost nothing beyond these two reads.
-            var extras = SZBriefExtras()
+            var extras = SZBriefExtras(target: projectTarget)
             if case .node(let nodeID) = scope, let projectURL = loadedProjectURL {
                 let nodeDir = projectURL.appending(path: "nodes/\(nodeID.uuidString)")
                 extras.nodeContract =

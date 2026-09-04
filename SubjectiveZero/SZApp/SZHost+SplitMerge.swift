@@ -248,7 +248,7 @@ extension SZHost {
         do {
             return try SZBriefRenderer(packRoot: root).render(
                 agent: coding, template: template, message: "",
-                world: SZWorld(), extras: SZBriefExtras(graphOp: graphOp))
+                world: SZWorld(), extras: SZBriefExtras(graphOp: graphOp, target: projectTarget))
         } catch {
             status = "the \(template) seed did not render: \(error)"
             return nil
@@ -258,6 +258,6 @@ extension SZHost {
     /// Read a node's current `Node.swift` source from disk (nil if it has none — an un-implemented node).
     private func nodeSource(_ id: SZNodeID) -> String? {
         guard let url = loadedProjectURL else { return nil }
-        return try? String(contentsOf: SZProjectIO.nodeSourceURL(projectURL: url, nodeID: id), encoding: .utf8)
+        return try? String(contentsOf: SZProjectIO.nodeSourceURL(projectURL: url, nodeID: id, target: projectTarget), encoding: .utf8)
     }
 }

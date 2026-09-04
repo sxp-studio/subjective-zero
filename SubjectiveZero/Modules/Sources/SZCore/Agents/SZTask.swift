@@ -28,10 +28,14 @@ public struct SZTask: Identifiable, Sendable, Equatable, Codable {
     /// The transcript bubbles that scheduled it (the words and their ack). They are not prior
     /// conversation to the run they became: `instruction` already carries the words.
     public var origin: Set<UUID>
+    /// What the run is for when it is not an ordinary build; nil for a build. The Director's door routes
+    /// on it (`SZRun.intent`).
+    public var intent: SZRunIntent?
 
     public init(id: UUID = UUID(), title: String, instruction: String,
                 state: State = .pending, workSet: Set<SZNodeID> = [],
-                thread: UUID? = nil, createdAt: Date = Date(), origin: Set<UUID> = []) {
+                thread: UUID? = nil, createdAt: Date = Date(), origin: Set<UUID> = [],
+                intent: SZRunIntent? = nil) {
         self.id = id
         self.title = title
         self.instruction = instruction
@@ -40,6 +44,7 @@ public struct SZTask: Identifiable, Sendable, Equatable, Codable {
         self.thread = thread
         self.createdAt = createdAt
         self.origin = origin
+        self.intent = intent
     }
 
     /// Tolerant of task files written before `origin` existed.
@@ -53,7 +58,14 @@ public struct SZTask: Identifiable, Sendable, Equatable, Codable {
         thread = try c.decodeIfPresent(UUID.self, forKey: .thread)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         origin = try c.decodeIfPresent(Set<UUID>.self, forKey: .origin) ?? []
+        intent = try c.decodeIfPresent(SZRunIntent.self, forKey: .intent)
     }
+}
+
+/// A run's purpose when it is not an ordinary build.
+public enum SZRunIntent: String, Codable, Sendable {
+    /// Write the active platform's source for every node that has none: the project just switched targets.
+    case convert
 }
 
 public extension SZTask {

@@ -113,7 +113,9 @@ extension SZHost {
     func refreshPreviewStream() {
         cardHostStorage?.graphDidChange()   // custom cards ride the same graph hook (SZCardHostController)
         guard let runtime else { return }
-        guard livePreviews, popoutManager.mainWindowIsDisplayable, let graph = store.project?.graph else {
+        // a renderer without thumbnails leaves the Metal loop nothing to run for
+        guard livePreviews, capabilities.streamsPreviews, popoutManager.mainWindowIsDisplayable,
+              let graph = store.project?.graph else {
             if lastPushedWatchKeys != [] {
                 lastPushedWatchKeys = []
                 runtime.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
@@ -177,7 +179,8 @@ extension SZHost {
     /// graph first: a publish races project switches, deletes, and retargets (the pass was encoded
     /// against an older world), and a stale write would resurrect pruned boxes.
     private func applyPreviewFrames(_ frames: [SZNodePreviewSurface]) {
-        guard livePreviews, let graph = store.project?.graph else { return }
+        // a pass encoded before a switch to a renderer without thumbnails lands after the clear
+        guard livePreviews, capabilities.streamsPreviews, let graph = store.project?.graph else { return }
         for frame in frames {
             guard let node = graph.node(id: frame.node),
                   node.effectivePreviewPort == frame.port else { continue }

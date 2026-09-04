@@ -99,14 +99,14 @@ private func arguments(_ json: String) throws -> [String: Any] {
     #expect((args["value"] as? [Any])?.count == 3)
 }
 
-@Test @MainActor func anArgumentSentAsNullTakesTheArgumentLessPath() throws {
+@Test @MainActor func anArgumentSentAsNullTakesTheArgumentLessPath() async throws {
     // `agent_view_frame { "node": null }` must behave exactly like `agent_view_frame {}` — read the
     // viewport's endpoint — not fail on "`node` must be a UUID".
     let host = SZHost()
     host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [])))
     let bridge = SZHostBridge(host: host)
-    #expect {
-        _ = try bridge.callTool(name: "agent_view_frame", arguments: ["node": NSNull()])
+    await #expect {
+        _ = try await bridge.call(name: "agent_view_frame", arguments: ["node": NSNull()])
     } throws: { error in
         "\(error)".contains("no frame rendered yet")     // the endpoint path, with nothing rendered yet
     }

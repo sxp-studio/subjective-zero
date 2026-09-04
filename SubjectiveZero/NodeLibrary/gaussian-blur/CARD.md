@@ -13,3 +13,4 @@ A **separable** 9-tap Gaussian blur — the go-to softening / bloom-prep node. T
   form a symmetric bell and are normalized in-shader, so tuning `radius` only changes spread, not gain.
 - **Gotchas:** the input must be connected — nil input skips the frame. Very large radii reveal the
   9-tap ceiling (banding); chain two instances for a heavier blur rather than pushing `radius` past 20.
+- **Web:** Also available in web projects (Node.js).

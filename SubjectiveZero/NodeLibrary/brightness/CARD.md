@@ -10,3 +10,4 @@ point for any single-pixel color op (contrast, gamma, saturation all follow the 
   `ui_set_input_default`. Values >1 will clip on an 8-bit target; that's expected.
 - **Gotchas:** the input texture must be connected — if `ctx.inputTexture("input")` is nil the kernel
   is skipped and the output stays as the pool left it. Wire a source (e.g. `camera.macos`) upstream.
+- **Web:** Also available in web projects (Node.js).

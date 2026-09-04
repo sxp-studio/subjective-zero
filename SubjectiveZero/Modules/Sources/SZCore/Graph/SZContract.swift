@@ -14,7 +14,20 @@ public enum SZPortType: String, Codable, Sendable, CaseIterable {
     case bool
     case enumeration = "enum"
     case string, event
+
+    /// Which by-value channel a port's default and live overrides travel on. Exhaustive, so a new port
+    /// type has to pick one and both backends agree.
+    public var valueChannel: SZValueChannel {
+        switch self {
+        case .float, .float2, .float3, .float4, .float3x3, .float4x4, .colorRGB, .colorRGBA, .bool: .float
+        case .enumeration, .string: .string
+        case .texture, .floatArray, .event: .none
+        }
+    }
 }
+
+/// The by-value channels: floats, a string, or nothing (textures, arrays and events flow only over edges).
+public enum SZValueChannel: Sendable { case float, string, none }
 
 /// A typed value carried by a port default (and, at runtime, across data edges). Encodes as a tagged
 /// object — `{ "type": "float", "value": 1.0 }` — so JSON stays self-describing and round-trips stably.
@@ -163,6 +176,21 @@ public struct SZEnumOption: Codable, Equatable, Sendable {
         var c = encoder.unkeyedContainer()
         try c.encode(label)
         try c.encode(value)
+    }
+}
+
+public extension SZPort {
+    /// An enum input's default must be one of its option values: the node switches on the value, the
+    /// dropdown shows the label. nil when the port is fine or has no options to check against.
+    var enumDefaultProblem: String? {
+        guard type == .enumeration, let options, !options.isEmpty,
+              case .enumeration(let chosen)? = def, !options.contains(where: { $0.value == chosen }) else { return nil }
+        let values = options.map(\.value).joined(separator: ", ")
+        if options.contains(where: { $0.label == chosen }) {
+            return "input `\(name)`: the default \"\(chosen)\" is a label, not a value. Options are [label, value] pairs "
+                + "(check the pair order) and the default is a value: \(values)."
+        }
+        return "input `\(name)`: the default \"\(chosen)\" is not one of its option values: \(values)."
     }
 }
 
@@ -325,4 +353,10 @@ public struct SZNodeContract: Codable, Equatable, Sendable {
 
     /// Declared entitlements, normalized to a list.
     public var requiredPermissions: [SZEntitlement] { permissions ?? [] }
+
+    /// Every enum input whose default is not one of its option values, each as the sentence the
+    /// agent needs. A reversed pair (`["value", "Label"]`) reads as a default that is a label.
+    public var enumDefaultProblems: [String] {
+        inputs.compactMap(\.enumDefaultProblem)
+    }
 }

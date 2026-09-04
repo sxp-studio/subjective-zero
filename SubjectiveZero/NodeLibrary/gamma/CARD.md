@@ -10,3 +10,4 @@ single-pixel compute template as brightness/contrast.
   `ctx.inputFloat("gamma") ?? 1.0`.
 - **Gotchas:** the input texture must be connected — if `ctx.inputTexture("input")` is nil the kernel
   is skipped. Curve is applied in the texture's own numeric space (no linear/sRGB conversion).
+- **Web:** Also available in web projects (Node.js).

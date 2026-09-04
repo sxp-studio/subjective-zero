@@ -50,7 +50,7 @@ private var libraryCameraDir: URL {
     try SZProjectIO.save(project, to: dir)
     try FileManager.default.copyItem(
         at: libraryCameraDir.appending(path: "Node.swift"),
-        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: cameraID))
+        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: cameraID, target: .native))
 
     // Compiles + loads + runs the lifecycle. Unauthorized in a test → setup starts no session → black.
     try runtime.loadProject(at: dir)

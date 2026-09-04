@@ -63,7 +63,9 @@ Everything in SubZ serves one loop:
 
 **Node**: a unit of compute, a source code `Node.swift` file plus a `node-contract.json` declaring its typed
 inputs and outputs. The Swift side is deliberately small (`setup()`, `teardown()`, and a
-per-frame `update()`), which is what makes hot reload practical.
+per-frame `update()`), which is what makes hot reload practical. A project picks where it runs when
+it is created: on this Mac, where nodes are Swift compiled against Metal, or in a browser, where
+they are `Node.js` modules drawn with three.js and the whole project exports as one `.html` file.
 
 **Agents**: the Director Agent coordinates the project, planning work, dispatching coding agents
 and reconciling what comes back. A coding agent owns one node's implementation. You can chat with

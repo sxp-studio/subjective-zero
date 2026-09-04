@@ -1,6 +1,8 @@
 # UI Panels
 
-**Package: SZUI.** Native panels only - **SwiftUI + AppKit, no WebView.** The UI is a function of
+**Package: SZUI.** Native panels only - **SwiftUI + AppKit.** The one WKWebView in the app is a web
+project's viewport, a render surface the host owns and the tile hosts as a plain `NSView`; no panel
+is web content. The UI is a function of
 [SZCore state](STATE.md); every meaningful interaction has a matching `ui_` MCP command so the
 same surface is drivable by agents and by tests ([MCP.md](MCP.md)).
 
@@ -93,6 +95,10 @@ overlays: a binary split tree
 - Displays whatever texture output is currently marked for display
   ([RUNTIME.md](RUNTIME.md) blits it to the drawable). The user changes the displayed output with
   the per-output **display** toggle in the node editor (`ui_toggle_display`).
+- In a web project the tile is `SZWebViewportPanel` instead: it re-parents the page view the host
+  owns (a WKWebView, though SZUI only sees an `NSView`), so panel moves never reload the page, and
+  it shows why in plain words while the page is not up. Clones, pop-outs, node thumbnails and
+  recording are not there for a web project yet ([RUNTIME.md](RUNTIME.md#web-runtime)).
 
 ## Node Editor
 
@@ -213,9 +219,13 @@ the agent it is for.
 `CommandGroup(replacing: .newItem)` - the document lifecycle
 ([STATE.md](STATE.md) has the on-disk story):
 
-- **New Project** (⌘N) - a fresh empty untitled project (`SZUntitledProjects` home); no "unsaved
-  changes" prompt ever (persistence is automatic; the previous untitled stays reachable via Open
-  Recent).
+- **New Project** (⌘N) - a sheet asks where the project will run, **On this Mac** or **In a
+  browser** (`SZNewProjectSheet`, preselecting last time's pick, under the hint "You can change
+  this later in Settings"), then creates a fresh empty untitled project for that target
+  (`SZUntitledProjects` home); no "unsaved changes" prompt ever
+  (persistence is automatic; the previous untitled stays reachable via Open Recent). The same sheet
+  serves the welcome screen's New Project, Esc from the welcome with nothing open, and a launch
+  with nothing to reopen, where it has no Cancel.
 - **Open…** (⌘O) - picks a `.subz` directory (validated on confirm; no registered document type
   yet).
 - **Open Recent** - the MRU (cap 10), existence-filtered at menu build, plus Clear Menu.
@@ -224,6 +234,11 @@ the agent it is for.
   doesn't exist.
 - **Save As…** (⇧⌘S) - copies the bundle, then makes the copy the live project in place, reloading
   nothing. Replacing `.newItem` also drops "New Window" - intended (single-window app).
+- **Target Platform…** - opens Settings on its Target Platform pane, where the open project is
+  switched between this Mac and the browser in place (below). Disabled with no project open.
+- **Export as Web App…** (⇧⌘E) and **Open in Browser** - web projects only: one self-contained
+  `.html` (the page runtime, three.js and every node inlined), saved where you choose, or written
+  to the project's `exports/` folder and handed to the default browser.
 - New / Open / Open Recent disable while a run or chat turn is in flight; Save and Save As stay
   live, because they write without swapping the project ([STATE.md](STATE.md)). Every method guards
   too - the MCP surface can race a click.
@@ -233,21 +248,43 @@ the agent it is for.
 
 ## Settings
 
-- **Agent Providers** - the provider half of the AI Settings sheet, on ⌘,
-  (`CommandGroup(replacing: .appSettings)`), the chat ⋯ menu's "AI Settings" item, and
-  auto-presented on first run until a default is confirmed. Provider cards with live status
-  badges (Ready / Verified / Not Installed / Login Needed / Failing), inline remedies (copyable
+- **Settings sheet** - on ⌘, (`CommandGroup(replacing: .appSettings)`), the gear menu's
+  Settings… item, the chat ⋯ menu's "AI Settings" item, and auto-presented on first run until a
+  default provider is confirmed. Titled "Settings", with a sidebar of three panes, **Target
+  Platform | Providers | Routing**; Target Platform is listed only while a project is open, and
+  File ▸ Target Platform… opens the sheet straight on it.
+- **Target Platform** (`SZTargetPlatformPane`) - where the open project runs, switched in place.
+  One row per platform, This Mac and Browser (BETA), each with its description, an ACTIVE badge on
+  the current one and "N of M nodes built" (a source file for that platform that is not behind the
+  contract). Clicking the other row picks it: the footer says what the switch would convert and what
+  comes from the library, and a Switch button confirms it; the sheet then closes, since the
+  conversion is a run followed in the chat like any other. The switch (`SZHost.setProjectTarget`)
+  flips and persists the target (a web project pins its
+  three.js version), every node placed from a library node that ships a file for the new platform
+  gets that twin copied in without an agent (`SZNode.libraryID`), the renderer is remounted
+  (Metal keeps an empty graph for a web project; the page is mounted for the browser), and a run
+  with the intent `convert` is minted over the nodes still missing a source
+  ([AGENT_GRAPHS.md](AGENT_GRAPHS.md)). Each node keeps one source per platform side by side, so
+  switching back needs nothing once both exist ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md)).
+  Refused while a run owns the project. Until its
+  source lands, a node wears the pill "Not built for this platform" and stays out of the render
+  graph. While the run works the pane shows a report, one line per node the switch touched:
+  READY with "copied from the library" or "regenerated from its prompt", CONVERTING, QUEUED,
+  NOT ON BROWSER / NOT ON MAC with the agent's reason (it answered `needsInput`), or FAILED; Stop
+  cancels the run and leaves converted nodes converted, and the finished header reads
+  "N regenerated · N from the library · N not available". On a ready web project the action row
+  carries Open in Browser and Export as Web App… instead.
+- **Providers** - provider cards with live status badges (Ready / Verified / Not Installed /
+  Login Needed / Failing), inline remedies (copyable
   install command; "Open Terminal to Log In" - a `.command` file handed to Terminal.app, no
   Apple-Events prompt), a per-card Test running the one-shot prompt probe, and a 3s cheap-tier
   re-check loop while open so remedies flip cards green on their own. First run: Confirm
   persists `defaultProviderID`, Skip returns next launch. Settled installs pick by clicking:
   selecting a READY card switches the active provider on the spot, and the Active capsule
   marks the provider actually in use ([AI_PROVIDERS.md](AI_PROVIDERS.md)).
-- **AI Settings sheet** - the provider cards above sit behind a two-item sidebar,
-  **Providers | Routing**. Providers is the card surface described above (active provider +
-  model / effort / fast per provider — the global default envelope; generation controls live
-  here, not in the composer). **Routing**
-  ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)): an Enable Model Routing toggle (off
+- **Routing** - the Providers pane holds the global default envelope (active provider +
+  model / effort / fast per provider; generation controls live there, not in the composer).
+  Routing ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)) refines it: an Enable Model Routing toggle (off
   hides the rest and says where everything runs; a (?) bubble carries the explainer) over a
   Profiles list where the SELECTED row is both what runs and what the cards below edit —
   double-click renames in place, + creates and selects, the toolbar deletes and duplicates.
@@ -275,8 +312,9 @@ the agent it is for.
   commands, so the UI looks identical regardless of who acted.
 - **1:1 with MCP.** If a user can do it here, there's a `ui_` command for it - this is what makes
   the app testable headlessly while agents build it.
-- **Native and lean.** No WebView, no web asset bridge, no native↔web state drift (the failure
-  mode a WebView UI is prone to).
+- **Native and lean.** No panel is a WebView, so the UI has no web asset bridge and no native↔web
+  state drift. A web project's viewport is a WKWebView, but it only renders the graph: the page
+  receives the graph from the host and reports errors back, and holds no UI state.
 
 ## Test scenarios
 

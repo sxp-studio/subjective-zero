@@ -4,6 +4,7 @@
 // library (index → read). Content is authored to match SZCore (`SZContract`) + the runtime ABI; keep it in
 // sync when those change. The host's `agent_docs_index` / `agent_docs_read` tools call straight through.
 import Foundation
+import SZCore
 
 /// One fetchable agent-docs topic: a stable `id` (the `topic` arg), a title, and a one-line summary for
 /// the index.
@@ -20,6 +21,8 @@ public enum SZAgentDocs {
               summary: "node-contract.json: port types, the `ui` OBJECT + valid kinds, `default`/`options` shapes, permissions, and what reaches the node at runtime."),
         SZAgentDocsTopic(id: "node-abi", title: "Node runtime ABI",
               summary: "Node.swift shape + the injected SZNode/SZFrameContext accessors (textures + live scalar/string inputs); BGRA8; don't-redeclare rules."),
+        SZAgentDocsTopic(id: "node-abi-web", title: "Node runtime ABI (web)",
+              summary: "Node.js shape for a web project + the injected `ctx` (three.js, textures, live scalar/string inputs, shaderPass); RGBA8; no-import rules."),
         SZAgentDocsTopic(id: "card-abi", title: "Card ABI (custom card UI)",
               summary: "Card.swift shape (SwiftUI, SZCardMain + SZCardState): reading ports, live/commit gesture rule, telemetry (values, strings, learn), host verbs (`call`), backdrop + plumbing, contract `card` hints, how to ship it with the node."),
     ]
@@ -43,6 +46,20 @@ public enum SZAgentDocs {
         guard let doc = read("node-abi") else { fatalError("SZAI: missing bundled doc node-abi.md") }
         return doc
     }()
+
+    /// The web counterpart: the `Node.js` ABI a web project's coding brief embeds instead.
+    public static let webABIReference: String = {
+        guard let doc = read("node-abi-web") else { fatalError("SZAI: missing bundled doc node-abi-web.md") }
+        return doc
+    }()
+
+    /// The ABI doc a project's target embeds into its coding briefs.
+    public static func abiReference(for target: SZProjectTarget) -> String {
+        switch target {
+        case .native: abiReference
+        case .web: webABIReference
+        }
+    }
 
     /// The node-contract doc body — ALSO embedded into cold-start coding briefs when the library
     /// index is inlined, so the schema prose lives in exactly one file, same as `abiReference`.

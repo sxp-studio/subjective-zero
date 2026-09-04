@@ -341,7 +341,7 @@ extension SZHost {
         guard let ref = graph.runRenderEndpoint(workSet: run.workSet.subtracting(hiddenPieces)),
               graph.renderEndpoint != ref,
               store.setRenderEndpoint(ref) else { return }
-        runtime?.setRenderEndpoint(ref)
+        backend?.setRenderEndpoint(ref)
         persistProject()
     }
 
@@ -354,7 +354,7 @@ extension SZHost {
             guard let port = node.contract?.outputs.first(where: { $0.display == true && $0.type == .texture }) else { continue }
             let ref = SZPortRef(node: node.id, port: port.name)
             guard store.setRenderEndpoint(ref) else { continue }
-            runtime?.setRenderEndpoint(ref)
+            backend?.setRenderEndpoint(ref)
             persistProject()
             return
         }
@@ -367,12 +367,14 @@ extension SZHost {
     /// moment its work set is free, ahead of any queued prose. Returns the task's id so the
     /// caller that minted it can withdraw it again (a stopped Director turn discards its own).
     @discardableResult
-    func mintRun(instruction: String, title: String? = nil, nodes: Set<SZNodeID> = []) -> UUID {
+    func mintRun(instruction: String, title: String? = nil, nodes: Set<SZNodeID> = [],
+                 intent: SZRunIntent? = nil) -> UUID {
         // Scheduled from inside a Director turn (the door's ruling, or the agent's own ui_run):
         // that delivery's bubbles are the ask, not conversation prior to it.
         let task = SZTask(title: title ?? SZTask.title(fromInstruction: instruction, nodeCount: 0),
                           instruction: instruction, workSet: nodes,
-                          origin: deliveringBubbles[SZChatScope.director.key] ?? [])
+                          origin: deliveringBubbles[SZChatScope.director.key] ?? [],
+                          intent: intent)
         pendingTasks.append(task)
         admissionSuspended = false   // a new ask is the user acting again
         flushTaskQueue()
@@ -671,7 +673,8 @@ extension SZHost {
                              title: task.title, origin: task.origin,
                              ownsGraphOp: startedForGraphOp, workSet: workSet,
                              unwiredIntent: owedArrows,
-                             wiringOnly: unwired.subtracting(implementable))
+                             wiringOnly: unwired.subtracting(implementable),
+                             intent: task.intent)
         activeRuns[taskID] = run
         let thread = run.thread
         // A grade is one briefing's read: this run's nodes start ungraded (its own Director
@@ -844,7 +847,7 @@ extension SZHost {
         }()
         let delivery = SZDelivery(
             agent: directorID, message: "",
-            extras: SZBriefExtras(gradingEnabled: gradingEnabled),
+            extras: SZBriefExtras(gradingEnabled: gradingEnabled, target: projectTarget),
             renderer: renderer, queries: queries,
             world: { [weak self] in
                 guard let self else { return SZWorld() }
@@ -870,7 +873,8 @@ extension SZHost {
                     resuming: directorGraph.resumes(run.directorSession, agent: directorID,
                                                     router: router),
                     run: SZRun(workSet: scoped, round: state.round, roundCap: roundCap,
-                               steers: state.steers, instruction: instruction, unwired: unwired),
+                               steers: state.steers, instruction: instruction, unwired: unwired,
+                               intent: run.intent?.rawValue),
                     mutations: self.mutationJournal.entries(since: state.mutationCursor),
                     conversation: self.conversation(for: .director, excluding: notPrior),
                     unwiredArrows: arrows)
@@ -1009,6 +1013,14 @@ extension SZHost {
                 continue
             }
             let scopeKey = SZChatScope.node(nodeID).key
+            // A conversion run hands the agent the node's source for the platform just left, so it
+            // translates instead of starting cold; nil on a build, or when the node was never built there.
+            let other: SZProjectTarget = projectTarget == .native ? .web : .native
+            let convertSource: String? = run.intent == .convert
+                ? loadedProjectURL.flatMap { try? String(
+                    contentsOf: SZProjectIO.nodeSourceURL(projectURL: $0, nodeID: nodeID, target: other),
+                    encoding: .utf8) }
+                : nil
             // The child's router carries its task's grade pick, frozen at this dispatch —
             // the engine never learns about grading. An unfilled grade slot falls to the
             // standard one, then to the ordinary cascade.
@@ -1028,7 +1040,10 @@ extension SZHost {
                     // Cold-start briefs inline the library index so a first dispatch spends
                     // no tool rounds fetching it; SZ_BRIEF_PREFETCH=0 reverts.
                     libraryIndex: ProcessInfo.processInfo.environment["SZ_BRIEF_PREFETCH"] == "0"
-                        ? nil : SZHostBridge.libraryCategoriesBlock()),
+                        ? nil : SZHostBridge.libraryCategoriesBlock(target: projectTarget),
+                    target: projectTarget,
+                    convertSource: convertSource,
+                    convertFrom: convertSource == nil ? nil : other.sourceFileName),
                 renderer: renderer, queries: queries,
                 world: { [weak self] in
                     guard let self else { return SZWorld() }

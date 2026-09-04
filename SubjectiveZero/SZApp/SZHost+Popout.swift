@@ -20,13 +20,18 @@ extension SZHost {
     /// and the closing-the-window-quits story).
     func canPopOutPanel(_ id: SZPanelID) -> Bool {
         Self.popoutAllowedKinds.contains(id.kind) && panelLayout.contains(id)
-            && panelLayout.presentIDs.count > 1
+            && panelLayout.presentIDs.count > 1 && !isPinnedViewport(id)
+    }
+
+    /// A viewport whose renderer cannot show a second copy (the page has one parent view).
+    private func isPinnedViewport(_ id: SZPanelID) -> Bool {
+        id.kind == .viewport && !capabilities.supportsViewportClones
     }
 
     /// Clone gate for the header button / menu: the kind is cloneable and a free instance exists
     /// (popped-out instances count as taken — their identities must never be reallocated).
     func canClonePanel(_ id: SZPanelID) -> Bool {
-        guard id.kind.maxInstances > 1, panelLayout.contains(id) else { return false }
+        guard id.kind.maxInstances > 1, panelLayout.contains(id), !isPinnedViewport(id) else { return false }
         let taken = panelLayout.presentIDs.union(poppedOutPanels.keys).filter { $0.kind == id.kind }
         return taken.count < id.kind.maxInstances
     }

@@ -101,7 +101,7 @@ extension SZHost {
     }
 
     /// Collapse a diagnostic to a single capped line so a suggestion row stays a one-liner.
-    private static func oneLine(_ text: String, cap: Int) -> String {
+    static func oneLine(_ text: String, cap: Int) -> String {
         let flat = text.replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return flat.count <= cap ? flat : String(flat.prefix(cap)) + "…"

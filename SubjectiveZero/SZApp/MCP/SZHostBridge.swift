@@ -114,10 +114,70 @@ final class SZHostBridge {
 
     /// Dispatch one `tools/call`, trying each surface in turn. Image tools (which return an inline image,
     /// not text) are tried first; the text surfaces stay `String?` and are wrapped in `.text`.
+    /// The server's entry: every tool, on main. The two that await the renderer (its compile gate and
+    /// its capture) are served first; everything else dispatches without suspending.
+    func call(name: String, arguments: [String: Any], surface: Surface = .full,
+              forcedContext: SZTraceContext? = nil,
+              caller: SZClaimToken? = nil,
+              callerScope: SZChatScope? = nil) async throws -> SZMCPToolResult {
+        let (arguments, traceContext) = try admit(name: name, arguments: arguments, surface: surface,
+                                                  forcedContext: forcedContext)
+        return try await SZToolCaller.$claim.withValue(caller) {
+        try await SZToolCaller.$scope.withValue(callerScope) {
+        try await SZTrace.$context.withValue(traceContext) {
+            try await SZTrace.span(SZTurnStage.mcpTool, detail: name, closing: closing(name: name, trace: traceContext)) {
+                if let result = try await handleAsyncAgentTool(name: name, arguments: arguments) { return result }
+                return try dispatch(name: name, arguments: arguments)
+            }
+        }
+        }
+        }
+    }
+
+    /// The tools that never suspend, for callers already on main (tests, mostly). Same rails as `call`.
     func callTool(name: String, arguments: [String: Any], surface: Surface = .full,
                   forcedContext: SZTraceContext? = nil,
                   caller: SZClaimToken? = nil,
                   callerScope: SZChatScope? = nil) throws -> SZMCPToolResult {
+        let (arguments, traceContext) = try admit(name: name, arguments: arguments, surface: surface,
+                                                  forcedContext: forcedContext)
+        return try SZToolCaller.$claim.withValue(caller) {
+        try SZToolCaller.$scope.withValue(callerScope) {
+        try SZTrace.$context.withValue(traceContext) {
+            try SZTrace.span(SZTurnStage.mcpTool, detail: name, closing: closing(name: name, trace: traceContext)) {
+                try dispatch(name: name, arguments: arguments)
+            }
+        }
+        }
+        }
+    }
+
+    /// The span's close: the result's context weight, and its text filed under the turn.
+    private func closing(name: String, trace: SZTraceContext?) -> (SZMCPToolResult) -> (detail: String?, addedTokens: Int?) {
+        { [host] result in
+            // The span closes with the RESULT's approximate context weight (chars/4): every tool
+            // result feeds straight back into the agent's context, and these payloads — library
+            // reads, doc pages, compile output — are most of what a turn's "in" count is made of.
+            // The payload TEXT is filed under the turn's debug capture, so "what did this action
+            // add" is inspectable as content, not just a number.
+            if let trace, case .text(let text) = result {
+                host.recordToolPayload(turnID: trace.turnID, tool: name, result: text)
+            }
+            return (detail: name, addedTokens: Self.contextWeight(of: result))
+        }
+    }
+
+    private func dispatch(name: String, arguments: [String: Any]) throws -> SZMCPToolResult {
+        if let result = try handleDebugTool(name: name, arguments: arguments) { return .text(result) }
+        if let result = try handleAgentTool(name: name, arguments: arguments) { return .text(result) }
+        if let result = try handleUITool(name: name, arguments: arguments) { return .text(result) }
+        if let result = try handleBindingTool(name: name, arguments: arguments) { return .text(result) }
+        throw SZMCPError.message("unknown tool: \(name)")
+    }
+
+    /// The gate every call passes: the withheld names, then the trace context the handlers nest under.
+    private func admit(name: String, arguments: [String: Any], surface: Surface,
+                       forcedContext: SZTraceContext?) throws -> (arguments: [String: Any], trace: SZTraceContext?) {
         let arguments = Self.omittingNulls(arguments)
         // Withheld, not merely unlisted: knowing the name from somewhere else must not be enough.
         guard !Self.debugToolNames.contains(name) || surface.exposesDebugTools else {
@@ -136,37 +196,12 @@ final class SZHostBridge {
         // unattributable call drops rather than misfiles. Every fence inside any handler (compile,
         // promote, future tools) nests under this span automatically. debug_* is the observer, not
         // the observed. `span` records thrown handlers too — a failing call still took time.
-        let traceContext = Self.debugToolNames.contains(name)
-            ? nil : (forcedContext ?? (surface == .agent ? host.traceContext(for: arguments) : nil))
         // The caller's claim rides the same way as the trace context: bound (even when nil — an
         // unidentified call must SHADOW any ambient identity, never inherit one) so the mutation
         // fence downstream can tell a turn touching its own held node from a bystander.
-        return try SZToolCaller.$claim.withValue(caller) {
-        try SZToolCaller.$scope.withValue(callerScope) {
-        try SZTrace.$context.withValue(traceContext) {
-            // The span closes with the RESULT's approximate context weight (chars/4): every tool
-            // result feeds straight back into the agent's context, and these payloads — library
-            // reads, doc pages, compile output — are most of what a turn's "in" count is made of.
-            // The payload TEXT is filed under the turn's debug capture, so "what did this action
-            // add" is inspectable as content, not just a number.
-            try SZTrace.span(SZTurnStage.mcpTool, detail: name,
-                             closing: { (result: SZMCPToolResult) in
-                                 if let traceContext, case .text(let text) = result {
-                                     host.recordToolPayload(turnID: traceContext.turnID,
-                                                            tool: name, result: text)
-                                 }
-                                 return (detail: name, addedTokens: Self.contextWeight(of: result))
-                             }) {
-                if let result = try handleImageTool(name: name, arguments: arguments) { return result }
-                if let result = try handleDebugTool(name: name, arguments: arguments) { return .text(result) }
-                if let result = try handleAgentTool(name: name, arguments: arguments) { return .text(result) }
-                if let result = try handleUITool(name: name, arguments: arguments) { return .text(result) }
-                if let result = try handleBindingTool(name: name, arguments: arguments) { return .text(result) }
-                throw SZMCPError.message("unknown tool: \(name)")
-            }
-        }
-        }
-        }
+        let traceContext = Self.debugToolNames.contains(name)
+            ? nil : (forcedContext ?? (surface == .agent ? host.traceContext(for: arguments) : nil))
+        return (arguments, traceContext)
     }
 
     /// Arguments with every JSON `null` VALUE dropped, at any depth — the one place "absent" is

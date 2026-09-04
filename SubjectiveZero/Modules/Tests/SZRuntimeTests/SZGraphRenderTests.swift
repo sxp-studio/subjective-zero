@@ -47,7 +47,7 @@ enum SZNodeMain { static func make() -> SZNode { Node() } }
     let sample = try SZProjectIO.load(from: sampleURL)
     let grayNode = try #require(sample.graph.nodes.first { $0.title == "Make Grayscale" })
     let grayContract = try #require(grayNode.contract)
-    let grayLibrarySource = SZProjectIO.nodeSourceURL(projectURL: sampleURL, nodeID: grayNode.id)
+    let grayLibrarySource = SZProjectIO.nodeSourceURL(projectURL: sampleURL, nodeID: grayNode.id, target: .native)
 
     let sourceID = SZNodeID(), grayID = SZNodeID()
     let project = SZProject(
@@ -70,9 +70,9 @@ enum SZNodeMain { static func make() -> SZNode { Node() } }
     defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
     try SZProjectIO.save(project, to: dir)
     try stubSourceSource.write(
-        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sourceID), atomically: true, encoding: .utf8)
+        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sourceID, target: .native), atomically: true, encoding: .utf8)
     try FileManager.default.copyItem(
-        at: grayLibrarySource, to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: grayID))
+        at: grayLibrarySource, to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: grayID, target: .native))
 
     try runtime.loadProject(at: dir)
     let frame = try #require(runtime.captureFrame())

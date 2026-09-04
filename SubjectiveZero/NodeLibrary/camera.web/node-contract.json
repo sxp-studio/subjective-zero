@@ -1,0 +1,39 @@
+{
+  "title": "Browser Camera",
+  "sfSymbol": "camera",
+  "summary": "The browser's camera as a texture output, through getUserMedia. Asks the browser (and this Mac) for camera access once.",
+  "permissions": [
+    "camera"
+  ],
+  "inputs": [
+    {
+      "name": "mirror",
+      "type": "bool",
+      "default": {
+        "type": "bool",
+        "value": true
+      },
+      "ui": {
+        "kind": "toggle"
+      }
+    },
+    {
+      "name": "aspectFit",
+      "type": "bool",
+      "default": {
+        "type": "bool",
+        "value": true
+      },
+      "ui": {
+        "kind": "toggle"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "name": "texture",
+      "type": "texture",
+      "display": true
+    }
+  ]
+}

@@ -335,7 +335,7 @@ private func generatedNode(_ store: SZStore, inputs: [SZPort] = [], outputs: [SZ
     // Derived: the surface moved off the build stamp. The store cannot read Node.swift, so whether the code
     // merely lags or contradicts the contract is the host's audit to say.
     #expect(node.rebuildReason == .contractChanged)
-    // The black-frame guard: `renderableSubgraph` keys on `kind`, so a rebuild must never flip it back.
+    // The black-frame guard: `SZGraph.renderable` keys on `kind`, so a rebuild must never flip it back.
     #expect(node.kind == .generated)
     #expect(node.needsImplementation)
 }

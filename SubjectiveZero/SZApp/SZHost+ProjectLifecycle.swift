@@ -47,9 +47,9 @@ extension SZHost {
     // MARK: - Launch chain
 
     /// The launch project: `SZ_PROJECT` env (dev override — never recorded in history) → the last
-    /// user-opened project if it still exists → a fresh empty untitled project.
-    /// Each link falls through to the next on failure (a stale path silently, a corrupt project
-    /// with an alert), so testers never boot into a dead app.
+    /// user-opened project if it still exists → the New Project sheet, in required mode, so the
+    /// user picks where the fresh project runs. Each link falls through to the next on failure (a
+    /// stale path silently, a corrupt project with an alert), so testers never boot into a dead app.
     func openInitialProject(preferred: URL? = nil) async {
         // A Finder cold-launch open (double-click / "Open With") takes priority over the remembered
         // chain — it's an explicit user intent. On failure, fall through to the normal chain below.
@@ -101,8 +101,16 @@ extension SZHost {
             lastOpenProjectPath = nil
             persistAppState()
         }
+        // Nothing to reopen: the sheet asks where the new project runs, required because there is no
+        // project to cancel back to. The locked-by-another-instance case keeps the silent native throwaway.
+        guard !recordFallbackInHistory else {
+            newProjectRequired = true
+            newProjectPresented = true
+            return
+        }
         do {
-            try await switchProject(to: try makeFreshUntitledProject(), recordInHistory: recordFallbackInHistory)
+            try await switchProject(to: try makeFreshUntitledProject(target: .native),
+                                    recordInHistory: recordFallbackInHistory)
         } catch {
             status = "load failed: \(error)"
             print("[SZHost] first-launch project failed: \(error)")
@@ -110,24 +118,47 @@ extension SZHost {
         }
     }
 
-    /// First-launch (and recovery) content: a fresh empty untitled project, the same one File ▸ New
-    /// makes. Nothing is bundled, and nothing asks for a permission until the user builds something.
-    private func makeFreshUntitledProject() throws -> URL {
+    /// A fresh empty untitled project for the given target, the same one File ▸ New makes. Nothing
+    /// is bundled, and nothing asks for a permission until the user builds something.
+    func makeFreshUntitledProject(target: SZProjectTarget) throws -> URL {
         let url = try SZUntitledProjects.newProjectDirectory().appending(path: "Untitled.subz")
-        try SZProjectIO.save(SZProject(name: "Untitled"), to: url)
+        try SZProjectIO.save(SZProject(name: "Untitled", target: target), to: url)
         return url
     }
 
     // MARK: - File menu flows
 
-    /// File ▸ New Project (⌘N): a fresh empty untitled project (SZUntitledProjects home). No
-    /// prompt about the current project — persistence is automatic and an untitled one stays
-    /// reachable via Open Recent (decided 2026-07-03).
-    func newProject() {
+    /// File ▸ New Project (⌘N): open the sheet that asks where the project runs. No prompt about
+    /// the current project — persistence is automatic and an untitled one stays reachable via
+    /// Open Recent (decided 2026-07-03).
+    func presentNewProject() {
+        guard !isBusyForProjectSwitch else { return }
+        newProjectRequired = false
+        newProjectPresented = true
+    }
+
+    /// The sheet's Create. The flag drops first, synchronously, so the provider sheet's auto-present
+    /// sees no sheet up once the project is live; the pick is remembered as next time's default.
+    func createNewProject(target: SZProjectTarget) {
+        newProjectPresented = false
+        lastProjectTarget = target
+        persistAppState()
+        newProject(target: target)
+    }
+
+    /// The sheet's Cancel / Esc. A no-op while the sheet is required: there is nothing to go back to.
+    func cancelNewProject() {
+        guard !newProjectRequired else { return }
+        newProjectPresented = false
+    }
+
+    /// A fresh empty untitled project (SZUntitledProjects home) for the given target, opened as the
+    /// document.
+    func newProject(target: SZProjectTarget) {
         guard !isBusyForProjectSwitch else { return }
         Task { @MainActor in
             do {
-                try await switchProject(to: try makeFreshUntitledProject())
+                try await switchProject(to: try makeFreshUntitledProject(target: target))
             } catch {
                 presentProjectError("Couldn't create a new project", error)
             }

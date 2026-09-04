@@ -56,6 +56,14 @@ public struct SZBriefExtras: Sendable {
     /// teaching in the Director's briefing templates. Off renders it empty, so an inactive
     /// profile leaves every prompt byte-identical.
     public var gradingEnabled: Bool = false
+    /// The project's target: picks the ABI doc, the source file name, and the `{{target}}`
+    /// block (empty for native, so a Mac project leaves every prompt byte-identical).
+    public var target: SZProjectTarget = .native
+    /// A conversion run's source to translate from: the node's file for the platform just left. Set,
+    /// the `reference` section becomes the convert partial; nil leaves every prompt byte-identical.
+    public var convertSource: String?
+    /// The file name that source came from (`Node.swift` / `Node.js`), named in the partial.
+    public var convertFrom: String?
 
     /// One split/merge operation as a piece's seed brief needs it: the original (split) or
     /// the constituents (merge), plus the reconciled boundary contract.
@@ -97,13 +105,18 @@ public struct SZBriefExtras: Sendable {
 
     public init(preserveBehavior: Bool = false, libraryIndex: String? = nil,
                 nodeContract: String? = nil, nodeSource: String? = nil,
-                graphOp: GraphOp? = nil, gradingEnabled: Bool = false) {
+                graphOp: GraphOp? = nil, gradingEnabled: Bool = false,
+                target: SZProjectTarget = .native,
+                convertSource: String? = nil, convertFrom: String? = nil) {
         self.preserveBehavior = preserveBehavior
         self.libraryIndex = libraryIndex
         self.nodeContract = nodeContract
         self.nodeSource = nodeSource
         self.graphOp = graphOp
         self.gradingEnabled = gradingEnabled
+        self.target = target
+        self.convertSource = convertSource
+        self.convertFrom = convertFrom
     }
 }
 
@@ -140,9 +153,11 @@ public struct SZBriefRenderer: Sendable {
     static let toolbeltPartial = "prompts/toolbelt.md.mustache"
     static let gradingPartial = "prompts/grading.md.mustache"
     static let cardsPartial = "prompts/cards.md.mustache"
+    static let targetWebPartial = "prompts/target-web.md.mustache"
     static let referencePreservePartial = "prompts/reference-preserve.md.mustache"
     static let referenceInlinePartial = "prompts/reference-inline.md.mustache"
     static let referenceLibraryPartial = "prompts/reference-library.md.mustache"
+    static let referenceConvertPartial = "prompts/reference-convert.md.mustache"
     static let schemaInlinePartial = "prompts/schema-inline.md.mustache"
     static let schemaFetchPartial = "prompts/schema-fetch.md.mustache"
 
@@ -152,7 +167,7 @@ public struct SZBriefRenderer: Sendable {
         "graph", "message", "toolbelt", "cards", "node", "contract", "source",
         "round", "cap", "blockers", "unwired", "inbox", "mutations", "instruction", "tasks",
         "prompt", "title", "symbol", "inputs", "outputs", "boundary", "abi", "reference", "schema",
-        "blocker", "director_message", "retry_note", "grading",
+        "blocker", "director_message", "retry_note", "grading", "source_file", "target",
         "original", "intent", "stage", "count", "constituents",
     ]
 
@@ -162,7 +177,9 @@ public struct SZBriefRenderer: Sendable {
         "toolbelt": [toolbeltPartial],
         "grading": [gradingPartial],
         "cards": [cardsPartial],
-        "reference": [referencePreservePartial, referenceInlinePartial, referenceLibraryPartial],
+        "target": [targetWebPartial],
+        "reference": [referencePreservePartial, referenceInlinePartial, referenceLibraryPartial,
+                      referenceConvertPartial],
         "schema": [schemaInlinePartial, schemaFetchPartial],
     ]
 
@@ -263,20 +280,35 @@ public struct SZBriefRenderer: Sendable {
             return SZPromptTemplate.defused(SZBoundaryPrompt.render(
                 inputs: p.inputs, outputs: p.outputs, permissions: p.permissions))
         }
-        add("abi") { SZAgentDocs.abiReference }
-        // The reference/schema SECTIONS: a staged piece preserves (and keeps the fetch
-        // schema); an inlined index flips BOTH to their inlined variants; otherwise the
-        // tiered library framing + the fetch schema.
+        add("abi") { SZAgentDocs.abiReference(for: extras.target) }
+        add("source_file") { extras.target.sourceFileName }
+        // A web project's briefs open with what the browser changes; native renders nothing,
+        // so the token sits on a line that already renders empty.
+        try add("target") {
+            extras.target == .web ? "\n" + (try template(agent, Self.targetWebPartial)) : ""
+        }
+        // The reference/schema SECTIONS: a conversion translates the other platform's source;
+        // a staged piece preserves (and keeps the fetch schema); an inlined index flips BOTH to
+        // their inlined variants; otherwise the tiered library framing + the fetch schema.
         try add("reference") {
+            if let source = extras.convertSource {
+                return SZPromptTemplate.render(
+                    try template(agent, Self.referenceConvertPartial),
+                    ["convert_source": SZPromptTemplate.defused(source),
+                     "convert_from": extras.convertFrom ?? "previous"])
+            }
             if extras.preserveBehavior {
                 return try template(agent, Self.referencePreservePartial)
             }
+            // Both variants name the source file, so they take the token like the brief does.
+            let sourceFile = extras.target.sourceFileName
             if let index = extras.libraryIndex {
                 return SZPromptTemplate.render(
                     try template(agent, Self.referenceInlinePartial),
-                    ["library_index": SZPromptTemplate.defused(index)])
+                    ["library_index": SZPromptTemplate.defused(index), "source_file": sourceFile])
             }
-            return try template(agent, Self.referenceLibraryPartial)
+            return SZPromptTemplate.render(try template(agent, Self.referenceLibraryPartial),
+                                           ["source_file": sourceFile])
         }
         try add("schema") {
             if !extras.preserveBehavior, extras.libraryIndex != nil {

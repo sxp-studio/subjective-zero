@@ -11,6 +11,7 @@
 // orchestrated: build a fresh module, remount, then unload the old one once its views left the
 // hierarchy. All main-thread by the ABI's contract.
 import Foundation
+import SZCore
 
 @MainActor
 public final class SZCardModule {

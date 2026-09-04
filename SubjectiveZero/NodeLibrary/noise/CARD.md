@@ -17,3 +17,4 @@ adapting rather than copying verbatim.
   unrolls it — `octaves` is clamped to 1…8 host-side. Output is clamped to [0,1] and written as
   `float4(float3(n), 1)` (opaque gray). Only `fractal` reads `octaves`; only animated modes read
   `speed`.
+- **Web:** Also available in web projects (Node.js).

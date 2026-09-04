@@ -14,3 +14,4 @@ back over the base by `opacity`. The workhorse two-input compositor — `copy-as
 - **Gotchas:** both inputs are sampled by integer `gid`, so they should share the output's
   dimensions (wire same-size sources). Blend results can exceed 1 (add/screen) and clip on an 8-bit
   target — expected. Bounds guarded against `outTex.get_width()/height()`.
+- **Web:** Also available in web projects (Node.js).

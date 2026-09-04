@@ -1,0 +1,12 @@
+## This node already runs on the other platform
+
+Its `{{convert_from}}` source is below. It IS your reference: translate it faithfully, with the same
+ports, the same behaviour and the same defaults. Do not call `agent_library_index`, `agent_library_card`
+or `agent_library_source`; the library describes other nodes, and this one's job is defined by the source
+below. If a faithful translation is impossible here, regenerate the node from its prompt instead. If this
+platform cannot do the job at all, report `agent_report_status` with `needsInput` and one plain sentence
+saying why, and stop.
+
+```
+{{convert_source}}
+```

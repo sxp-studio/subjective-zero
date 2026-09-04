@@ -56,9 +56,9 @@ private func contract(_ title: String, inputs: [SZPort] = []) -> SZNodeContract 
     defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
     try SZProjectIO.save(project, to: dir)
     try solidSource(r: 1, g: 0, b: 0).write(
-        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: aID), atomically: true, encoding: .utf8)
+        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: aID, target: .native), atomically: true, encoding: .utf8)
     try solidSource(r: 0, g: 0, b: 1).write(
-        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: bID), atomically: true, encoding: .utf8)
+        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: bID, target: .native), atomically: true, encoding: .utf8)
     try runtime.loadProject(at: dir)
 
     // Nothing has rendered yet: no fabricated blank.

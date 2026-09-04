@@ -12,3 +12,4 @@ node via the `type` enum — the go-to `copy-as-is` starting point for backgroun
 - **Gotchas:** UV origin is top-left with y flipped in the vertex stage (matches the animated-gradient
   sample). `angle` is ignored for radial; `center` is ignored for linear. Reading a colorRGBA input
   yields 4 floats via `ctx.inputFloats` — guard the count before indexing (see `simd4` helper).
+- **Web:** Also available in web projects (Node.js).

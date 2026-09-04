@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src subz: 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; connect-src 'none'">
+<script type="importmap">{ "imports": { "three": "subz://app/lib/three/__THREE_VERSION__/three.module.min.js" } }</script>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="sz-canvas"></canvas>
+<script src="subz://app/runtime/transport-wk.js"></script>
+<script type="module" src="subz://app/runtime/sz-runtime.js"></script>
+</body>
+</html>

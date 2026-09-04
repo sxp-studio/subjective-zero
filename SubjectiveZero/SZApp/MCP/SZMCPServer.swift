@@ -175,12 +175,10 @@ final class SZMCPServer: @unchecked Sendable {
                     result = try await bridge.callOffMainTool(name: name, arguments: arguments,
                                                               surface: surface)
                 } else {
-                    result = try await MainActor.run {
-                        let arguments = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
-                        return try bridge.callTool(name: name, arguments: arguments, surface: surface,
+                    let arguments = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
+                    result = try await bridge.call(name: name, arguments: arguments, surface: surface,
                                                    forcedContext: traceContext, caller: caller,
                                                    callerScope: callerScope)
-                    }
                 }
                 let payload: [String: Any]
                 switch result {

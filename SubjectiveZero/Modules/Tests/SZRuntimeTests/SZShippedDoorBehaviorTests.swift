@@ -53,6 +53,16 @@ struct SZShippedDoorBehaviorTests {
         #expect(asks.isEmpty)
     }
 
+    @Test func aConversionRunTakesItsOwnLaneAheadOfTheBuildRuling() async throws {
+        let (loader, dir) = try compiled("director", "door")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let facts = #"{"message": "", "resuming": false, "pendingTasks": [], "runningTasks": [], "run": {"workSet": ["\#(UUID().uuidString)"], "round": 1, "roundCap": 2, "steers": [], "instruction": "", "unwired": [], "intent": "convert"}}"#
+        let (outcome, asks) = await decide(loader, facts: facts)
+        #expect(outcome == .outcome("convert"))
+        // Pre-ruled like a build: not one model call.
+        #expect(asks.isEmpty)
+    }
+
     @Test func anImplementRulingCarriesTheRequestBuildEffect() async throws {
         let (loader, dir) = try compiled("director", "door")
         defer { try? FileManager.default.removeItem(at: dir) }

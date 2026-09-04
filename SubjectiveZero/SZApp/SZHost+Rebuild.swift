@@ -74,7 +74,7 @@ extension SZHost {
             if !added.isEmpty { parts.append("ports added since the build: \(list(added))") }
             if !removed.isEmpty { parts.append("ports removed since the build: \(list(removed))") }
             return parts.isEmpty ? nil : parts.joined(separator: "; ")
-        case .intentChanged:
+        case .intentChanged, .notBuiltForTarget:
             return nil
         }
     }
@@ -82,9 +82,9 @@ extension SZHost {
     /// Run `SZPortBindingAudit` over a built node's live source + contract; nil when it cannot run.
     private func auditErrors(_ node: SZNode) -> [String]? {
         guard let projectURL = loadedProjectURL, node.kind == .generated, let contract = node.contract,
-              let source = try? String(contentsOf: SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: node.id),
+              let source = try? String(contentsOf: SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: node.id, target: projectTarget),
                                        encoding: .utf8) else { return nil }
-        return SZPortBindingAudit.audit(contract: contract, source: source).errors
+        return SZPortBindingAudit.audit(contract: contract, source: source, sourceFile: nodeSourceFileName).errors
     }
 
     /// After a project loads: `SZProjectIO.load` already audited every built node; this pass attaches the
@@ -124,9 +124,15 @@ extension SZHost {
 
     /// Install the node→host fault sink (once, from `start()`, beside the preview one). The runtime fires
     /// it only when the reported set changes, off the main actor.
-    func installNodeErrorSink(_ runtime: SZRuntime) {
-        runtime.setNodeErrorCallback { [weak self] errors in
-            Task { @MainActor [weak self] in self?.applyNodeErrors(errors) }
+    func installNodeErrorSink(_ backend: any SZRenderBackend) {
+        let identity = ObjectIdentifier(backend)
+        backend.setNodeErrorCallback { [weak self] errors in
+            Task { @MainActor [weak self] in
+                // the Metal runtime keeps publishing under a web project (its empty graph): only the
+                // backend that renders now is heard
+                guard let self, let live = self.backend, ObjectIdentifier(live) == identity else { return }
+                self.applyNodeErrors(errors)
+            }
         }
     }
 
@@ -172,8 +178,11 @@ extension SZHost {
             ask = " has ports its code doesn't implement yet — implement them in Node.swift against the current "
                 + "contract, keeping everything that already works."
         case .intentChanged:
-            ask = " was re-briefed after it was built — re-implement Node.swift against the node's current "
+            ask = " was re-briefed after it was built — re-implement \(nodeSourceFileName) against the node's current "
                 + "prompt, keeping its declared ports and everything the new intent doesn't change."
+        case .notBuiltForTarget:
+            ask = " has no build for \(projectTarget == .web ? "the browser" : "this Mac") yet — write its "
+                + "\(nodeSourceFileName) from its prompt and contract, keeping every declared port."
         }
         // The one composer addresses the Director; the node rides in the mention, which is how
         // the triage is told what the ask is about. Scoping this to the node would mean the

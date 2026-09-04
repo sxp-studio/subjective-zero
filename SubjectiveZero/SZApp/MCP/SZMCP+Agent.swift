@@ -19,15 +19,15 @@ extension SZHostBridge {
                  properties: ["node": ["type": "string", "description": "library node id (e.g. camera.macos)"]]),
             tool("agent_library_source", "Fetch one library node's full Node.swift source, to copy-as-is, adapt, or study before writing your own. Batchable with agent_library_card in the same round. `file: \"Card.swift\"` fetches the node's custom card instead (nodes marked \"ships a card\" in the index) — the worked example for authoring one.",
                  properties: ["node": ["type": "string", "description": "library node id (e.g. camera.macos)"],
-                              "file": ["type": "string", "enum": ["Node.swift", "Card.swift"], "description": "which file (default Node.swift)"]]),
-            tool("agent_write_node_staged", "Write a node's Node.swift (+ optional node-contract.json, + optional Card.swift — the node's custom card, see agent_docs_read {topic:\"card-abi\"}) to the project's .staging area. Does NOT touch live state. Omitting `card` also drops any previously staged card.",
+                              "file": ["type": "string", "enum": ["Node.swift", "Node.js", "Card.swift"], "description": "which file (default: the project's node source, Node.swift or Node.js)"]]),
+            tool("agent_write_node_staged", "Write a node's source (Node.swift, or Node.js in a web project) (+ optional node-contract.json, + optional Card.swift — the node's custom card, see agent_docs_read {topic:\"card-abi\"}) to the project's .staging area. Does NOT touch live state. Omitting `card` also drops any previously staged card.",
                  properties: [
                     "node": ["type": "string", "description": "node id (UUID)"],
-                    "source": ["type": "string", "description": "the full Node.swift source"],
+                    "source": ["type": "string", "description": "the full node source (Node.swift, or Node.js in a web project)"],
                     "contract": ["type": "object", "description": "the node-contract.json object (optional)"],
                     "card": ["type": "string", "description": "the full Card.swift source (optional)"],
                  ]),
-            tool("agent_compile_node", "Compile-check the staged Node.swift (and the staged Card.swift, if any). On success, promote (copy to live + hot-reload; a first card turns itself on) and return {ok:true}. On failure, return {ok:false, errors} and leave live state untouched — a red card blocks the promote too.",
+            tool("agent_compile_node", "Compile-check the staged node source (and the staged Card.swift, if any). On success, promote (copy to live + hot-reload; a first card turns itself on) and return {ok:true}. On failure, return {ok:false, errors} and leave live state untouched — a red card blocks the promote too.",
                  properties: ["node": ["type": "string", "description": "node id (UUID)"]]),
             tool("agent_report_status", "Report a node's observable status (queued/coding/ok/needsInput/error + message).",
                  properties: [
@@ -51,11 +51,12 @@ extension SZHostBridge {
         ]
     }
 
-    /// Handle an image-returning `agent_*` call (result is an inline image, not text), or nil if `name`
-    /// isn't ours. Kept separate from `handleAgentTool` because the return type differs.
-    func handleImageTool(name: String, arguments: [String: Any]) throws -> SZMCPToolResult? {
+    /// The `agent_*` calls that await the renderer (its compile gate, its capture), or nil if `name`
+    /// isn't one of them.
+    func handleAsyncAgentTool(name: String, arguments: [String: Any]) async throws -> SZMCPToolResult? {
         switch name {
-        case "agent_view_frame": return try agentViewFrame(arguments)
+        case "agent_compile_node": return .text(try await agentCompileNode(arguments))
+        case "agent_view_frame": return try await agentViewFrame(arguments)
         default: return nil
         }
     }
@@ -63,29 +64,29 @@ extension SZHostBridge {
     /// Read back a node's texture output (`node` given — the endpoint stays where the user put it) or the
     /// current render endpoint (what the viewport displays), downscale to `maxSize`, and return it as an
     /// inline PNG the model can look at.
-    private func agentViewFrame(_ arguments: [String: Any]) throws -> SZMCPToolResult {
-        let frame: SZImageBytes
-        if arguments["node"] != nil {
-            guard let id = arguments.uuid("node") else { throw SZMCPError.message("agent_view_frame `node` must be a UUID") }
-            guard let node = host.store.project?.graph.node(id: id) else { throw SZMCPError.message("no node \(id)") }
-            let textureOutputs = node.contract?.outputs.filter { $0.type == .texture }.map(\.name) ?? []
-            guard let port = arguments.string("port") ?? textureOutputs.first else {
-                throw SZMCPError.message("`\(node.title)` has no texture output to look at")
-            }
-            guard textureOutputs.contains(port) else {
-                throw SZMCPError.message("`\(node.title)` has no texture output `\(port)` — outputs: \(textureOutputs.joined(separator: ", "))")
-            }
-            guard let captured = host.runtime?.captureTexture(node: id, port: port) else {
-                throw SZMCPError.message("`\(node.title)` `\(port)` has not rendered yet — only implemented (compiled) nodes render; build it first, or wait a frame")
-            }
-            frame = captured
-        } else {
-            guard let captured = host.runtime?.captureFrame() else {
+    private func agentViewFrame(_ arguments: [String: Any]) async throws -> SZMCPToolResult {
+        let maxDim = min(max(arguments.int("maxSize") ?? 768, 64), 1280)
+        guard arguments["node"] != nil else {
+            guard let png = await host.backend?.captureViewport(maxDimension: maxDim) else {
                 throw SZMCPError.message("no frame rendered yet")
             }
-            frame = captured
+            return .image(base64: png.base64EncodedString())
         }
-        let maxDim = min(max(arguments.int("maxSize") ?? 768, 64), 1280)
+        guard host.capabilities.readsNodeOutputs else {
+            throw SZMCPError.message("this platform can only capture the viewport for now; call agent_view_frame without `node`")
+        }
+        guard let id = arguments.uuid("node") else { throw SZMCPError.message("agent_view_frame `node` must be a UUID") }
+        guard let node = host.store.project?.graph.node(id: id) else { throw SZMCPError.message("no node \(id)") }
+        let textureOutputs = node.contract?.outputs.filter { $0.type == .texture }.map(\.name) ?? []
+        guard let port = arguments.string("port") ?? textureOutputs.first else {
+            throw SZMCPError.message("`\(node.title)` has no texture output to look at")
+        }
+        guard textureOutputs.contains(port) else {
+            throw SZMCPError.message("`\(node.title)` has no texture output `\(port)` — outputs: \(textureOutputs.joined(separator: ", "))")
+        }
+        guard let frame = host.runtime?.captureTexture(node: id, port: port) else {
+            throw SZMCPError.message("`\(node.title)` `\(port)` has not rendered yet — only implemented (compiled) nodes render; build it first, or wait a frame")
+        }
         guard let png = frame.pngData(maxDimension: maxDim) else {
             throw SZMCPError.message("frame encode failed")
         }
@@ -96,11 +97,10 @@ extension SZHostBridge {
         switch name {
         case "agent_read_graph":         return try agentReadGraph()
         case "agent_read_node":          return try agentReadNode(arguments)
-        case "agent_library_index":      return Self.libraryIndexText()
+        case "agent_library_index":      return Self.libraryIndexText(target: host.projectTarget)
         case "agent_library_card":       return try agentLibraryCard(arguments)
         case "agent_library_source":     return try agentLibrarySource(arguments)
         case "agent_write_node_staged":  return try agentWriteNodeStaged(arguments)
-        case "agent_compile_node":       return try agentCompileNode(arguments)
         case "agent_report_status":      return try agentReportStatus(arguments)
         case "agent_docs_index":         return agentDocsIndex()
         case "agent_docs_read":          return try agentDocsRead(arguments)
@@ -205,7 +205,7 @@ extension SZHostBridge {
     /// reads it as something to reconcile. The derived reason says everything about it an agent may act on.
     private func annotatingRebuild(_ json: [String: Any], id: SZNodeID) -> [String: Any] {
         var json = json
-        json.removeValue(forKey: "buildStamp")
+        json.removeValue(forKey: "buildStamps")
         guard let node = host.store.project?.graph.node(id: id) else { return json }
         // A node can be perfectly built and still render black because a file input points at nothing.
         // Say so here: it is the first thing anyone asks when a node looks dead, and it is not a rebuild.
@@ -262,8 +262,8 @@ extension SZHostBridge {
     /// the deeper tiers). The framing stays OUT of the brief embed below — a brief carries its own
     /// framing (`reference-inline`), and the two must not ship together (they disagree on how to
     /// spend the deeper tiers).
-    nonisolated static func libraryIndexText() -> String {
-        let categories = libraryCategoriesBlock() ?? "(the library is empty)"
+    nonisolated static func libraryIndexText(target: SZProjectTarget = .native) -> String {
+        let categories = libraryCategoriesBlock(target: target) ?? "(the library is empty)"
         // The framing template lives in the coding pack (the ONE home for agent prose;
         // the equivalence gate pins the bytes). No packs, or a render refusal → the bare
         // categories block, which is the payload's substance — degrade, never invent.
@@ -279,11 +279,16 @@ extension SZHostBridge {
     /// regression): the brief then falls back to the call-the-tool framing rather than asserting
     /// "the full catalog is right here" around nothing while forbidding the tool that would show
     /// the live state.
-    nonisolated static func libraryCategoriesBlock() -> String? {
+    nonisolated static func libraryCategoriesBlock(target: SZProjectTarget = .native) -> String? {
         func ports(_ list: [SZLibraryIndexEntry.Port]) -> String {
             list.isEmpty ? "none" : list.map { "\($0.name):\($0.type.rawValue)" }.joined(separator: ",")
         }
-        let byCategory = Dictionary(grouping: libraryCatalog(), by: Self.libraryCategory)
+        // a node is offered to a target iff its folder ships that target's source file
+        let entries = libraryCatalog().filter { entry in
+            FileManager.default.fileExists(
+                atPath: SZHost.libraryURL.appending(path: entry.id).appending(path: target.sourceFileName).path)
+        }
+        let byCategory = Dictionary(grouping: entries, by: Self.libraryCategory)
         guard !byCategory.isEmpty else { return nil }
         let categories = byCategory.keys.sorted().map { category -> String in
             let lines = (byCategory[category] ?? []).map { entry in
@@ -318,9 +323,9 @@ extension SZHostBridge {
         let id = try libraryNodeID(arguments, tool: "agent_library_source")
         // `file: "Card.swift"` reads the node's custom card instead of its Node.swift — the worked
         // example an agent studies before authoring one (only nodes flagged "ships a card" have one).
-        let file = arguments.string("file") ?? "Node.swift"
-        guard file == "Node.swift" || file == "Card.swift" else {
-            throw SZMCPError.message("agent_library_source `file` must be Node.swift or Card.swift")
+        let file = arguments.string("file") ?? host.nodeSourceFileName
+        guard file == "Node.swift" || file == "Node.js" || file == "Card.swift" else {
+            throw SZMCPError.message("agent_library_source `file` must be Node.swift, Node.js or Card.swift")
         }
         let url = SZHost.libraryURL.appending(path: "\(id)/\(file)")
         guard let source = try? String(contentsOf: url, encoding: .utf8) else {
@@ -355,7 +360,7 @@ extension SZHostBridge {
 
         let dir = projectURL.appending(path: ".staging/nodes/\(id.uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try source.write(to: dir.appending(path: "Node.swift"), atomically: true, encoding: .utf8)
+        try source.write(to: dir.appending(path: host.nodeSourceFileName), atomically: true, encoding: .utf8)
         // The contract, when given, is decoded and re-encoded through the SAME serializer the live
         // `node-contract.json` uses, so staged vs live diff on content only (never on float formatting).
         // A contract staged in an earlier write of the SAME attempt stays (a source-only fix after a red
@@ -367,7 +372,11 @@ extension SZHostBridge {
                 authored = try JSONDecoder().decode(SZNodeContract.self, from: raw)
             } catch {
                 // Same self-correction channel as a build failure. Node.swift IS staged at this point.
-                let msg = Self.contractSchemaError(error, then: "Fix node-contract.json and re-stage (Node.swift was staged; the previous staged contract, if any, is untouched).")
+                let msg = Self.contractSchemaError(error, then: "Fix node-contract.json and re-stage (\(host.nodeSourceFileName) was staged; the previous staged contract, if any, is untouched).")
+                host.recordBuildErrors(msg)
+                return SZJSONRPC.encode(["ok": false, "errors": msg])
+            }
+            if let msg = Self.enumDefaultError(authored, then: "Fix node-contract.json and re-stage.") {
                 host.recordBuildErrors(msg)
                 return SZJSONRPC.encode(["ok": false, "errors": msg])
             }
@@ -384,19 +393,30 @@ extension SZHostBridge {
         return SZJSONRPC.encode(["ok": true, "staged": dir.path])
     }
 
-    /// Compile-check the staged source; promote on success (host copies live + hot-reloads), or return
-    /// the swiftc errors and leave live state untouched.
-    private func agentCompileNode(_ arguments: [String: Any]) throws -> String {
+    /// The renderer's compile gate on the staged source (swiftc, or the page); promote on success (host
+    /// copies live + hot-reloads), or return the errors and leave live state untouched.
+    private func agentCompileNode(_ arguments: [String: Any]) async throws -> String {
+        let (id, projectURL, staged) = try stagedSourceForCompile(arguments)
+        guard let backend = host.backend else { throw SZMCPError.message("no project/runtime") }
+        guard let node = host.store.project?.graph.node(id: id) else { throw SZMCPError.message("no node \(id)") }
+        let result = await backend.checkNodeSource(at: staged, for: node)
+        return try finishCompile(id: id, projectURL: projectURL, staged: staged, result: result)
+    }
+
+    private func stagedSourceForCompile(_ arguments: [String: Any]) throws -> (SZNodeID, URL, URL) {
         guard let id = arguments.uuid("node") else { throw SZMCPError.message("agent_compile_node needs `node` (UUID)") }
-        guard let projectURL = host.loadedProjectURL, let runtime = host.runtime else {
-            throw SZMCPError.message("no project/runtime")
-        }
-        let staged = projectURL.appending(path: ".staging/nodes/\(id.uuidString)/Node.swift")
+        guard let projectURL = host.loadedProjectURL else { throw SZMCPError.message("no project loaded") }
+        let staged = projectURL.appending(path: ".staging/nodes/\(id.uuidString)/\(host.nodeSourceFileName)")
         guard FileManager.default.fileExists(atPath: staged.path) else {
             throw SZMCPError.message("no staged source for \(id) — call agent_write_node_staged first")
         }
+        return (id, projectURL, staged)
+    }
 
-        switch runtime.compileNodeSource(at: staged) {
+    /// Everything after the compile check: a failed check returns its log; a green one validates the
+    /// staged contract, audits the ports, checks a staged card, and promotes.
+    private func finishCompile(id: SZNodeID, projectURL: URL, staged: URL, result: SZBuildResult) throws -> String {
+        switch result {
         case .failed(let log):
             host.recordBuildErrors(log)
             return SZJSONRPC.encode(["ok": false, "errors": log])
@@ -415,6 +435,10 @@ extension SZHostBridge {
                     host.recordBuildErrors(msg)
                     return SZJSONRPC.encode(["ok": false, "errors": msg])
                 }
+                if let contract = authored, let msg = Self.enumDefaultError(contract, then: "Fix node-contract.json (re-stage with agent_write_node_staged) and call agent_compile_node again.") {
+                    host.recordBuildErrors(msg)
+                    return SZJSONRPC.encode(["ok": false, "errors": msg])
+                }
             }
             // Audit against what the promote will actually PUT LIVE (`SZPortBindingAudit.auditForPromote`):
             // the authored contract merged into the node, or — with no staged contract — the LIVE
@@ -426,9 +450,10 @@ extension SZHostBridge {
             var merged: SZNodeContract?
             if let node = host.store.project?.graph.node(id: id),
                let source = try? String(contentsOf: staged, encoding: .utf8) {
-                let audit = SZPortBindingAudit.auditForPromote(source: source, authored: authored, node: node)
+                let audit = SZPortBindingAudit.auditForPromote(source: source, authored: authored, node: node,
+                                                               sourceFile: host.nodeSourceFileName)
                 if !audit.result.errors.isEmpty {
-                    let msg = Self.portBindingError(audit.result.errors)
+                    let msg = Self.portBindingError(audit.result.errors, file: host.nodeSourceFileName)
                     host.recordBuildErrors(msg)
                     return SZJSONRPC.encode(["ok": false, "errors": msg])
                 }
@@ -440,8 +465,13 @@ extension SZHostBridge {
             // `{ok:false, errors}` channel, prefixed so the agent knows which file to fix.
             let stagedCard = projectURL.appending(path: ".staging/nodes/\(id.uuidString)/Card.swift")
             if FileManager.default.fileExists(atPath: stagedCard.path) {
+                if !host.capabilities.supportsCards {
+                    let msg = "Card.swift failed: this platform has no custom cards yet (nothing was promoted). Re-stage without `card`."
+                    host.recordBuildErrors(msg)
+                    return SZJSONRPC.encode(["ok": false, "errors": msg])
+                }
                 if case .failed(let log) = host.cardHost.compileCheck(source: stagedCard) {
-                    let msg = Self.cardCompileError(log)
+                    let msg = Self.cardCompileError(log, file: host.nodeSourceFileName)
                     host.recordBuildErrors(msg)
                     return SZJSONRPC.encode(["ok": false, "errors": msg])
                 }
@@ -458,6 +488,14 @@ extension SZHostBridge {
     /// wrong (e.g. `"ui": "knob"` instead of the `ui` object). Surfaced through the same `{ok:false, errors}`
     /// channel as a build failure, so the coding agent's fix loop self-corrects. See `agent_docs_read`
     /// (`node-contract`) for the full schema.
+    /// A contract whose enum default is not one of its option values is refused before anything is
+    /// staged or promoted: the node would switch on a string the dropdown never sends.
+    private static func enumDefaultError(_ contract: SZNodeContract, then next: String) -> String? {
+        let problems = contract.enumDefaultProblems
+        guard !problems.isEmpty else { return nil }
+        return "node-contract.json was NOT applied (nothing was promoted): " + problems.joined(separator: " ") + " " + next
+    }
+
     private static func contractSchemaError(_ error: Error, then next: String) -> String {
         """
         node-contract.json is invalid and was NOT applied (the source was not promoted): \(error)
@@ -475,9 +513,9 @@ extension SZHostBridge {
 
     /// A red Card.swift compile, surfaced through the same channel as a node build failure so the
     /// coding agent's fix loop self-corrects — and knows it's the CARD, not the node, that failed.
-    private static func cardCompileError(_ log: String) -> String {
+    private static func cardCompileError(_ log: String, file: String) -> String {
         """
-        Card.swift failed to compile (nothing was promoted — Node.swift included):
+        Card.swift failed to compile (nothing was promoted — \(file) included):
         \(log)
 
         Fix Card.swift, re-stage with agent_write_node_staged (source + card), and call agent_compile_node again.
@@ -489,9 +527,9 @@ extension SZHostBridge {
     /// the same `{ok:false, errors}` channel as a build/contract failure so the coding agent's fix loop
     /// self-corrects. Only hard errors (referenced-but-undeclared ports) reach here; warnings ride the
     /// `{ok:true}` payload.
-    private static func portBindingError(_ errors: [String]) -> String {
+    private static func portBindingError(_ errors: [String], file: String) -> String {
         """
-        node-contract.json and Node.swift disagree on port names (the source was NOT promoted):
+        node-contract.json and \(file) disagree on port names (the source was NOT promoted):
         \(errors.map { "  • \($0)" }.joined(separator: "\n"))
 
         Every port the code reads/writes via ctx.input*/ctx.output*/ctx.setOutput* must be declared in

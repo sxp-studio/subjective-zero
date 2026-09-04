@@ -2,6 +2,7 @@
   "project": {
     "name": "Audio Cube",
     "author": "SXP Studio",
+    "target": "native",
     "viewport": {
       "zoom": 1,
       "translation": {

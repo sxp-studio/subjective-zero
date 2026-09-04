@@ -11,11 +11,11 @@ hot-reloadable.
 
 ```
 MyProject.subz/
-├─ project.json            // App/Project/Graph: nodes (by id), connections, viewport - see STATE.md
+├─ project.json            // App/Project/Graph: nodes (by id), connections, viewport, target (+ web) - see STATE.md
 ├─ nodes/
 │  ├─ n1/
 │  │  ├─ node-contract.json
-│  │  ├─ Node.swift
+│  │  ├─ Node.swift          // the Mac source; Node.js sits beside it once built for the browser
 │  │  └─ Card.swift          // optional: the node's custom card (see below)
 │  └─ n2/
 │     ├─ node-contract.json
@@ -29,6 +29,32 @@ MyProject.subz/
 `project.json` references nodes by id and owns the connection list. Each node folder owns its
 contract + source (+ an optional `Card.swift`). This "per-node `Node.swift` + `node-contract.json`"
 shape keeps each node a self-contained, inspectable unit on disk.
+
+**Targets.** `project.json` carries `target`, `native` or `web`; a file without the key is a Mac
+project. A Mac project runs each node's `Node.swift`, compiled and rendered with Metal; a web
+project runs its `Node.js`, an ES module drawn with three.js in a browser page, and its `web` block
+pins the three.js version the nodes were written against (`SZProjectWeb.currentThreeVersion` is
+what a new project gets; an existing project keeps its own). The contract, the port audit and the
+accessor names are the same for both; only the source file and the runtime differ
+([RUNTIME.md](RUNTIME.md#web-runtime)). A change to frame semantics or to the node kit lands on both
+sides in the same change ([two backends, one contract](RUNTIME.md#two-backends-one-contract)).
+
+**One source per platform, side by side.** A node folder keeps `Node.swift` beside `Node.js`, and
+the target is switched in place from Settings ▸ Target Platform ([UI.md](UI.md#settings)): the
+other platform's file stays where it is, so switching back needs nothing once both exist.
+`SZNode.builtForTarget` says whether the folder has the active platform's file. It
+is ephemeral, never written to `project.json`: read from disk at load
+(`SZProjectIO.reconcileRebuildFlags`), after a promote and after a switch
+(`SZHost.refreshTargetBuilds`). A built node without that file has the rebuild reason
+`notBuiltForTarget`, wears the pill "Not built for this platform", counts as work for any run, and
+is left out of the render graph: `SZGraph.renderable` keeps only the generated nodes built for the
+target, the connections among them, and the endpoint if its node is one, so a missing file never
+fails a load. `SZNode.libraryID`, persisted in `project.json`, records which library node a placed
+node came from, so a switch copies the library's twin for the new platform without an agent. Every
+other node goes to a conversion run: its coding agent is handed the other platform's source as a
+reference, translates it first, regenerates from the prompt if a translation cannot work, and
+answers `needsInput` with a reason when the platform cannot do it at all
+([AGENT_GRAPHS.md](AGENT_GRAPHS.md)).
 
 **A picked file is copied in.** Choosing or dropping a file for a `filePicker` port brings it into
 `media/<uuid>/`, and the port stores the bundle-relative path (`media/<uuid>/IMG_2479.MOV`) rather
@@ -188,8 +214,12 @@ visible intent and narrated, never silently dropped.
    *needs rebuild* only by derivation from it - `contractChanged` (surface off the stamp),
    `intentChanged` (prompt off the stamp) - or from the port audit (`sourceMismatch`: `Node.swift`
    names a port the contract doesn't declare, names a declared one off the wrong channel, or owns a
-   live AV resource with no `setPaused`; never `ui`/defaults/formatting). Nothing is latched: the
-   next promote re-stamps and re-audits.
+   live AV resource with no `setPaused`; never `ui`/defaults/formatting) - or from disk
+   (`notBuiltForTarget`: no source file for the active platform, see Targets above). Nothing is
+   latched: the next promote re-stamps and re-audits. Stamps are kept per platform
+   (`SZNode.buildStamps`): a rebuild on this Mac moves the Mac stamp only, so the browser file is
+   then behind the contract (`isStale(for:)`), the Target Platform pane says NEEDS BUILD for it, and
+   the next switch converts it.
 4. User iterates: edit defaults, draw data connections, chat with the node's agent, or split/merge.
 
 ## Split / merge as graph transactions

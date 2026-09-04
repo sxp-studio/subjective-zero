@@ -37,7 +37,7 @@ private var sampleURL: URL { fixtureProjects.appending(path: "grayscale-camera.s
 
     // Each node's Node.swift source exists on disk (compiled by the runtime from step 3 on).
     for node in project.graph.nodes {
-        let src = SZProjectIO.nodeSourceURL(projectURL: sampleURL, nodeID: node.id)
+        let src = SZProjectIO.nodeSourceURL(projectURL: sampleURL, nodeID: node.id, target: .native)
         #expect(FileManager.default.fileExists(atPath: src.path), "missing Node.swift for \(node.title)")
     }
 }
@@ -62,7 +62,7 @@ private var promptSampleURL: URL { fixtureProjects.appending(path: "grayscale-pr
 
     // No Node.swift is shipped for either node — agents produce them.
     for node in project.graph.nodes {
-        let src = SZProjectIO.nodeSourceURL(projectURL: promptSampleURL, nodeID: node.id)
+        let src = SZProjectIO.nodeSourceURL(projectURL: promptSampleURL, nodeID: node.id, target: .native)
         #expect(!FileManager.default.fileExists(atPath: src.path), "fixture must ship no Node.swift for \(node.title)")
     }
 }
@@ -101,7 +101,7 @@ private var audioCubeURL: URL { fixtureProjects.appending(path: "audio-cube.subz
         .deletingLastPathComponent()   // SubjectiveZero (umbrella root)
         .appending(path: "NodeLibrary")
     for node in project.graph.nodes {
-        let src = SZProjectIO.nodeSourceURL(projectURL: audioCubeURL, nodeID: node.id)
+        let src = SZProjectIO.nodeSourceURL(projectURL: audioCubeURL, nodeID: node.id, target: .native)
         #expect(FileManager.default.fileExists(atPath: src.path), "missing Node.swift for \(node.title)")
         guard let libID = libraryIDs[node.id.uuidString.lowercased()] else { continue }
         let library = libraryRoot.appending(path: libID).appending(path: "Node.swift")
@@ -120,9 +120,9 @@ private var audioCubeURL: URL { fixtureProjects.appending(path: "audio-cube.subz
     // load-time source audit (`sourceMismatch` is derived from the source on disk, never persisted) sees
     // the same files.
     for node in project.graph.nodes {
-        let src = SZProjectIO.nodeSourceURL(projectURL: sampleURL, nodeID: node.id)
+        let src = SZProjectIO.nodeSourceURL(projectURL: sampleURL, nodeID: node.id, target: .native)
         guard FileManager.default.fileExists(atPath: src.path) else { continue }
-        try FileManager.default.copyItem(at: src, to: SZProjectIO.nodeSourceURL(projectURL: copy, nodeID: node.id))
+        try FileManager.default.copyItem(at: src, to: SZProjectIO.nodeSourceURL(projectURL: copy, nodeID: node.id, target: .native))
     }
     #expect(try SZProjectIO.load(from: copy) == project)
 }

@@ -21,7 +21,7 @@ state that is true between messages, minted by the host, read by steps and brief
 
 | world state | true while | minted by |
 |---|---|---|
-| `run` | a granted build is live — its work set, round, retry cap, steers, standing instruction | admitting a scheduled task |
+| `run` | a granted build is live — its work set, round, retry cap, steers, standing instruction, and its intent (`convert` for the run a target switch mints; nil for a build) | admitting a scheduled task |
 | `pendingTasks` | always — the asks scheduled and not yet started | the Build press, `ui_run`, or the door's `requestBuild` effect |
 | `runningTasks` | always — the asks being built right now | admitting a scheduled task |
 | `assignment` | work stands assigned to this scope — the attempt, the sender's note | a dispatch node's fleet delivery |
@@ -111,7 +111,8 @@ like any step; nothing routes *into* it. The shipped director's door, whole:
 // director/steps/door/Step.swift
 struct Ruling: Codable { let outcome: String }
 
-let step = SZStep(outcomes: ["build", "answer", "answer-resumed", "implement", "amend"]) { ctx in
+let step = SZStep(outcomes: ["build", "convert", "answer", "answer-resumed", "implement", "amend"]) { ctx in
+    if ctx.run?.intent == "convert" { return "convert" }   // a target switch's run: dispatched as it stands
     if ctx.run != nil { return "build" }        // a granted build arrives PRE-RULED
     let ruling = try await ctx.ask("triage", as: Ruling.self)
     if ruling.outcome == "amend",
@@ -124,7 +125,11 @@ let step = SZStep(outcomes: ["build", "answer", "answer-resumed", "implement", "
 ```
 
 Every line is a real decision: a grant goes straight to work (re-triaging it would spend a
-token to maybe drop a build), prose is triaged by the model, an `implement` ruling schedules
+token to maybe drop a build), and a conversion run takes the `convert` lane before the build
+ruling: its work set is every built node with no source for the platform the project just
+switched to, and the convert turn dispatches them as they stand, contracts and wires kept, no
+redesign (a node the platform cannot serve comes back `needsInput`, which is the right answer,
+not a retry). Prose is triaged by the model, an `implement` ruling schedules
 the task, and an `amend` ruling only stands when there is something scheduled to fold into —
 otherwise the ask is a fresh one, because routing a hallucinated amend would reach a turn with
 no work to do. Amending is a TURN (`ui_amend_task` / `ui_cancel_task`), not an effect: naming

@@ -23,6 +23,7 @@ public enum SZNodeStatus: Sendable {
     case building        // a Coding Agent is writing this node's Swift (mirrors the HUD Build button)
     case ready           // generated + compiled, and its code still fits its contract
     case outdated        // built and still rendering, but its contract declares ports its code hasn't implemented
+    case notBuiltHere    // built for the other platform only; a conversion run writes this one's source
     case reloading       // recompiling this node's hand-edited Node.swift (hot reload)
     case needsInput      // the agent asked for clarification
     case error           // the agent/build failed
@@ -36,6 +37,7 @@ public enum SZNodeStatus: Sendable {
         case .building: "Building"
         case .ready: "Ready"
         case .outdated: "Outdated"
+        case .notBuiltHere: "Not built for this platform"
         case .reloading: "Reloading"
         case .needsInput: "Needs Input"
         case .error: "Error"
@@ -50,7 +52,7 @@ public enum SZNodeStatus: Sendable {
         case .planning, .building: .orange
         case .ready: .green
         // amber — the node still draws and nothing failed; its code just hasn't caught up with its contract
-        case .outdated: Color(red: 0.85, green: 0.60, blue: 0.20)
+        case .outdated, .notBuiltHere: Color(red: 0.85, green: 0.60, blue: 0.20)
         case .reloading: Color(red: 0.30, green: 0.55, blue: 0.95)   // blue — a hot recompile, not agent coding
         case .needsInput: Color(red: 0.98, green: 0.78, blue: 0.13)   // gold — "your turn"; distinct from the orange of coding/planning
         case .error: .red
@@ -72,7 +74,7 @@ public enum SZNodeStatus: Sendable {
     var isWorking: Bool {
         switch self {
         case .planning, .building, .reloading, .splitting, .merging: true
-        case .draft, .ready, .outdated, .needsInput, .error: false
+        case .draft, .ready, .outdated, .notBuiltHere, .needsInput, .error: false
         }
     }
 

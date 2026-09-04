@@ -14,6 +14,7 @@
   "nodes": [
     { "id": "door", "title": "On message", "step": "door", "ask": "sorter" },
     { "id": "decompose", "title": "Decompose", "turn": { "brief": "decompose", "slot": "planner", "context": "conversation" } },
+    { "id": "convert", "title": "Convert", "turn": { "brief": "convert", "slot": "planner", "context": "conversation" } },
     { "id": "implement", "title": "Implement", "dispatch": { "to": "coding" } },
     { "id": "unresolved", "title": "Still unresolved?", "step": "work-left" },
     { "id": "reconcile", "title": "Reconcile", "turn": { "brief": "reconcile", "session": "resume", "slot": "planner" } },
@@ -23,10 +24,12 @@
   ],
   "edges": [
     { "from": "door", "outcome": "build", "to": "decompose" },
+    { "from": "door", "outcome": "convert", "to": "convert" },
     { "from": "door", "outcome": "amend", "to": "amend" },
     { "from": "door", "outcome": "answer", "to": "chat" },
     { "from": "door", "outcome": "answer-resumed", "to": "chat-resumed" },
     { "from": "decompose", "outcome": "ok", "to": "implement" },
+    { "from": "convert", "outcome": "ok", "to": "implement" },
     { "from": "implement", "outcome": "settled", "to": "unresolved", "maxTraversals": 2 },
     { "from": "unresolved", "outcome": "yes", "to": "reconcile" },
     { "from": "reconcile", "outcome": "ok", "to": "implement" }

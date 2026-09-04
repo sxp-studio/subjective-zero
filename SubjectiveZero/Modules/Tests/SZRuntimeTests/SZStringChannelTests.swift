@@ -51,7 +51,7 @@ func outputStringFlowsAcrossDataEdgeToDownstreamInput(portType: SZPortType) thro
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source, target: .native), atomically: true, encoding: .utf8)
 
     // Red iff the string crossed the edge (its own default is "cold" → black).
     try """
@@ -69,7 +69,7 @@ func outputStringFlowsAcrossDataEdgeToDownstreamInput(portType: SZPortType) thro
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sink), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sink, target: .native), atomically: true, encoding: .utf8)
 
     try runtime.loadProject(at: dir)
     #expect(runtime.readOutputString(node: source, port: "mode") == nil)   // nothing encoded yet

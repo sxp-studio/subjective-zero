@@ -58,7 +58,7 @@ private func makeOneNodeProject(source: String) throws -> URL {
     let dir = FileManager.default.temporaryDirectory
         .appending(path: "szrecord-\(UUID().uuidString)").appending(path: "record-test.subz")
     try SZProjectIO.save(project, to: dir)
-    try source.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: nodeID),
+    try source.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: nodeID, target: .native),
                      atomically: true, encoding: .utf8)
     return dir
 }

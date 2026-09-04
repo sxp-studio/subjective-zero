@@ -87,10 +87,10 @@ private func libraryCornerPinContract() throws -> SZNodeContract {
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sourceID), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sourceID, target: .native), atomically: true, encoding: .utf8)
     try FileManager.default.copyItem(
         at: libraryCornerPinDir.appending(path: "Node.swift"),
-        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: pinID))
+        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: pinID, target: .native))
     try runtime.loadProject(at: dir)
 
     // Identity corners: the source passes through — red at the center AND at a frame corner.

@@ -293,3 +293,30 @@ private func node(_ contract: SZNodeContract?, title: String = "T", symbol: Stri
     #expect(r.errors.count == 1)
     #expect(r.errors[0].contains("declares no such input"))
 }
+
+// MARK: - Web nodes (Node.js)
+
+/// A web node names ports in single quotes and comments the JavaScript way; the audit reads them like
+/// Swift's double quotes and skips the comments the same.
+@Test func auditsJavaScriptSourceWithSingleQuotes() {
+    let c = contract(inputs: [input("input", .texture), input("amount")], outputs: [output("output")])
+    let clean = """
+    export default class Node {
+      // ctx.inputFloat('ghost') lives in a comment
+      /* ctx.inputTexture('legacy') too */
+      update(ctx) {
+        const out = ctx.outputTexture('output');
+        if (!out) return;
+        ctx.inputTexture('input'); ctx.inputFloat('amount');
+      }
+    }
+    """
+    let r = SZPortBindingAudit.audit(contract: c, source: clean)
+    #expect(r.errors.isEmpty)
+    #expect(r.warnings.isEmpty)
+
+    let undeclared = clean.replacingOccurrences(of: "ctx.inputFloat('amount')", with: "ctx.inputFloat('gain')")
+    let bad = SZPortBindingAudit.audit(contract: c, source: undeclared)
+    #expect(bad.errors.count == 1)
+    #expect(bad.errors[0].contains("\"gain\""))
+}

@@ -12,3 +12,4 @@ color of its block's top-left source texel.
 - **Gotchas:** the input must be connected — nil input skips the frame. Uses `access::read` (integer
   `read(gid)`), not a sampler, so it snaps to exact texels with no interpolation — that hard edge is the
   point.
+- **Web:** Also available in web projects (Node.js).

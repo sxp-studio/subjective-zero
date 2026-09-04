@@ -63,9 +63,13 @@ import SZCore
     /// would resume whatever the other run last said.
     var directorSession: SZAgentSession?
 
+    /// The task's intent ("convert" for a target switch), carried into the run's world as `SZRun.intent`.
+    let intent: SZRunIntent?
+
     init(taskID: UUID, claim: SZClaimToken, instruction: String, title: String = "",
          origin: Set<UUID> = [], ownsGraphOp: Bool, workSet: Set<SZNodeID>,
-         unwiredIntent: Set<SZConnectionID> = [], wiringOnly: Set<SZNodeID> = []) {
+         unwiredIntent: Set<SZConnectionID> = [], wiringOnly: Set<SZNodeID> = [],
+         intent: SZRunIntent? = nil) {
         self.taskID = taskID
         self.claim = claim
         self.instruction = instruction
@@ -75,5 +79,6 @@ import SZCore
         self.workSet = workSet
         self.unwiredIntent = unwiredIntent
         self.wiringOnly = wiringOnly
+        self.intent = intent
     }
 }

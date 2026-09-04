@@ -2,6 +2,7 @@
   "project": {
     "name": "Grayscale Camera (prompt)",
     "author": "SXP Studio",
+    "target": "native",
     "viewport": {
       "zoom": 1,
       "translation": { "x": 0, "y": 0 },

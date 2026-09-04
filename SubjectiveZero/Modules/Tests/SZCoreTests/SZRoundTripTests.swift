@@ -190,7 +190,13 @@ private func sampleProject() -> SZProject {
     }
 
     let loaded = try SZProjectIO.load(from: dir)
-    #expect(loaded == project)
+    // No Node.swift was written beside the contracts, so load reads every built node as not built for
+    // the target; that flag is disk truth, not document state, and is the one expected difference.
+    var expected = project
+    for i in expected.graph.nodes.indices where expected.graph.nodes[i].kind == .generated {
+        expected.graph.nodes[i].builtForTarget = false
+    }
+    #expect(loaded == expected)
 }
 
 // MARK: - Load: seed the build stamp, audit the source
@@ -213,7 +219,7 @@ private func projectWithSource(contract: SZNodeContract, source: String, prompt:
         .appending(path: "SZLoadAudit-\(UUID().uuidString)")
         .appending(path: "Drifted.subz")
     try SZProjectIO.save(project, to: dir)
-    try source.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id), atomically: true, encoding: .utf8)
+    try source.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native), atomically: true, encoding: .utf8)
     if let legacyReason {
         // A pre-stamp `project.json` stored the reason on the node. Splice it back in as the old writer would have.
         let file = dir.appending(path: "project.json")

@@ -77,7 +77,7 @@ public struct SZViewport: Codable, Equatable, Sendable {
 /// is the only writer, and it only ever moves `prompt → generated`. Never flipped backward.
 ///
 /// This is deliberately NOT "is the node up to date" — that is `SZNode.needsRebuild`, an orthogonal fact. A node
-/// whose contract moved is both renderable (it still has last run's build) and pending work; `renderableSubgraph`
+/// whose contract moved is both renderable (it still has last run's build) and pending work; `SZGraph.renderable`
 /// keys on `kind` alone, so flipping a drifted node back to `.prompt` would drop it from the render graph and
 /// black it out.
 public enum SZNodeKind: String, Codable, Sendable {
@@ -105,6 +105,10 @@ public enum SZRebuildReason: String, Codable, Sendable {
     /// promote source in this state (`SZPortBindingAudit` calls it an error, not a warning). Ephemeral: the
     /// host re-audits at load, after every promote and after every hot reload (`SZNode.sourceMismatch`).
     case sourceMismatch
+
+    /// The node's folder has no source file for the active target (`SZNode.builtForTarget`); the other
+    /// platform's file is untouched. A conversion run writes the missing one.
+    case notBuiltForTarget
 }
 
 /// What a node's build CONSUMED — the evidence `SZNode.rebuildReason` is derived from. Written by
@@ -253,10 +257,35 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     public var contract: SZNodeContract?
     public var position: SZPoint
 
-    /// What this node's build consumed — the evidence behind `rebuildReason`. nil until the node is built (or
-    /// seeded on load for a built node that predates the stamp). Only `promoteStagedNode` writes it from a
-    /// real compile; the derived-binding edits carry it along with the table-generic surface they add.
-    public var buildStamp: SZBuildStamp?
+    /// What each platform's build consumed, keyed by platform — the evidence behind `rebuildReason` for the
+    /// active one and `isStale(for:)` for the others. Empty until the node is built (a built node without one
+    /// is seeded on load). Only `promoteStagedNode` writes a real one; the derived-binding edits carry it along
+    /// with the table-generic surface they add.
+    public var buildStamps: [SZProjectTarget: SZBuildStamp] = [:]
+
+    /// The platform `buildStamp` addresses. Ephemeral: set for every node on load and after a target
+    /// switch, and by the promote that writes a stamp.
+    public var activeTarget: SZProjectTarget = .native
+
+    /// The active platform's stamp (`buildStamps[activeTarget]`).
+    public var buildStamp: SZBuildStamp? {
+        get { buildStamps[activeTarget] }
+        set { buildStamps[activeTarget] = newValue }
+    }
+
+    /// The platform has a source file and it is not behind the contract or prompt. What a target switch
+    /// leaves alone and the Target Platform pane counts.
+    public func hasCurrentBuild(for target: SZProjectTarget) -> Bool {
+        builtTargets.contains(target) && !isStale(for: target)
+    }
+
+    /// A built platform whose stamp no longer matches the contract or prompt: its file implements an older
+    /// node. The other platforms' `contractChanged` / `intentChanged`, which `rebuildReason` derives for the
+    /// active one alone.
+    public func isStale(for target: SZProjectTarget) -> Bool {
+        guard let stamp = buildStamps[target] else { return false }
+        return stamp.portSurface != (contract?.portSurface ?? []) || stamp.prompt != prompt
+    }
 
     /// The host's audit verdict: the live source names ports the contract does not declare. Ephemeral — never
     /// encoded; recomputed from `SZPortBindingAudit` at load, after a promote and after a hot reload.
@@ -268,6 +297,19 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// Kept on the NODE rather than on the transient status state, which every agent report clears.
     public var unreadableInputs: [String: String] = [:]
 
+    /// The platforms whose source file the node's folder holds (`Node.swift`, `Node.js`). Ephemeral: read
+    /// from disk at load and after a target switch, extended by a promote. What the Target Platform pane
+    /// counts, so it never touches disk.
+    public var builtTargets: Set<SZProjectTarget> = []
+
+    /// `builtTargets` holds the project's active target. Kept beside it because `rebuildReason` reads the
+    /// node alone; false derives `.notBuiltForTarget` and keeps the node out of `SZGraph.renderable`.
+    public var builtForTarget: Bool = true
+
+    /// The library node this one was placed from (`NodeLibrary/<id>`), when it was; nil for a node an
+    /// agent wrote. Lets a target switch copy the library's twin for the new platform without an agent.
+    public var libraryID: String?
+
     /// What the card renders between header and rows (preview thumbnail / the node's custom card / nothing).
     /// `nil` = unset; the editor applies its legacy auto-preview fallback. Presentation-only: never affects
     /// the render graph or a rebuild.
@@ -278,6 +320,7 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// to `kind`: a node awaiting a rebuild keeps rendering its existing source rather than going black.
     public var rebuildReason: SZRebuildReason? {
         guard kind == .generated else { return nil }
+        if !builtForTarget { return .notBuiltForTarget }
         if sourceMismatch { return .sourceMismatch }
         guard let stamp = buildStamp else { return nil }
         if (contract?.portSurface ?? []) != stamp.portSurface { return .contractChanged }
@@ -315,9 +358,11 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         contract: SZNodeContract? = nil,
         position: SZPoint,
         buildStamp: SZBuildStamp? = nil,
+        target: SZProjectTarget = .native,
         sourceMismatch: Bool = false,
         unreadableInputs: [String: String] = [:],
-        body: SZNodeBody? = nil
+        body: SZNodeBody? = nil,
+        libraryID: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -326,17 +371,58 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         self.prompt = prompt
         self.contract = contract
         self.position = position
-        self.buildStamp = buildStamp
+        self.activeTarget = target
+        if let buildStamp { buildStamps[target] = buildStamp }
         self.sourceMismatch = sourceMismatch
         self.unreadableInputs = unreadableInputs
         self.body = body
+        self.libraryID = libraryID
     }
 
-    /// `sourceMismatch` and `unreadableInputs` are host state, not document state: both stay out of
-    /// `project.json` (a file missing on THIS machine is not a fact about the project). A legacy stored `rebuildReason` key is ignored on decode — the reason is
-    /// derived now.
+    /// `sourceMismatch`, `unreadableInputs`, `builtTargets` and `activeTarget` are host state, not document
+    /// state: they stay out of `project.json` (a file missing on THIS machine is not a fact about the
+    /// project). A legacy stored `rebuildReason` key is ignored on decode — the reason is derived now; a
+    /// legacy single `buildStamp` is this Mac's.
     private enum CodingKeys: String, CodingKey {
-        case id, kind, title, sfSymbol, prompt, contract, position, buildStamp, body
+        case id, kind, title, sfSymbol, prompt, contract, position, buildStamp, buildStamps, body, libraryID
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(SZNodeID.self, forKey: .id)
+        kind = try c.decode(SZNodeKind.self, forKey: .kind)
+        title = try c.decode(String.self, forKey: .title)
+        sfSymbol = try c.decode(String.self, forKey: .sfSymbol)
+        prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
+        contract = try c.decodeIfPresent(SZNodeContract.self, forKey: .contract)
+        position = try c.decode(SZPoint.self, forKey: .position)
+        body = try c.decodeIfPresent(SZNodeBody.self, forKey: .body)
+        libraryID = try c.decodeIfPresent(String.self, forKey: .libraryID)
+        var stamps: [SZProjectTarget: SZBuildStamp] = [:]
+        for (key, stamp) in try c.decodeIfPresent([String: SZBuildStamp].self, forKey: .buildStamps) ?? [:] {
+            if let target = SZProjectTarget(rawValue: key) { stamps[target] = stamp }
+        }
+        if stamps.isEmpty, let legacy = try c.decodeIfPresent(SZBuildStamp.self, forKey: .buildStamp) {
+            stamps[.native] = legacy
+        }
+        buildStamps = stamps
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(title, forKey: .title)
+        try c.encode(sfSymbol, forKey: .sfSymbol)
+        try c.encodeIfPresent(prompt, forKey: .prompt)
+        try c.encodeIfPresent(contract, forKey: .contract)
+        try c.encode(position, forKey: .position)
+        if !buildStamps.isEmpty {
+            try c.encode(Dictionary(uniqueKeysWithValues: buildStamps.map { ($0.key.rawValue, $0.value) }),
+                         forKey: .buildStamps)
+        }
+        try c.encodeIfPresent(body, forKey: .body)
+        try c.encodeIfPresent(libraryID, forKey: .libraryID)
     }
 }
 
@@ -424,18 +510,73 @@ public struct SZGraph: Codable, Equatable, Sendable {
     public func node(id: SZNodeID) -> SZNode? { nodes.first { $0.id == id } }
 }
 
+// MARK: - Target
+
+/// Where a project runs: this Mac (Swift + Metal nodes) or a browser (JavaScript nodes drawn with
+/// three.js over WebGL2). The node source file name and the runtime follow from it.
+public enum SZProjectTarget: String, Codable, Sendable, CaseIterable {
+    case native, web
+
+    /// The per-node source file the agents write and the runtime loads.
+    public var sourceFileName: String {
+        switch self {
+        case .native: "Node.swift"
+        case .web: "Node.js"
+        }
+    }
+
+    /// Plain words for the UI.
+    public var displayName: String {
+        switch self {
+        case .native: "On this Mac"
+        case .web: "In a browser"
+        }
+    }
+}
+
+/// The three.js version a web project's nodes were written against. A new project takes the current
+/// default; an existing one keeps its own.
+public struct SZProjectWeb: Codable, Equatable, Sendable {
+    /// The version new web projects pin. Bump it after the library's web nodes are checked against it;
+    /// the app's library store needs the new version's hashes too.
+    public static let currentThreeVersion = "0.185.1"
+
+    public var threeVersion: String
+
+    public init(threeVersion: String = SZProjectWeb.currentThreeVersion) {
+        self.threeVersion = threeVersion
+    }
+}
+
 /// One effect / document.
 public struct SZProject: Codable, Equatable, Sendable {
     public var name: String
     public var author: String
     public var viewport: SZViewport
     public var graph: SZGraph
+    public var target: SZProjectTarget
+    /// Present on web projects only.
+    public var web: SZProjectWeb?
 
-    public init(name: String, author: String = "", viewport: SZViewport = SZViewport(), graph: SZGraph = SZGraph()) {
+    public init(name: String, author: String = "", viewport: SZViewport = SZViewport(), graph: SZGraph = SZGraph(),
+                target: SZProjectTarget = .native, web: SZProjectWeb? = nil) {
         self.name = name
         self.author = author
         self.viewport = viewport
         self.graph = graph
+        self.target = target
+        self.web = target == .web ? (web ?? SZProjectWeb()) : nil
+    }
+
+    /// A project written before targets existed runs on this Mac: the key is absent, not wrong.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        author = try c.decode(String.self, forKey: .author)
+        viewport = try c.decode(SZViewport.self, forKey: .viewport)
+        graph = try c.decode(SZGraph.self, forKey: .graph)
+        target = try c.decodeIfPresent(SZProjectTarget.self, forKey: .target) ?? .native
+        web = try c.decodeIfPresent(SZProjectWeb.self, forKey: .web)
     }
 }
 
@@ -583,6 +724,9 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// Sticky recording settings. Optional for the same decode-compatibility reason; nil means
     /// defaults (full frame, 1080, 60 fps, H.264).
     public var recordPrefs: SZRecordPrefs?
+    /// The target picked for the last new project: the New Project sheet's preselection. Optional
+    /// for the same decode-compatibility reason; nil means On this Mac.
+    public var lastProjectTarget: SZProjectTarget?
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
 
@@ -609,7 +753,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         activeRoutingProfileName: String? = nil,
         routingSeededStarterNames: [String]? = nil,
         routingLastProfileName: String? = nil,
-        recordPrefs: SZRecordPrefs? = nil
+        recordPrefs: SZRecordPrefs? = nil,
+        lastProjectTarget: SZProjectTarget? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -634,6 +779,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.routingSeededStarterNames = routingSeededStarterNames
         self.routingLastProfileName = routingLastProfileName
         self.recordPrefs = recordPrefs
+        self.lastProjectTarget = lastProjectTarget
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

@@ -74,7 +74,7 @@ private func libraryVideoContract() throws -> SZNodeContract {
     try SZProjectIO.save(project, to: dir)
     try FileManager.default.copyItem(
         at: libraryVideoDir.appending(path: "Node.swift"),
-        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: videoID))
+        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: videoID, target: .native))
 
     // Compiles + loads + runs the lifecycle. Empty `path` → no player is built → black.
     try runtime.loadProject(at: dir)

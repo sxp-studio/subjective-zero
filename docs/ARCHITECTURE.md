@@ -7,7 +7,8 @@ The spine doc. It defines the package boundaries, who owns what, and how a singl
 
 - **Small but modular.** Few packages, clear seams, so an agent (or a human) can work on one
   concern without loading the whole codebase.
-- **Native macOS, no WebView.** SwiftUI + AppKit for UI, Metal for rendering.
+- **Native macOS UI.** The editor and every panel are SwiftUI + AppKit. A Mac project renders with
+  Metal; a web project's viewport is one WKWebView that is a render surface, not UI.
 - **Host-owned everything risky.** Agents reason and write source; the host owns Metal
   resources, graph mutations, the build, and scheduling. Agents never touch the GPU or mutate
   state directly - they go through MCP.
@@ -46,11 +47,11 @@ split/merge deferred-commit, run state + post-run surfacing, and chat/agent-sess
 
 | Package | Responsibility | Key contents |
 |---|---|---|
-| **SZApp** | The app bundle and the **host**: composition root that instantiates and injects the others, owns the window/run loop, implements `HostBridge`, and **hosts the MCP server** (the app's command bus). Also the **run-lifecycle owner**: staging→promote (the contract boundary merge), split/merge deferred-commit, run + chat/agent-session state. | `App`, host coordinator (`SZHost` + `SZHost+*.swift` extensions), `MCPServer` + `MCP+*.swift`, window/scene setup, notarization/packaging config |
+| **SZApp** | The app bundle and the **host**: composition root that instantiates and injects the others, owns the window/run loop, implements `HostBridge`, and **hosts the MCP server** (the app's command bus). Also the **run-lifecycle owner**: staging→promote (the contract boundary merge), split/merge deferred-commit, run + chat/agent-session state. Holds the web runtime for a web project (`SZApp/Web`: the WKWebView, the `subz://` scheme handler, the three.js cache); the only package that imports WebKit. | `App`, host coordinator (`SZHost` + `SZHost+*.swift` extensions), `MCPServer` + `MCP+*.swift`, `Web/`, window/scene setup, notarization/packaging config |
 | **SZCore** | The canonical, portable model + its JSON serialization, **and the seam protocols** every cross-package interaction goes through. No macOS/Metal types. | `App`/`Project`/`Graph`/`Node` models, `node-contract.json` schema, observable `Store` + named edit ops, `SZNodeAgentState`, checkpoint undo (M8) |
 | **SZAI** | Provider wrapping, agent runtime, orchestration, sessions, failure recovery. Implements `Orchestrator`; **does not** own the MCP server. | `DirectorAgent`, `CodingAgent`, `Orchestrator` impl (hardcoded Swift in V1, behavior-tree engine later), provider adapters (claude code, codex) |
-| **SZRuntime** | Lightweight rendering engine. Owns Metal device/queue/resources, viewport context, permissions. Implements `NodeCompiler`/`Renderer`; compiles, schedules, executes the graph; hot reload. | `MTLDevice` ownership, resource/asset manager, DAG scheduler, swiftc build pipeline, node module loader |
-| **SZUI** | Native panels. Binds to the `SZCore` `Store`; emits commands/intents. | ViewportPanel (MTKView in SwiftUI), Node Editor, Chat, HUD, Settings |
+| **SZRuntime** | Lightweight rendering engine for a Mac project. Owns Metal device/queue/resources, viewport context, permissions. Implements `SZRenderBackend`; compiles, schedules, executes the graph; hot reload. | `MTLDevice` ownership, resource/asset manager, DAG scheduler, swiftc build pipeline, node module loader |
+| **SZUI** | Native panels. Binds to the `SZCore` `Store`; emits commands/intents. Never imports WebKit: a web project's page reaches its viewport tile as a plain `NSView` the host hands over. | ViewportPanel (a Metal layer in SwiftUI), WebViewportPanel, Node Editor, Chat, HUD, Settings |
 
 ## The host seam
 
@@ -71,11 +72,11 @@ is *forced* by the dependency rule: since `SZUI`/`SZAI`/`SZRuntime` may not impo
 >
 > Evidence: **M1 shipped its whole runtime + hot-reload + capture path with *zero* seam protocols.**
 > The viewport gets frames from the runtime via a host-injected MetalKit `MTKViewDelegate` (not a
-> protocol); the host calls the concrete `SZRuntime` directly. The two real cross-module needs are
-> already covered without new protocols: **the package graph** (the boundary) and **`SZStore`** (the
-> shared-state seam). The list below is *illustrative of shapes if/when earned* - several may never be
-> needed; `SZNodeCompiler`/`SZRenderer` in particular proved unnecessary (the host holds the concrete
-> runtime). Only `SZStore` exists today.
+> protocol); the host called the concrete `SZRuntime` directly. The two general cross-module needs are
+> covered without new protocols: **the package graph** (the boundary) and **`SZStore`** (the
+> shared-state seam). The one render seam, `SZRenderBackend`, arrived with its second implementation:
+> the web runtime. The list below is *illustrative of shapes if/when earned* - several may never be
+> needed.
 
 **`SZCore` owns the contracts.**
 
@@ -88,8 +89,13 @@ is *forced* by the dependency rule: since `SZUI`/`SZAI`/`SZRuntime` may not impo
 - **Seam protocols (candidates, added only when *earned* - not on a schedule).** Pure Swift, no
   macOS/Metal types. The host mediates most cross-module calls with concrete types, so these may never
   appear; each is added the day a real swap or un-mediatable call shows up:
-  - `SZNodeCompiler` / `SZRenderer` - **not needed.** The host holds the concrete `SZRuntime` and calls
-    `compile`/`renderFrame`/`captureFrame` directly; the viewport rides a MetalKit delegate. (M1 shipped without them.)
+  - `SZRenderBackend` (`SZCore/Runtime/SZRenderBackend.swift`) - **exists.** The graph lifecycle the host
+    drives through `host.backend`: load a project, reload or compile-check one node's source, live input
+    overrides, the render endpoint, pause and rewind, the node error sink. Two implementations: the
+    Metal runtime (`SZRuntime`) for a Mac project and the web runtime (`SZApp/Web/SZWebRuntime`) for a
+    web project. Only what both do for real is on the protocol; Metal-only vocabulary (surfaces,
+    captures, recording) stays on `SZRuntime`, which the host still reaches concretely. What is shared,
+    what is mirrored, and the rule for changing either: [RUNTIME.md](RUNTIME.md#two-backends-one-contract).
   - `SZHostBridge` - the strongest candidate: SZUI must call *into* the host without importing SZApp.
     Try `SZStore` + a host object injected via the SwiftUI environment first; add a protocol only if routing earns it. *(M3.)*
   - `SZOrchestrator` - justified **only by the M7 swap** (hardcoded Swift ↔ a behavior-tree engine). Add

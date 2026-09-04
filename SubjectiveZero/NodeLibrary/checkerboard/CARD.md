@@ -11,3 +11,4 @@ pattern and a `copy-as-is` starting point for any tiled procedural generator.
 - **Gotchas:** UV origin is top-left with y flipped in the vertex stage (matches gradient). Reading a
   colorRGBA input yields 4 floats via `ctx.inputFloats` — guard the count before indexing (`simd4`
   helper). `scale` is snapped to whole cells by the slider step, but any float value works.
+- **Web:** Also available in web projects (Node.js).

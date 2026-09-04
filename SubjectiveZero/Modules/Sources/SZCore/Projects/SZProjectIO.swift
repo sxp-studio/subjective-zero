@@ -6,7 +6,8 @@
 //   │                          //   connections, render endpoint. Node CONTRACTS are NOT inline here.
 //   └─ nodes/<node-id>/
 //      ├─ node-contract.json   // the node's contract (when generated)
-//      └─ Node.swift           // the node's source (owned by the runtime/host, untouched here)
+//      └─ Node.swift           // the node's source (owned by the runtime/host, untouched here);
+//                              //   Node.js in a web project (`SZProject.target`)
 //
 // `project.json` stores only graph-level info; each node's contract lives in its folder. This splitter
 // keeps node source/contracts isolated and inspectable. Pure SZCore — no Metal, no compilation.
@@ -91,7 +92,7 @@ public enum SZProjectIO {
             project.graph.nodes[i].contract = try JSONDecoder()
                 .decode(SZNodeContract.self, from: Data(contentsOf: contractFile))
         }
-        reconcileRebuildFlags(in: &project.graph, projectURL: url)
+        reconcileRebuildFlags(in: &project.graph, projectURL: url, target: project.target)
         return project
     }
 
@@ -108,23 +109,36 @@ public enum SZProjectIO {
     /// contract does not declare — count. The audit's other half (a contract port the code never names)
     /// is unreliable: it is a string-literal scan, so a node that builds a port name at runtime
     /// (`NodeLibrary/audio-bands`: `ctx.setOutputFloat(kBandNames[b], …)`) would read dirty on every open.
-    private static func reconcileRebuildFlags(in graph: inout SZGraph, projectURL: URL) {
+    private static func reconcileRebuildFlags(in graph: inout SZGraph, projectURL: URL, target: SZProjectTarget) {
         for i in graph.nodes.indices {
             let node = graph.nodes[i]
             guard node.kind == .generated else { continue }
-            if node.buildStamp == nil {
+            graph.nodes[i].activeTarget = target
+            if graph.nodes[i].buildStamp == nil {
                 graph.nodes[i].buildStamp = .trusting(contract: node.contract, prompt: node.prompt)
             }
+            let built = builtTargets(projectURL: projectURL, nodeID: node.id)
+            graph.nodes[i].builtTargets = built
+            graph.nodes[i].builtForTarget = built.contains(target)
+            let sourceURL = nodeSourceURL(projectURL: projectURL, nodeID: node.id, target: target)
             guard let contract = node.contract,
-                  let source = try? String(contentsOf: nodeSourceURL(projectURL: projectURL, nodeID: node.id),
-                                           encoding: .utf8) else { continue }
-            graph.nodes[i].sourceMismatch = !SZPortBindingAudit.audit(contract: contract, source: source).errors.isEmpty
+                  let source = try? String(contentsOf: sourceURL, encoding: .utf8) else { continue }
+            graph.nodes[i].sourceMismatch = !SZPortBindingAudit.audit(contract: contract, source: source, sourceFile: target.sourceFileName).errors.isEmpty
         }
     }
 
-    /// The on-disk path of a node's `Node.swift` source inside a `.subz` directory.
-    public static func nodeSourceURL(projectURL: URL, nodeID: SZNodeID) -> URL {
-        projectURL.appending(path: nodesDirName).appending(path: nodeID.description).appending(path: "Node.swift")
+    /// The platforms a node's folder holds a source file for.
+    public static func builtTargets(projectURL: URL, nodeID: SZNodeID) -> Set<SZProjectTarget> {
+        Set(SZProjectTarget.allCases.filter {
+            FileManager.default.fileExists(atPath: nodeSourceURL(projectURL: projectURL, nodeID: nodeID, target: $0).path)
+        })
+    }
+
+    /// The on-disk path of a node's source inside a `.subz` directory: `Node.swift` on this Mac,
+    /// `Node.js` in a web project.
+    public static func nodeSourceURL(projectURL: URL, nodeID: SZNodeID, target: SZProjectTarget) -> URL {
+        projectURL.appending(path: nodesDirName).appending(path: nodeID.description)
+            .appending(path: target.sourceFileName)
     }
 
     /// The on-disk path of a node's optional `Card.swift` (its custom card), beside `Node.swift`.

@@ -73,7 +73,7 @@ private func clockRuntime() throws -> (SZRuntime, URL) {
     let dir = FileManager.default.temporaryDirectory
         .appending(path: "szruntime-clock-\(UUID().uuidString)").appending(path: "clock.subz")
     try SZProjectIO.save(project, to: dir)
-    try clockNodeSource.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: nodeID),
+    try clockNodeSource.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: nodeID, target: .native),
                               atomically: true, encoding: .utf8)
     return (runtime, dir)
 }

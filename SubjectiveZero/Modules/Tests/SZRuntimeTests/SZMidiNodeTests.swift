@@ -78,7 +78,7 @@ private func midiContract() throws -> SZNodeContract {
     try SZProjectIO.save(project, to: dir)
     try FileManager.default.copyItem(
         at: midiLibraryRoot.appending(path: "midi.macos/Node.swift"),
-        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: midi))
+        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: midi, target: .native))
     try runtime.loadProject(at: dir)
 
     // Before any event: lastEvent is the zero sentinel, no key yet, and the bound output is NOT

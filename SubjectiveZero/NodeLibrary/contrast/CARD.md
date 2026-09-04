@@ -10,3 +10,4 @@ brightness — same single-pixel compute template.
   (0–1, default 0.5) — the value that stays fixed. Both read live via `ctx.inputFloat`.
 - **Gotchas:** the input texture must be connected — if `ctx.inputTexture("input")` is nil the kernel
   is skipped. High `amount` clips on an 8-bit target; that's expected.
+- **Web:** Also available in web projects (Node.js).

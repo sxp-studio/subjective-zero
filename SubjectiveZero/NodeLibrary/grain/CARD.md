@@ -14,3 +14,4 @@ Adds animated hash noise to the input, faking film / sensor grain. The noise fie
 - **Gotchas:** the input must be connected — nil input skips the frame. Animation depends on `ctx.time`
   advancing; if the graph is paused the field holds still. `amount` is added (not clamped) — high values
   clip on an 8-bit target, which is the expected grainy look.
+- **Web:** Also available in web projects (Node.js).

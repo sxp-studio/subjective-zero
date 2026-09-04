@@ -28,6 +28,18 @@ enum SZPendingGraphOp {
 @Observable
 final class SZHost {
     private(set) var runtime: SZRuntime?
+    /// The page that renders a web project (SZWebRuntime); nil while a native project is open. The
+    /// Metal runtime stays alive underneath holding an empty graph.
+    internal(set) var webRuntime: SZWebRuntime?   // set by switchProject and the target switch (SZHost+Retarget)
+    /// Whatever renders the open project: the page for a web project, else the Metal runtime.
+    var backend: (any SZRenderBackend)? { webRuntime.map { $0 as any SZRenderBackend } ?? runtime }
+    /// The last target switch's conversion (SZHost+Retarget): what was copied, what was queued, its run.
+    /// Cleared by the next switch and by a project switch.
+    var conversion: SZConversionState?
+    /// Where the open project runs (`SZProject.target`); On this Mac until a project is loaded.
+    var projectTarget: SZProjectTarget { store.project?.target ?? .native }
+    /// The per-node source file for the open project: `Node.swift`, or `Node.js` in a web project.
+    var nodeSourceFileName: String { projectTarget.sourceFileName }
     /// Which viewport drives (the rest mirror); pushed to the runtime by `applyRenderDrive()`
     /// (SZHost+Viewports.swift).
     let viewportDriver = SZViewportDriverRegistry()
@@ -333,6 +345,9 @@ final class SZHost {
     // SZTelemetry consults this live per send, so a mid-session toggle takes effect immediately,
     // heartbeat included.
     internal(set) var telemetryEnabled: Bool = SZAppStateIO.load()?.telemetryEnabled ?? true
+    /// The target picked for the last new project: the New Project sheet's preselection
+    /// (SZHost+ProjectLifecycle). Persisted with the other prefs; nil reads as On this Mac.
+    internal(set) var lastProjectTarget: SZProjectTarget? = SZAppStateIO.load()?.lastProjectTarget
 
     // Node-editor camera commands (Graph ▸ Center View / Zoom to Fit). The camera (zoom/offset) is
     // panel-local @State, unreachable from here, so the host raises a one-shot command the panel
@@ -461,6 +476,12 @@ final class SZHost {
     /// The Agent Providers sheet. Auto-presents on a first-run launch; reopened any time via the
     /// app menu (⌘,) or the HUD health dot.
     var providerSetupPresented = false
+    /// The New Project sheet (Project ▸ New, the welcome's New, a cold launch with nothing to open).
+    var newProjectPresented = false
+    /// The sheet cannot be cancelled: nothing else is loaded, so a target must be picked.
+    var newProjectRequired = false
+    /// The Settings section a menu item asked for; the sheet lands there once, then clears it.
+    var requestedSetupSection: SZProviderSetupSection?
     /// The first-run sheet auto-presents at most once per launch. Transient: without it, every
     /// Help ▸ Welcome round-trip would re-nag a user who chose Skip for Now.
     var providerSetupAutoPresented = false
@@ -693,11 +714,10 @@ final class SZHost {
             pumpSuspended = false
             pumpMailboxes()
         }
-        // The two awaits are adjacent on purpose: one interleaving window, covered by one re-check.
-        // Permissions first, then the new project's nodes built off-main. Preparing touches nothing
-        // live, so the old project keeps rendering and an abandoned prepare is just dropped.
-        try await runtime.requestDeclaredPermissions(at: newURL)
-        let prepared = try await runtime.prepareProject(project, at: newURL)
+        // The awaits are adjacent on purpose: one interleaving window, covered by one re-check.
+        // Permissions first, then the new project's renderer built off-main (SZHost+Backend). Preparing
+        // touches nothing live, so the old project keeps rendering and an abandoned prepare is dropped.
+        let prepared = try await prepareBackend(for: project, at: newURL, runtime: runtime)
         // The pump is suspended, but a user send or an MCP call can still start a turn in that window.
         // Re-check before tearing the old project down under one.
         guard !agentsOwnProject else {
@@ -724,7 +744,7 @@ final class SZHost {
         // `prepared`; the save is for everything downstream that reads disk.
         do {
             if !repairedEdges.isEmpty { try SZProjectIO.save(project, to: newURL) }
-            try runtime.commit(prepared)
+            try runtime.commit(prepared.native)
         } catch {
             newLock.release()
             throw error
@@ -734,8 +754,13 @@ final class SZHost {
         projectLock = newLock
         stopAllNodeSourceWatchers()
         clearPerProjectState()
+        mountBackend(prepared)
+        conversion = nil
         loadedProjectURL = newURL
         store.setProject(project)
+        if let page = prepared.page {
+            do { try page.loadProject(project, at: newURL) } catch { print("[SZHost] web project load failed: \(error)") }
+        }
         restoreTranscripts()            // chat history + resumable sessions (replaces the old map)
         restoreAgentGraphRuns()         // the RUNS panel's history sidecar (SZHost+GraphRuns.swift)
         if !repairedEdges.isEmpty {
@@ -761,7 +786,7 @@ final class SZHost {
             persistAppState()
         }
         status = "loaded \(newURL.lastPathComponent)"
-        print("[SZHost] loaded project — edit any node's Node.swift to hot-reload:\n  \(newURL.path)")
+        print("[SZHost] loaded project — edit any node's \(nodeSourceFileName) to hot-reload:\n  \(newURL.path)")
         // A project is now live — leave the welcome/home surface (SZHost+Welcome).
         leaveWelcomeForLiveProject()
         return true
@@ -843,7 +868,7 @@ final class SZHost {
         for node in graph.nodes {
             for port in node.contract?.inputs ?? [] where port.ui?.kind == .filePicker {
                 guard case .string(let value)? = port.def, !value.isEmpty else { continue }
-                runtime?.setInputString(node: node.id, port: port.name,
+                backend?.setInputString(node: node.id, port: port.name,
                                         string: SZProjectMedia.resolve(value, in: newURL))
             }
         }
@@ -884,13 +909,13 @@ final class SZHost {
     /// HUD Pause/Play toggle: flip the observable state and tell the runtime to freeze/resume the clock.
     func togglePlayback() {
         isPaused.toggle()
-        runtime?.setPaused(isPaused)
+        backend?.setPaused(isPaused)
     }
 
     /// HUD Reset Time (rewind): restart the render clock at t=0 / frame 0. Leaves the paused/playing
     /// state as-is (a reset while paused holds the fresh first frame).
     func resetPlayback() {
-        runtime?.resetTimeline()
+        backend?.resetTimeline()
     }
 
     /// Note nodes CREATED by a run's own tooling (Director split/merge, `ui_add_prompt_node` mid-run)
@@ -973,8 +998,8 @@ final class SZHost {
         // `resetTimeline` deliberately preserves the paused/playing state, so clearing the mirror alone
         // left the runtime clock paused behind a HUD reading Play — frozen viewport, and (since ABI v7)
         // suspended node resources with it. Tell the runtime, which owns the clock.
-        runtime?.setPaused(false)
-        runtime?.resetTimeline()
+        backend?.setPaused(false)
+        backend?.resetTimeline()
         isPaused = false
         // recording surfaces: the take itself was finalized before the point of no return
         // (`finalizeActiveTakeBlocking`); the editor and toast belong to the old project's picture
@@ -1008,12 +1033,19 @@ final class SZHost {
             guard let nodeID = UUID(uuidString: folder.lastPathComponent),
                   watchers[nodeID] == nil,
                   store.project?.graph.node(id: nodeID) != nil else { continue }
-            let source = folder.appending(path: "Node.swift")
+            let source = folder.appending(path: nodeSourceFileName)
             guard FileManager.default.fileExists(atPath: source.path) else { continue }
             let watcher = SZSourceWatcher(watching: source)
             watcher.start { [weak self] in self?.reloadEditedNode(id: nodeID) }
             watchers[nodeID] = watcher
         }
+    }
+
+    /// After a target switch the watched file name changes: drop every watcher and watch the new files.
+    func rewatchNodeSources() {
+        guard let url = loadedProjectURL else { return }
+        stopAllNodeSourceWatchers()
+        watchNodeSources(in: url)
     }
 
     /// Stop watching a node's source (node delete) — an edit to the orphaned `nodes/<id>/` folder must
@@ -1083,8 +1115,8 @@ final class SZHost {
         // contract-only re-edit (a slider range, a title) can restage a byte-identical Node.swift, and
         // recompiling it needlessly tears down + re-acquires an exclusive device (a camera-session hiccup)
         // for zero shader change — so the in-place recompile below is gated on a real source change.
-        let liveSource = live.appending(path: "Node.swift")
-        let stagedSource = staging.appending(path: "Node.swift")
+        let liveSource = live.appending(path: nodeSourceFileName)
+        let stagedSource = staging.appending(path: nodeSourceFileName)
         let sourceChanged = (try? Data(contentsOf: liveSource)) != (try? Data(contentsOf: stagedSource))
         if fm.fileExists(atPath: liveSource.path) { try fm.removeItem(at: liveSource) }
         try fm.copyItem(at: stagedSource, to: liveSource)
@@ -1107,6 +1139,8 @@ final class SZHost {
         store.mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
             project.graph.nodes[i].kind = .generated
+            project.graph.nodes[i].builtTargets.insert(project.target)   // the promoted file is the active target's source
+            project.graph.nodes[i].builtForTarget = true
             if let contract {
                 // The contract the gate MERGED (`SZNodeContract.mergingAuthored(_:intoNode:)`) rather than
                 // either side wholesale: the live contract carries the typed boundary the graph is wired
@@ -1128,6 +1162,7 @@ final class SZHost {
             // (a Director re-brief mid-run, a user edit) reads `.intentChanged`, because the code implements
             // what the prompt used to say. No dispatch record (a node-scoped chat turn, an off-run compile)
             // → the current prompt is the brief.
+            project.graph.nodes[i].activeTarget = project.target
             project.graph.nodes[i].buildStamp = SZBuildStamp(
                 portSurface: project.graph.nodes[i].contract?.portSurface ?? [],
                 prompt: dispatchPrompts[id] ?? project.graph.nodes[i].prompt)
@@ -1148,10 +1183,10 @@ final class SZHost {
         // path the file watcher uses; loadProject then reconciles the contract + seeds any new input value.
         // Only when the source actually changed — a contract-only promote skips the recompile (see above).
         try SZTrace.span(SZTurnStage.promoteReload) {
-            if sourceChanged, runtime?.isNodeLoaded(id) == true {
-                try runtime?.reloadNode(id: id, source: liveSource)
+            if sourceChanged, backend?.isNodeLoaded(id) == true {
+                try backend?.reloadNode(id: id, source: liveSource)
             }
-            try runtime?.loadProject(at: projectURL)
+            try reloadBackendGraph(at: projectURL)
         }
         watchNodeSources(in: projectURL)          // a newly-generated node becomes hot-reloadable
         if cardArrived { refreshPreviewStream() } // the card host mounts the body flipped above
@@ -1182,9 +1217,11 @@ final class SZHost {
         guard let projectURL = loadedProjectURL else { throw SZMCPError.message("no project loaded") }
         let fm = FileManager.default
         let src = Self.libraryURL.appending(path: libraryID)
-        let sourceURL = src.appending(path: "Node.swift")
+        let sourceURL = src.appending(path: nodeSourceFileName)
         guard fm.fileExists(atPath: sourceURL.path) else {
-            throw SZMCPError.message("library node '\(libraryID)' has no Node.swift")
+            throw SZMCPError.message(projectTarget == .web
+                ? "library node '\(libraryID)' has no web version yet"
+                : "library node '\(libraryID)' has no Node.swift")
         }
         var contract = try JSONDecoder().decode(
             SZNodeContract.self, from: Data(contentsOf: src.appending(path: "node-contract.json")))
@@ -1195,10 +1232,13 @@ final class SZHost {
         }
         var node = SZNode(kind: .generated, title: contract.title, sfSymbol: contract.sfSymbol,
                           contract: contract, position: position,
-                          buildStamp: .trusting(contract: contract, prompt: nil))   // a shipped build: trusted as-is
+                          buildStamp: .trusting(contract: contract, prompt: nil),   // a shipped build: trusted as-is
+                          target: projectTarget,
+                          libraryID: libraryID)                                     // so a target switch can copy its twin
+        node.builtTargets = [projectTarget]
         let live = projectURL.appending(path: "nodes/\(node.id.uuidString)")
         try fm.createDirectory(at: live, withIntermediateDirectories: true)
-        try fm.copyItem(at: sourceURL, to: live.appending(path: "Node.swift"))
+        try fm.copyItem(at: sourceURL, to: live.appending(path: nodeSourceFileName))
         // A library node that ships a custom card copies it along. A contract that DECLARES a `card`
         // block lands with the card ON — it is the node's face (corner-pin's handles over the output,
         // a controller's learn strips); a Card.swift with no `card` block is an optional control
@@ -1229,7 +1269,7 @@ final class SZHost {
     }
 
     private func finishInstantiate(_ libraryID: String, in projectURL: URL) throws {
-        try runtime?.loadProject(at: projectURL)   // diffs node ids → compiles + loads the new module
+        try reloadBackendGraph(at: projectURL)     // diffs node ids → compiles + loads the new module
         watchNodeSources(in: projectURL)           // the new node becomes hot-reloadable
         status = "added \(libraryID)"
     }
@@ -1265,7 +1305,7 @@ final class SZHost {
         if let lastID = created.last {
             let ref = SZPortRef(node: lastID, port: "output")
             if store.setRenderEndpoint(ref) {
-                runtime?.setRenderEndpoint(ref)
+                backend?.setRenderEndpoint(ref)
                 persistProject()
             }
         }
@@ -1291,7 +1331,7 @@ final class SZHost {
             // new ones), and none of these callers add a renderable node here (wiring edits add none; split/
             // merge stage pieces as `.prompt`, which compile later in `promoteStagedNode`), so this does zero
             // compiles and returns in microseconds.
-            try runtime?.loadProject(at: projectURL)
+            try reloadBackendGraph(at: projectURL)
             watchNodeSources(in: projectURL)   // split/merge pieces become hot-reloadable
             status = action
         } catch {
@@ -1468,11 +1508,11 @@ final class SZHost {
         }
         let portModel = store.project?.graph.node(id: node)?.contract?.inputs.first { $0.name == port }
         let value = portModel?.clampedDefault(rawValue) ?? rawValue
-        if let floats = value.floats { runtime?.setInputValue(node: node, port: port, floats: floats) }     // live (v3)
+        if let floats = value.floats { backend?.setInputValue(node: node, port: port, floats: floats) }     // live (v3)
         // A file port holds the bundle-relative form; the runtime always gets a machine path, exactly as
         // `loadProject` seeds it, so an override and a seeded default are the same kind of value.
         if let string = value.string {
-            runtime?.setInputString(node: node, port: port, string: runtimeString(string, port: portModel))
+            backend?.setInputString(node: node, port: port, string: runtimeString(string, port: portModel))
         }
         guard store.setInputDefault(node: node, port: port, value: value) else { return value }
         // Journaled on the committed write only — a slider drag's live ticks are not decisions yet.
@@ -1502,14 +1542,14 @@ final class SZHost {
         let inputs = store.project?.graph.node(id: node)?.contract?.inputs ?? []
         for change in changes where inputs.contains(where: { $0.name == change.port }) {
             guard let value = change.value else {
-                runtime?.clearInput(node: node, port: change.port)
+                backend?.clearInput(node: node, port: change.port)
                 continue
             }
-            if let floats = value.floats { runtime?.setInputValue(node: node, port: change.port, floats: floats) }
+            if let floats = value.floats { backend?.setInputValue(node: node, port: change.port, floats: floats) }
             // Resolved, like `setInputDefault` does: a file port's kept value is bundle-relative, and a node
             // opens what it is handed. Pushing it raw would leave the node with a path relative to nothing.
             if let string = value.string {
-                runtime?.setInputString(node: node, port: change.port,
+                backend?.setInputString(node: node, port: change.port,
                                         string: runtimeString(string, port: inputs.first { $0.name == change.port }))
             }
         }
@@ -1607,7 +1647,7 @@ final class SZHost {
         guard store.setRenderEndpoint(newEndpoint) else { return store.project?.graph.renderEndpoint }
         noteMutation("toggled display", [newEndpoint.map { "→ \(mutationLabel($0))" } ?? "off (was \(mutationLabel(ref)))"],
                      origin: origin)
-        runtime?.setRenderEndpoint(newEndpoint)
+        backend?.setRenderEndpoint(newEndpoint)
         persistProject()
         return newEndpoint
     }
@@ -1781,7 +1821,7 @@ final class SZHost {
     /// its mount's watcher).
     func openNodeSource(_ id: SZNodeID) {
         guard let url = loadedProjectURL else { return }
-        let files = [SZProjectIO.nodeSourceURL(projectURL: url, nodeID: id),
+        let files = [SZProjectIO.nodeSourceURL(projectURL: url, nodeID: id, target: projectTarget),
                      SZProjectIO.cardSourceURL(projectURL: url, nodeID: id)]
             .filter { FileManager.default.fileExists(atPath: $0.path) }
         guard let first = files.first else { return }
@@ -1797,7 +1837,7 @@ final class SZHost {
     /// Ready. Incremental — only the edited node rebuilds (`reloadNode`); falls back to a full `loadProject`
     /// only when the node isn't currently in the live graph (e.g. a graph stuck failing wholesale).
     private func reloadEditedNode(id: SZNodeID) {
-        guard let runtime, let url = loadedProjectURL else { return }
+        guard let backend, let url = loadedProjectURL else { return }
         // Edge case — an agent owns this node: a Director run (isRunning) or its Coding Agent mid-chat
         // (isChatting). The agent's own compile→promote path reloads it and drives its pill; reloading
         // here would clobber that. Leave it to the agent (its promote write fires the watcher while guarded).
@@ -1813,12 +1853,12 @@ final class SZHost {
             nodeAgentState[id] = SZNodeAgentState(phase: .reloading)   // pill → Reloading, prior error cleared
             await Task.yield()                          // let the pill paint before the (blocking) compile
             guard isInGraph(id) else { nodeAgentState[id] = nil; return }   // deleted mid-yield: take the pill back
-            let source = SZProjectIO.nodeSourceURL(projectURL: url, nodeID: id)
+            let source = SZProjectIO.nodeSourceURL(projectURL: url, nodeID: id, target: projectTarget)
             do {
-                if runtime.isNodeLoaded(id) {
-                    try runtime.reloadNode(id: id, source: source)   // incremental: just this node
+                if backend.isNodeLoaded(id) {
+                    try backend.reloadNode(id: id, source: source)   // incremental: just this node
                 } else {
-                    try runtime.loadProject(at: url)                 // fallback: node not yet in live graph
+                    try reloadBackendGraph(at: url)                  // fallback: node not yet in live graph
                 }
                 nodeAgentState[id] = nil                 // → derived .ready
                 classifyRebuild(node: id)                // the hand edit may have opened or closed a port mismatch

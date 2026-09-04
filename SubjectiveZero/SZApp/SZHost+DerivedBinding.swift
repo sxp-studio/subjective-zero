@@ -85,7 +85,7 @@ extension SZHost {
         }
         // Live-push the new table (the store write alone doesn't reach the running frame — same
         // discipline as setInputDefault), then persist + incremental reload so the new edge schedules.
-        runtime?.setInputString(node: source, port: SZBindingSource.tableInput, string: table)
+        backend?.setInputString(node: source, port: SZBindingSource.tableInput, string: table)
         persistGraphEditAndReload(action: action)
         // The gesture is answered — a lingering arm would immediately re-catch the just-bound control.
         if bindingLearn?.node == source {
@@ -116,7 +116,7 @@ extension SZHost {
             node: source, tableInput: SZBindingSource.tableInput, tableJSON: table, output: portName) else {
             throw SZMCPError.message("binding removal failed — node/table missing")
         }
-        runtime?.setInputString(node: source, port: SZBindingSource.tableInput, string: table)
+        backend?.setInputString(node: source, port: SZBindingSource.tableInput, string: table)
         noteMutation("removed binding", ["\(mutationTitle(source)).\(portName)"], origin: origin)
         persistGraphEditAndReload(action: "removed binding \(portName)")
     }

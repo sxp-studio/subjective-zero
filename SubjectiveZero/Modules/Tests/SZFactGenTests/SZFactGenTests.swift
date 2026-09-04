@@ -28,7 +28,7 @@ private func specSource() throws -> String {
     #expect(owners["SZFacts"]?.map(\.name) == ["message", "node", "resuming", "run", "assignment",
                                                "pendingTasks", "runningTasks"])
     #expect(owners["SZRun"]?.map(\.name) == ["workSet", "round", "roundCap", "steers", "instruction",
-                                             "unwired"])
+                                             "unwired", "intent"])
     #expect(owners["SZAssignment"]?.map(\.name) == ["attempt", "note"])
     // Typed-group references and the plain whitelist, spot-checked.
     func field(_ name: String, _ owner: String) -> SZFactField? {

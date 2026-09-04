@@ -175,7 +175,7 @@ With this plus a generated grayscale node, the canonical demo
 A library node is a self-contained folder under `NodeLibrary/<id>/`, plus one curation entry in
 `index.json`. Copy an existing node (e.g. `camera.macos`, or an `audio-*` node) and adapt it.
 
-A node folder has three files:
+A node folder has three files (four with a web version):
 
 - **`node-contract.json`** - the node's typed interface: `title`, `sfSymbol`, `summary`, `inputs`,
   `outputs`, `permissions`. **This is the source of truth for I/O and identity.**
@@ -183,6 +183,10 @@ A node folder has three files:
   `ctx.setOutput*` must use a `name` declared in the contract. (Copying a clean library node keeps you on
   the right side of this; the same rule is enforced automatically for *generated* nodes - see
   [the port-name check](#the-port-name-check).)
+- **`Node.js`** *(optional)* - the same node for a web project. A node is offered to a target iff
+  its folder has that target's source file, so a folder with only `Node.swift` never shows up in a
+  web project. Every pure GPU effect ships both today, plus `camera.web` beside `camera.macos`. The
+  accessor names match the Swift kit, so one contract serves both files.
 - **`CARD.md`** - prose reuse guidance + gotchas (Tier 2), short by design.
 - **`Card.swift`** *(optional, rare)* - a custom card ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md#custom-card-cardswift)),
   copied along when the node is instantiated (`ui_add_library_node` / the palette); a contract that

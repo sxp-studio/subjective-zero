@@ -104,13 +104,13 @@ private func renderAudioChain(
         .appending(path: "SZAudioChain-\(UUID().uuidString)").appending(path: "audio.subz")
     defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
     try SZProjectIO.save(project, to: dir)
-    try sourceSetup(SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sourceID))
+    try sourceSetup(SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sourceID, target: .native))
     for (id, libID) in [(fft, "audio-fft"), (bands, "audio-bands")] {
         try FileManager.default.copyItem(
             at: audioLibraryRoot.appending(path: libID).appending(path: "Node.swift"),
-            to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id))
+            to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native))
     }
-    try inlineVisualizerSource.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: viz),
+    try inlineVisualizerSource.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: viz, target: .native),
                                      atomically: true, encoding: .utf8)
 
     try runtime.loadProject(at: dir)

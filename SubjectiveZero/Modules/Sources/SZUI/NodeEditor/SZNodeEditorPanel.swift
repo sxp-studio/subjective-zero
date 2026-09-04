@@ -64,6 +64,7 @@ public struct SZNodeEditorPanel: View {
     private let onTogglePause: () -> Void            // HUD Pause/Play → host.togglePlayback()
     private let onResetTime: () -> Void              // HUD Reset Time (rewind) → host.resetPlayback()
     private let isRecording: Bool                    // a take is rolling → red dot + elapsed readout
+    private let canRecord: Bool                      // false hides the dot (a web project cannot record yet)
     private let recordingElapsed: String?            // host-owned "01:24" readout; nil hides it
     private let onToggleRecord: () -> Void           // HUD record dot → host.toggleRecording()
     private let recordSettingsSeen: Bool             // first-ever press opens settings, not a take
@@ -158,6 +159,7 @@ public struct SZNodeEditorPanel: View {
                 onTogglePause: @escaping () -> Void = {},
                 onResetTime: @escaping () -> Void = {},
                 isRecording: Bool = false,
+                canRecord: Bool = true,
                 recordingElapsed: String? = nil,
                 onToggleRecord: @escaping () -> Void = {},
                 recordSettingsSeen: Bool = true,
@@ -213,6 +215,7 @@ public struct SZNodeEditorPanel: View {
         self.onTogglePause = onTogglePause
         self.onResetTime = onResetTime
         self.isRecording = isRecording
+        self.canRecord = canRecord
         self.recordingElapsed = recordingElapsed
         self.onToggleRecord = onToggleRecord
         self.recordSettingsSeen = recordSettingsSeen
@@ -460,7 +463,7 @@ public struct SZNodeEditorPanel: View {
             SZHudIconButton(name: isPaused ? "play.fill" : "pause.fill",
                             help: isPaused ? "Play" : "Pause") { onTogglePause() }
             SZHudIconButton(name: "backward.end.fill", help: "Reset time") { onResetTime() }
-            recordButton
+            if canRecord { recordButton }
             if isRecording, let recordingElapsed {
                 Text(recordingElapsed)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))

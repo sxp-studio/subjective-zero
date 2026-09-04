@@ -13,3 +13,4 @@ darkening (or a colored tint). Same single-pixel compute template, plus per-pixe
   `ctx.inputFloats("color")` packed into a `SIMD4<Float>`.
 - **Gotchas:** the input texture must be connected — if `ctx.inputTexture("input")` is nil the kernel
   is skipped. Because uv is normalized to the frame, the vignette is elliptical on non-square outputs.
+- **Web:** Also available in web projects (Node.js).

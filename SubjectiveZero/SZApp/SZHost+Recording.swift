@@ -21,6 +21,10 @@ extension SZHost {
     /// The HUD record dot: one press starts a take with the saved settings, one press stops it.
     /// A press while the previous take is still finalizing waits it out rather than failing.
     func toggleRecording() {
+        guard capabilities.canRecord else {
+            status = "Recording is not available for this platform yet."
+            return
+        }
         if isRecording {
             stopTake()
         } else if runtime?.isRecording == true {

@@ -28,7 +28,7 @@ enum SZNodeMain { static func make() -> SZNode { Node() } }
 """
 
 private func writeSource(_ id: SZNodeID, in dir: URL) throws {
-    let url = SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id)
+    let url = SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native)
     try FileManager.default.createDirectory(
         at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     try levelSource.write(to: url, atomically: true, encoding: .utf8)
@@ -56,7 +56,7 @@ enum SZNodeMain { static func make() -> SZNode { Node() } }
 """
 
 private func writeTwoInputSource(_ id: SZNodeID, in dir: URL) throws {
-    let url = SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id)
+    let url = SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native)
     try FileManager.default.createDirectory(
         at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     try twoInputSource.write(to: url, atomically: true, encoding: .utf8)
@@ -335,7 +335,7 @@ private func oneNodeProject(_ id: SZNodeID, inputs: [SZPort],
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native), atomically: true, encoding: .utf8)
 
     // v1 — `tint` is a float: it seeds the float channel, but the source reads the string channel ⇒ G=0.
     try runtime.loadProject(at: dir)
@@ -388,7 +388,7 @@ private func oneNodeProject(_ id: SZNodeID, inputs: [SZPort],
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native), atomically: true, encoding: .utf8)
 
     // v1 — only output `a` (red) declared; endpoint on `a`.
     try runtime.loadProject(at: dir)
@@ -439,7 +439,7 @@ private func oneNodeProject(_ id: SZNodeID, inputs: [SZPort],
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native), atomically: true, encoding: .utf8)
 
     // v1 — `tint` is a scalar; override it to [0.3]. Source sees count 1 (not a 3-vector) ⇒ red.
     try runtime.loadProject(at: dir)
@@ -535,7 +535,7 @@ private func oneNodeProject(_ id: SZNodeID, inputs: [SZPort],
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native), atomically: true, encoding: .utf8)
 
     try runtime.loadProject(at: dir)
     let pixel = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))
@@ -571,7 +571,7 @@ private func oneNodeProject(_ id: SZNodeID, inputs: [SZPort],
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native), atomically: true, encoding: .utf8)
 
     try runtime.loadProject(at: dir)
     let pixel = try #require(runtime.captureFrame()?.pixel(x: 8, y: 8))

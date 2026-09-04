@@ -50,8 +50,10 @@ extension SZHost {
     /// from welcome into a live project. Silent unless it's genuinely first-run, and at most once per
     /// launch — a Skip for Now must not be undone by a Help ▸ Welcome round-trip. While welcome is up
     /// this returns WITHOUT consuming the once-per-launch flag, leaving the retry for switchProject.
+    /// The New Project sheet holds it back the same way (Create clears its flag before the project opens).
     func autoPresentProviderSetupIfNeeded() {
-        guard defaultProviderID == nil, !providerSetupAutoPresented, !welcomePresented else { return }
+        guard defaultProviderID == nil, !providerSetupAutoPresented, !welcomePresented,
+              !newProjectPresented else { return }
         providerSetupAutoPresented = true
         presentProviderSetup(auto: true)
     }

@@ -81,7 +81,7 @@ private func writeProject(_ project: SZProject, ids: [SZNodeID]) throws -> URL {
     let dir = scratch().appending(path: "g.subz")
     try SZProjectIO.save(project, to: dir)
     for id in ids {
-        let url = SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id)
+        let url = SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         try paintSource.write(to: url, atomically: true, encoding: .utf8)
@@ -121,7 +121,7 @@ private func writeProject(_ project: SZProject, ids: [SZNodeID]) throws -> URL {
     try runtime.loadProject(at: dir)
     let before = runtime.loaderIdentities()
 
-    let source = SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id)
+    let source = SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: id, target: .native)
     try paintSource.write(to: source, atomically: true, encoding: .utf8)   // same bytes, new mtime
     try runtime.reloadNode(id: id, source: source)
     #expect(runtime.loaderIdentities() == before)

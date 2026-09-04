@@ -43,7 +43,7 @@ private func loadRampProject(into runtime: SZRuntime) throws -> URL {
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: nodeID), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: nodeID, target: .native), atomically: true, encoding: .utf8)
     try runtime.loadProject(at: dir)
     return dir
 }

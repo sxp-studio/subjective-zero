@@ -51,7 +51,7 @@ import Metal
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: source, target: .native), atomically: true, encoding: .utf8)
 
     // Downstream clears the output to gray = its `gain` input — which it receives ONLY via the data edge
     // from upstream (its own default is 0). A non-zero gray proves the value crossed the edge.
@@ -70,7 +70,7 @@ import Metal
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sink), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: sink, target: .native), atomically: true, encoding: .utf8)
 
     try runtime.loadProject(at: dir)
     // Nothing has encoded yet — the host-side read reports nothing rather than inventing a value.

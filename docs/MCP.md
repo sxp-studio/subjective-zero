@@ -116,7 +116,7 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 
 **`agent_` (orchestration + host ops)**
 - `agent_read_graph`, `agent_read_node`         // a built node that needs a rebuild carries `rebuildReason`
-                                            // (contractChanged | intentChanged | sourceMismatch), plus `rebuildDetail`
+                                            // (contractChanged | intentChanged | sourceMismatch | notBuiltForTarget), plus `rebuildDetail`
                                             // when there is evidence to name (the audit's offending lines / the ports
                                             // off the build stamp; an intentChanged node has none - its prompt is it)
 - `agent_view_frame` - **real framebuffer readback** of a node's texture output, returned as an inline
@@ -124,11 +124,16 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
   but downscaled to fit the token budget (default 768px long edge; `maxSize` overrides). `node` (+
   optional `port`, default: the node's first texture output) reads that node's last-rendered texture off
   the render pool without moving the viewport - never `ui_toggle_display` just to look. Without `node`
-  it captures the CURRENT display endpoint (what's on screen).
+  it captures the CURRENT display endpoint (what's on screen). In a web project it is a snapshot of
+  the page as shown, viewport only: a `node` argument is refused for now.
 - `agent_apply_plan`, `agent_spawn_coding_agents`, `agent_await_all`
 - `agent_write_node_staged`, `agent_compile_node`   // `card` = an optional Card.swift; a red card blocks the promote
+                                            // (in a web project the source is Node.js, and the compile is a
+                                            // JavaScriptCore parse plus the page importing, constructing and
+                                            // running the module a few frames)
 - `agent_library_index`, `agent_library_card`, `agent_library_source`  // 3-tier, see NODE_LIBRARY.md
-                                            // (`source` takes `file: "Card.swift"` for a node that ships a card)
+                                            // (`source` takes `file`: Node.swift, Node.js for a web version, or
+                                            // Card.swift for a node that ships a card; default: the project's source file)
   (`index` built M3; `card` + `source` built M4 - `card`/`source` return raw text, `index` returns JSON)
 - `agent_report_status`, `agent_report_complete`
 
@@ -173,6 +178,11 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
   fast" strings per filled slot ({agent: {slot: choice}}) plus the fallback and the resolution's
   fallback notes (read without consuming the once-per-state narration). A pin naming a missing
   profile reads as `{refused: <detail>}`.
+- `debug_open_project` - open a `.subz` in the running app, the same switch File ▸ Open does
+  (`path`); replies at once, refused while another open is in flight.
+- `debug_set_project_target` - switch the open project in place between `native` and `web`, what
+  Settings ▸ Target Platform does (flip, remount, copy library twins, start the conversion run);
+  replies at once, the switch completes on its own.
 - `debug_record_session`, `debug_replay_session` *(deferred - not a V1 gate; see below)*
 
 ## V1 scope (functional minimum + verify hooks)
@@ -192,8 +202,11 @@ verify it headlessly in a closed loop.
 - **State and graph mutations are host-owned.** `ui_*`/`agent_*` commands that change the graph
   produce **commands/transactions** on SZCore ([STATE.md](STATE.md)) - agents never write project
   state files directly. This is what keeps undo/redo and history correct regardless of who acted.
-- **GPU/build stay in the runtime.** `agent_compile_node` asks SZRuntime to build staged source;
-  agents don't invoke swiftc or touch Metal themselves ([RUNTIME.md](RUNTIME.md)).
+- **GPU/build stay in the runtime.** `agent_compile_node` asks the project's renderer to check
+  staged source; agents don't invoke swiftc or touch Metal themselves ([RUNTIME.md](RUNTIME.md)).
+  Every tool enters through one async call on the main actor (`SZHostBridge.call`); the two that
+  await the renderer, `agent_compile_node` and `agent_view_frame`, are served first and the rest
+  dispatch without suspending.
 - **Permissions per session.** Which MCP commands a session may call is part of its
   `SessionConfig` ([AI_PROVIDERS.md](AI_PROVIDERS.md)).
 

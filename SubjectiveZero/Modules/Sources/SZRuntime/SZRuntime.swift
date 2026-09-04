@@ -4,8 +4,8 @@
 // (SZScheduler) into the asset pool. `captureFrame()` is the real framebuffer readback behind
 // `agent_view_frame` (MCP.md).
 //
-// The SZCore seam protocols (SZNodeCompiler/SZRenderer) are still deferred — the host and tests call
-// these concrete methods directly (seams earned, not scheduled).
+// The host drives it through `SZRenderBackend` (SZCore) where a web project's runtime stands in for it;
+// the Metal-only surface (viewports, captures, recording) stays on the concrete class.
 import Foundation
 import Metal
 import MetalKit
@@ -13,19 +13,12 @@ import MetalPerformanceShaders
 import Synchronization
 import SZCore
 
-/// Result of a compile-check (`compileNodeSource`). `.failed` carries the swiftc log for the agent's
-/// fix loop / `debug_get_build_errors`.
 /// Something loaded between prepare and commit, so the prepared modules no longer cover the graph.
 /// Nothing retries: it surfaces to the user, hence the readable sentence.
 public enum SZLoadError: Error, LocalizedError, CustomStringConvertible {
     case staleLoad
     public var description: String { "the graph changed while this load was being prepared" }
     public var errorDescription: String? { description }
-}
-
-public enum SZBuildResult: Sendable, Equatable {
-    case ok
-    case failed(String)
 }
 
 /// Threading model (why this is not `@MainActor`):
@@ -186,36 +179,35 @@ public final class SZRuntime: @unchecked Sendable {
     /// and build the schedule. Replaces any live graph. The host should `requestDeclaredPermissions`
     /// first so a node that needs e.g. the camera is already authorized when its `setup` runs.
     public func loadProject(at url: URL) throws {
-        let project = try SZProjectIO.load(from: url)
+        try loadProject(try SZProjectIO.load(from: url), at: url)
+    }
+
+    public func loadProject(_ project: SZProject, at url: URL) throws {
         // Render only IMPLEMENTED nodes: a prompt node has no Node.swift to compile. This is what lets a
         // graph with un-implemented (dirty) prompt nodes load — the agent loop starts from exactly that,
         // and the node becomes renderable once its coding agent's source is promoted (kind → generated).
         // …and resolve every file port against the bundle on the way in: the model holds the PORTABLE
         // form (`media/<uuid>/<name>`), the runtime is the one place that needs a machine path,
         // because it is the one place that hands a string to a node that will open it.
-        let graph = Self.renderableSubgraph(project.graph).resolvingFilePaths(in: url)
-        try loadGraph(graph) { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0) }
+        let graph = project.graph.renderable.resolvingFilePaths(in: url)
+        try loadGraph(graph) { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0, target: .native) }
     }
 
     /// Compile + dlopen a project's new nodes off the caller's thread, touching nothing live: the cold
     /// open, where every node is new. By value so the caller's repaired graph is the one prepared.
     /// Install with `commit`, or drop it to abandon the load.
     public func prepareProject(_ project: SZProject, at url: URL) async throws -> SZPreparedLoad {
-        let graph = Self.renderableSubgraph(project.graph).resolvingFilePaths(in: url)   // see loadProject
+        let graph = project.graph.renderable.resolvingFilePaths(in: url)   // see loadProject
         return try await Task.detached(priority: .userInitiated) { [self] in
-            try prepareLoad(graph, sourceURL: { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0) },
+            try prepareLoad(graph, sourceURL: { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0, target: .native) },
                             offMain: true)
         }.value
     }
 
-    /// The subgraph the runtime can actually render: `generated` nodes, the connections among them, and
-    /// the render endpoint only if its node is generated.
-    static func renderableSubgraph(_ graph: SZGraph) -> SZGraph {
-        let generated = Set(graph.nodes.filter { $0.kind == .generated }.map(\.id))
-        return SZGraph(
-            nodes: graph.nodes.filter { generated.contains($0.id) },
-            connections: graph.connections.filter { generated.contains($0.from.node) && generated.contains($0.to.node) },
-            renderEndpoint: graph.renderEndpoint.flatMap { generated.contains($0.node) ? $0 : nil })
+    /// Tear down every live node and leave the loop holding an empty graph (the host switching to a web
+    /// project). The same diff path as a load, with everything in `removed`.
+    public func unloadAll() throws {
+        try loadGraph(SZGraph()) { _ in URL(filePath: "/") }   // no added nodes, so never asked
     }
 
     /// Compile-check one staged `Node.swift` WITHOUT loading or swapping it — the validation behind
@@ -503,14 +495,7 @@ public final class SZRuntime: @unchecked Sendable {
     /// channel (`inputValues`), `enum`/`string` ride the string channel (`inputStrings`), and
     /// texture/floatArray/event carry no seedable by-value state. Mirrors the split already implicit in
     /// `SZPortValue.floats` / `.string`; used by `loadGraph` to reconcile overrides against a contract.
-    private enum SZValueChannel { case float, string, none }
-    private static func valueChannel(_ type: SZPortType) -> SZValueChannel {
-        switch type {
-        case .float, .float2, .float3, .float4, .float3x3, .float4x4, .colorRGB, .colorRGBA, .bool: .float
-        case .enumeration, .string: .string
-        case .texture, .floatArray, .event: .none
-        }
-    }
+    private static func valueChannel(_ type: SZPortType) -> SZValueChannel { type.valueChannel }
 
     /// Reconcile one float-channel input against its contract default: keep a live override only while it
     /// still fits the port's arity (the default's element count), else fall back to the default. This is
@@ -1090,5 +1075,17 @@ public struct SZImageBytes: Sendable, Equatable {
         let i = (y * width + x) * 4
         guard i + 3 < bgra.count else { return nil }
         return (bgra[i], bgra[i + 1], bgra[i + 2], bgra[i + 3])
+    }
+}
+
+extension SZRuntime: SZRenderBackend {
+    public var capabilities: SZBackendCapabilities { .native }
+
+    public func checkNodeSource(at source: URL, for node: SZNode) async -> SZBuildResult {
+        compileNodeSource(at: source)
+    }
+
+    public func captureViewport(maxDimension: Int) async -> Data? {
+        captureFrame()?.pngData(maxDimension: maxDimension)
     }
 }

@@ -282,7 +282,7 @@ extension SZStore {
             // A surface change invalidates a build — derived by `SZNode.rebuildReason` from the surface moving
             // off the build stamp, so undoing the edit heals it. `kind` is NOT touched: the node keeps
             // rendering its existing source until the fleet regenerates it (flipping it to `.prompt` would
-            // drop it from `renderableSubgraph` and black it out). Whether the code is merely *behind* the
+            // drop it from `SZGraph.renderable` and black it out). Whether the code is merely *behind* the
             // contract or *contradicts* it (naming ports that no longer exist) takes reading the source,
             // which the store cannot do; the host re-audits after this returns.
             result.raisedRebuild = !node.needsRebuild && project.graph.nodes[i].needsRebuild

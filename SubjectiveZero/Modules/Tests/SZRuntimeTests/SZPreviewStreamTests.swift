@@ -74,7 +74,7 @@ private func solidRuntime(renderSize: (width: Int, height: Int)) throws -> (SZRu
         }
     }
     enum SZNodeMain { static func make() -> SZNode { Node() } }
-    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: nodeID), atomically: true, encoding: .utf8)
+    """.write(to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: nodeID, target: .native), atomically: true, encoding: .utf8)
     try runtime.loadProject(at: dir)
     return (runtime, nodeID, dir.deletingLastPathComponent())
 }

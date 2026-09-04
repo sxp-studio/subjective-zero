@@ -3,7 +3,8 @@
 **Package: SZRuntime.** A lightweight rendering engine. It owns Metal and all GPU resources,
 compiles and hot-reloads node modules, and schedules + executes the graph each frame. Kept
 deliberately lean and **general** - a node graph is a structured sequence of compute, **not a
-pure VFX texture-filter pipeline**.
+pure VFX texture-filter pipeline**. This is the Mac project's runtime; a web project runs in a
+browser page instead ([Web runtime](#web-runtime) below).
 
 ## Host responsibilities
 
@@ -207,6 +208,64 @@ instances (a future card panel mounts a second one). Cards hot-reload per file l
 a red compile keeps the last good instance mounted (keep-last-good) and surfaces the log. Card
 and step dylibs are **never dlclose'd** (Darwin pins Swift metadata); each build is a fresh module,
 and swiftc invocations are throttled by one gate shared with steps.
+
+## Web runtime
+
+A web project renders in one WKWebView instead of Metal: `SZApp/Web/SZWebRuntime.swift`, the
+second implementation of `SZRenderBackend` (`SZCore/Runtime/SZRenderBackend.swift`), which the
+host drives through `host.backend` for both targets. The page files live in
+`SubjectiveZero/WebRuntime/` (`index.html`, `transport-wk.js`, `sz-runtime.js`), bundled as a
+folder reference and served in-process over `subz://app/...` by `SZWebSchemeHandler`: runtime
+files from the bundle, three.js from the library cache, node files from the `.subz`. No socket, no
+server.
+
+- **three.js is not vendored.** `SZWebLibraryStore` downloads the project's pinned version once
+  from jsDelivr, checks its SHA-256 against a table in the app, and caches it under
+  `~/Library/Application Support/SubjectiveZero/web-libraries/three/<version>/`. A version the app
+  has no hashes for is refused; bumping the default means adding its hashes there.
+- **The page mirrors the Mac scheduler.** Topological order comes from SZCore; one render target
+  per `<node>:<port>` at the canvas's pixel size, so the graph fills the tile as on the Mac; data
+  edges typed by the source port; the endpoint is blitted to
+  the canvas. Nodes are ES modules loaded with `import(url)`; a hot reload bumps `?v=`. Node
+  errors come back on the same error channel as ABI v9.
+- **The compile gate** is a JavaScriptCore parse (`SZWebNodeCheck`) plus the page importing,
+  constructing and running the staged module for a few frames; it waits for the page to come up
+  and fails if it does not. Both halves sit behind `SZRenderBackend.checkNodeSource`, as swiftc does
+  for a Mac node; `agent_view_frame` is `captureViewport`, a page snapshot ([MCP.md](MCP.md)).
+- **Live inputs** are coalesced: the page reads once per frame, so the runtime sends one message
+  per run-loop pass with the latest value of every port written since the last one.
+- **Switching in place.** Settings ▸ Target Platform flips the open project's target and brings the
+  renderer up again on the same project through the one prepare-and-mount path a project open uses
+  (`SZHost+Backend`): the Metal runtime always gets a prepare and commit (an empty graph for a web
+  project), the page is mounted only for a web one, and node errors are heard only from the backend
+  that renders now. Each node keeps one source per platform side by side; a node with no file for
+  the new platform stays out of the render graph until the conversion run writes one
+  ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md)).
+- **What a renderer can do** beyond drawing (record, stream thumbnails, mount cards, clone the
+  viewport, read a node's output back, export a web page) is declared once per backend in
+  `SZBackendCapabilities`; the host and UI gate on those, never on the project's target. Today's
+  web set says no to all but export. Also not there yet for a web project: the camera, microphone,
+  MIDI, OSC, system-audio and file nodes.
+
+## Two backends, one contract
+
+Both targets are the same app with a different renderer behind `host.backend`. Keep the split
+straight:
+
+- **Shared, written once.** The graph model, node contracts and the port audit, topological
+  ordering, the by-value channel split (`SZPortType.valueChannel`), project IO and the `.subz`
+  layout, the library catalog, the prompts (the ABI doc is picked per target at the one compose
+  site, `SZAgentDocs.abiReference(for:)`), the MCP tools, the host's lifecycle through
+  `SZRenderBackend` (load, reload, the compile gate, the capture, live inputs, endpoint, pause,
+  rewind, the error sink, the capability set), the new-project flow and the in-place target switch.
+- **Mirrored, because the language changes.** The per-frame scheduler (`SZScheduler.encodeFrame` and
+  `sz-runtime.js` `encode()`), the node kit surface (`SZNodeKit` and the page `ctx`, same accessor
+  names), the two ABI docs (`node-abi.md` and `node-abi-web.md`, same skeleton), and each dual
+  library node's two sources (`Node.swift` beside `Node.js`).
+- **The rule.** A change to frame semantics (edge routing, seeds, the endpoint, pause, the error
+  channel) or to the node kit surface lands in both implementations and both docs in the same
+  change. The check is `SZAppTests/SZBackendParityTests`, which renders the same gradient graph on
+  both backends and compares the frames.
 
 ## Failure handling
 

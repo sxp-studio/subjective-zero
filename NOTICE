@@ -20,6 +20,23 @@ This exception applies only to such author-created node and plugin works. The
 Subjective Zero application and engine themselves remain under the AGPL-3.0.
 
 
+1a. RUNTIME EXCEPTION (additional permission under GNU AGPL v3 section 7)
+------------------------------------------------------------------------
+
+Some of Subjective Zero's own files are copied into the works its users make:
+the page runtime and its transport shim (SubjectiveZero/WebRuntime/), the
+node kit a node is compiled against, and the built-in library nodes
+(SubjectiveZero/NodeLibrary/) placed into a project. When such a file is
+embedded, unmodified or adapted, in a work made with Subjective Zero -- an
+exported web page, an ejected application, a project -- you may convey that
+work under terms of your choice, and the presence of these files does not make
+the work a covered work under the AGPL.
+
+This permission covers only the files named above as they appear inside a
+user's work. The Subjective Zero application and engine, including these files
+as part of the application itself, remain under the AGPL-3.0.
+
+
 2. TRADEMARKS
 -------------
 

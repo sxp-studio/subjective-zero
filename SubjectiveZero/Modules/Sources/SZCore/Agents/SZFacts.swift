@@ -62,15 +62,18 @@ public struct SZRun: Codable, Sendable {
     public var instruction: String
     /// Work-set nodes with an arrow nobody wired. `hasWorkLeft`'s other evidence, and the reconcile brief's `{{unwired}}`.
     public var unwired: [UUID]
+    /// What the run is for when it is not a build (`SZRunIntent.convert` after a target switch, as its raw value); nil for a build. The director door's `convert` ruling.
+    public var intent: String?
 
     public init(workSet: [UUID], round: Int, roundCap: Int, steers: [String],
-                instruction: String, unwired: [UUID] = []) {
+                instruction: String, unwired: [UUID] = [], intent: String? = nil) {
         self.workSet = workSet
         self.round = round
         self.roundCap = roundCap
         self.steers = steers
         self.instruction = instruction
         self.unwired = unwired
+        self.intent = intent
     }
 }
 

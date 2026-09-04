@@ -359,7 +359,11 @@ struct SZNodeCanvasContentView: View, Equatable {
             switch node.rebuildReason {
             case nil: return .ready
             case .some(let reason) where !inFlight:
-                return reason == .sourceMismatch ? .error : .outdated
+                switch reason {
+                case .sourceMismatch: return .error
+                case .notBuiltForTarget: return .notBuiltHere
+                default: return .outdated
+                }
             default: break                              // being rebuilt right now → fall through to Building
             }
         }

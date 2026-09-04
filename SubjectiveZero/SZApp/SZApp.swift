@@ -77,6 +77,16 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// SwiftUI rebuilds the main menu when command content changes, and the rebuilt File item comes
+    /// back untitled: re-assert the retitle after every update (one string compare when nothing changed).
+    func applicationDidUpdate(_ notification: Notification) {
+        // SwiftUI resets the item's title, not always the submenu's: check both.
+        guard let fileItem = NSApp.mainMenu?.items.first(where: { $0.title == "File" || $0.submenu?.title == "File" })
+        else { return }
+        fileItem.title = "Project"
+        fileItem.submenu?.title = "Project"
+    }
+
     /// Back to the front: a file a node points at can be moved, renamed or thrown away in the Finder
     /// while we are in the background, and nothing else would notice. One stat per file port.
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -364,13 +374,23 @@ struct SZApp: App {
                                       onPickCodec: { host.setRecordCodec($0) },
                                       onPickSound: { host.setRecordSoundSource($0) })
             }
+            // The New Project sheet: where the project will run. A set-false (Esc / swipe) is a
+            // Cancel, which the host ignores while the sheet is required (nothing else is loaded).
+            .sheet(isPresented: Binding(get: { host.newProjectPresented },
+                                        set: { if !$0 { host.cancelNewProject() } })) {
+                SZNewProjectSheet(initial: host.lastProjectTarget ?? .native,
+                                  required: host.newProjectRequired,
+                                  onCreate: { host.createNewProject(target: $0) },
+                                  onCancel: { host.cancelNewProject() })
+            }
             .sheet(isPresented: Binding(get: { host.providerSetupPresented },
                                         set: { if !$0 { host.skipProviderSetup() } })) {
                 SZProviderSetupSheet(cards: host.providerSetupCards,
                                      selectedID: host.selectedSetupProviderID,
                                      activeID: host.activeProviderID,
+                                     targetPlatform: targetPlatformPane,
                                      routing: routingSettingsView,
-                                     initialSection: setupSection,
+                                     initialSection: host.requestedSetupSection ?? setupSection,
                                      onSelect: { host.selectSetupProvider($0) },
                                      onRefresh: { Task { await host.refreshProviderHealthOnce() } },
                                      onTest: { host.runProviderProbe($0) },
@@ -386,6 +406,13 @@ struct SZApp: App {
                                      // First run = the default provider is still unconfirmed;
                                      // afterwards the Providers pane closes with a plain Done.
                                      isFirstRun: host.defaultProviderID == nil)
+                // A menu item asked for a section: land there once, then the sheet remembers as usual.
+                .onAppear {
+                    if let requested = host.requestedSetupSection {
+                        setupSection = requested
+                        host.requestedSetupSection = nil
+                    }
+                }
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)
@@ -413,9 +440,9 @@ struct SZApp: App {
             // Recent sit out a run or in-flight chat; Save As does not, because it never swaps the
             // project (the methods are guarded too — MCP can race a click).
             CommandGroup(replacing: .newItem) {
-                Button("New Project") { host.newProject() }
+                Button("New Project") { host.presentNewProject() }
                     .keyboardShortcut("n", modifiers: .command)
-                    .disabled(host.isBusyForProjectSwitch)
+                    .disabled(host.isBusyForProjectSwitch || host.newProjectPresented)
                 Button("Open…") { host.openProjectViaPanel() }
                     .keyboardShortcut("o", modifiers: .command)
                     .disabled(host.isBusyForProjectSwitch)
@@ -445,6 +472,18 @@ struct SZApp: App {
                 Button("Save As…") { host.saveProjectAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(host.isOpeningProject || !host.hasSavableProject)
+                // where the project runs: the Settings pane that does the switch
+                Button("Target Platform…") { host.presentTargetPlatformSettings() }
+                    .disabled(host.store.project == nil)
+                Divider()
+                // a web project leaves as one file
+                if host.capabilities.exportsWebApp {
+                    Button("Export as Web App…") { host.exportWebApp() }
+                        .keyboardShortcut("e", modifiers: [.command, .shift])
+                        .disabled(!host.canExportWebApp)
+                    Button("Open in Browser") { host.openWebAppInBrowser() }
+                        .disabled(!host.canExportWebApp)
+                }
                 Divider()
                 // the way back to recorded takes after the stop toast is gone
                 Button("Show Recordings in Finder") { host.revealTakes() }
@@ -453,7 +492,7 @@ struct SZApp: App {
             // ⌘, — the app's only settings surface today; graduates into a real Settings window
             // once more prefs earn one (docs/UI.md).
             CommandGroup(replacing: .appSettings) {
-                Button("AI Settings") { host.presentProviderSetup() }
+                Button("Settings…") { host.presentProviderSetup() }
                     .keyboardShortcut(",", modifiers: .command)
                 Button("Recording Options") { host.recordSettingsPresented = true }
             }
@@ -572,6 +611,24 @@ struct SZApp: App {
                        set: { $0 ? host.showPanel(id) : host.closePanel(id) })
     }
 
+    /// The Target Platform pane: rows and report mapped by the host, the switch and Stop on it. A
+    /// confirmed switch closes the sheet: the conversion is a run, followed in the chat like any other.
+    private var targetPlatformPane: SZTargetPlatformPane {
+        SZTargetPlatformPane(
+            rows: host.targetPlatformRows,
+            report: host.conversionReport,
+            note: host.targetPlatformNote,
+            webActions: host.canExportWebApp
+                ? (open: { host.openWebAppInBrowser() }, export: { host.exportWebApp() }) : nil,
+            preview: { target in host.switchPreview(to: target) },
+            onSwitch: { target in
+                host.skipProviderSetup()
+                Task { await host.setProjectTarget(target) }
+            },
+            onStop: { host.stopConversion() },
+            onDone: { host.skipProviderSetup() })
+    }
+
     /// The AI Settings Routing pane, wired to the host mapping (SZHost+RoutingSettings).
     /// No presentation state: the selected row IS the active profile, so the host's
     /// `activeRoutingProfileName` is the whole story — the gearMenu pattern, typed.
@@ -632,8 +689,8 @@ struct SZApp: App {
         Button("Welcome Screen") { host.presentWelcome() }
         Divider()
         Menu("Project") {
-            Button("New Project") { host.newProject() }
-                .disabled(host.isBusyForProjectSwitch)
+            Button("New Project") { host.presentNewProject() }
+                .disabled(host.isBusyForProjectSwitch || host.newProjectPresented)
             Button("Open…") { host.openProjectViaPanel() }
                 .disabled(host.isBusyForProjectSwitch)
             Menu("Open Recent") {
@@ -654,6 +711,12 @@ struct SZApp: App {
             }
             Button("Save As…") { host.saveProjectAs() }
                 .disabled(host.isOpeningProject || !host.hasSavableProject)
+            Button("Target Platform…") { host.presentTargetPlatformSettings() }
+                .disabled(host.store.project == nil)
+            if host.capabilities.exportsWebApp {
+                Button("Export as Web App…") { host.exportWebApp() }.disabled(!host.canExportWebApp)
+                Button("Open in Browser") { host.openWebAppInBrowser() }.disabled(!host.canExportWebApp)
+            }
             Divider()
             Button("Show Recordings in Finder") { host.revealTakes() }
                 .disabled(!host.hasTakes)
@@ -703,7 +766,7 @@ struct SZApp: App {
                                                   set: { host.setLivePreviews($0) }))
         }
         Divider()
-        Button("AI Settings") { host.presentProviderSetup() }
+        Button("Settings…") { host.presentProviderSetup() }
         Button("Recording Options") { host.recordSettingsPresented = true }
         Divider()
         // Collapse the community/support links into one Help submenu so the gear's top level stays light.
@@ -760,7 +823,7 @@ struct SZApp: App {
             discordIcon: Image("discord"),
             opening: host.openingProject,
             onOpenRecent: { host.openProject(at: URL(filePath: $0)) },
-            onNewProject: { host.newProject() },
+            onNewProject: { host.presentNewProject() },
             onOpenProject: { host.openProjectViaPanel() },
             onClearRecents: { host.clearRecentProjects() },
             onStarGitHub: { host.openGitHub() },
@@ -813,6 +876,15 @@ struct SZApp: App {
     @ViewBuilder
     private func panelContent(_ id: SZPanelID) -> some View {
         switch id.kind {
+        case .viewport where host.webRuntime != nil:
+            // A web project's picture is its page (SZWebRuntime); the tile re-parents the one page
+            // view, so no Metal surface attaches and the native loop idles.
+            SZWebViewportPanel(pageView: host.webRuntime?.webView,
+                               status: host.webRuntime?.phase.status,
+                               onRetry: host.webRuntime.flatMap { web in
+                                   if case .failed = web.phase { return { Task { await web.start() } } }
+                                   return nil
+                               })
         case .viewport:
             SZViewportPanel(device: host.runtime?.device, events: host.viewportEvents(for: id))
                 // Rolling-take edge: every viewport wears it (this closure also feeds pop-out
@@ -879,6 +951,7 @@ struct SZApp: App {
                               onTogglePause: { host.togglePlayback() },
                               onResetTime: { host.resetPlayback() },
                               isRecording: host.isRecording,
+                              canRecord: host.capabilities.canRecord,
                               recordingElapsed: host.recordingElapsed,
                               onToggleRecord: { host.toggleRecording() },
                               recordSettingsSeen: host.recordSettingsSeen,

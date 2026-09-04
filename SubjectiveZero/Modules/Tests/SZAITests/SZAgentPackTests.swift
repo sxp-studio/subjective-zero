@@ -485,7 +485,7 @@ private let shippedPacksRoot = URL(filePath: #filePath)
 /// these claims, field for field — edit a shipped step and both sides move together.
 private let shippedPackSteps = StubSteps(infos: [
     "director/door": SZStepDeclarationInfo(
-        outcomes: ["build", "answer", "answer-resumed", "implement", "amend"]),
+        outcomes: ["build", "convert", "answer", "answer-resumed", "implement", "amend"]),
     "director/work-left": SZStepDeclarationInfo(outcomes: ["yes", "no"]),
     "coding/door": SZStepDeclarationInfo(
         outcomes: ["implement", "continue", "edit", "chat", "chat-resumed"]),
@@ -509,14 +509,19 @@ private let shippedPackSteps = StubSteps(infos: [
 }
 
 /// The shipped director: ONE graph whose door decides everything — a granted build goes
-/// to work, prose is answered cold or resumed — with the retry round as the dispatch's own
-/// leashed settled edge. Pinned so the shape the redesign asked for cannot drift.
+/// to work, a conversion run takes its own lane into the same dispatch, prose is answered
+/// cold or resumed — with the retry round as the dispatch's own leashed settled edge.
+/// Pinned so the shape the redesign asked for cannot drift.
 @Test func theShippedDirectorDecidesEverythingAtItsDoor() throws {
     let loaded = SZAgentPackLoader.load(root: shippedPacksRoot)
     let director = try #require(loaded.packs.first { $0.id == "director" })
     let graph = try #require(director.graph)
     #expect(graph.door?.form == .step(name: "door"))
     #expect(graph.edge(from: "door", outcome: "build")?.to == "decompose")
+    // A target switch's run: no planning, the work set goes to the fleet as it stands.
+    #expect(graph.edge(from: "door", outcome: "convert")?.to == "convert")
+    #expect(graph.edge(from: "convert", outcome: "ok")?.to == "implement")
+    #expect(director.prompts.contains("prompts/convert.md.mustache"))
     #expect(graph.edge(from: "door", outcome: "answer")?.to == "chat")
     #expect(graph.edge(from: "door", outcome: "answer-resumed")?.to == "chat-resumed")
     // `implement` is the requestBuild ack — deliberately unwired: the run is the reply.

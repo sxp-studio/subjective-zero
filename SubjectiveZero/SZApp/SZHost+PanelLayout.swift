@@ -14,8 +14,15 @@ extension SZHost {
     /// observable state, so SwiftUI surfaces re-title automatically; pop-out WINDOW titles are
     /// pushed by syncViewportDriver (same triggers: every live-set change).
     func panelTitle(_ id: SZPanelID) -> String {
-        SZPanelID.displayTitles(for: panelLayout.root.leafIDs + poppedOutPanels.keys)[id]
+        let title = SZPanelID.displayTitles(for: panelLayout.root.leafIDs + poppedOutPanels.keys)[id]
             ?? id.displayName
+        // the header names the platform once there is another one to confuse it with: a web project's
+        // viewport is always a page; a native project's says Native as soon as any node has a web build
+        guard id.kind == .viewport else { return title }
+        switch projectTarget {
+        case .web: return "\(title) (Web)"
+        case .native: return builtNodeCount(for: .web) > 0 ? "\(title) (Native)" : title
+        }
     }
 
     /// Header maximize toggle: blow `id` up to fill the window (others hidden), or restore if it's
@@ -159,7 +166,8 @@ extension SZHost {
                                                 ratio: recordRatio.rawValue,
                                                 crop: recordCrop,
                                                 soundSource: recordSoundSource == .off ? nil : recordSoundSource.rawValue,
-                                                seenSettings: recordSettingsSeen ? true : nil)))
+                                                seenSettings: recordSettingsSeen ? true : nil),
+                                             lastProjectTarget: lastProjectTarget))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

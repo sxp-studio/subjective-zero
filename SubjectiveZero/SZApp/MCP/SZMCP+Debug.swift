@@ -42,6 +42,10 @@ extension SZHostBridge {
                     "profile": ["type": "object", "description": "a full SZRoutingProfile JSON object to create-or-replace by name"],
                  ]),
             tool("debug_routing_state", "The routing world as JSON: `active_profile` (the saved name app-state activates), `env` (the raw SZ_MODEL_ROUTING launch pin), `profiles` (saved names), `node_grades` (node uuid → light|standard|heavy, as recorded), and `resolved` — the table a delivery starting NOW would bind, built through the real resolution path (without consuming the once-per-state fallback narration): per-slot \"provider · model · effort · fast\" strings ({agent: {slot: choice}}) plus the fallback, and the `notes` resolution produced. A launch pin naming a missing profile reads as {refused: <detail>}."),
+            tool("debug_open_project", "Open a `.subz` in the running app, exactly like Project > Open (the same switch a Finder open does). Test-bus only: the way a drive moves between projects without touching the GUI. Replies at once; the open completes on its own.",
+                 properties: ["path": ["type": "string", "description": "absolute path of the .subz directory"]]),
+            tool("debug_set_project_target", "Switch the open project's target platform in place (what Settings > Target Platform does): flips the target, remounts the backend, copies library twins and starts a conversion run over the rest. Test-bus only. Replies at once; the switch completes on its own.",
+                 properties: ["target": ["type": "string", "enum": ["native", "web"]]]),
             tool("debug_quit", "Quit the app cleanly, exactly like ⌘Q (windows close, state persists, the camera stops). Test-bus only — the way an automated drive ends a session instead of resorting to kill signals that skip teardown. Replies before terminating."),
             tool("debug_check_pack", "PRE-FLIGHT a pack of agent folders without spending a token: load + validate `path` exactly as the host would (decode, naming, graph shape, the door, seats, dispatch targets, turn briefs, step folders), returning each agent's summary, the sorted defect list, and a verdict naming the highest tier honestly attained — `loads`, `validates`, or `does not load`. Step-attached checks (a compiled step's declared outcomes) compile every step folder through the real toolchain first — expect seconds, not milliseconds. Omit `path` for the live packs root (the materialized bundled packs, or SZ_AGENT_PACKS).",
                  properties: ["path": ["type": "string", "description": "absolute path to a pack root (a directory of agent folders)"]]),
@@ -67,6 +71,8 @@ extension SZHostBridge {
         case "debug_set_paused":       return try debugSetPaused(arguments)
         case "debug_set_routing":      return try debugSetRouting(arguments)
         case "debug_routing_state":    return debugRoutingState()
+        case "debug_open_project":     return try debugOpenProject(arguments)
+        case "debug_set_project_target": return try debugSetProjectTarget(arguments)
         case "debug_quit":             return debugQuit()
         // debug_check_pack never lands here — SZMCPServer routes it down the off-main lane
         // (SZHostBridge.offMainToolNames) before the MainActor hop.
@@ -464,5 +470,28 @@ extension SZHostBridge {
             return String(decoding: data, as: UTF8.self)
         }
         return String(decoding: out, as: UTF8.self)
+    }
+}
+
+extension SZHostBridge {
+    /// `debug_set_project_target`: the settings pane's switch, for drives and tests.
+    func debugSetProjectTarget(_ arguments: [String: Any]) throws -> String {
+        guard let raw = arguments.string("target"), let target = SZProjectTarget(rawValue: raw) else {
+            throw SZMCPError.message("debug_set_project_target needs `target` (native | web)")
+        }
+        let host = host
+        Task { @MainActor in await host.setProjectTarget(target) }
+        return SZJSONRPC.encode(["switching": true, "target": raw])
+    }
+
+    /// `debug_open_project`: hand the path to the host's ordinary open. Refused while a project switch
+    /// is under way, so a drive never queues two opens.
+    func debugOpenProject(_ arguments: [String: Any]) throws -> String {
+        guard let path = arguments.string("path"), !path.isEmpty else {
+            throw SZMCPError.message("debug_open_project needs `path`")
+        }
+        guard !host.isBusyForProjectSwitch else { return SZJSONRPC.encode(["opening": false, "reason": host.status]) }
+        host.openProject(at: URL(filePath: path))
+        return SZJSONRPC.encode(["opening": true, "path": path])
     }
 }

@@ -119,6 +119,25 @@ public enum SZTrace {
         }
     }
 
+    /// Async twin of the closing span, for a body that may await.
+    @discardableResult
+    public static func span<T: Sendable>(_ stage: String, detail: String? = nil,
+                                         closing: (T) -> (detail: String?, addedTokens: Int?),
+                                         isolation: isolated (any Actor)? = #isolation,
+                                         _ body: () async throws -> T) async rethrows -> T {
+        let fence = begin(stage, detail: detail)
+        guard let id = fence.state?.id else { return try await body() }
+        do {
+            let value = try await $currentParent.withValue(id) { try await body() }
+            let meta = closing(value)
+            fence.end(detail: meta.detail, addedTokens: meta.addedTokens)
+            return value
+        } catch {
+            fence.end()
+            throw error
+        }
+    }
+
     /// Async twin — `#isolation` keeps the caller's actor, so `span` never hops.
     @discardableResult
     public static func span<T: Sendable>(_ stage: String, detail: String? = nil,

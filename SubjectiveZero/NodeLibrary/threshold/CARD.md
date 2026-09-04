@@ -11,3 +11,4 @@ cutoff instead of a hard step. Handy as a matte or key source.
   of the feathered edge; 0 approaches a hard binary. Both read live via `ctx.inputFloat`.
 - **Gotchas:** the input texture must be connected — if `ctx.inputTexture("input")` is nil the kernel
   is skipped. Output is monochrome RGB; original color is discarded by design.
+- **Web:** Also available in web projects (Node.js).

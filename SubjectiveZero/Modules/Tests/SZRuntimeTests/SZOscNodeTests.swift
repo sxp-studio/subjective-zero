@@ -86,7 +86,7 @@ private func oscBundle(_ messages: [[UInt8]]) -> [UInt8] {
     try SZProjectIO.save(project, to: dir)
     try FileManager.default.copyItem(
         at: oscLibraryRoot.appending(path: "osc-input/Node.swift"),
-        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: osc))
+        to: SZProjectIO.nodeSourceURL(projectURL: dir, nodeID: osc, target: .native))
     try runtime.loadProject(at: dir)
 
     // The first frame opens the listener; before any packet the learn signal is the zero sentinel.

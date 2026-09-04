@@ -203,9 +203,9 @@ struct SZBriefPinTests {
 
         // — the director's build briefs —
         func run(workSet: [SZNodeID] = [], round: Int = 0, roundCap: Int = 0,
-                 steers: [String] = [], instruction: String = "") -> SZRun {
+                 steers: [String] = [], instruction: String = "", intent: String? = nil) -> SZRun {
             SZRun(workSet: workSet, round: round, roundCap: roundCap,
-                  steers: steers, instruction: instruction)
+                  steers: steers, instruction: instruction, intent: intent)
         }
         // The arrows a live run captured at its start — every build brief below passes these, as the
         // host does. The chat/amend/debug pins pass none and still list the whole graph, which is what
@@ -242,6 +242,38 @@ struct SZBriefPinTests {
             world: SZWorld(graph: base, run: run(instruction: "make the camera feed grayscale"),
                            unwiredArrows: runArrows),
             extras: SZBriefExtras(gradingEnabled: true))
+
+        // A web project: the ABI section is the Node.js doc, the source file is `Node.js`, and
+        // the target block opens the brief. Every native render above proves both tokens
+        // render to nothing new on a Mac project (their pins predate the target, unmoved).
+        out["coding-node-compile-web.md"] = try renderer.render(
+            agent: "coding", template: "node-compile", message: "", world: workWorld,
+            extras: SZBriefExtras(target: .web))
+        out["director-decompose-web.md"] = try renderer.render(
+            agent: "director", template: "decompose", message: "",
+            world: SZWorld(graph: base, run: run(instruction: "make the camera feed grayscale"),
+                           unwiredArrows: runArrows),
+            extras: SZBriefExtras(target: .web))
+
+        // A conversion run: the project just switched platforms, the built camera node has no source
+        // for the new one, and the Director's convert brief dispatches it as it stands. The coding
+        // brief carries the other platform's source to translate from. Every render above passes no
+        // convert source, which proves the reference section is unmoved without one.
+        var convertGraph = base
+        convertGraph.nodes[0].builtForTarget = false
+        let convertWorld = SZWorld(graph: convertGraph,
+                                   run: run(workSet: [cameraID], intent: "convert"),
+                                   unwiredArrows: runArrows)
+        out["director-convert.md"] = try renderer.render(
+            agent: "director", template: "convert", message: "", world: convertWorld)
+        out["director-convert-web.md"] = try renderer.render(
+            agent: "director", template: "convert", message: "", world: convertWorld,
+            extras: SZBriefExtras(target: .web))
+        out["coding-compile-convert-web.md"] = try renderer.render(
+            agent: "coding", template: "node-compile", message: "", world: workWorld,
+            extras: SZBriefExtras(libraryIndex: libraryIndexText, target: .web,
+                                  convertSource: "struct Node {\n    // fixture source\n}",
+                                  convertFrom: "Node.swift"))
 
         // — graphSummary's fallback branches, through the one summary renderer —
         out["director-graph-summary-variants.md"] =

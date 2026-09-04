@@ -14,3 +14,4 @@ A 3×3 Sobel operator on luminance. Pixels where the gradient magnitude crosses 
 - **Gotchas:** the input must be connected — nil input skips the frame. colorRGBA inputs arrive as 4
   floats via `ctx.inputFloats`; guard the count (see `simd4`). `thickness` scales sample offsets, not a
   true line width, so very high values start to alias.
+- **Web:** Also available in web projects (Node.js).

@@ -12,3 +12,4 @@ point while green stays put. The offset grows with distance from `center`, so ed
 - **Gotchas:** the input must be connected — nil input skips the frame. `center` is a colorWell-free
   float2 read via `ctx.inputFloats("center")`; guard the count before indexing. `clamp_to_edge` keeps the
   outward red sample from wrapping at the border.
+- **Web:** Also available in web projects (Node.js).

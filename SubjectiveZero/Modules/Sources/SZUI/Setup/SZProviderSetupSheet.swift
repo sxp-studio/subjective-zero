@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The AI Settings sheet (the Xcode-Settings shape): a sidebar toggles focused panes —
-// Providers (provider cards with live status badges, inline remedies, and Confirm for the
-// default; also the first-run surface) and Routing (named profiles, SZRoutingSettingsView).
+// The Settings sheet (the Xcode-Settings shape): a sidebar toggles focused panes —
+// Target Platform (where the project runs, SZTargetPlatformPane), Providers (provider cards with
+// live status badges, inline remedies, and Confirm for the default; also the first-run surface)
+// and Routing (named profiles, SZRoutingSettingsView).
 // SZUI can't import SZAI: everything arrives as host-mapped values + closures.
 import AppKit
 import SwiftUI
@@ -18,9 +19,10 @@ public struct SZProviderGenerationPickerModelItem: Identifiable, Equatable, Send
     }
 }
 
-/// The sheet's sidebar sections: provider health/auth/default vs. the routing profiles —
-/// related surfaces, deliberately not one list.
+/// The sheet's sidebar sections: the project's target platform, provider health/auth/default,
+/// and the routing profiles — related surfaces, deliberately not one list.
 public enum SZProviderSetupSection: String, CaseIterable, Sendable {
+    case target
     case providers
     case routing
 }
@@ -96,6 +98,8 @@ public struct SZProviderSetupSheet: View {
     /// The provider actually ACTIVE (runs, chat, routing's Default) — what the capsule marks.
     /// Distinct from `selectedID`: a first-run selection is a radio Confirm has not committed.
     private let activeID: String?
+    /// The Target Platform pane, built by the presenter. nil = no such section (previews/tests).
+    private let targetPlatform: SZTargetPlatformPane?
     /// The Routing pane's content, built by the presenter (the gearMenu AnyView pattern).
     /// nil = no Routing section (previews/tests); the sidebar hides it.
     private let routing: SZRoutingSettingsView?
@@ -121,6 +125,7 @@ public struct SZProviderSetupSheet: View {
 
     public init(cards: [SZProviderSetupCard], selectedID: String?,
                 activeID: String? = nil,
+                targetPlatform: SZTargetPlatformPane? = nil,
                 routing: SZRoutingSettingsView? = nil,
                 initialSection: SZProviderSetupSection = .providers,
                 onSelect: @escaping (String) -> Void, onRefresh: @escaping () -> Void,
@@ -137,6 +142,7 @@ public struct SZProviderSetupSheet: View {
         self.cards = cards
         self.selectedID = selectedID
         self.activeID = activeID
+        self.targetPlatform = targetPlatform
         self.routing = routing
         self.isFirstRun = isFirstRun
         _section = State(initialValue: initialSection)
@@ -161,6 +167,7 @@ public struct SZProviderSetupSheet: View {
             sidebar
             Group {
                 switch section {
+                case .target: targetPlatformPane
                 case .providers: providersPane
                 case .routing: routingPane
                 }
@@ -176,10 +183,13 @@ public struct SZProviderSetupSheet: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("AI Settings")
+            Text("Settings")
                 .font(.system(size: 13, weight: .semibold))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 8)
+            if targetPlatform != nil {
+                sidebarItem(.target, label: "Target Platform", systemImage: "desktopcomputer")
+            }
             sidebarItem(.providers, label: "Providers", systemImage: "cpu")
             if routing != nil {
                 sidebarItem(.routing, label: "Routing", systemImage: "arrow.triangle.branch")
@@ -197,6 +207,13 @@ public struct SZProviderSetupSheet: View {
                              systemImage: String) -> some View {
         SZSidebarItem(label: label, systemImage: systemImage,
                       selected: section == target) { section = target }
+    }
+
+    // MARK: - Target Platform pane (presenter-built content; its own actions row)
+
+    @ViewBuilder
+    private var targetPlatformPane: some View {
+        if let targetPlatform { targetPlatform }
     }
 
     // MARK: - Providers pane (the original sheet, unchanged in substance)
@@ -312,12 +329,7 @@ public struct SZProviderSetupSheet: View {
                     // The provider the Routing pane's helper and "Default (…)" rows resolve
                     // to — the ACTIVE truth, never the radio selection.
                     if card.id == activeID {
-                        Text("Active")
-                            .font(.system(size: 10, weight: .semibold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.accentColor.opacity(0.15), in: Capsule())
-                            .foregroundStyle(Color.accentColor)
+                        SZSetupBadge(label: "Active", color: .accentColor)
                     }
                     Spacer()
                     modelMenu(card)
@@ -345,16 +357,7 @@ public struct SZProviderSetupSheet: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(selected ? Color.accentColor.opacity(0.12)
-                               : Color(nsColor: .controlBackgroundColor).opacity(0.82))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(selected ? Color.accentColor.opacity(0.52) : Color.primary.opacity(0.10),
-                        lineWidth: 1)
-        )
+        .modifier(SZSetupCardStyle(selected: selected))
         .contentShape(Rectangle())
         .onTapGesture {
             if card.isSelectable { onSelect(card.id) }
@@ -362,12 +365,7 @@ public struct SZProviderSetupSheet: View {
     }
 
     private func statusBadge(_ card: SZProviderSetupCard) -> some View {
-        Text(card.statusLabel)
-            .font(.system(size: 10, weight: .semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(badgeColor(card.readiness).opacity(0.15), in: Capsule())
-            .foregroundStyle(badgeColor(card.readiness))
+        SZSetupBadge(label: card.statusLabel, color: badgeColor(card.readiness))
     }
 
     private func badgeColor(_ readiness: SZProviderSetupCard.Readiness) -> Color {
@@ -511,6 +509,42 @@ public struct SZProviderSetupSheet: View {
                 .controlSize(.small)
                 .help("Stop checking \(card.displayName) and hide it from runs. Re-enable it here any time")
         }
+    }
+}
+
+
+/// The settings sheet's card: its fill and stroke, with the accent tint on the picked one.
+struct SZSetupCardStyle: ViewModifier {
+    let selected: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(selected ? Color.accentColor.opacity(0.12)
+                                   : Color(nsColor: .controlBackgroundColor).opacity(0.82))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(selected ? Color.accentColor.opacity(0.52) : Color.primary.opacity(0.10),
+                            lineWidth: 1)
+            )
+    }
+}
+
+/// The sheet's status badge: a small capsule tinted by its color. Shared by the provider cards
+/// (Ready, Verified, Active) and the Target Platform pane (BETA, ACTIVE, the report outcomes).
+struct SZSetupBadge: View {
+    let label: String
+    let color: Color
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.15), in: Capsule())
+            .foregroundStyle(color)
     }
 }
 

@@ -490,6 +490,8 @@ extension SZHostBridge {
         // declares a port SURFACE, and an agent that means to set a VALUE has `ui_set_input_default`,
         // which brings the file into the project. Deliberate, not an omission.
         let inputs = try ports("inputs"), outputs = try ports("outputs")
+        let problems = inputs.upsert.compactMap(\.enumDefaultProblem)
+        guard problems.isEmpty else { throw SZMCPError.message(problems.joined(separator: " ")) }
         let edit = SZStore.SZPortEdit(upsertInputs: inputs.upsert, removeInputs: inputs.remove,
                                       upsertOutputs: outputs.upsert, removeOutputs: outputs.remove)
         guard !edit.isEmpty else { throw SZMCPError.message("ui_edit_ports needs at least one upsert or remove") }
@@ -506,7 +508,7 @@ extension SZHostBridge {
         if result.raisedRebuild { host.noteRunCreatedWork([id]) }
         // Through the host (not a bare store edit) so the new contract + the rebuild flag reach disk and the
         // runtime — otherwise a crash before the next run loses both. Safe because `kind` is untouched: a
-        // reload re-renders the node rather than dropping it from `renderableSubgraph`.
+        // reload re-renders the node rather than dropping it from `SZGraph.renderable`.
         host.persistGraphEditAndReload(action: "edit ports")
         // After the reload, whose reconcile deliberately keeps a live override: any value this edit moved has
         // to be pushed, or the node keeps rendering the one the card no longer shows.

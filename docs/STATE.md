@@ -38,11 +38,19 @@ Project                  // one effect / document
       ├─ prompt (for prompt/pre-gen nodes)
       ├─ contract (node-contract.json: typed inputs/outputs) - see GRAPH_AND_NODES.md
       ├─ position
+      ├─ libraryID (the library node it was placed from, if any)
+      ├─ builtForTarget (ephemeral: the folder has the active platform's source file)
       └─ connections are stored on the Graph, not the Node
 ```
 
 Connections live on the `Graph` (a list of edges) rather than inside nodes, so rewiring during
 split/merge is a graph-level edit and nodes stay independently serializable.
+
+`libraryID` is persisted, so a target switch can copy the library's twin for the new platform.
+`builtForTarget` is never written: it is read from disk at load, after a promote and after a
+switch, and a built node without the active platform's file derives the rebuild reason
+`notBuiltForTarget` beside `contractChanged`, `intentChanged` and `sourceMismatch`
+([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md)).
 
 `App` state is **local, per-machine** - `SZAppState`, persisted by `SZAppStateIO` as
 `~/Library/Application Support/SubjectiveZero/app-state.json` (pretty-printed JSON, same
@@ -55,14 +63,14 @@ layout encodes byte-identically to the pre-instance format, so old builds keep r
 until a clone exists. Also live: `poppedOutPanels` - panels living in their own windows with their
 screen frames, restored (frames sanitized against the current displays) when the workspace next
 appears; the panel's dock-back spot rides `panelLayout.restorePositions`, not this record.
-Also live: `defaultProviderID` - the provider confirmed in the Agent Providers setup sheet
+Also live: `defaultProviderID` - the provider confirmed in the Settings sheet's Providers pane
 ([AI_PROVIDERS.md](AI_PROVIDERS.md)); nil means first-run setup hasn't been confirmed, which is
-what auto-presents the sheet at launch (post-first-run, picking a ready card in AI Settings
+what auto-presents the sheet at launch (post-first-run, picking a ready card in Settings
 re-persists it). Also live:
 `openProjectPath` (the last USER-opened project, reopened next launch) and `recentProjectPaths`,
 i.e. File ▸ Open Recent, newest first, capped at 10 (`SZAppState.noteRecentProject`). Also live:
 `providerGenerationSettings` - per-provider generation choices (model /
-reasoning effort / fast mode) keyed by provider id, written immediately from AI Settings and
+reasoning effort / fast mode) keyed by provider id, written immediately from Settings and
 `ui_set_provider`; rows are stored raw and clamped against the provider's real capabilities at read
 (`resolvedGenerationSettings`), so a stale model id degrades to the default instead of failing.
 Per-provider keying = switching codex→claude→codex keeps each provider's choices. Also live:
