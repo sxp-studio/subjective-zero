@@ -53,4 +53,37 @@ struct SZCanvasCamera: Equatable, Sendable {
                            min(viewSize.width / framed.width, viewSize.height / framed.height)))
         return centered(on: framed, in: viewSize, zoom: zoom)
     }
+
+    /// Center on `rect` at the current zoom, zooming out only if it would not fit; never in.
+    func centering(on rect: CGRect, in viewSize: CGSize) -> SZCanvasCamera {
+        .centered(on: rect, in: viewSize, zoom: min(zoom, Self.fitting(rect, in: viewSize).zoom))
+    }
+
+    /// The camera that slides the least to bring `rect` (world) `margin` inside the viewport edges.
+    /// Nil when it is already inside. Zooms out and centers only when the rect cannot fit at the
+    /// current zoom; never zooms in.
+    func revealing(_ rect: CGRect, in viewSize: CGSize, margin: CGFloat = 40) -> SZCanvasCamera? {
+        let inset = min(margin, viewSize.width / 4, viewSize.height / 4)   // a tiny viewport keeps half its width usable
+        let frame = CGRect(origin: .zero, size: viewSize).insetBy(dx: inset, dy: inset)
+        let onScreen = CGRect(origin: screenPoint(world: rect.origin),
+                              size: CGSize(width: rect.width * zoom, height: rect.height * zoom))
+        if onScreen.width > frame.width || onScreen.height > frame.height {
+            return centering(on: rect, in: viewSize)
+        }
+        if frame.contains(onScreen) { return nil }
+        var delta = CGSize.zero
+        if onScreen.minX < frame.minX {
+            delta.width = frame.minX - onScreen.minX
+        } else if onScreen.maxX > frame.maxX {
+            delta.width = frame.maxX - onScreen.maxX
+        }
+        if onScreen.minY < frame.minY {
+            delta.height = frame.minY - onScreen.minY
+        } else if onScreen.maxY > frame.maxY {
+            delta.height = frame.maxY - onScreen.maxY
+        }
+        var moved = self
+        moved.pan(by: delta)
+        return moved
+    }
 }

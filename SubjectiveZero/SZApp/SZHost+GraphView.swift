@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Graph-menu intents: auto-layout ("Tidy Graph") and the two node-editor camera commands
-// ("Center View" / "Zoom to Fit"). Tidy is a pure node-position edit committed through the shared
+// Graph-menu intents (Tidy Graph, Center View, Zoom to Fit) plus the one-shot reveal that slides
+// agent-added cards into view. Tidy is a pure node-position edit committed through the shared
 // SZStore.moveNodes path (the layout math lives in SZUI's SZGraphLayout, which SZCore can't reach —
 // so the host, not the store, drives it). The camera commands can't run here at all: the editor's
 // zoom/offset is panel-local @State, so the host just raises a one-shot `cameraCommand` the panel
@@ -32,4 +32,18 @@ extension SZHost {
 
     /// Graph ▸ Zoom to Fit — frame the whole graph in the node editor (zoom + offset).
     func zoomToFit() { cameraCommand = SZCameraCommand(action: .fit) }
+
+    /// An agent added nodes: raise one `.reveal` per burst. The Director adds one node per tool call
+    /// over a few seconds; the 80ms debounce folds adds that arrive together. Whether the camera
+    /// moves is the panel's call (SZCanvasReveal).
+    func revealAgentAddedNodes(_ ids: Set<SZNodeID>) {
+        pendingReveal.formUnion(ids)
+        revealDebounce?.cancel()
+        revealDebounce = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled, let self else { return }
+            cameraCommand = SZCameraCommand(action: .reveal(nodes: pendingReveal, askedAt: lastUserAskAt))
+            pendingReveal = []
+        }
+    }
 }

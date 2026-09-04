@@ -228,6 +228,7 @@ extension SZHost {
         if origin == .user {
             showChat()
             admissionSuspended = false   // the user is asking again; the queue may move
+            lastUserAskAt = Date()       // the canvas is the agent's to reveal into until the user touches it
         }
 
         // A pre-flight rejection: shown in the tab but TRANSIENT — never flushed, never recapped.

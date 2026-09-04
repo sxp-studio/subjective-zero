@@ -13,20 +13,22 @@ import SZUI   // SZNodeLayout.gridPitch/snapped — agent placement lands on the
 extension SZHostBridge {
     nonisolated static var uiToolDefinitions: [[String: Any]] {
         [
-            tool("ui_add_prompt_node", "Add a prompt node; returns its id and placed x/y (while snap-to-grid is on, the card's edges snap to the \(Int(SZNodeLayout.gridPitch))pt canvas grid — the echoed x/y center is the applied truth).",
+            tool("ui_add_prompt_node", "Add a prompt node; returns its id and placed x/y. Omit x/y and pass `after` (the node it takes input from) to land one column right of that node; with neither it lands beside the whole graph. Give x/y only for a spot the user asked for. While snap-to-grid is on, the card's edges snap to the \(Int(SZNodeLayout.gridPitch))pt canvas grid; the echoed x/y center is the applied truth.",
                  properties: [
                     "prompt": ["type": "string", "description": "the node's logic prompt"],
+                    "after": ["type": "string", "description": "id of the node this one reads from; the card lands beside it"],
                     "x": ["type": "number"], "y": ["type": "number"],
                  ]),
-            tool("ui_add_source_node", "Add media SOURCE nodes reading files from disk — mirrors dragging them onto the canvas. Images become an `image-file` node, videos a `video-file` node, both with `path` pre-set; audio and other types are rejected. Cards stagger down-right and the LAST takes the viewport, as a drop does. Rejects the whole call if any path is missing or isn't an image/video, so you never get a half-built graph.",
+            tool("ui_add_source_node", "Add media SOURCE nodes reading files from disk — mirrors dragging them onto the canvas. Images become an `image-file` node, videos a `video-file` node, both with `path` pre-set; audio and other types are rejected. Cards stagger down-right from x/y (omit both to land one column left of the graph, where a source belongs) and the LAST takes the viewport, as a drop does. Rejects the whole call if any path is missing or isn't an image/video, so you never get a half-built graph.",
                  properties: [
                     "paths": ["type": "array", "items": ["type": "string"],
                               "description": "absolute paths to image/video files (≥1)"],
                     "x": ["type": "number"], "y": ["type": "number"],
                  ]),
-            tool("ui_add_library_node", "Add a built-in library node verbatim (see agent_library_index for ids, e.g. `corner-pin`, `checkerboard`) — mirrors placing one from the palette. Copies its Node.swift (and Card.swift, when the node ships a custom card — a card that draws over the node's output lands ON, others wait in the context menu) into the project, compiles, and returns the new node id.",
+            tool("ui_add_library_node", "Add a built-in library node verbatim (see agent_library_index for ids, e.g. `corner-pin`, `checkerboard`) — mirrors placing one from the palette. Copies its Node.swift (and Card.swift, when the node ships a custom card — a card that draws over the node's output lands ON, others wait in the context menu) into the project, compiles, and returns the new node id. Placement as ui_add_prompt_node: omit x/y and pass `after` to land beside the node it reads from.",
                  properties: [
                     "library": ["type": "string", "description": "the NodeLibrary id"],
+                    "after": ["type": "string", "description": "id of the node this one reads from; the card lands beside it"],
                     "x": ["type": "number"], "y": ["type": "number"],
                  ]),
             tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged. Data edges must keep the graph acyclic: a data connection that would close a cycle is refused with {status: \"refused\", reason} naming the path — rewire or drop an edge instead. A flow (intent) edge is refused the same way when it would run in a circle, counting the arrows already drawn, since only one edge of a ring could ever be laid; nothing about ports refuses an arrow. A flow edge given an explicit fromPort/toPort naming a declared data port is PINNED to that slot (the user-drop-on-a-blue-dot semantics) — omit the ports for plain node-to-node intent.",
@@ -220,10 +222,29 @@ extension SZHostBridge {
         return SZPoint(x: snapped.x, y: snapped.y)
     }
 
+    /// The add handlers' shared placement: a given x/y wins per axis; the rest comes from `after`
+    /// (beside the node it reads from), else beside the whole graph (left of it for a `source`).
+    /// Agents never see node positions, so guessing x/y is the exception.
+    private func placedPosition(_ arguments: [String: Any], cardSize: CGSize,
+                                source: Bool = false) throws -> SZPoint {
+        let graph = host.store.project?.graph ?? SZGraph()
+        var center: CGPoint
+        if let after = arguments.string("after") {
+            guard let anchor = SZNodeID(uuidString: after).flatMap({ graph.node(id: $0) }) else {
+                throw SZMCPError.message("`after` names no node in the graph: \(after)")
+            }
+            center = SZNodePlacement.after(anchor, size: cardSize, in: graph, previewsEnabled: host.livePreviews)
+        } else {
+            center = SZNodePlacement.beside(graph: graph, size: cardSize, previewsEnabled: host.livePreviews,
+                                            source: source)
+        }
+        if let x = arguments.double("x") { center.x = x }
+        if let y = arguments.double("y") { center.y = y }
+        return placedPosition(x: center.x, y: center.y, cardSize: cardSize)
+    }
+
     private func uiAddPromptNode(_ arguments: [String: Any]) throws -> String {
-        let position = placedPosition(
-            x: arguments.double("x") ?? 240, y: arguments.double("y") ?? 240,
-            cardSize: CGSize(width: SZNodeLayout.width, height: SZNodeLayout.promptHeight))
+        let position = try placedPosition(arguments, cardSize: SZNodeLayout.promptCardSize)
         guard let id = host.store.addPromptNode(prompt: arguments.string("prompt"), position: position) else {
             throw SZMCPError.message("no project loaded")
         }
@@ -257,9 +278,7 @@ extension SZHostBridge {
             }
         }
 
-        let origin = placedPosition(
-            x: arguments.double("x") ?? 240, y: arguments.double("y") ?? 240,
-            cardSize: CGSize(width: SZNodeLayout.width, height: SZNodeLayout.promptHeight))
+        let origin = try placedPosition(arguments, cardSize: SZNodeLayout.promptCardSize, source: true)
         let specs = SZMediaSource.specs(for: urls, origin: origin)
         let created = host.createMediaNodes(specs, origin: .agent)
         guard created.count == specs.count else {   // a disk/compile failure part-way; the rest did land
@@ -900,10 +919,8 @@ extension SZHostBridge {
     /// can place one without authoring it.
     private func uiAddLibraryNode(_ arguments: [String: Any]) throws -> String {
         guard let library = arguments.string("library") else { throw SZMCPError.message("ui_add_library_node needs `library` (a NodeLibrary id, e.g. corner-pin)") }
-        let x = (arguments["x"] as? NSNumber)?.doubleValue ?? 0
-        let y = (arguments["y"] as? NSNumber)?.doubleValue ?? 0
-        let id = try host.instantiateLibraryNode(libraryID: library, position: SZPoint(x: x, y: y),
-                                                 origin: .agent)
+        let position = try placedPosition(arguments, cardSize: SZNodeLayout.promptCardSize)
+        let id = try host.instantiateLibraryNode(libraryID: library, position: position, origin: .agent)
         host.noteRunCreatedWork([id])   // added by the run's own tooling, so it joins its work set
         var response: [String: Any] = ["node": id.uuidString, "library": library]
         if let body = host.store.project?.graph.node(id: id)?.body { response["body"] = body.mode.rawValue }

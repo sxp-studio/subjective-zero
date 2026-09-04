@@ -354,6 +354,12 @@ final class SZHost {
     // observes and applies. Transient (never persisted): the camera itself resets on panel appear.
     // Each issue carries a fresh token so pressing the same item twice re-fires the panel's .onChange.
     internal(set) var cameraCommand: SZCameraCommand?
+    /// The user's last chat send. An agent's node adds may move the camera only while the user has
+    /// not touched the canvas since this moment (SZCanvasReveal); nil = never asked.
+    internal(set) var lastUserAskAt: Date?
+    /// Agent-added nodes waiting for one `.reveal` command per burst (see revealAgentAddedNodes).
+    @ObservationIgnored var pendingReveal: Set<SZNodeID> = []
+    @ObservationIgnored var revealDebounce: Task<Void, Never>?
 
     // Project lifecycle (roadmap Task 1) — same app-state.json home + restore story as the prefs
     // above; mutated by `switchProject` (and Open Recent ▸ Clear via SZHost+ProjectLifecycle).

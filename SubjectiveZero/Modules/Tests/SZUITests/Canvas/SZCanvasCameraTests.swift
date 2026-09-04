@@ -88,3 +88,45 @@ import Testing
                                         in: CGSize(width: 1000, height: 800))
     #expect(camera.zoom == SZCanvasCamera.zoomRange.upperBound)
 }
+
+// MARK: - Reveal (agent-added nodes slide into view)
+
+private let revealView = CGSize(width: 1000, height: 600)
+
+@Test func revealingIsNilWhenTheRectAlreadySitsInsideTheMargin() {
+    let camera = SZCanvasCamera()
+    #expect(camera.revealing(CGRect(x: 100, y: 100, width: 200, height: 100), in: revealView) == nil)
+}
+
+@Test func revealingPansExactlyTheOvershootPerAxisAndKeepsZoom() {
+    let camera = SZCanvasCamera(zoom: 1, offset: .zero)
+    // Off to the right only: slide left until the card's right edge sits on the 40pt margin.
+    let right = camera.revealing(CGRect(x: 1100, y: 100, width: 200, height: 100), in: revealView)
+    #expect(right?.zoom == 1)
+    #expect(right?.offset == CGSize(width: 960 - 1300, height: 0))
+    // Above and to the left: both axes pull the card in by its overshoot.
+    let upLeft = camera.revealing(CGRect(x: -300, y: -200, width: 200, height: 100), in: revealView)
+    #expect(upLeft?.offset == CGSize(width: 40 + 300, height: 40 + 200))
+}
+
+@Test func revealingNeverZoomsInEvenWhenFitWould() {
+    let camera = SZCanvasCamera(zoom: 0.5, offset: .zero)
+    let tiny = CGRect(x: 5000, y: 5000, width: 100, height: 50)
+    #expect(SZCanvasCamera.fitting(tiny, in: revealView).zoom > 0.5)   // fit alone would zoom in
+    let moved = camera.revealing(tiny, in: revealView)
+    #expect(moved?.zoom == 0.5)
+    // The card now sits on the far margin (screen = world·zoom + offset).
+    let screenMaxX = 5100 * 0.5 + (moved?.offset.width ?? 0)
+    #expect(abs(screenMaxX - 960) < 1e-9)
+}
+
+@Test func revealingZoomsOutToFitAndCentersWhenTheRectIsTooBig() {
+    let camera = SZCanvasCamera(zoom: 2, offset: .zero)
+    let big = CGRect(x: 0, y: 0, width: 800, height: 800)
+    let moved = camera.revealing(big, in: revealView)
+    #expect(moved?.zoom == SZCanvasCamera.fitting(big, in: revealView).zoom)
+    #expect((moved?.zoom ?? 9) < 2)
+    let center = moved?.screenPoint(world: CGPoint(x: big.midX, y: big.midY))
+    #expect(abs((center?.x ?? 0) - 500) < 1e-9)
+    #expect(abs((center?.y ?? 0) - 300) < 1e-9)
+}

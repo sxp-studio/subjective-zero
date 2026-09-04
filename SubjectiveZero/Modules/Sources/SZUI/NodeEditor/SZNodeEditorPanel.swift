@@ -15,10 +15,16 @@ import SwiftUI
 import SZCore
 import UniformTypeIdentifiers
 
-/// A one-shot node-editor camera command raised by the host (Graph ▸ Center View / Zoom to Fit) and
-/// applied by the panel, which owns the actual zoom/offset. `token` is fresh per issue so re-selecting
-/// the same item re-fires the panel's `.onChange` even though `action` is unchanged.
-public enum SZCameraAction: Equatable, Sendable { case center, fit }
+/// A one-shot node-editor camera command raised by the host (Graph ▸ Center View / Zoom to Fit, or an
+/// agent's node adds) and applied by the panel, which owns the actual zoom/offset. `token` is fresh
+/// per issue so re-selecting the same item re-fires the panel's `.onChange` even though `action` is
+/// unchanged.
+public enum SZCameraAction: Equatable, Sendable {
+    case center, fit
+    /// Bring agent-added nodes on screen, if the user has not taken the canvas back since asking
+    /// (`askedAt` = their last chat send; the rule is SZCanvasReveal).
+    case reveal(nodes: Set<SZNodeID>, askedAt: Date?)
+}
 public struct SZCameraCommand: Equatable, Sendable {
     public let action: SZCameraAction
     public let token: UUID
@@ -55,7 +61,7 @@ public struct SZNodeEditorPanel: View {
     private let onVisibleNodesChanged: ((Set<SZNodeID>) -> Void)?
     @State private var visiblePublishTask: Task<Void, Never>?
     @State private var lastPublishedVisible: Set<SZNodeID>?
-    private let cameraCommand: SZCameraCommand?   // host-raised one-shot: Center View / Zoom to Fit
+    private let cameraCommand: SZCameraCommand?   // host-raised one-shot: Center View / Zoom to Fit / reveal agent-added nodes
     private let onMentionNodeInChat: (SZNodeID) -> Void   // a card's chat button / "Mention in Chat"
     private let onOpenNodeSource: (SZNodeID) -> Void  // a node's file button → open its Node.swift in the editor
     private let onFixNode: (SZNodeID) -> Void         // Outdated/Error pill → compose a rebuild request
@@ -101,6 +107,7 @@ public struct SZNodeEditorPanel: View {
 
     @State private var camera = SZCanvasCamera()   // zoom + pan offset + the screen↔world transforms
     @State private var pinchAnchor: SZCanvasCamera?   // camera at pinch start — the zoom-about-pivot base
+    @State private var userTouchedAt: Date?   // last pan/zoom/drag/select/edit — the reveal rule's "who owns the canvas"
     @State private var chatToggleHover = false   // HUD chat-toggle hover highlight
     @State private var recordHover = false       // HUD record-dot hover highlight
     @State private var cursor: CGPoint?
@@ -420,6 +427,7 @@ public struct SZNodeEditorPanel: View {
                                                                  workSet: runWorkSet)
                           },
                           onNavigate: { proposed, animated in
+                              noteUserTouch()
                               if animated {
                                   withAnimation(.snappy(duration: 0.22)) { camera = proposed }
                               } else {
@@ -628,6 +636,7 @@ public struct SZNodeEditorPanel: View {
     /// Tap-select a node. Shift-click toggles it in the multi-selection (for Merge); a plain click selects
     /// just it. `selectedNodeID` (the chat/edit target) tracks the most-recently-touched node.
     private func selectNode(_ id: SZNodeID, additive: Bool) {
+        noteUserTouch()
         if additive {
             if multiSelection.contains(id) {
                 multiSelection.remove(id)
@@ -645,6 +654,7 @@ public struct SZNodeEditorPanel: View {
     }
 
     private func clearSelection() {
+        noteUserTouch()
         selectedNodeID = nil
         multiSelection = []
         selectedConnectionID = nil
@@ -710,6 +720,7 @@ public struct SZNodeEditorPanel: View {
     }
 
     private func presentContextMenu(target: SZCanvasContextTarget, anchor: CGPoint) {
+        noteUserTouch()   // a reveal would otherwise close the menu and slide the canvas under it
         contextMenuSize = .zero   // re-measure; the menu stays invisible until it has a size
         contextMenu = SZContextMenuSession(target: target, anchor: anchor,
                                            suggestions: contextSuggestionsFor(target))
@@ -842,6 +853,7 @@ public struct SZNodeEditorPanel: View {
     private var marqueeGesture: some Gesture {
         DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.space))
             .onChanged { value in
+                if marquee == nil { noteUserTouch() }
                 marquee = (start: value.startLocation, current: value.location)
                 cursor = value.location   // marquee drag suppresses onContinuousHover; keep the trail following
                 updateMarqueeSelection()
@@ -936,6 +948,7 @@ public struct SZNodeEditorPanel: View {
             optionsFor: optionsFor,
             onCommitPrompt: onCommitPrompt,
             onPromptEditingChanged: { id, editing in
+                if editing { noteUserTouch() }
                 editingNodeID = editing ? id : nil
                 if editing, autoEditNodeID == id { autoEditNodeID = nil }   // consume the one-shot auto-focus
             },
@@ -1175,6 +1188,7 @@ public struct SZNodeEditorPanel: View {
     private func addPromptNode(atScreen screen: CGPoint) {
         let center = snappedPromptCenter(camera.worldPoint(screen: screen))
         if let id = store.addPromptNode(prompt: "", position: SZPoint(x: center.x, y: center.y)) {
+            noteUserTouch()
             onNodeAdded(id)
             selectedNodeID = id
             autoEditNodeID = id   // the new card opens into editing + grabs the field (see SZPromptNodeView)
@@ -1194,6 +1208,7 @@ public struct SZNodeEditorPanel: View {
     /// `SZMediaSource` — the same rules `ui_add_source_node` applies. Returns whether ANY media file was
     /// handled: false leaves the drag un-consumed (so a stray .txt just bounces back).
     private func handleFileDrop(_ urls: [URL], at screen: CGPoint) -> Bool {
+        noteUserTouch()
         let origin = snappedPromptCenter(camera.worldPoint(screen: screen))
         let specs = SZMediaSource.specs(for: urls, origin: SZPoint(x: origin.x, y: origin.y))
         guard !specs.isEmpty else { return false }
@@ -1214,6 +1229,7 @@ public struct SZNodeEditorPanel: View {
             let ids = groupDrag ? multiSelection : [id]
             let members = ids.compactMap { mid in storePosition(mid).map { (id: mid, start: $0) } }
             drag = NodeDrag(primary: id, members: members)
+            noteUserTouch()
             if !groupDrag { selectedNodeID = id; multiSelection = [id] }
             selectedConnectionID = nil
             canvasFocused = true
@@ -1253,6 +1269,7 @@ public struct SZNodeEditorPanel: View {
             guard let session = SZWireDragSession.begin(from: source, atWorld: world, screen: location,
                                                         in: graph, previewsEnabled: livePreviews,
                                                         isLocked: isLocked) else { return }
+            noteUserTouch()
             wire = session
         } else {
             wire?.lastScreen = location
@@ -1273,6 +1290,7 @@ public struct SZNodeEditorPanel: View {
             guard let session = SZWireDragSession.begin(along: connection, atWorld: world,
                                                         screen: screen, in: graph,
                                                         previewsEnabled: livePreviews) else { return }
+            noteUserTouch()
             wire = session
         } else {
             wire?.lastScreen = screen
@@ -1310,6 +1328,7 @@ public struct SZNodeEditorPanel: View {
             guard let newRef = spawnPromptNode(for: kind, source: source, downstream: downstream,
                                                at: SZPoint(x: snapped.x, y: snapped.y))
             else { break }
+            noteUserTouch()
             onNodeAdded(newRef.node)
             // Oriented by the drag: downstream = source feeds new, else new feeds source.
             let (fromRef, toRef) = downstream ? (source, newRef) : (newRef, source)
@@ -1384,7 +1403,7 @@ public struct SZNodeEditorPanel: View {
         MagnificationGesture()
             .onChanged { value in
                 dismissContextMenu()   // the menu is panel-space; it must not drift off its world anchor
-                if pinchAnchor == nil { pinchAnchor = camera }
+                if pinchAnchor == nil { pinchAnchor = camera; noteUserTouch() }
                 guard let anchor = pinchAnchor else { return }
                 camera.applyZoom(anchor.zoom * value, pivot: pivot(), from: anchor)
             }
@@ -1397,6 +1416,7 @@ public struct SZNodeEditorPanel: View {
     private func handleScroll(_ data: SZScrollWheelData) {
         dismissContextMenu()   // same rule as zoom: the camera moved, the anchor didn't
         guard editingNodeID == nil else { return }
+        noteUserTouch()
         if data.commandHeld {
             camera.applyZoom(camera.zoom * (1 - data.deltaY * 0.005), pivot: data.location, from: camera)
         } else {
@@ -1409,16 +1429,46 @@ public struct SZNodeEditorPanel: View {
     }
 
     /// Apply a host-raised camera command (the framing math lives on SZCanvasCamera). No-op with no
-    /// nodes or an unmeasured viewport. Animated with a snappy reframe.
+    /// nodes or an unmeasured viewport. Center View and Zoom to Fit count as the user's touch;
+    /// `.reveal` has its own gate (revealNodes).
     private func applyCameraCommand(_ command: SZCameraCommand) {
         guard let bounds = graphWorldBounds(), viewSize.width > 0, viewSize.height > 0 else { return }
-        withAnimation(.snappy(duration: command.action == .fit ? 0.28 : 0.22)) {
-            switch command.action {
-            case .center: camera = .centered(on: bounds, in: viewSize, zoom: camera.zoom)
-            case .fit: camera = .fitting(bounds, in: viewSize)
-            }
+        switch command.action {
+        case .center:
+            noteUserTouch()
+            withAnimation(.snappy(duration: 0.22)) { camera = .centered(on: bounds, in: viewSize, zoom: camera.zoom) }
+        case .fit:
+            noteUserTouch()
+            withAnimation(.snappy(duration: 0.28)) { camera = .fitting(bounds, in: viewSize) }
+        case let .reveal(ids, askedAt):
+            revealNodes(ids, askedAt: askedAt)
         }
     }
+
+    /// Slide the camera the least distance that shows agent-added cards, only while the user has not
+    /// taken the canvas back since asking (SZCanvasReveal). With no other card on screen, center on
+    /// them instead. Never zooms in; never selects (selection re-scopes the chat).
+    private func revealNodes(_ ids: Set<SZNodeID>, askedAt: Date?) {
+        let interacting = drag != nil || wire != nil || marquee != nil || pinchAnchor != nil || editingNodeID != nil
+        guard SZCanvasReveal.mayMove(userTouchedAt: userTouchedAt, askedAt: askedAt, interacting: interacting),
+              let graph = project.map({ contentGraph($0.graph) }) else { return }
+        var rect = CGRect.null
+        for node in graph.nodes where ids.contains(node.id) {
+            rect = rect.union(SZNodeLayout.cardRect(of: node, previewsEnabled: livePreviews))
+        }
+        guard !rect.isNull else { return }   // gone again before the debounce fired
+        let viewport = SZMiniMapLayout.viewportWorldRect(camera: camera, viewSize: viewSize)
+        let othersOnScreen = graph.nodes.contains {
+            !ids.contains($0.id) && SZNodeLayout.cardRect(of: $0, previewsEnabled: livePreviews).intersects(viewport)
+        }
+        let target = othersOnScreen ? camera.revealing(rect, in: viewSize) : camera.centering(on: rect, in: viewSize)
+        guard let target, target != camera else { return }
+        dismissContextMenu()   // panel-space menu; the camera moves under it
+        withAnimation(.snappy(duration: 0.28)) { camera = target }
+    }
+
+    /// The user touched the canvas: from now until their next chat message the camera is theirs.
+    private func noteUserTouch() { userTouchedAt = Date() }
 
     /// World-space bounding box of every node card. Nil with no graph / no nodes.
     private func graphWorldBounds() -> CGRect? {

@@ -30,6 +30,7 @@ extension SZHost {
     func noteNodeAdded(_ id: SZNodeID, origin: SZMutationOrigin = .user) {
         noteMutation("added node", [mutationTitle(id)], origin: origin)
         persistProject()
+        if origin == .agent { revealAgentAddedNodes([id]) }   // the user can't see where it landed
     }
 
     /// The journal actor behind a mutation: see the file header for the rule.

@@ -48,10 +48,13 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
   clears it** (like resolving a comment). You only ever create `data` edges. You never remove an arrow on
   your own judgement either: remove one with `ui_disconnect` only when the user asks you to, in words, in
   this conversation.
-- `ui_add_prompt_node { "prompt": "...", "x": <n>, "y": <n> }` — add a node; returns its id.
-- `agent_library_index` lists the built-in nodes; `ui_add_library_node { "library": "<id>", "x": <n>, "y": <n> }`
-  places one, already built, with no run to wait for. Use a built-in when it does the whole job (a
-  similar name is not a match) and brief a new node only for what no built-in does.
+- `ui_add_prompt_node { "prompt": "...", "after": "<id>" }` — add a node; returns its id. `after` is the node
+  it will read from: the card lands one column right of it, so the graph reads left to right without you
+  placing anything. Omit `after` for a node with no upstream (it lands beside the graph). Give `x`/`y`
+  only when the user asked for a specific spot.
+- `agent_library_index` lists the built-in nodes; `ui_add_library_node { "library": "<id>", "after": "<id>" }`
+  places one, already built, with no run to wait for (same `after` rule). Use a built-in when it does the
+  whole job (a similar name is not a match) and brief a new node only for what no built-in does.
 - `ui_toggle_display { "node": "<id>", "port": "<texture output>" }` — point the viewport at the final
   output so the result is visible. Do this once, on the last node's display output, after its contract exists.
   The viewport is the user's live view — never toggle it just to LOOK at a node: `agent_view_frame
