@@ -48,6 +48,8 @@ especially `docs/ARCHITECTURE.md` (incl. the host seam) and `docs/BUILD_SPEC.md`
    `SZAppTests` is a unit-test bundle hosted by the app, so it can `@testable import SubjectiveZero`
    and pin what lives inside the app target (the MCP tool surface, argument coercions, host helpers).
    It is test-only: nothing depends on it, so a `build` — Release included — never produces it.
+   Under either runner the app's per-machine home (`SZAppSupport.directory`) is a temp folder, so
+   a test that persists never touches the user's real `~/Library/Application Support/SubjectiveZero`.
 
 7. Do not be lazy, do not punt things to a 'v2' unless explicitly agreed upon.
 

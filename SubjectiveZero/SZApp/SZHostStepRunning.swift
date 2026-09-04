@@ -41,8 +41,7 @@ final class SZHostStepRunning: SZStepRunning, SZStepProviding {
     /// Shared with the hot-reload watchers (SZHost+AgentPacks.swift), so an edit-triggered
     /// recompile lands in the same dirs and coalesces with a run's own schedule.
     static func buildRoot(for key: SZStepKey) -> URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "SubjectiveZero/agent-steps/\(key.agent)/\(key.step)")
+        SZAppSupport.directory.appending(path: "agent-steps/\(key.agent)/\(key.step)")
     }
 
     private func stepSource(_ key: SZStepKey) -> URL {

@@ -58,6 +58,10 @@ human-diffable style as `project.json`, but never part of a `.subz`: a project i
 document and says nothing about this machine's window). Live today: `panelLayout` - the window's
 panel split tree + remembered reopen spots ([UI.md](UI.md#layout)), saved on every layout change
 and restored (sanitized via `normalize()`) at launch; a missing/corrupt file just means defaults.
+Every per-machine file resolves its home through `SZAppSupport.directory`: the real folder on a
+plain launch, a fresh temp folder under a test runner (so a test that persists never rewrites the
+user's preferences), or an absolute `SZ_APP_SUPPORT_DIR`. The one exception is the three.js
+download cache, which tests share with the app on purpose.
 Tiles are addressed by `SZPanelID` tokens (`viewport`, `viewport:2` for clones) - a clone-free
 layout encodes byte-identically to the pre-instance format, so old builds keep reading new files
 until a clone exists. Also live: `poppedOutPanels` - panels living in their own windows with their

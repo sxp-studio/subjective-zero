@@ -11,11 +11,8 @@ import SZCore
 public enum SZProviderCatalogIO {
     static let fileName = "provider-catalogs.json"
 
-    /// `~/Library/Application Support/SubjectiveZero/provider-catalogs.json`
-    public static var defaultURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "SubjectiveZero").appending(path: fileName)
-    }
+    /// `provider-catalogs.json` under `SZAppSupport.directory`.
+    public static var defaultURL: URL { SZAppSupport.directory.appending(path: fileName) }
 
     public static func load(from url: URL = defaultURL) -> [String: SZProviderModelCatalog] {
         guard let data = try? Data(contentsOf: url) else { return [:] }

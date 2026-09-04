@@ -22,12 +22,8 @@ import SZUI
 import UniformTypeIdentifiers
 
 extension SZHost {
-    /// `~/Library/Application Support/SubjectiveZero` — the base the materialized packs and
-    /// their manifests both hang off.
-    nonisolated static var supportRoot: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "SubjectiveZero")
-    }
+    /// `SZAppSupport.directory`: the base the materialized packs and their manifests hang off.
+    nonisolated static var supportRoot: URL { SZAppSupport.directory }
 
     /// Which app a materialized pack belongs to. A shipped build always answers `app`: the copy,
     /// and the user's edits in it, then stay put when the app is moved, renamed, or run from a disk

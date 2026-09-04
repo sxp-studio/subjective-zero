@@ -1246,10 +1246,9 @@ extension SZHost {
     /// the RUNS records' debug shadow, off unless SZ_GRAPH_TRACE=1.
     static func appendGraphTrace(_ payload: [String: Any]) {
         guard ProcessInfo.processInfo.environment["SZ_GRAPH_TRACE"] == "1" else { return }
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         else { return }
-        let url = base.appending(path: "SubjectiveZero/graph-trace.jsonl")
+        let url = SZAppSupport.directory.appending(path: "graph-trace.jsonl")
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
         if let handle = try? FileHandle(forWritingTo: url) {

@@ -162,7 +162,7 @@ extension SZHost {
         }
         guard !disabledProviderIDs.contains(id) else { return true }   // already disabled
         guard enabledProviders.contains(where: { $0.id != id }) else {
-            status = "cannot disable \(id) — it is the last enabled provider"
+            status = "cannot disable \(id): it is the last enabled provider"
             return false
         }
         if id == activeProviderID {
@@ -373,9 +373,9 @@ extension SZHost {
         let id = providerID ?? activeProviderID
         // A disabled provider carries no health entry (checks skip it) — name the real reason.
         let message = disabledProviderIDs.contains(id)
-            ? "disabled — enable it in Agent Providers"
+            ? "disabled. Enable it in Settings"
             : displayedProviderHealth(id)?.message ?? "set up Agent Providers"
-        status = "\(id) not ready — \(message)"
+        status = "\(id) not ready: \(message)"
         presentProviderSetup()
     }
 
@@ -421,9 +421,7 @@ extension SZHost {
         \(provider.loginCommand)
         """
         do {
-            let dir = try FileManager.default.url(for: .applicationSupportDirectory,
-                                                  in: .userDomainMask, appropriateFor: nil, create: true)
-                .appending(path: "SubjectiveZero")
+            let dir = SZAppSupport.directory
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let file = dir.appending(path: "sz-login-\(id).command")
             try script.write(to: file, atomically: true, encoding: .utf8)
@@ -457,7 +455,7 @@ extension SZHost {
                     id: provider.id,
                     displayName: provider.displayName,
                     statusLabel: Self.cardStatusLabel(.disabled),
-                    message: "Disabled — skipped by health checks and unavailable for runs.",
+                    message: "Disabled. Skipped by health checks and unavailable for runs.",
                     readiness: .disabled,
                     installCommand: provider.installCommand,
                     isSelectable: false)

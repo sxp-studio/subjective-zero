@@ -10,11 +10,8 @@ import Foundation
 public enum SZAppStateIO {
     static let fileName = "app-state.json"
 
-    /// `~/Library/Application Support/SubjectiveZero/app-state.json`
-    public static var defaultURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "SubjectiveZero").appending(path: fileName)
-    }
+    /// `app-state.json` under `SZAppSupport.directory`.
+    public static var defaultURL: URL { SZAppSupport.directory.appending(path: fileName) }
 
     /// nil on a missing or undecodable file — never throws into app startup.
     public static func load(from url: URL = defaultURL) -> SZAppState? {

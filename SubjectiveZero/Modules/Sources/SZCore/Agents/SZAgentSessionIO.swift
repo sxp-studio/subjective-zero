@@ -18,11 +18,8 @@ import Foundation
 public enum SZAgentSessionIO {
     static let fileName = "agent-sessions.json"
 
-    /// `~/Library/Application Support/SubjectiveZero/agent-sessions.json`
-    public static var defaultURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "SubjectiveZero").appending(path: fileName)
-    }
+    /// `agent-sessions.json` under `SZAppSupport.directory`.
+    public static var defaultURL: URL { SZAppSupport.directory.appending(path: fileName) }
 
     private struct Document: Codable {
         var formatVersion: Int

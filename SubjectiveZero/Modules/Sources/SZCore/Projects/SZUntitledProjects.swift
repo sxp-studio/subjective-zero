@@ -9,11 +9,8 @@
 import Foundation
 
 public enum SZUntitledProjects {
-    /// `~/Library/Application Support/SubjectiveZero/Projects`
-    public static var projectsDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "SubjectiveZero").appending(path: "Projects")
-    }
+    /// `Projects` under `SZAppSupport.directory`.
+    public static var projectsDirectory: URL { SZAppSupport.directory.appending(path: "Projects") }
 
     /// A fresh `Projects/<uuid>/` directory for one new untitled project (created on disk). The
     /// caller drops its `<Name>.subz` bundle inside; the uuid layer keeps N untitled projects with

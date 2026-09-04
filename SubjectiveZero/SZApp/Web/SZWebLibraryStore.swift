@@ -35,7 +35,9 @@ enum SZWebLibraryStore {
         }
     }
 
-    /// `~/Library/Application Support/SubjectiveZero/web-libraries/three/`
+    /// `~/Library/Application Support/SubjectiveZero/web-libraries/three/`. Deliberately not under
+    /// `SZAppSupport.directory`: a checksummed download cache, not a preference, and the backend
+    /// parity test reads the copy the app cached rather than downloading its own.
     static var root: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appending(path: "SubjectiveZero").appending(path: "web-libraries").appending(path: "three")

@@ -107,10 +107,7 @@ extension SZHost {
         debugTurnsRoot.appending(path: turnID.uuidString)
     }
 
-    nonisolated static var debugTurnsRoot: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "SubjectiveZero/debug-turns")
-    }
+    nonisolated static var debugTurnsRoot: URL { SZAppSupport.directory.appending(path: "debug-turns") }
 
     /// Seed `heldPromptIDs` from the on-disk captures (called once at start) — the view-prompt
     /// buttons and Tokens windows of PAST sessions' turns light up again.
