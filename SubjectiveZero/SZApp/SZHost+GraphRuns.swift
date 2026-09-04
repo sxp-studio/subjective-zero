@@ -16,11 +16,12 @@ extension SZHost {
 
     /// A traversal began — open its live record. `thread` groups a build with the work
     /// children it dispatched (the build passes its OWN record id, which is what makes it
-    /// the thread's leader); a conversation passes nil and never joins a thread.
-    func beginAgentGraphRun(_ sighting: SZTraversalSighting, thread: UUID?) {
+    /// the thread's leader); a conversation passes nil and never joins a thread. `title` is
+    /// the leader's ask.
+    func beginAgentGraphRun(_ sighting: SZTraversalSighting, thread: UUID?, title: String? = nil) {
         let record = SZAgentGraphRun(id: sighting.id, agent: sighting.agent,
                                      thread: thread, work: sighting.work,
-                                     grade: sighting.grade)
+                                     grade: sighting.grade, title: title)
         agentGraphRuns = SZAgentGraphRun.ordered(agentGraphRuns + [record])
         persistAgentGraphRuns()
     }
@@ -92,6 +93,20 @@ extension SZHost {
     /// a narration always knows which one it is speaking for.
     func linkNarrationToRun(_ messageID: UUID, thread: UUID) {
         store.setChatGraphRun(thread, messageID, in: .director)
+        store.setChatBuild(name: buildName(thread: thread), step: nil, messageID, in: .director)
+    }
+
+    /// The short name of the build a thread leads; nil once its record is gone or it has no ask.
+    func buildName(thread: UUID) -> String? {
+        agentGraphRuns.first { $0.id == thread }?.name
+    }
+
+    /// The step a thread's Director is on right now, by its title: the leader's last running
+    /// trace entry. nil between steps or once the record is gone.
+    func buildStep(thread: UUID) -> String? {
+        guard let leader = agentGraphRuns.first(where: { $0.id == thread }),
+              let node = leader.trace.last(where: { $0.phase == .running })?.node else { return nil }
+        return agentGraphStepTitle(agent: leader.agent, node: node) ?? node
     }
 
     /// The transcript's jump: open the Agent Graph panel and land on the given run.
@@ -149,27 +164,38 @@ extension SZHost {
         if let cached = agentGraphPlanCache { return cached }
         var agents: [SZAgentGraphPlanAgent] = []
         if let root = Self.graphAgentPacksRoot() {
-            let loaded = SZAgentPackLoader.load(root: root)
-            let ordered = loaded.packs.sorted {
-                (($0.seat == .director) ? 0 : 1, $0.id) < (($1.seat == .director) ? 0 : 1, $1.id)
-            }
-            agents = ordered.compactMap { pack in
-                guard let graph = pack.graph else { return nil }
-                return SZAgentGraphPlanAgent(
-                    id: pack.id,
-                    title: graph.label
-                        ?? (pack.id.isEmpty ? pack.id : pack.id.prefix(1).uppercased() + pack.id.dropFirst()),
-                    // The pack's own declared glyph wins; the seat default catches packs
-                    // that declare none.
-                    symbol: graph.symbol ?? Self.agentGraphSymbol(for: pack),
-                    graph: graph,
-                    seat: pack.seat?.rawValue,
-                    recommendedRouting: pack.recommendedRouting)
-            }
+            agents = Self.planAgents(from: SZAgentPackLoader.load(root: root).packs)
         }
         agentGraphPlanCache = agents
         fillAgentGraphStepOutcomes(into: agents)
         return agents
+    }
+
+    /// Fill the plan cache from packs a run has already loaded.
+    func seedAgentGraphPlan(from packs: [SZAgentPack]) {
+        let agents = Self.planAgents(from: packs)
+        agentGraphPlanCache = agents
+        fillAgentGraphStepOutcomes(into: agents)
+    }
+
+    /// The panel's plain values for a loaded library, director first.
+    nonisolated private static func planAgents(from packs: [SZAgentPack]) -> [SZAgentGraphPlanAgent] {
+        let ordered = packs.sorted {
+            (($0.seat == .director) ? 0 : 1, $0.id) < (($1.seat == .director) ? 0 : 1, $1.id)
+        }
+        return ordered.compactMap { pack in
+            guard let graph = pack.graph else { return nil }
+            return SZAgentGraphPlanAgent(
+                id: pack.id,
+                title: graph.label
+                    ?? (pack.id.isEmpty ? pack.id : pack.id.prefix(1).uppercased() + pack.id.dropFirst()),
+                // The pack's own declared glyph wins; the seat default catches packs
+                // that declare none.
+                symbol: graph.symbol ?? agentGraphSymbol(for: pack),
+                graph: graph,
+                seat: pack.seat?.rawValue,
+                recommendedRouting: pack.recommendedRouting)
+        }
     }
 
     /// Attach the compiled steps' declared outcome sets to the cached plan, asynchronously:
@@ -206,6 +232,12 @@ extension SZHost {
     /// the library no longer carries it; the panel degrades to an honest empty canvas.
     func agentGraphResolve(_ run: SZAgentGraphRun) -> SZAgentGraph? {
         agentGraphPlanAgents().first { $0.id == run.agent }?.graph
+    }
+
+    /// A graph node's declared title ("Decompose") for a trace entry's id ("decompose"). nil when
+    /// the library no longer carries it; callers fall back to the id.
+    func agentGraphStepTitle(agent: String, node: String) -> String? {
+        agentGraphPlanAgents().first { $0.id == agent }?.graph.nodes.first { $0.id == node }?.title
     }
 
     /// The seats' glyphs — the app's established agent identities.

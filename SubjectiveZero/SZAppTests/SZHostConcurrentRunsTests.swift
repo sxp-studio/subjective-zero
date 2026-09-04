@@ -600,7 +600,8 @@ struct SZHostQueueNarrationTests {
         host.mintRun(instruction: "first", title: "first")
         host.mintRun(instruction: "second", title: "second")
 
-        #expect(host.scheduledTaskRows.map(\.title) == ["first", "second"])
+        // A row wears the build's short name (`SZBuildName`), sentence-cased like every surface.
+        #expect(host.scheduledTaskRows.map(\.title) == ["First", "Second"])
         #expect(host.store.messages(for: .director).isEmpty)
     }
 

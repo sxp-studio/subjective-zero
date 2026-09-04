@@ -157,10 +157,10 @@ struct SZAgentGraphRunList: View {
                                 Image(systemName: names.symbol(director))
                                     .font(.system(size: 9))
                                     .foregroundStyle(.secondary)
-                                // WHO, not which file: the agent leads the row and the
-                                // graph it traversed rides the line below. A name is not
-                                // an identifier, so it is not set in monospace.
-                                Text(names.agentTitle(director))
+                                // The row leads with the ask; the glyph still says who ran it. A
+                                // record without an ask (a conversation, or one older than titles)
+                                // leads with the agent. A name is not an identifier, so not monospace.
+                                Text(director.name ?? names.agentTitle(director))
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
@@ -207,7 +207,9 @@ struct SZAgentGraphRunList: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 4)
-        .help("One build — \(entry.traversals.count) traversals · started "
+        // The row clips the ask to one line; hover has all of it.
+        .help((director.title.map { $0 + "\n" } ?? "")
+              + "One build — \(entry.traversals.count) traversals · started "
               + began.formatted(date: .abbreviated, time: .standard))
     }
 }

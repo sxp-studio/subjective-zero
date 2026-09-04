@@ -70,7 +70,15 @@ extension SZHost {
         // A turn a RUN dispatched belongs to that run: the stamp is what the chat feed reads to
         // tell the fleet's implementation work from a conversation, and what its task's drill-in
         // collects by. A turn the user started carries none.
-        if let run = activeRun(for: claim) { store.setChatGraphRun(run.thread, assistantID, in: scope) }
+        if let run = activeRun(for: claim) {
+            store.setChatGraphRun(run.thread, assistantID, in: scope)
+            // A Director turn keeps the build's name and its step on the message itself, so the
+            // header still reads once the run record has been capped away.
+            if scope == .director {
+                store.setChatBuild(name: buildName(thread: run.thread),
+                                   step: buildStep(thread: run.thread), assistantID, in: scope)
+            }
+        }
         // The run identity is CAPTURED here: finalize re-checks it against the live runs, so a
         // zombie turn settling after cancel-and-restart can't log itself into the new run.
         let turnRunID = activeRun(for: claim)?.traceID
@@ -797,6 +805,9 @@ extension SZHost {
     ) async throws {
         let steps = SZHostStepRunning(packsRoot: packsRoot, runtime: stepRuntime)
         let loaded = SZAgentPackLoader.load(root: packsRoot)
+        // The chat reads step titles from the plan cache while this build runs; seed it from the
+        // load already done here rather than from a view body.
+        seedAgentGraphPlan(from: loaded.packs)
         var defects = loaded.defects
         defects += await SZAgentPackLoader.validate(packs: loaded.packs, steps: steps)
         guard defects.isEmpty else {
@@ -835,7 +846,9 @@ extension SZHost {
         let roundCap = directorGraph.retryCap
 
         let sighting = SZTraversalSighting(id: thread, agent: directorID)
-        beginAgentGraphRun(sighting, thread: thread)
+        // The untrimmed words, so hover can show the whole ask; the Build button has only its title.
+        beginAgentGraphRun(sighting, thread: thread,
+                           title: run.instruction.isEmpty ? run.title : run.instruction)
         // The grading teaching renders only when the profile fills a light/heavy grade slot
         // of the dispatched pack — an assessment nothing reads would waste prompt budget.
         let gradingEnabled: Bool = {

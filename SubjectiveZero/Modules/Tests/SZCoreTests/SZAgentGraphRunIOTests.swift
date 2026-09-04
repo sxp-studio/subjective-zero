@@ -189,3 +189,21 @@ private func sampleRecords() -> [SZAgentGraphRun] {
     // honestly rather than invented.
     #expect(records[0].isLive)
 }
+
+@Test func runsRoundTripCarryTheLeadersTitleAndReadOlderRecordsWithout() throws {
+    // The ask a build was scheduled under rides the leader record, so the chat can name the
+    // build after the run state is gone; a record written before titles existed loads with none.
+    let projectURL = temporaryProjectURL()
+    defer { try? FileManager.default.removeItem(at: projectURL) }
+    let leader = UUID()
+    let titled = SZAgentGraphRun(id: leader, agent: "director", thread: leader,
+                                 title: "Make a grayscale version of my camera",
+                                 startedAt: Date(timeIntervalSinceReferenceDate: 700))
+    try SZAgentGraphRunIO.save([titled], projectURL: projectURL)
+    let loaded = try #require(SZAgentGraphRunIO.load(projectURL: projectURL))
+    #expect(loaded.first?.title == "Make a grayscale version of my camera")
+
+    let older = Data(#"{"id":"\#(UUID().uuidString)","agent":"director","startedAt":700}"#.utf8)
+    let decoded = try JSONDecoder().decode(SZAgentGraphRun.self, from: older)
+    #expect(decoded.title == nil)
+}

@@ -68,6 +68,11 @@ extension SZStore {
         mutateMessage(messageID, in: scope) { $0.graphRunID = runID }
     }
 
+    /// Name the build a line belongs to, and the step a Director turn ran.
+    public func setChatBuild(name: String?, step: String?, _ messageID: UUID, in scope: SZChatScope) {
+        mutateMessage(messageID, in: scope) { $0.buildName = name; $0.buildStep = step }
+    }
+
     /// Mark a message transient (a host notice, not conversation): the recap skips it.
     public func setChatTransient(_ messageID: UUID, in scope: SZChatScope) {
         mutateMessage(messageID, in: scope) { $0.transient = true }

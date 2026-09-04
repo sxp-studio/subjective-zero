@@ -55,7 +55,9 @@ extension SZHost {
             let blocker = task.workSet
                 .compactMap { ledger.holder(of: .node($0))?.label }
                 .first
-            return SZScheduledRow(id: task.id, title: task.title, waitingOn: blocker)
+            // The same words the build wears once admitted.
+            let ask = task.instruction.isEmpty ? task.title : task.instruction
+            return SZScheduledRow(id: task.id, title: SZBuildName.short(ask), waitingOn: blocker)
         }
     }
 

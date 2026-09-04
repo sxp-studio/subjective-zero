@@ -386,12 +386,17 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
     /// Set when this turn IS a finished build rather than something someone said — rendered as a
     /// settled lane instead of a speaker's turn. nil on every ordinary message.
     public var receipt: SZChatReceipt?
+    /// The build this line belongs to, by its short name, and the graph step a Director turn ran
+    /// ("Decompose"). Written when the turn starts, so the words outlive the run record.
+    public var buildName: String?
+    public var buildStep: String?
 
     public init(id: UUID = UUID(), role: SZChatRole, text: String, thinking: String = "",
                 timestamp: Date = Date(), duration: TimeInterval? = nil, usage: SZTokenUsage? = nil,
                 breakdown: [SZTurnEvent]? = nil, attachments: [SZChatAttachment] = [],
                 transient: Bool = false, graphRunID: UUID? = nil,
-                generation: SZTurnGeneration? = nil, receipt: SZChatReceipt? = nil) {
+                generation: SZTurnGeneration? = nil, receipt: SZChatReceipt? = nil,
+                buildName: String? = nil, buildStep: String? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -405,13 +410,15 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
         self.graphRunID = graphRunID
         self.generation = generation
         self.receipt = receipt
+        self.buildName = buildName
+        self.buildStep = buildStep
     }
 }
 
 extension SZChatMessage: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, role, text, thinking, timestamp, duration, usage, breakdown, attachments, transient
-        case graphRunID, generation, receipt
+        case graphRunID, generation, receipt, buildName, buildStep
     }
 
     // Hand-written for append tolerance (see header).
@@ -433,6 +440,8 @@ extension SZChatMessage: Codable {
         // survives either way — its `text` still says what happened.
         generation = (try? c.decodeIfPresent(SZTurnGeneration.self, forKey: .generation)) ?? nil
         receipt = (try? c.decodeIfPresent(SZChatReceipt.self, forKey: .receipt)) ?? nil
+        buildName = try c.decodeIfPresent(String.self, forKey: .buildName)
+        buildStep = try c.decodeIfPresent(String.self, forKey: .buildStep)
     }
 
     // Hand-written to keep the common case clean: `duration` and `transient` are omitted rather
@@ -453,5 +462,7 @@ extension SZChatMessage: Codable {
         try c.encodeIfPresent(graphRunID, forKey: .graphRunID)
         try c.encodeIfPresent(generation, forKey: .generation)
         try c.encodeIfPresent(receipt, forKey: .receipt)
+        try c.encodeIfPresent(buildName, forKey: .buildName)
+        try c.encodeIfPresent(buildStep, forKey: .buildStep)
     }
 }

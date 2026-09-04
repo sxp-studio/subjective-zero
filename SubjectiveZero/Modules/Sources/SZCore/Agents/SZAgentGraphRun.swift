@@ -19,6 +19,13 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     /// For a dispatched work child: the Director's grade for its task
     /// ("light"/"standard"/"heavy"), frozen at dispatch; nil = ungraded.
     public var grade: String?
+    /// For a thread leader: the words that scheduled its build, copied at the start since the
+    /// task leaves the list once done. nil on work children and conversations.
+    public var title: String?
+    /// What the UI calls this build: `title` through `SZBuildName`. nil where there is no ask.
+    public var name: String? {
+        title.flatMap { let n = SZBuildName.short($0); return n.isEmpty ? nil : n }
+    }
     public var startedAt: Date
     /// nil while the traversal is under way — the record is LIVE. Live records persist too;
     /// one restored still live was interrupted (`sealInterrupted`).
@@ -36,7 +43,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     public var leadsThread: Bool { thread == id }
 
     public init(id: UUID, agent: String, thread: UUID? = nil, work: String? = nil,
-                grade: String? = nil,
+                grade: String? = nil, title: String? = nil,
                 startedAt: Date = Date(), endedAt: Date? = nil, trace: [Entry] = [],
                 conclusion: Conclusion? = nil) {
         self.id = id
@@ -44,6 +51,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         self.thread = thread
         self.work = work
         self.grade = grade
+        self.title = title
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.trace = trace
@@ -58,6 +66,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         thread = try c.decodeIfPresent(UUID.self, forKey: .thread)
         work = try c.decodeIfPresent(String.self, forKey: .work)
         grade = try c.decodeIfPresent(String.self, forKey: .grade)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
         startedAt = try c.decode(Date.self, forKey: .startedAt)
         endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
         trace = try c.decodeIfPresent([Entry].self, forKey: .trace) ?? []
@@ -65,7 +74,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, agent, thread, work, grade, startedAt, endedAt, trace, conclusion
+        case id, agent, thread, work, grade, title, startedAt, endedAt, trace, conclusion
     }
 
     // MARK: - The trace entry

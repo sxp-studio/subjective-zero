@@ -200,6 +200,26 @@ import SZCore
     #expect(host.agentGraphRuns.contains { $0.id == stamped.graphRunID })
 }
 
+@Test @MainActor func aRunsLinesWearTheBuildsNameAndStep() throws {
+    // The name and step are written onto the message, so a header still reads after the run
+    // record has been capped away.
+    let host = SZHost()
+    let thread = UUID()
+    host.beginAgentGraphRun(SZTraversalSighting(id: thread, agent: "director"), thread: thread,
+                            title: "Make a slowly rotating grayscale checkerboard")
+    host.noteAgentGraphRun(thread, SZTraversalNote(ordinal: 1, node: "door", phase: .done, outcome: "build"))
+    host.noteAgentGraphRun(thread, SZTraversalNote(ordinal: 2, node: "decompose", phase: .running))
+    #expect(host.buildName(thread: thread) == "Slowly rotating grayscale checkerboard")
+    #expect(host.buildStep(thread: thread) == "Decompose")
+    #expect(host.buildStep(thread: UUID()) == nil)
+
+    let line = host.narrateDirector("⚠️ a note")
+    host.linkNarrationToRun(line, thread: thread)
+    let stamped = try #require(host.store.messages(for: .director).first { $0.id == line })
+    #expect(stamped.buildName == "Slowly rotating grayscale checkerboard")
+    #expect(stamped.buildStep == nil)
+}
+
 /// The panel's landing ask is host-owned and consumed once, exactly like the Profiler's.
 @Test @MainActor func revealInAgentGraphRecordsTheAsk() {
     let host = SZHost()
@@ -207,4 +227,29 @@ import SZCore
     #expect(host.agentGraphFocusRequest == nil)
     host.revealInAgentGraph(target)
     #expect(host.agentGraphFocusRequest == target)
+}
+
+@Test @MainActor func theLeaderRecordCarriesTheAskAndItsChildrenDoNot() throws {
+    // The chat names a build by what was asked: the title rides the thread's leader record
+    // (persisted with it), never a dispatched child's, which is named by its node.
+    let host = SZHost()
+    let build = UUID(), item = UUID()
+    host.beginAgentGraphRun(SZTraversalSighting(id: build, agent: "director"), thread: build,
+                            title: "Make a grayscale version of my camera")
+    host.beginAgentGraphRun(SZTraversalSighting(id: item, agent: "coding", work: "node-1"),
+                            thread: build)
+    let leader = try #require(host.agentGraphRuns.first { $0.id == build })
+    #expect(leader.title == "Make a grayscale version of my camera")
+    let child = try #require(host.agentGraphRuns.first { $0.id == item })
+    #expect(child.title == nil)
+}
+
+@Test @MainActor func aStepTitleResolvesThroughTheAgentLibrary() {
+    // The strip's muted word and the transcript header read the step's declared title, not the
+    // trace's node id; an id the library does not carry resolves to nothing, so callers fall
+    // back to the id.
+    let host = SZHost()
+    #expect(host.agentGraphStepTitle(agent: "director", node: "decompose") == "Decompose")
+    #expect(host.agentGraphStepTitle(agent: "director", node: "no-such-step") == nil)
+    #expect(host.agentGraphStepTitle(agent: "no-such-agent", node: "decompose") == nil)
 }

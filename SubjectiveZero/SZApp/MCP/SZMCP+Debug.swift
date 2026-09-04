@@ -416,6 +416,8 @@ extension SZHostBridge {
         // The run this turn belongs to — the same id the Agent Graph panel and `debug_run_summary`
         // key on, so a driver can join a transcript line to its record.
         if let runID = message.graphRunID { m["graphRunID"] = runID.uuidString }
+        if let name = message.buildName { m["buildName"] = name }
+        if let step = message.buildStep { m["buildStep"] = step }
         return m
     }
 

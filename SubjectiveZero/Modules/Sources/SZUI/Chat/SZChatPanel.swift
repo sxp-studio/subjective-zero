@@ -29,6 +29,7 @@ public struct SZChatPanel: View {
     private let workingScopes: Set<String>         // scopes with a streaming turn → the typing dots
     private let runThreadIDs: [UUID]               // every live thread, oldest first → the run strip
     private let agentGraphRuns: [SZAgentGraphRun]  // the RUNS records → the run strip's fleet lanes
+    private let stepTitle: (String, String) -> String?   // (agent id, graph node id) → the step's declared title
     private let scheduledTasks: [SZScheduledRow]   // work queued and not yet started → the strip
     private let onCancelScheduledTask: ((UUID) -> Void)?   // a scheduled row's ✕
     private let onStopOneRun: ((UUID) -> Void)?            // a live lane's ■ — that traversal only
@@ -139,6 +140,7 @@ public struct SZChatPanel: View {
                 workingScopes: Set<String> = [],
                 runThreadIDs: [UUID] = [],
                 agentGraphRuns: [SZAgentGraphRun] = [],
+                stepTitle: @escaping (String, String) -> String? = { _, _ in nil },
                 scheduledTasks: [SZScheduledRow] = [],
                 onCancelScheduledTask: ((UUID) -> Void)? = nil,
                 onStopOneRun: ((UUID) -> Void)? = nil,
@@ -166,6 +168,7 @@ public struct SZChatPanel: View {
         self.workingScopes = workingScopes
         self.runThreadIDs = runThreadIDs
         self.agentGraphRuns = agentGraphRuns
+        self.stepTitle = stepTitle
         self.scheduledTasks = scheduledTasks
         self.onCancelScheduledTask = onCancelScheduledTask
         self.onStopOneRun = onStopOneRun
@@ -333,12 +336,17 @@ public struct SZChatPanel: View {
         // Computed once per transcript render, shared by every row's tombstone check — it changes
         // only on graph edits, which is exactly when mention tombstones must re-render.
         let liveNodeIDs = Set(project?.graph.nodes.map(\.id) ?? [])
+        // The builds' leader records by thread id, once per render: a Director turn inside a build
+        // carries its thread as `graphRunID`, and its row names the build from that record.
+        let leaders = Dictionary(agentGraphRuns.lazy.filter(\.leadsThread).map { ($0.id, $0) },
+                                 uniquingKeysWith: { first, _ in first })
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(items) { item in
                         turn(for: item.message, isLast: item.id == items.last?.id,
-                             liveNodeIDs: liveNodeIDs, from: item.scope)
+                             liveNodeIDs: liveNodeIDs, from: item.scope,
+                             build: item.message.graphRunID.flatMap { leaders[$0] })
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)   // scroll anchor
                 }
@@ -390,6 +398,7 @@ public struct SZChatPanel: View {
         SZRunStrip(threads: runThreadIDs,
                    runs: agentGraphRuns,
                    title: { id in SZNodeID(uuidString: id).flatMap { project?.graph.node(id: $0)?.title } },
+                   stepTitle: stepTitle,
                    onOpen: revealInAgentGraph.map { reveal in { reveal($0) } },
                    scheduled: scheduledTasks,
                    onCancelScheduled: onCancelScheduledTask,
@@ -438,7 +447,7 @@ public struct SZChatPanel: View {
     /// tombstones.
     @ViewBuilder
     private func turn(for message: SZChatMessage, isLast: Bool, liveNodeIDs: Set<SZNodeID>,
-                      from origin: SZChatScope) -> some View {
+                      from origin: SZChatScope, build: SZAgentGraphRun? = nil) -> some View {
         if let receipt = message.receipt {
             // A finished build is not a speaker: no rail, no DIRECTOR AGENT header, no markdown
             // body. It is the strip's lane, settled here at the moment it finished.
@@ -447,16 +456,18 @@ public struct SZChatPanel: View {
                 seconds: message.duration ?? 0,
                 breakdown: showTurnBreakdown ? message.breakdown : nil,
                 turnID: message.id,
-                runID: message.graphRunID)
+                runID: message.graphRunID,
+                context: message.buildName ?? build?.name, contextDetail: build?.title)
                 .equatable()
         } else {
-            speakerTurn(for: message, liveNodeIDs: liveNodeIDs, from: origin)
+            speakerTurn(for: message, liveNodeIDs: liveNodeIDs, from: origin, build: build)
         }
     }
 
-    /// Someone's turn — you, the Director, a node's Coding Agent.
+    /// Someone's turn — you, the Director, a node's Coding Agent. `build` is the leader record of
+    /// the build a Director turn belongs to, when it belongs to one.
     private func speakerTurn(for message: SZChatMessage, liveNodeIDs: Set<SZNodeID>,
-                             from origin: SZChatScope) -> some View {
+                             from origin: SZChatScope, build: SZAgentGraphRun? = nil) -> some View {
         let isUser = message.role == .user
         // One feed, several speakers: a line from a node's own conversation is labelled with that
         // node, so "who said this" is carried by the message, not by where you were looking.
@@ -467,11 +478,17 @@ public struct SZChatPanel: View {
         let isDebugReply = isDebug && !isUser   // the debug chat agent's reply (its own tab)
         let isDirector = !isDebugReply
             && (message.role == .director || (message.role == .assistant && originNode == nil))
+        // A Director turn inside a build names its step ("Decompose", "Reconcile"), so stacked
+        // Director blocks tell apart. The stamp on the message wins; the record is the fallback
+        // for turns written before stamps existed.
+        let step = message.buildStep ?? build.flatMap { run in
+            run.trace.first { $0.turnID == message.id }.map { stepTitle(run.agent, $0.node) ?? $0.node }
+        }
         // A note the Director writes into a node's conversation is addressed to that node's agent.
         // Unlabelled it reads as an instruction to you, which is how "do the freezing yourself"
         // arrived as an order in someone's chat.
         let directorLabel = originNode.map { "director agent → \($0.title)'s agent" }
-            ?? "director agent"
+            ?? (step.map { "director agent · \($0)" } ?? "director agent")
         return SZChatTurnRow(
             message: message,
             // Dots = this turn is still in flight (works for codex's preamble-then-tools order, not
@@ -498,6 +515,8 @@ public struct SZChatPanel: View {
                 : (isDebugReply ? (agentAccents.debugSymbol ?? "ladybug.fill")
                    : (isDirector ? (agentAccents.directorSymbol ?? "eyeglasses")
                       : (originNode?.sfSymbol ?? "sparkles"))),
+            context: isDirector && originNode == nil ? (message.buildName ?? build?.name) : nil,
+            contextDetail: isDirector && originNode == nil ? build?.title : nil,
             liveNodeIDs: liveNodeIDs)
             .equatable()
     }
@@ -823,6 +842,9 @@ private struct SZChatReceiptRow: View, Equatable {
     /// `SZChatTurnRow`'s type comment exists to protect: receipts accumulate one per build, and at
     /// streaming-flush cadence every visible one would rebuild its breakdown disclosure.
     let runID: UUID?
+    /// The build's short name and full ask, so two receipts finishing together tell apart.
+    var context: String? = nil
+    var contextDetail: String? = nil
 
     @Environment(\.szRevealInAgentGraph) private var revealInAgentGraph
 
@@ -832,11 +854,12 @@ private struct SZChatReceiptRow: View, Equatable {
     }
 
     /// Hand-written because `@Environment` is not synthesizable — and correct on purpose: what the
-    /// row RENDERS is these five values, while the reveal action is ambient and stable for the
+    /// row RENDERS is these values, while the reveal action is ambient and stable for the
     /// panel's lifetime. Comparing only the values is what makes the skip real.
     nonisolated static func == (a: SZChatReceiptRow, b: SZChatReceiptRow) -> Bool {
         a.receipt == b.receipt && a.seconds == b.seconds && a.breakdown == b.breakdown
             && a.turnID == b.turnID && a.runID == b.runID
+            && a.context == b.context && a.contextDetail == b.contextDetail
     }
 
     /// The elbow's geometry, named so the two halves cannot drift: the stem sits on the message
@@ -867,17 +890,15 @@ private struct SZChatReceiptRow: View, Equatable {
 
     private var receiptStack: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // `hammer`, not the Director's `eyeglasses`. The strip's two glyphs mean two things —
-            // eyeglasses is the DIRECTOR's lane, named "Director"; hammer is a WORK lane, named by
-            // what it built. A receipt names the work, so under eyeglasses it read as a Director
-            // lane that had lost its name. The hammer also agrees with the verb it sits beside.
+            // `hammer`, not the Director's `eyeglasses`: eyeglasses is the build's own lane, named
+            // by the ask; hammer is a work lane, named by what it built. A receipt names the work.
             SZLanePill(symbol: "hammer", name: receipt.label, phase: nil,
                        // A settled lane takes the neutral wash and never spends its tint — passing
                        // the Director's violet here would have been a value that says the opposite
                        // of what this row is for, and that nothing reads.
                        tint: .secondary, isLive: false,
                        clock: SZTurnBreakdown.format(seconds),
-                       onOpen: onOpen) {
+                       help: contextDetail, onOpen: onOpen) {
                 // A clean ending wears NO chip. "built Scrolling Gradient" has already said it went
                 // well, and a saturated `end` badge on every build in the history is the loudest
                 // thing in a row with nothing to report. Keeping the badge for the endings that are
@@ -890,6 +911,13 @@ private struct SZChatReceiptRow: View, Equatable {
             // The one thing the pill cannot say: why a build died. Everything a NODE can explain
             // for itself already arrived as its own turn. Hung under the pill's TEXT, not its
             // edge — it belongs to the label, the way a turn's reply belongs to its header.
+            if let context, !context.isEmpty {
+                Text(context)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .padding(.leading, SZLaneMetrics.padH)
+            }
             if let detail = receipt.detail, !detail.isEmpty {
                 Text(detail)
                     .font(.system(size: 10.5))
@@ -921,6 +949,10 @@ private struct SZChatTurnRow: View, Equatable {
     let accent: Color
     let label: String
     let symbol: String
+    /// The build this turn serves, by its short name: one line under the header. nil = not a build's turn.
+    var context: String? = nil
+    /// The full ask behind `context`, for hover.
+    var contextDetail: String? = nil
     let liveNodeIDs: Set<SZNodeID>  // mention-tombstone check; changes only on graph edits
 
     private var isUser: Bool { message.role == .user }
@@ -936,6 +968,14 @@ private struct SZChatTurnRow: View, Equatable {
                         .textCase(.uppercase)
                 }
                 .foregroundStyle(accent)
+                if let context, !context.isEmpty {
+                    Text(context)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(contextDetail ?? "")
+                }
                 if !message.thinking.isEmpty {
                     SZThinkingView(text: message.thinking)   // collapsible activity + reasoning trace
                 }

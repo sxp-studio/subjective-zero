@@ -304,7 +304,9 @@ Every message an agent receives is ONE record, an `SZAgentGraphRun`: the ordered
 the whole journey (entry 1 is the door visit — its outcome says what arrived and how it
 was ruled), and the conclusion. The record carries no kind: a build **leads its thread**
 (its `thread` is its own id, shared by the work children it dispatched), a work child
-carries the node it served, a conversation stands alone. A build's record stays LIVE for
+carries the node it served, a conversation stands alone. A build's leader also carries the
+ask it was scheduled under (`title`); the RUNS list and the chat name the build by it, through
+one rule (`SZBuildName`). A build's record stays LIVE for
 its whole run — fleets included — sealing only when the story actually ends. Live records
 exist only in memory; sealed records persist into the project's `runs.json`, capped per
 budget (thread leaders and the rest separately), never evicting a live record.

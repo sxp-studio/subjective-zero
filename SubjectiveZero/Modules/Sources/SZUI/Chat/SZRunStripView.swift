@@ -212,6 +212,8 @@ struct SZRunStrip: View {
     let runs: [SZAgentGraphRun]
     /// A lane's work-node title; nil falls the lane back to the node id, as on the canvas.
     let title: (String) -> String?
+    /// (agent id, node id) → the step's declared title ("Decompose"); nil shows the id.
+    var stepTitle: (String, String) -> String? = { _, _ in nil }
     /// Open a run in the Agent Graph panel. nil = the surface isn't wired; the strip is a readout.
     let onOpen: ((UUID) -> Void)?
     /// Work SCHEDULED and not yet started, oldest first — the asks that survived being second.
@@ -274,12 +276,16 @@ struct SZRunStrip: View {
     private func row(_ row: SZStripPlan.Row) -> some View {
         switch row {
         case .director(let run):
-            laneRow(SZLaneModel(run: run, name: "Director", symbol: "eyeglasses",
-                                tint: SZEdgeStyle.intentViolet),
+            // Named by the ask, not the agent: two live builds both labelled "Director" can't be
+            // told apart; the glyph and tint still say who is driving. Full ask on hover.
+            laneRow(SZLaneModel(run: run, name: run.name ?? "Director", symbol: "eyeglasses",
+                                tint: SZEdgeStyle.intentViolet,
+                                step: stepTitle, help: run.title),
                     stop: run.isLive ? onStopRun.map { s in { s(run.thread ?? run.id) } } : nil)
         case .lane(let run, let connector):
             laneRow(SZLaneModel(run: run, name: run.work.flatMap(title) ?? "work",
-                                symbol: "hammer", tint: SZAgentGraphStyle.running),
+                                symbol: "hammer", tint: SZAgentGraphStyle.running,
+                                step: stepTitle),
                     connector: connector)
         case .waiting(let thread):
             waitingLine(thread: thread)
@@ -436,9 +442,16 @@ struct SZLaneModel {
     let name: String
     let symbol: String
     let tint: Color
+    /// (agent id, node id) → the step's title; nil shows the node id.
+    var step: (String, String) -> String? = { _, _ in nil }
+    /// Hover text before the open hint: a build's full ask.
+    var help: String? = nil
 
     /// Where this agent is: the last entry still running, else the last one it finished.
     var phase: String? { run.trace.last { $0.phase == .running }?.node ?? run.trace.last?.node }
+
+    /// The muted word: the step's title, else its id.
+    var phaseTitle: String? { phase.map { step(run.agent, $0) ?? $0 } }
 }
 
 /// The elbow joining a lane to what it belongs to — drawn, not typed, so the vertical actually
@@ -494,11 +507,12 @@ struct SZStripLane: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             SZLanePill(
-                symbol: model.symbol, name: model.name, phase: model.phase,
+                symbol: model.symbol, name: model.name, phase: model.phaseTitle,
                 tint: model.tint, isLive: isLive,
                 clock: model.run.endedAt
                     .map { SZTurnBreakdown.format($0.timeIntervalSince(model.run.startedAt)) }
                     ?? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(model.run.startedAt)),
+                help: model.help,
                 onOpen: onOpen, rowHeight: SZLaneMetrics.rowHeight,
                 blockID: blockID, indent: indent, boxWidth: boxWidth
             ) {
@@ -541,6 +555,8 @@ struct SZLanePill<Badge: View>: View {
     /// hover states are scaled against.
     let isLive: Bool
     let clock: String
+    /// Hover text before the open hint: a build's full ask. nil = the hint alone.
+    var help: String? = nil
     var onOpen: (() -> Void)?
     /// The height the lane OCCUPIES, when that is more than the pill it draws. A strip row is
     /// taller than its pill and the difference is the gap `SZLaneConnector` draws through — and
@@ -585,7 +601,8 @@ struct SZLanePill<Badge: View>: View {
             .contentShape(Rectangle())
             .onTapGesture { onOpen?() }
             .trackingHover($hover)
-            .help(interactive ? "Open this run in the Agent Graph" : "")
+            .help([help, interactive ? "Open this run in the Agent Graph" : nil]
+                .compactMap { $0 }.joined(separator: "\n"))
     }
 
     /// Name and what it is doing on the left ("Director decompose"); the live signal and the clock

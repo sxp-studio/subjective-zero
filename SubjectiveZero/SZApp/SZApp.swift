@@ -993,6 +993,7 @@ struct SZApp: App {
                         workingScopes: host.chatInFlight,
                         runThreadIDs: host.liveThreadIDs,
                         agentGraphRuns: host.agentGraphRuns,
+                        stepTitle: { host.agentGraphStepTitle(agent: $0, node: $1) },
                         scheduledTasks: host.scheduledTaskRows,
                         onCancelScheduledTask: { host.withdrawTask($0) },
                         onStopOneRun: { host.cancelRun(thread: $0) },
