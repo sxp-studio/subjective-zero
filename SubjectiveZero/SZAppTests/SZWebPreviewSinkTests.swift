@@ -107,6 +107,31 @@ struct SZWebPreviewSinkTests {
         #expect(task.finished && task.error == nil)
     }
 
+    @Test @MainActor func aRecordPostReachesTheRecordDoorOnly() throws {
+        let handler = SZWebSchemeHandler(runtimeDirectory: SZWebRuntime.runtimeDirectory, libraryDirectory: URL(filePath: "/nonexistent"),
+                                         projectURL: URL(filePath: "/nonexistent"), threeVersion: "0")
+        var previews = 0
+        var frame: (Data, URL)?
+        handler.onPreviewBody = { _, _ in previews += 1 }
+        handler.onRecordBody = { frame = ($0, $1) }
+        var request = URLRequest(url: URL(string: "subz://app/record?take=1&seq=4&t=0.066667&dropped=0")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data([9, 9, 9, 9])
+        let task = FakeSchemeTask(request: request)
+        handler.webView(WKWebView(frame: .zero), start: task)
+        #expect(previews == 0)
+        #expect(frame?.0 == Data([9, 9, 9, 9]))
+        #expect(frame?.1.query() == "take=1&seq=4&t=0.066667&dropped=0")
+        #expect((task.response as? HTTPURLResponse)?.statusCode == 204)
+
+        var other = URLRequest(url: URL(string: "subz://app/elsewhere")!)
+        other.httpMethod = "POST"
+        other.httpBody = Data([1])
+        let refused = FakeSchemeTask(request: other)
+        handler.webView(WKWebView(frame: .zero), start: refused)
+        #expect(refused.error != nil && previews == 0)
+    }
+
     final class FakeSchemeTask: NSObject, WKURLSchemeTask {
         let request: URLRequest
         var response: URLResponse?

@@ -5,12 +5,16 @@
 // lifecycle, the compile gate and the capture; the last two await the page.
 //
 // Wire protocol, both ways JSON: the app posts `{op: ...}` through `window.__szDispatch` (queued until
-// the page says `ready`); the page posts `{channel: ready | errors | loadError | check | previewLayout}`
-// back. Thumbnail atlases come the other way as a POST to `subz://app/previews` (SZWebPreviewSink).
+// the page says `ready`); the page posts `{channel: ready | errors | loadError | check | previewLayout |
+// record}` back. Thumbnail atlases and a rolling take's frames come the other way as POSTs to
+// `subz://app/previews` (SZWebPreviewSink) and `subz://app/record` (the recorder's CPU feed).
 import AppKit
 import AVFoundation
 import Foundation
+import Metal
+import QuartzCore
 import SZCore
+import SZRuntime
 import WebKit
 
 @MainActor
@@ -60,6 +64,59 @@ final class SZWebRuntime: NSObject {
     private var previewMaxDimension = 0
     /// Turns the page's posted atlases into published surfaces (fed by the scheme handler).
     private let previewSink = SZWebPreviewSink()
+    /// A take: the app's recorder, fed by the page's frames (sz-record.js). A class so the per-frame
+    /// counters mutate in place: `take` itself changes only at start and stop, and observation
+    /// (`renderSize`) never fires per frame.
+    private final class Take {
+        let token: Int
+        let recorder: SZLiveVideoRecorder
+        let settings: SZRecordSettings
+        var output: (width: Int, height: Int) { (settings.width, settings.height) }
+        var renderSize: (width: Int, height: Int) { settings.renderSize }
+        /// Highest frame number seen from the current page; a reloaded page counts from 0 again.
+        var lastSeq = -1
+        var received = 0
+        /// Frames the page dropped (its ring full): the current page's latest count, and the pages
+        /// before a reload. Frames that landed behind a later one count as dropped too.
+        var pageDropped = 0
+        var pageDroppedBefore = 0
+        var reordered = 0
+
+        init(token: Int, recorder: SZLiveVideoRecorder, settings: SZRecordSettings) {
+            self.token = token
+            self.recorder = recorder
+            self.settings = settings
+        }
+
+        /// The page came back: its frame numbers and drop count start over.
+        func pageReloaded() {
+            lastSeq = -1
+            pageDroppedBefore += pageDropped
+            pageDropped = 0
+        }
+
+        /// Drops to add to the recorder's: the page's own, from every page that served the take.
+        func pageDrops(report: PageReport) -> Int {
+            pageDroppedBefore + (report.received ? report.dropped : pageDropped) + reordered
+        }
+    }
+    /// What the page reports when a take stops: frames sent and frames it dropped. `received` is false
+    /// for the empty report a dead or silent page stands in for.
+    private struct PageReport: Sendable {
+        var sent = 0
+        var dropped = 0
+        var received = false
+    }
+    /// The rolling take; nil while none rolls (the seam's `isRecording`).
+    private var take: Take?
+    /// A stopped take whose last frames may still be in transit while its file finishes.
+    private var finishing: Take?
+    /// A take the page ended on its own (its graphics context went away), finished; the host's stop
+    /// collects it.
+    private var ended: (url: URL, frames: Int, dropped: Int, duration: Double)?
+    private var takeCounter = 0
+    private var stopReports: [Int: CheckedContinuation<PageReport, Never>] = [:]
+    private var reportTimeouts: [Int: Task<Void, Never>] = [:]
 
     init(projectURL: URL, threeVersion: String) {
         self.projectURL = projectURL
@@ -103,6 +160,9 @@ final class SZWebRuntime: NSObject {
         let handler = SZWebSchemeHandler(runtimeDirectory: Self.runtimeDirectory, libraryDirectory: library,
                                          projectURL: projectURL, threeVersion: threeVersion)
         handler.onPreviewBody = { [previewSink] body, url in previewSink.receive(body, url: url) }
+        handler.onRecordBody = { [weak self] body, url in
+            MainActor.assumeIsolated { self?.receiveRecordBody(body, url: url) }
+        }
         config.setURLSchemeHandler(handler, forURLScheme: SZWebSchemeHandler.scheme)
         if let rules = try? await Self.sealRuleList() { config.userContentController.add(rules) }
         proxy.handler = self
@@ -120,6 +180,9 @@ final class SZWebRuntime: NSObject {
 
     /// Tear down cleanly: WebKit retains the message-handler proxy, so remove it explicitly.
     func unmount() {
+        // the host finalizes a take before any unmount path; this is the safety net
+        if let take { self.take = nil; take.recorder.cancelAndDelete() }
+        settleAllReports()
         proxy.handler = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "sz")
         webView?.stopLoading()
@@ -370,6 +433,8 @@ extension SZWebRuntime: SZRenderBackend {
     func setPaused(_ paused: Bool) {
         isPaused = paused
         push(["op": "setPaused", "paused": paused])
+        // a rolling take's audio leg pauses with the clock (video pauses by not encoding)
+        take?.recorder.setPaused(paused, now: CACurrentMediaTime())
     }
 
     func resetTimeline() {
@@ -396,6 +461,159 @@ extension SZWebRuntime: SZRenderBackend {
     }
 }
 
+// MARK: - Recording
+
+extension SZWebRuntime {
+    /// Whether a take is rolling.
+    var isRecording: Bool { take != nil }
+
+    /// The picture size a take is framed against: the take's own while rolling, else the page's
+    /// canvas in pixels (the tile times its backing scale), the page's default before it is up.
+    var renderSize: (width: Int, height: Int) {
+        if let take { return take.renderSize }
+        guard let webView, webView.bounds.width >= 1, webView.bounds.height >= 1 else { return (1280, 720) }
+        let scale = webView.window?.backingScaleFactor ?? 2
+        return (Int((webView.bounds.width * scale).rounded()), Int((webView.bounds.height * scale).rounded()))
+    }
+
+    /// Start a take: the recorder is built here, the page holds the render size and starts posting
+    /// frames. Throws `.alreadyRecording`, `.nothingToRender` (no page yet), or `.writerFailed`.
+    func startRecording(to url: URL, settings: SZRecordSettings) throws {
+        guard take == nil else { throw SZRecordError.alreadyRecording }
+        // the writer's pool wants a device for its Metal-compatible buffers; the page never touches it
+        guard handshaken, let device = MTLCreateSystemDefaultDevice() else { throw SZRecordError.nothingToRender }
+        let recorder = try SZLiveVideoRecorder(url: url, settings: settings, device: device)
+        takeCounter += 1
+        let started = Take(token: takeCounter, recorder: recorder, settings: settings)
+        take = started
+        ended = nil
+        if isPaused { recorder.setPaused(true, now: CACurrentMediaTime()) }
+        push(startRecordOp(for: started))
+    }
+
+    private func startRecordOp(for take: Take) -> [String: Any] {
+        let s = take.settings
+        return ["op": "startRecord", "take": take.token,
+                "width": s.width, "height": s.height, "fps": s.fps,
+                "renderWidth": s.renderSize.width, "renderHeight": s.renderSize.height,
+                "crop": ["x": s.crop.x, "y": s.crop.y, "w": s.crop.width, "h": s.crop.height]]
+    }
+
+    /// Attach the app-sound capture to the rolling take (see SZRuntime.startRecordingSound).
+    func startRecordingSound() async throws {
+        guard let take else { throw SZRecordError.notRecording }
+        try await take.recorder.startAudioCapture()
+    }
+
+    /// Stop the take. The take leaves `take` before the first await (as the Metal runtime removes its
+    /// tap first), so a wind-down hook finds nothing rolling; frames still in transit land through
+    /// `finishing` until the page has reported what it sent, then the recorder finishes the file. A
+    /// dead page reports nothing and the file keeps what arrived. A take the page ended itself is
+    /// collected here.
+    func stopRecording() async throws -> (url: URL, frames: Int, dropped: Int, duration: Double) {
+        guard let take else { return try await endedResult() }
+        self.take = nil
+        finishing = take
+        defer { finishing = nil }
+        var report = PageReport()
+        if handshaken {
+            push(["op": "stopRecord"])
+            report = await awaitReport(for: take.token)
+            let deadline = CACurrentMediaTime() + 0.5
+            while take.received < report.sent, CACurrentMediaTime() < deadline {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        let result = try await take.recorder.stop()
+        return (result.url, result.frames, result.dropped + take.pageDrops(report: report), result.duration)
+    }
+
+    /// Bounded synchronous stop, the quit path; frames still in transit are lost, the file plays.
+    @discardableResult
+    func stopRecordingBlocking(timeout: TimeInterval) -> URL? {
+        guard let take else { return nil }
+        self.take = nil
+        if handshaken { push(["op": "stopRecord"]) }
+        return take.recorder.stopBlocking(timeout: timeout)
+    }
+
+    /// Abandon the rolling take and delete its file. No-op when idle.
+    func cancelRecording() {
+        guard let take else { return }
+        self.take = nil
+        if handshaken { push(["op": "stopRecord"]) }
+        take.recorder.cancelAndDelete()
+    }
+
+    /// One posted frame (`subz://app/record?take=&seq=&t=&dropped=`), on the main thread: a frame for
+    /// another take is ignored; one that lands behind a later frame (readbacks settle on their own
+    /// timers) would stamp a step late, so it counts as dropped; the rest go to the recorder's queue.
+    private func receiveRecordBody(_ body: Data, url: URL) {
+        guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return }
+        func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+        guard let token = value("take").flatMap(Int.init),
+              let current = [take, finishing].compactMap({ $0 }).first(where: { $0.token == token }),
+              let seq = value("seq").flatMap(Int.init), let time = value("t").flatMap(Double.init) else { return }
+        current.received += 1
+        if let dropped = value("dropped").flatMap(Int.init) { current.pageDropped = dropped }
+        guard seq > current.lastSeq else { current.reordered += 1; return }
+        current.lastSeq = seq
+        current.recorder.appendFrame(bgra: body, width: current.output.width, height: current.output.height,
+                                     engineTime: time)
+    }
+
+    // MARK: The page's stop report
+
+    /// The page's report for `token`, or an empty one after 3 s (a page that never answers).
+    private func awaitReport(for token: Int) async -> PageReport {
+        await withCheckedContinuation { continuation in
+            stopReports[token] = continuation
+            reportTimeouts[token] = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                self?.settleReport(token, PageReport())
+            }
+        }
+    }
+
+    private func settleReport(_ token: Int, _ report: PageReport) {
+        reportTimeouts.removeValue(forKey: token)?.cancel()
+        stopReports.removeValue(forKey: token)?.resume(returning: report)
+    }
+
+    /// The page is gone (unmount, process death): every pending stop proceeds without a report.
+    private func settleAllReports() {
+        for token in Array(stopReports.keys) { settleReport(token, PageReport()) }
+    }
+
+    /// The page ended the take on its own: finish the file with what it holds. The host still
+    /// believes a take rolls; its stop collects the result through `endedResult`.
+    private func endTake(_ take: Take) {
+        self.take = nil
+        finishing = take
+        Task { @MainActor [weak self] in
+            let result = try? await take.recorder.stop()
+            guard let self else { return }
+            finishing = nil
+            ended = result.map { ($0.url, $0.frames, $0.dropped + take.pageDrops(report: PageReport()), $0.duration) }
+        }
+    }
+
+    private func endedResult() async throws -> (url: URL, frames: Int, dropped: Int, duration: Double) {
+        while finishing != nil { try? await Task.sleep(for: .milliseconds(20)) }
+        guard let result = ended else { throw SZRecordError.notRecording }
+        ended = nil
+        return result
+    }
+
+    /// The page died and came back: the rolling take continues on the fresh page (its clock and frame
+    /// numbers start over; the recorder takes the clock reset in stride).
+    private func resumeTakeOnReloadedPage() {
+        guard let take else { return }
+        take.pageReloaded()
+        push(startRecordOp(for: take))
+    }
+}
+
 // MARK: - The page's messages
 
 extension SZWebRuntime: WKScriptMessageHandler {
@@ -410,6 +628,7 @@ extension SZWebRuntime: WKScriptMessageHandler {
                 queue.removeAll()
                 if let project = try? SZProjectIO.load(from: projectURL) { try? loadProject(project, at: projectURL) }
                 if !watchedPreviews.isEmpty { pushWatchedPreviews() }
+                resumeTakeOnReloadedPage()
             }
             flushQueue()
         case "errors":
@@ -421,6 +640,14 @@ extension SZWebRuntime: WKScriptMessageHandler {
             print("[SZWebRuntime] \(body["id"] ?? "?"): \(body["message"] ?? "")")
         case "previewLayout":
             previewSink.setLayout(from: body)
+        case "record":
+            guard let token = body["take"] as? Int else { return }
+            if body["event"] as? String == "failed" {
+                print("[SZWebRuntime] take \(token): \(body["message"] ?? "the page stopped recording")")
+                if stopReports[token] == nil, let take, take.token == token { endTake(take) }
+            }
+            settleReport(token, PageReport(sent: body["sent"] as? Int ?? 0, dropped: body["dropped"] as? Int ?? 0,
+                                           received: true))
         case "check":
             guard let token = body["token"] as? String, let continuation = checks.removeValue(forKey: token) else { return }
             let ok = body["ok"] as? Bool ?? false
@@ -478,6 +705,7 @@ extension SZWebRuntime: WKNavigationDelegate, WKUIDelegate {
         reloadOnReady = true
         for (_, continuation) in checks { continuation.resume(returning: .failed("the web viewport stopped; try again")) }
         checks.removeAll()
+        settleAllReports()   // a stop waiting on this page proceeds with what arrived
         phase = .loading
         webView.load(URLRequest(url: SZWebSchemeHandler.indexURL))
     }

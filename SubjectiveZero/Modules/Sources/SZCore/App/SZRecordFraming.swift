@@ -43,7 +43,8 @@ public enum SZRecordFraming {
         public var label: String { self == .p2160 ? "4K" : "\(rawValue)" }
     }
 
-    /// The format row's choices. UI + persistence face; the engine's SZVideoCodec shares raw values.
+    /// The format row's choices, and the writer's codec. Every take records into .mov (fragment
+    /// writing); h264/hevc rewrap to .mp4 on stop, proRes422 stays .mov.
     public enum Codec: String, Codable, CaseIterable, Sendable {
         case h264
         case hevc
@@ -54,6 +55,14 @@ public enum SZRecordFraming {
             case .h264: "H.264"
             case .hevc: "HEVC"
             case .proRes422: "ProRes"
+            }
+        }
+
+        /// Extension of the finished take after any rewrap.
+        public var finalFileExtension: String {
+            switch self {
+            case .h264, .hevc: "mp4"
+            case .proRes422: "mov"
             }
         }
     }
@@ -161,4 +170,36 @@ public enum SZRecordFraming {
     }
 
     private static func even(_ value: Double) -> Int { max(Int(value.rounded()) & ~1, 2) }
+}
+
+/// Settings for one take, fixed at start; the host builds them from the sticky record state and any
+/// renderer takes them through `SZRenderBackend.startRecording`.
+public struct SZRecordSettings: Sendable {
+    /// Output file dimensions.
+    public var width: Int
+    public var height: Int
+    /// Output frame rate (30/60); engine frames beyond it are decimated.
+    public var fps: Int
+    public var codec: SZRecordFraming.Codec
+    /// Picture-normalized crop of the full frame.
+    public var crop: SZRect
+    /// Full-frame render size while the take rolls (output size / crop fraction, capped) —
+    /// overrides the size the picture would otherwise follow.
+    public var renderSize: (width: Int, height: Int)
+    /// Sound source (off / app / system). The audio track exists for any non-off source; the
+    /// capture attaches separately via `startRecordingSound`, so a denied permission degrades to
+    /// video-only.
+    public var sound: SZRecordFraming.SoundSource
+
+    public init(width: Int, height: Int, fps: Int, codec: SZRecordFraming.Codec,
+                crop: SZRect = .unit, renderSize: (width: Int, height: Int),
+                sound: SZRecordFraming.SoundSource = .off) {
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.codec = codec
+        self.crop = crop
+        self.renderSize = renderSize
+        self.sound = sound
+    }
 }

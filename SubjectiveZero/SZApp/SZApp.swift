@@ -873,6 +873,34 @@ struct SZApp: App {
     /// pop-out/dock intentionally recreates the panel's view in its new window (one expected
     /// "[SZViewportPanel] makeNSView" print per transition — render state lives in the runtime);
     /// WITHIN a window, layout edits still never recreate it (the container's stable ForEach ids).
+    /// Rolling-take edge: every viewport wears it (panelContent also feeds pop-out windows), so a
+    /// recording is visible wherever the picture is. A cropped take also outlines the recorded
+    /// region on the picture itself, and the framing editor opens on the one viewport the host
+    /// picked (largest visible). Framing state lives on the host. Applied as an `.overlay` closure
+    /// on both viewport kinds: evaluated lazily inside the tile, so the host reads it tracks
+    /// re-render the tile alone.
+    @ViewBuilder
+    private func recordingOverlays(for id: SZPanelID) -> some View {
+        if host.isRecording {
+            Rectangle()
+                .strokeBorder(Color.red.opacity(0.8), lineWidth: 1.5)
+                .allowsHitTesting(false)
+        }
+        if host.isRecording, host.recordCrop != .unit {
+            SZRecordedRegionOverlay(picture: host.recordPicture, crop: host.recordCrop)
+        }
+        if host.framingEditorViewport == id {
+            SZRecordFramingOverlay(
+                picture: host.recordPicture,
+                crop: host.recordCrop,
+                ratio: host.recordRatio,
+                tier: host.recordTier,
+                onCropChanged: { host.recordCrop = $0 },
+                onRatioPicked: { host.pickFramingRatio($0) },
+                onDone: { host.closeFramingEditor() })
+        }
+    }
+
     @ViewBuilder
     private func panelContent(_ id: SZPanelID) -> some View {
         switch id.kind {
@@ -885,38 +913,10 @@ struct SZApp: App {
                                    if case .failed = web.phase { return { Task { await web.start() } } }
                                    return nil
                                })
+                .overlay { recordingOverlays(for: id) }
         case .viewport:
             SZViewportPanel(device: host.runtime?.device, events: host.viewportEvents(for: id))
-                // Rolling-take edge: every viewport wears it (this closure also feeds pop-out
-                // windows), so a recording is visible wherever the picture is. A cropped take
-                // also outlines the recorded region on the picture itself.
-                .overlay {
-                    if host.isRecording {
-                        Rectangle()
-                            .strokeBorder(Color.red.opacity(0.8), lineWidth: 1.5)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .overlay {
-                    if host.isRecording, host.recordCrop != .unit {
-                        SZRecordedRegionOverlay(picture: host.runtime?.renderSize ?? (1280, 800),
-                                                crop: host.recordCrop)
-                    }
-                }
-                // The framing editor, on the one viewport the host picked (largest visible).
-                // Framing state lives on the host — this closure also builds pop-out windows.
-                .overlay {
-                    if host.framingEditorViewport == id {
-                        SZRecordFramingOverlay(
-                            picture: host.runtime?.renderSize ?? (1280, 800),
-                            crop: host.recordCrop,
-                            ratio: host.recordRatio,
-                            tier: host.recordTier,
-                            onCropChanged: { host.recordCrop = $0 },
-                            onRatioPicked: { host.pickFramingRatio($0) },
-                            onDone: { host.closeFramingEditor() })
-                    }
-                }
+                .overlay { recordingOverlays(for: id) }
         case .nodeEditor:
             SZNodeEditorPanel(store: host.store, project: host.store.project,
                               status: host.status, isRunning: host.isRunning,

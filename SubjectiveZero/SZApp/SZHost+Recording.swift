@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Recording, the host half: the HUD record dot's toggle, take placement in the project bundle
-// (`recordings/`), and the elapsed readout. The engine work is SZRuntime.startRecording/
-// stopRecording; wind-down hooks for project switch / Save As / quit live with the lifecycle
-// code that calls them.
+// (`recordings/`), and the elapsed readout. The engine work is the backend's startRecording/
+// stopRecording (the Metal runtime or the web page, whichever renders); wind-down hooks for project
+// switch / Save As / quit live with the lifecycle code that calls them.
 import AppKit
 import AVFoundation
 import Foundation
@@ -27,7 +27,7 @@ extension SZHost {
         }
         if isRecording {
             stopTake()
-        } else if runtime?.isRecording == true {
+        } else if backend?.isRecording == true {
             status = "still saving the last take"
         } else {
             startTake()
@@ -35,7 +35,7 @@ extension SZHost {
     }
 
     private func startTake() {
-        guard let runtime, let projectURL = loadedProjectURL else { return }
+        guard let backend, let projectURL = loadedProjectURL else { return }
         // an open framing editor commits its crop and closes; the options sheet closes with it
         if framingEditorViewport != nil { closeFramingEditor() }
         recordSettingsPresented = false
@@ -45,7 +45,7 @@ extension SZHost {
                 withIntermediateDirectories: true)
             let take = SZProjectMedia.nextRecording(in: projectURL, fileExtension: "mov")
             let settings = currentRecordSettings()
-            try runtime.startRecording(to: take.url, settings: settings)
+            try backend.startRecording(to: take.url, settings: settings)
             currentTakeNumber = take.number
             isRecording = true
             startElapsedTicker()
@@ -56,7 +56,7 @@ extension SZHost {
                 // attach fails is not a permission problem — no alert then.
                 Task { [weak self] in
                     do {
-                        try await runtime.startRecordingSound()
+                        try await backend.startRecordingSound()
                     } catch {
                         if self?.isRecording == true { self?.presentSoundPermissionAlert() }
                     }
@@ -85,7 +85,7 @@ extension SZHost {
     }
 
     private func stopTake() {
-        guard let runtime else { return }
+        guard let backend else { return }
         isRecording = false
         recordingTicker?.cancel()
         recordingTicker = nil
@@ -95,7 +95,7 @@ extension SZHost {
         Task { [weak self] in
             let result: (url: URL, frames: Int, dropped: Int, duration: Double)
             do {
-                result = try await runtime.stopRecording()
+                result = try await backend.stopRecording()
             } catch {
                 self?.status = "recording failed: \(error)"
                 self?.recordingElapsed = nil
@@ -115,25 +115,25 @@ extension SZHost {
 
     /// Finalize a rolling take synchronously, bounded — called before the bundle is copied,
     /// retired, or the process exits. No toast: the moment has nothing to show it on.
-    /// The runtime is the truth here, not the host mirror: a just-pressed stop clears `isRecording`
+    /// The backend is the truth here, not the host mirror: a just-pressed stop clears `isRecording`
     /// while its finalize still sits in a task, and this hook must not skip a live writer.
     func finalizeActiveTakeBlocking() {
-        let rolling = runtime?.isRecording ?? false
+        let rolling = backend?.isRecording ?? false
         guard isRecording || rolling else { return }
         resetRecordingState()
-        if rolling, let url = runtime?.stopRecordingBlocking(timeout: 2) {
+        if rolling, let url = backend?.stopRecordingBlocking(timeout: 2) {
             lastTakeURL = url
             status = "saved \(url.lastPathComponent)"
         }
     }
 
     /// Abandon a rolling take with its bundle — the discard-untitled path. Releases the writer's
-    /// file before the project's home is deleted. Same runtime-is-the-truth guard as above.
+    /// file before the project's home is deleted. Same backend-is-the-truth guard as above.
     func cancelActiveTake() {
-        let rolling = runtime?.isRecording ?? false
+        let rolling = backend?.isRecording ?? false
         guard isRecording || rolling else { return }
         resetRecordingState()
-        if rolling { runtime?.cancelRecording() }
+        if rolling { backend?.cancelRecording() }
     }
 
     private func resetRecordingState() {
@@ -211,15 +211,16 @@ extension SZHost {
         let output = recordOutputSize
         let render = SZRecordFraming.renderSize(output: output, crop: recordCrop)
         return SZRecordSettings(width: output.width, height: output.height, fps: recordFPS,
-                                codec: SZVideoCodec(rawValue: recordCodec.rawValue) ?? .h264,
-                                crop: recordCrop, renderSize: render, sound: recordSoundSource)
+                                codec: recordCodec, crop: recordCrop, renderSize: render, sound: recordSoundSource)
     }
 
     /// The output file dimensions the sticky settings currently yield.
     var recordOutputSize: (width: Int, height: Int) {
-        SZRecordFraming.outputSize(ratio: recordRatio, tier: recordTier, crop: recordCrop,
-                                   picture: runtime?.renderSize ?? (1280, 800))
+        SZRecordFraming.outputSize(ratio: recordRatio, tier: recordTier, crop: recordCrop, picture: recordPicture)
     }
+
+    /// The full-frame picture a take is framed against: the renderer's size (the take's own while one rolls).
+    var recordPicture: (width: Int, height: Int) { backend?.renderSize ?? (1280, 800) }
 
     /// The sheet's framing row, in words: ratio, whether a custom crop is set, output dims.
     var recordFramingSummary: String {
@@ -267,10 +268,12 @@ extension SZHost {
     // MARK: - Framing editor
 
     /// Open the framing editor on the largest visible viewport (editing comfort; the crop is global).
+    /// A web project attaches no Metal surface, so its one tile is whichever viewport panel the
+    /// layout holds (not necessarily the primary instance).
     func openFramingEditor() {
         framingEditorViewport = viewportSurfaces
             .max { Self.pixelArea($0.layer.drawableSize) < Self.pixelArea($1.layer.drawableSize) }?
-            .id
+            .id ?? (panelLayout.root.leafIDs + poppedOutPanels.keys).first { $0.kind == .viewport }
     }
 
     func closeFramingEditor() {
@@ -282,8 +285,7 @@ extension SZHost {
     func pickFramingRatio(_ ratio: SZRecordFraming.Ratio) {
         recordRatio = ratio
         if let aspect = ratio.aspect {
-            recordCrop = SZRecordFraming.fitted(recordCrop, toAspect: aspect,
-                                                picture: runtime?.renderSize ?? (1280, 800))
+            recordCrop = SZRecordFraming.fitted(recordCrop, toAspect: aspect, picture: recordPicture)
         }
         persistAppState()
     }
@@ -300,7 +302,7 @@ extension SZHost {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, self.isRecording else { break }
                 let now = Date()
-                if self.runtime?.isPaused != true {
+                if self.backend?.isPaused != true {
                     self.recordingAccumulated += now.timeIntervalSince(self.recordingLastTick)
                 }
                 self.recordingLastTick = now
@@ -310,3 +312,4 @@ extension SZHost {
         }
     }
 }
+

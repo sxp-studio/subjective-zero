@@ -22,6 +22,7 @@ const state = {
   values: new Map(), strings: new Map(),
   paused: false, frameIndex: 0, time: 0, lastNow: null,
   errorsDirty: false,
+  renderSizeOverride: null,   // a rolling take owns the render size (the Mac's renderSizeOverride)
 };
 const sizeVec = new THREE.Vector2();
 const targets = new Map();          // "<node>:<port>" -> WebGLRenderTarget, the texture pool
@@ -55,15 +56,24 @@ function resize(width, height) {
   for (const node of state.nodes.values()) { seedOutputs(node); }
 }
 
+// The canvas follows the window; the render size follows the canvas unless a take holds it, and
+// present() aspect-fits either way, so a small tile shows a full-size take downscaled.
 function fitCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const w = Math.max(1, Math.floor(window.innerWidth)), h = Math.max(1, Math.floor(window.innerHeight));
   renderer.setPixelRatio(dpr);
   renderer.setSize(w, h, false);
-  resize(w * dpr, h * dpr);
+  const held = state.renderSizeOverride;
+  if (held) { resize(held.width, held.height); } else { resize(w * dpr, h * dpr); }
 }
 window.addEventListener("resize", fitCanvas);
 fitCanvas();
+
+// `size` is {width, height} in pixels for the take's duration, null to follow the canvas again.
+function setRenderSize(size) {
+  state.renderSizeOverride = size ? { width: size.width, height: size.height } : null;
+  fitCanvas();
+}
 
 // MARK: - The full-screen pass (ctx.shaderPass and the present blit)
 
@@ -143,11 +153,11 @@ renderer.debug.onShaderError = (glc, program, vertexShader, fragmentShader) => {
   console.error("sz: shader error", log);
 };
 
-// The door for other page modules (sz-previews.js, loaded by index.html only): the renderer and the
-// texture pool, `afterPresent` hooks run once per frame, and `ops` for messages this file does not
-// handle. Nothing here is for nodes.
+// The door for other page modules (sz-previews.js and sz-record.js, loaded by index.html only): the
+// renderer and the texture pool, `afterPresent` hooks run once per frame, `ops` for messages this file
+// does not handle, and the render-size hold a take uses. Nothing here is for nodes.
 export const engine = Object.freeze({
-  renderer, targets, state, passScene, passCamera, passMesh, passMaterial,
+  renderer, targets, state, passScene, passCamera, passMesh, passMaterial, setRenderSize,
   afterPresent: [], ops: new Map(),
 });
 

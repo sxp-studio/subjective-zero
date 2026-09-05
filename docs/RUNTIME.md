@@ -243,6 +243,20 @@ server.
   when the set changes. `SZWebPreviewSink` row-copies each tile off the main thread into that key's
   double-buffered IOSurface pair and publishes `SZNodePreviewSurface`s, so the cards never learn
   which renderer drew them.
+- **Recording** is the app's recorder fed by the page (`sz-record.js`, `index.html` only). While a
+  take rolls the page holds the render size the take asks for (`engine.setRenderSize`, the mirror of
+  the Mac's `renderSizeOverride`; `present()` aspect-fits, so a small tile shows a full-size take),
+  and after every encode it draws the endpoint cropped into one output-size target with the
+  thumbnails' flip-and-BGRA shader, reads it back without stalling (a ring of three buffers) and
+  POSTs the raw bytes with the engine time to `subz://app/record`. `SZWebRuntime` hands each body to
+  `SZLiveVideoRecorder.appendFrame`, the CPU twin of the Metal tap: the same PTS, decimation, audio
+  and finish code writes both kinds of take. The page pre-applies the recorder's decimation rule so a
+  30 fps take on a 60 or 120 Hz page posts half the bytes; the recorder re-applies it, so the file is
+  the same either way. A stop waits for the page's report of what it sent, then the last bodies,
+  then finishes the file. A page that dies mid-take comes back recording the same take (its clock
+  restarts at 0, which the recorder takes as a reset); a page that loses its graphics context ends
+  the take with what it holds, and the user's stop collects that file. Measured 2026-09-05: 1080p60 and 4K30 both
+  deliver every frame with the main thread under 0.1 ms per body.
 - **Switching in place.** Settings ▸ Target Platform flips the open project's target and brings the
   renderer up again on the same project through the one prepare-and-mount path a project open uses
   (`SZHost+Backend`): the Metal runtime always gets a prepare and commit (an empty graph for a web
@@ -253,8 +267,8 @@ server.
 - **What a renderer can do** beyond drawing (record, stream thumbnails, mount cards, clone the
   viewport, read a node's output back, export a web page) is declared once per backend in
   `SZBackendCapabilities`; the host and UI gate on those, never on the project's target. Today's
-  web set says yes to thumbnails and export, no to the rest. Also not there yet for a web project:
-  the microphone, MIDI, OSC, system-audio and file nodes.
+  web set says yes to recording, thumbnails and export, no to cards, clones and node readback. Also
+  not there yet for a web project: the microphone, MIDI, OSC, system-audio and file nodes.
 
 ## Two backends, one contract
 
@@ -266,12 +280,15 @@ straight:
   layout, the library catalog, the prompts (the ABI doc is picked per target at the one compose
   site, `SZAgentDocs.abiReference(for:)`), the MCP tools, the host's lifecycle through
   `SZRenderBackend` (load, reload, the compile gate, the capture, live inputs, endpoint, pause,
-  rewind, the error sink, the thumbnail watch set and sink, the capability set), the new-project
-  flow and the in-place target switch.
+  rewind, the error sink, the thumbnail watch set and sink, the take's start, sound, stop and
+  cancel, the capability set), the recorder and writer behind a take (`SZLiveVideoRecorder`,
+  `SZVideoWriter`), the new-project flow and the in-place target switch.
 - **Mirrored, because the language changes.** The per-frame scheduler (`SZScheduler.encodeFrame` and
-  `sz-runtime.js` `encode()`), the node kit surface (`SZNodeKit` and the page `ctx`, same accessor
-  names), the two ABI docs (`node-abi.md` and `node-abi-web.md`, same skeleton), and each dual
-  library node's two sources (`Node.swift` beside `Node.js`).
+  `sz-runtime.js` `encode()`), the record tap (`encodeCapture` on the frame's command buffer and
+  `sz-record.js`, which also mirrors the recorder's decimation rule), the render-size hold of a take,
+  the node kit surface (`SZNodeKit` and the page `ctx`, same accessor names), the two ABI docs
+  (`node-abi.md` and `node-abi-web.md`, same skeleton), and each dual library node's two sources
+  (`Node.swift` beside `Node.js`).
 - **The rule.** A change to frame semantics (edge routing, seeds, the endpoint, pause, the error
   channel) or to the node kit surface lands in both implementations and both docs in the same
   change. The check is `SZAppTests/SZBackendParityTests`, which renders the same gradient graph on

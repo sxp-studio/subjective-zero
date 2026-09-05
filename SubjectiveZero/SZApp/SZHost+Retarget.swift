@@ -78,7 +78,8 @@ extension SZHost {
         if let project = store.project {
             do { try SZProjectIO.save(project, to: projectURL) } catch { presentProjectError("Couldn't save the project", error) }
         }
-        // 3. Render with the new platform's backend.
+        // 3. Render with the new platform's backend; a rolling take ends with the renderer it taps.
+        finalizeActiveTakeBlocking()
         await remountBackend(at: projectURL)
         rewatchNodeSources()
         classifyRebuildsAfterLoad()

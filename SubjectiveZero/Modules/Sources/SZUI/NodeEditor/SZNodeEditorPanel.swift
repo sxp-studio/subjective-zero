@@ -64,7 +64,7 @@ public struct SZNodeEditorPanel: View {
     private let onTogglePause: () -> Void            // HUD Pause/Play → host.togglePlayback()
     private let onResetTime: () -> Void              // HUD Reset Time (rewind) → host.resetPlayback()
     private let isRecording: Bool                    // a take is rolling → red dot + elapsed readout
-    private let canRecord: Bool                      // false hides the dot (a web project cannot record yet)
+    private let canRecord: Bool                      // false hides the dot (a renderer that cannot record)
     private let recordingElapsed: String?            // host-owned "01:24" readout; nil hides it
     private let onToggleRecord: () -> Void           // HUD record dot → host.toggleRecording()
     private let recordSettingsSeen: Bool             // first-ever press opens settings, not a take

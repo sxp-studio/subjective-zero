@@ -7,22 +7,9 @@
 import AVFoundation
 import CoreVideo
 import Metal
+import SZCore
 
-/// Encodable codecs for a take. Every take records into .mov (fragment writing); h264/hevc
-/// rewrap to .mp4 on stop, proRes422 stays .mov.
-public enum SZVideoCodec: String, CaseIterable, Sendable {
-    case h264
-    case hevc
-    case proRes422
-
-    /// Extension of the finished take after any rewrap.
-    public var finalFileExtension: String {
-        switch self {
-        case .h264, .hevc: "mp4"
-        case .proRes422: "mov"
-        }
-    }
-
+extension SZRecordFraming.Codec {
     var avCodec: AVVideoCodecType {
         switch self {
         case .h264: .h264
@@ -69,7 +56,7 @@ final class SZVideoWriter {
         var height: Int
         /// Take frame rate (30/60): the h264/hevc encoder's expected source rate + keyframe interval.
         var fps: Int
-        var codec: SZVideoCodec
+        var codec: SZRecordFraming.Codec
         /// True for live recording (the encoder biases for latency over lookahead compression).
         var realtime: Bool
         /// Add an AAC audio track (the app-sound toggle). The track exists even if no samples ever
@@ -172,11 +159,11 @@ final class SZVideoWriter {
         guard textureCache != nil else { throw SZRecordError.writerFailed("CVMetalTextureCache creation failed") }
     }
 
-    /// Dequeue a pool buffer and wrap it as a Metal render target. Non-blocking by construction:
-    /// past `maxPooledBuffers` in flight the pool refuses (nil) instead of allocating — the caller
-    /// drops the frame. Safe to call under the engine lock.
-    func makeFrameTarget() -> SZVideoFrameTarget? {
-        guard let pool = adaptor.pixelBufferPool, let textureCache else { return nil }
+    /// Dequeue a pool buffer, 709-tagged, for a CPU fill (the page's frames). Non-blocking by
+    /// construction: past `maxPooledBuffers` in flight the pool refuses (nil) instead of allocating —
+    /// the caller drops the frame.
+    func makePixelBuffer() -> CVPixelBuffer? {
+        guard let pool = adaptor.pixelBufferPool else { return nil }
         var pixelBuffer: CVPixelBuffer?
         let aux = [kCVPixelBufferPoolAllocationThresholdKey as String: Self.maxPooledBuffers] as CFDictionary
         guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(nil, pool, aux, &pixelBuffer) == kCVReturnSuccess,
@@ -190,7 +177,13 @@ final class SZVideoWriter {
                               kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
         CVBufferSetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey,
                               kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+        return pixelBuffer
+    }
 
+    /// A pool buffer wrapped as a Metal render target (the GPU tap). Same refusal as
+    /// `makePixelBuffer`; safe to call under the engine lock.
+    func makeFrameTarget() -> SZVideoFrameTarget? {
+        guard let textureCache, let pixelBuffer = makePixelBuffer() else { return nil }
         var metalTexture: CVMetalTexture?
         guard CVMetalTextureCacheCreateTextureFromImage(
                 kCFAllocatorDefault, textureCache, pixelBuffer, nil, .bgra8Unorm,

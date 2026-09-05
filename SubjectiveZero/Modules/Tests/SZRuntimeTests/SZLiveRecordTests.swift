@@ -458,3 +458,76 @@ private func makeSilence(seconds: Double, duration: Double) throws -> CMSampleBu
     let formats = try await audio.load(.formatDescriptions)
     #expect(formats.contains { CMFormatDescriptionGetMediaSubType($0) == kAudioFormatMPEG4AAC })
 }
+
+// MARK: - The CPU feed (the web page's frames)
+
+/// One solid BGRA frame as the page would post it: tightly packed, rows top-down.
+private func solidFrame(width: Int, height: Int, b: UInt8, g: UInt8, r: UInt8) -> Data {
+    var bytes = [UInt8](repeating: 255, count: width * height * 4)
+    for i in stride(from: 0, to: bytes.count, by: 4) { bytes[i] = b; bytes[i + 1] = g; bytes[i + 2] = r }
+    return Data(bytes)
+}
+
+private func cpuRecorder(_ name: String, fps: Int, width: Int = 64, height: Int = 48) throws -> SZLiveVideoRecorder {
+    let device = try #require(MTLCreateSystemDefaultDevice())
+    return try SZLiveVideoRecorder(
+        url: scratchMovieURL(name),
+        settings: SZRecordSettings(width: width, height: height, fps: fps, codec: .h264, renderSize: (width, height)),
+        device: device)
+}
+
+/// Frames fed as bytes land like the tap's: in order, at the engine time's PTS, a repeated engine
+/// time absent (a frozen duplicate), the file rewrapped to .mp4.
+@Test(.enabled(if: SZGPU.isAvailable)) func cpuFramesRecordLikeTheTap() async throws {
+    let recorder = try cpuRecorder("cpu-feed", fps: 60)
+    let grays: [UInt8] = [20, 60, 100, 140, 180, 220]   // grays survive the 4:2:0 roundtrip; saturated colors do not
+    for (i, gray) in grays.enumerated() {
+        recorder.appendFrame(bgra: solidFrame(width: 64, height: 48, b: gray, g: gray, r: gray), width: 64, height: 48,
+                             engineTime: Double(i) / 60)
+        if i == 2 {   // the same engine time again: renderFrame while paused, must not double up
+            recorder.appendFrame(bgra: solidFrame(width: 64, height: 48, b: 255, g: 255, r: 255), width: 64, height: 48,
+                                 engineTime: Double(i) / 60)
+        }
+        try await Task.sleep(for: .milliseconds(8))   // the page paces at the display rate; a burst past the pending cap drops
+    }
+    let result = try await recorder.stop()
+    defer { try? FileManager.default.removeItem(at: result.url) }
+    #expect(result.url.pathExtension == "mp4")
+    #expect(result.frames == grays.count)
+    #expect(result.dropped == 0)
+    #expect(abs(result.duration - Double(grays.count) / 60) < 0.001)
+    let pixels = try await decodedPixels(url: result.url, x: 10, y: 10)
+    #expect(pixels.count == grays.count)
+    for (pixel, gray) in zip(pixels, grays) {   // the dark end of the ramp lands ~5 off after the codec
+        let g = Int(gray)
+        #expect(isNear(pixel.r, g, tolerance: 6) && isNear(pixel.g, g, tolerance: 6) && isNear(pixel.b, g, tolerance: 6),
+                "\(pixel) vs gray \(gray)")
+    }
+}
+
+/// A 30 fps take fed at 60 Hz keeps every other frame, the same rule as the tap.
+@Test(.enabled(if: SZGPU.isAvailable)) func cpuFramesDecimateForThirty() async throws {
+    let recorder = try cpuRecorder("cpu-decimate", fps: 30)
+    for i in 0..<20 {
+        recorder.appendFrame(bgra: solidFrame(width: 64, height: 48, b: 0, g: 128, r: 0), width: 64, height: 48,
+                             engineTime: Double(i) / 60)
+        try await Task.sleep(for: .milliseconds(8))
+    }
+    let result = try await recorder.stop()
+    defer { try? FileManager.default.removeItem(at: result.url) }
+    #expect(result.frames == 10, "\(result.frames) frames")
+    #expect(result.dropped == 0)
+}
+
+/// A body of the wrong size is a counted drop, never a corrupt frame.
+@Test(.enabled(if: SZGPU.isAvailable)) func cpuFrameOfTheWrongSizeDrops() async throws {
+    let recorder = try cpuRecorder("cpu-wrong-size", fps: 60)
+    recorder.appendFrame(bgra: solidFrame(width: 64, height: 48, b: 0, g: 0, r: 200), width: 64, height: 48, engineTime: 0)
+    try await Task.sleep(for: .milliseconds(8))
+    recorder.appendFrame(bgra: solidFrame(width: 32, height: 32, b: 0, g: 0, r: 200), width: 32, height: 32, engineTime: 1 / 60)
+    try await Task.sleep(for: .milliseconds(8))
+    let result = try await recorder.stop()
+    defer { try? FileManager.default.removeItem(at: result.url) }
+    #expect(result.frames == 1)
+    #expect(result.dropped == 1)
+}

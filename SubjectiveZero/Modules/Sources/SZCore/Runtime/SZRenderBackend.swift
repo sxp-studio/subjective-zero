@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The seam between the host and whatever renders a project: the Metal runtime for a native project, the
 // browser runtime for a web one. Only what both implement for real; a backend's own extras (surfaces,
-// captures, recording) stay on the concrete type.
+// captures) stay on the concrete type.
 import Foundation
 import IOSurface
 
@@ -71,7 +71,7 @@ public struct SZBackendCapabilities: Sendable, Equatable {
         readsNodeOutputs: true, exportsWebApp: false)
     /// The browser page.
     public static let web = SZBackendCapabilities(
-        canRecord: false, streamsPreviews: true, supportsCards: false, supportsViewportClones: false,
+        canRecord: true, streamsPreviews: true, supportsCards: false, supportsViewportClones: false,
         readsNodeOutputs: false, exportsWebApp: true)
 }
 
@@ -114,4 +114,23 @@ public protocol SZRenderBackend: AnyObject {
     func setWatchedPreviews(_ requests: [(node: SZNodeID, port: String)], maxDimension: Int)
     /// Install the thumbnail sink. Fires off the main actor after each publish; hop and return.
     func setPreviewFrameCallback(_ callback: (@Sendable ([SZNodePreviewSurface]) -> Void)?)
+
+    // Recording: one take at a time, written by the app's recorder whichever renderer feeds it.
+
+    /// The full-frame picture size a take is framed against: the render size, the take's own while one rolls.
+    var renderSize: (width: Int, height: Int) { get }
+    /// Whether a take is rolling.
+    var isRecording: Bool { get }
+    /// Start a take to `url` (a .mov path; h264/hevc rewrap to .mp4 on stop). Throws when one already
+    /// rolls, when there is nothing to render, or when the writer cannot open the file.
+    func startRecording(to url: URL, settings: SZRecordSettings) throws
+    /// Attach the app-sound capture to the rolling take. Separate from `startRecording` because the
+    /// permission check is async; a throw leaves the take rolling video-only.
+    func startRecordingSound() async throws
+    /// Stop and finalize the take: frames appended, frames dropped, and the file's duration.
+    func stopRecording() async throws -> (url: URL, frames: Int, dropped: Int, duration: Double)
+    /// Bounded synchronous finalize, the quit path; nil when no take was rolling.
+    func stopRecordingBlocking(timeout: TimeInterval) -> URL?
+    /// Abandon the rolling take and delete its file. No-op when idle.
+    func cancelRecording()
 }

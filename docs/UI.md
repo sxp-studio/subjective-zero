@@ -98,9 +98,10 @@ overlays: a binary split tree
   the per-output **display** toggle in the node editor (`ui_toggle_display`).
 - In a web project the tile is `SZWebViewportPanel` instead: it re-parents the page view the host
   owns (a WKWebView, though SZUI only sees an `NSView`), so panel moves never reload the page, and
-  it shows why in plain words while the page is not up. Node thumbnails work as on the Mac (the
-  page streams them, [RUNTIME.md](RUNTIME.md#web-runtime)); clones, pop-outs and recording are not
-  there for a web project yet.
+  it shows why in plain words while the page is not up. Node thumbnails and recording work as on
+  the Mac (the page streams them, [RUNTIME.md](RUNTIME.md#web-runtime)); the recording edge and the
+  framing editor are the same overlays the Metal tile wears. Clones and pop-outs are not there for
+  a web project yet.
 
 ## Node Editor
 

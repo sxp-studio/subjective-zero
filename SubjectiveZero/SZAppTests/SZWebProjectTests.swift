@@ -56,6 +56,7 @@ struct SZWebProjectTests {
                                            runtimeDirectory: SZWebRuntime.runtimeDirectory,
                                            libraryDirectory: library)
         #expect(!page.contains("subz://"))
+        #expect(!page.contains("readRenderTargetPixelsAsync"), "the editor-only modules (thumbnails, recording) must not ship")
         #expect(page.contains("\"three\": \"data:text/javascript;base64,"))
         #expect(page.contains("\"three-core\": \"data:text/javascript;base64,"))
         #expect(page.contains("window.sz = Object.freeze({ onMessage: () => {}, post: () => {}, boot: {"))

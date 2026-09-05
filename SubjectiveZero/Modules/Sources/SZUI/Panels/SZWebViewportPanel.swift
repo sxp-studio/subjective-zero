@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The viewport tile of a web project: a dumb parent for the page view the host owns (a WKWebView, but
 // SZUI never learns that; it re-parents an NSView). Panel moves change the rect, never the view, so the
-// page never reloads. While the page is not up, the tile says why in plain words. The header
-// title carries the "(Web)" mark: an AppKit page view paints over any SwiftUI overlay here.
+// page never reloads. While the page is not up, the tile says why in plain words. SwiftUI overlays
+// draw above the page view as they do above the Metal one (the recording edge and framing editor
+// ride on the tile from the workspace); the header title carries the "(Web)" mark.
 import AppKit
 import SwiftUI
 

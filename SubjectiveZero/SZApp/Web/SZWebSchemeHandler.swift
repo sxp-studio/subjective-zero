@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The web project's page is served in-process over `subz://app/...`, no socket, no server: the runtime
 // files from the app bundle, three.js from the version cache, and the project's own node files from
-// its `.subz`. One host (`app`) so every module import is same-origin. Read-only but for the one POST
-// door for preview atlases, traversal-guarded, never cached by WebKit (a hot reload bumps `?v=` anyway).
+// its `.subz`. One host (`app`) so every module import is same-origin. Read-only but for two POST
+// doors, preview atlases and take frames, traversal-guarded, never cached by WebKit (a hot reload bumps
+// `?v=` anyway).
 import Foundation
 import WebKit
 
@@ -25,6 +26,8 @@ final class SZWebSchemeHandler: NSObject, WKURLSchemeHandler {
     /// Where the page's POSTed preview atlases land (`subz://app/previews?layout=&seq=`): the raw body and
     /// the request URL. WebKit delivers the task on the main thread, so the sink must hand the bytes off.
     var onPreviewBody: ((Data, URL) -> Void)?
+    /// Where a rolling take's frames land (`subz://app/record?take=&seq=&t=&dropped=`), same terms.
+    var onRecordBody: ((Data, URL) -> Void)?
 
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
         guard let url = task.request.url else {
@@ -32,11 +35,16 @@ final class SZWebSchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
         if task.request.httpMethod == "POST" {
-            guard url.host() == "app", url.path == "/previews", let body = task.request.httpBody else {
+            let door: ((Data, URL) -> Void)? = switch url.path {
+            case "/previews": onPreviewBody
+            case "/record": onRecordBody
+            default: nil
+            }
+            guard url.host() == "app", let door, let body = task.request.httpBody else {
                 task.didFailWithError(URLError(.unsupportedURL))
                 return
             }
-            onPreviewBody?(body, url)
+            door(body, url)
             task.didReceive(HTTPURLResponse(url: url, statusCode: 204, httpVersion: "HTTP/1.1",
                                             headerFields: ["Access-Control-Allow-Origin": "*"])!)
             task.didFinish()

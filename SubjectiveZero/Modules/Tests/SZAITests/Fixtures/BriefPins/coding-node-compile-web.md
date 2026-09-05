@@ -118,7 +118,8 @@ bytes.
 ## Rules
 
 - **Textures are RGBA8 at the viewport's size**, which follows the tile (or the browser window in an
-  exported page), so read `ctx.width` / `ctx.height` every frame rather than caching them. The host
+  exported page) and is the take's frame size while the user records, so read `ctx.width` /
+  `ctx.height` every frame rather than caching them. The host
   allocates every node target; you cannot choose the format. Build materials, scenes and cameras ONCE
   in `setup()`; do per-frame work in `update()`.
 - **Read every declared scalar/string input LIVE inside `update(ctx)` every frame**: never hardcode it,
