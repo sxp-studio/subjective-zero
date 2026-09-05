@@ -39,6 +39,7 @@ enum SZWelcomeStyle {
     // translucent tint), with the same white label/icon as every other button — one text color throughout.
     static let primaryFill      = Color(red: 0.290, green: 0.190, blue: 0.120)  // solid ember-over-dark
     static let primaryFillHover = Color(red: 0.350, green: 0.235, blue: 0.150)
+    static let update      = Color(red: 0.42, green: 0.78, blue: 0.50)  // the update-available pill
     static let hair        = Color.white.opacity(0.10)
     static let hairSoft    = Color.white.opacity(0.06)
     /// Brighter than the node editor's 0.16 so the trail reads as a foreground flourish here.
@@ -64,6 +65,8 @@ public struct SZWelcomeOverlay: View {
     private let onSetShowAtStartup: (Bool) -> Void
     private let onSetShareUsageData: (Bool) -> Void
     private let onOpenPrivacyInfo: () -> Void
+    private let updateAvailable: String?           // a dismissed update prompt's version → green pill
+    private let onInstallUpdate: () -> Void
     private let onClose: () -> Void
 
     public init(versionText: String,
@@ -74,6 +77,7 @@ public struct SZWelcomeOverlay: View {
                 githubIcon: Image,
                 discordIcon: Image,
                 opening: String? = nil,
+                updateAvailable: String? = nil,
                 onOpenRecent: @escaping (String) -> Void,
                 onNewProject: @escaping () -> Void,
                 onOpenProject: @escaping () -> Void,
@@ -84,6 +88,7 @@ public struct SZWelcomeOverlay: View {
                 onSetShowAtStartup: @escaping (Bool) -> Void,
                 onSetShareUsageData: @escaping (Bool) -> Void,
                 onOpenPrivacyInfo: @escaping () -> Void,
+                onInstallUpdate: @escaping () -> Void = {},
                 onClose: @escaping () -> Void) {
         self.versionText = versionText
         self.taglines = taglines
@@ -93,6 +98,7 @@ public struct SZWelcomeOverlay: View {
         self.githubIcon = githubIcon
         self.discordIcon = discordIcon
         self.opening = opening
+        self.updateAvailable = updateAvailable
         self.onOpenRecent = onOpenRecent
         self.onNewProject = onNewProject
         self.onOpenProject = onOpenProject
@@ -103,6 +109,7 @@ public struct SZWelcomeOverlay: View {
         self.onSetShowAtStartup = onSetShowAtStartup
         self.onSetShareUsageData = onSetShareUsageData
         self.onOpenPrivacyInfo = onOpenPrivacyInfo
+        self.onInstallUpdate = onInstallUpdate
         self.onClose = onClose
     }
 
@@ -161,10 +168,15 @@ public struct SZWelcomeOverlay: View {
                 .padding(.bottom, 14)
             Text("SubjectiveZero").font(.system(size: 29, weight: .semibold)).foregroundStyle(SZWelcomeStyle.text)
             // "Version" stays plain (flush-left with the title/tagline); only the numbers live in the
-            // copy pill.
+            // copy pill. A green pill follows it while a newer version sits uninstalled (the launch
+            // check prompted, the user dismissed); clicking brings the prompt back.
             HStack(spacing: 7) {
                 Text("Version").font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
                 SZVersionPill(display: versionText, copyText: "Version \(versionText)")
+                if let updateAvailable {
+                    SZWelcomePill(title: "Update available", tint: SZWelcomeStyle.update, action: onInstallUpdate)
+                        .help("SubjectiveZero \(updateAvailable) is ready to install")
+                }
             }
             .padding(.top, 9)
             if !taglines.isEmpty {
@@ -412,9 +424,11 @@ private struct SZVersionPill: View {
     }
 }
 
-/// The small "Clear" pill by RECENT PROJECTS — muted until hover, then brightens toward the accent.
+/// The small pill ("Clear" by RECENT PROJECTS, "Update available" by the version) — muted until
+/// hover, then brightens toward the accent; a `tint` colors it throughout (the update green).
 private struct SZWelcomePill: View {
     let title: String
+    var tint: Color? = nil
     let action: () -> Void
     @State private var hover = false
 
@@ -423,9 +437,10 @@ private struct SZWelcomePill: View {
             Text(title)
                 .font(.system(size: 10.5, weight: .semibold)).tracking(0.4)
                 .padding(.vertical, 3).padding(.horizontal, 10)
-                .foregroundStyle(hover ? SZWelcomeStyle.accentSoft : Color.white.opacity(0.42))
-                .background(Capsule().fill(hover ? Color.white.opacity(0.07) : Color.clear))
-                .overlay(Capsule().stroke(Color.white.opacity(hover ? 0.18 : 0.10), lineWidth: 1))
+                .foregroundStyle(tint.map { $0.opacity(hover ? 1 : 0.85) }
+                                 ?? (hover ? SZWelcomeStyle.accentSoft : Color.white.opacity(0.42)))
+                .background(Capsule().fill((tint ?? .white).opacity(hover ? 0.12 : (tint == nil ? 0 : 0.07))))
+                .overlay(Capsule().stroke((tint ?? .white).opacity(hover ? 0.35 : 0.22), lineWidth: 1))
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)

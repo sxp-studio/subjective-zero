@@ -285,11 +285,16 @@ struct SZApp: App {
     // Sparkle (SZUpdater.swift). Explicit init: constructing the controller in a default-value
     // expression would run outside the struct's MainActor isolation under Swift 6.
     private let updaterController: SPUStandardUpdaterController
+    /// The updater delegate (Sparkle holds it weakly; this State keeps it alive) — the source of the
+    /// home screen's "Update available" pill.
+    @State private var updaterState: SZUpdaterState
 
     init() {
+        let updaterState = SZUpdaterState()
+        _updaterState = State(initialValue: updaterState)
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: updaterState,
             userDriverDelegate: nil
         )
     }
@@ -822,6 +827,7 @@ struct SZApp: App {
             githubIcon: Image("github"),      // symbolsets live in the app bundle, not SZUI's
             discordIcon: Image("discord"),
             opening: host.openingProject,
+            updateAvailable: updaterState.dismissedUpdateVersion,
             onOpenRecent: { host.openProject(at: URL(filePath: $0)) },
             onNewProject: { host.presentNewProject() },
             onOpenProject: { host.openProjectViaPanel() },
@@ -832,6 +838,7 @@ struct SZApp: App {
             onSetShowAtStartup: { host.setShowWelcomeAtStartup($0) },
             onSetShareUsageData: { host.setTelemetryEnabled($0) },
             onOpenPrivacyInfo: { host.openPrivacyInfo() },
+            onInstallUpdate: { updaterController.updater.checkForUpdates() },   // brings the prompt back
             onClose: { host.continueFromWelcome() })
     }
 
