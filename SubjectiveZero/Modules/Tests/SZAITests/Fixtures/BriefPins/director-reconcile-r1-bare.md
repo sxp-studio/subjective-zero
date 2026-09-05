@@ -49,7 +49,9 @@ For EACH unresolved node above, make the **smallest** change that will unblock i
   it reported needing) → `ui_send_chat { "scope": "<node id>", "message": "<your message>" }`. It is
   delivered to that agent when it retries (it resumes its own session) — you do NOT wait here.
 - It just needs another attempt (e.g. a transient build error the agent can fix itself) → leave it as
-  is; it will be retried automatically.
+  is; it will be retried automatically. A node that built but reports an error at render (its
+  `reported:` line starts "the node reports at runtime") is listed here for the same reason and is
+  retried the same way, with that error in front of its agent.
 - The blocker is a port-audit line (`Node.swift reads input port "x" but node-contract.json declares no
   such input`) → the finding is exactly that: those port NAMES, or a live AV resource with no `setPaused`.
   The audit never looks at `ui`, defaults, order or file bytes. Either declare the port (`ui_edit_ports`)

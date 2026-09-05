@@ -220,6 +220,23 @@ extension SZHost {
         return (result, turnID)
     }
 
+    /// The nodes a run still owes, read live for every Director brief and dispatch: its work-set
+    /// nodes that still need implementing, plus any it promoted that now report a fault at render
+    /// (a shader that failed at first frame). THIS run's work set, never the host-wide union:
+    /// another live run's nodes are not ours to dispatch to, and delivering to one would present a
+    /// claim we do not hold (deliver's holder guard would trip). The faulting node stays owed so the
+    /// reconcile turn reads the fault and the retry continues the agent's own session; a run once
+    /// ended "built 6 nodes" over a red card the user had to point at.
+    func owedWork(of run: SZRunState) -> [SZNodeID] {
+        let nodes = store.project?.graph.nodes ?? []
+        var owed = nodes.filter(\.needsImplementation).map(\.id).filter(run.workSet.contains)
+        for node in nodes where run.promoted.contains(node.id) && nodeRuntimeErrors[node.id] != nil
+            && !owed.contains(node.id) {
+            owed.append(node.id)
+        }
+        return owed
+    }
+
     /// A node whose last attempt the HOST failed (a spent budget, a dead CLI) and whose session
     /// survived counts its next dispatch as a retry: the coding door then continues that session
     /// on the node's own blocker instead of starting the node over. An agent's own report is the
@@ -876,11 +893,7 @@ extension SZHost {
             world: { [weak self] in
                 guard let self else { return SZWorld() }
                 let graph = self.store.project?.graph
-                let candidates = (graph?.nodes ?? []).filter(\.needsImplementation).map(\.id)
-                // THIS run's work set, never the host-wide union: another live run's nodes are
-                // not ours to dispatch to, and delivering to one would present a claim we do not
-                // hold (deliver's holder guard would trip).
-                let scoped = candidates.filter(run.workSet.contains)
+                let scoped = self.owedWork(of: run)
                 // The arrows this run owes: captured at admission, still standing. Not a live read,
                 // which would race the user's own drag; not scoped to `scoped` either, since a node
                 // leaves the dirty list at promote, exactly when its arrows still need noticing.
@@ -1348,7 +1361,8 @@ extension SZHost {
         for id in accountedWork(run) {                                             // the work it speaks for
             guard let node = store.project?.graph.node(id: id) else { continue }   // removed mid-run (merge)
             let verdict = SZRunNodeVerdict.classify(node: node, promoted: run.promoted.contains(id),
-                                                    state: nodeAgentState[id])
+                                                    state: nodeAgentState[id],
+                                                    runtimeFault: nodeRuntimeErrors[id])
             if verdict.isImplemented {
                 implemented += 1
                 retireHostFailure(id)   // no red pill on a node this run just counted built
@@ -1373,6 +1387,12 @@ extension SZHost {
                     ?? "it failed the port audit"
                 recordRunFailure(node: id, fallback: reason)
                 narrateDirector("\(node.title) was built, but \(reason). See the flagged node.")
+            case .failedRuntimeFault:
+                // The build landed and the node itself says it does not work: its own words are
+                // the reason, and the card's red pill carries them.
+                let fault = Self.oneLineDetail(nodeRuntimeErrors[id] ?? "a fault at render")
+                recordRunFailure(node: id, fallback: "it built, but reports at runtime: \(fault)")
+                narrateDirector("\(node.title) was built, but reports an error at runtime: \(fault). See the flagged node.")
             case .failedSilently:
                 // A line the host already wrote (a dead provider, a spent budget) is a truer reason
                 // than the generic one — and it is what the next run reads as this node's blocker.

@@ -1772,9 +1772,17 @@ final class SZHost {
     }
 
     /// The status lines for every node that has reported one — the reconcile loop's signal
-    /// (`SZOrchestrationContext.nodeStatus`) and `debug_agent_state`'s `statuses` payload.
+    /// (`SZOrchestrationContext.nodeStatus`) and `debug_agent_state`'s `statuses` payload. A fault
+    /// the node reports at render (`ctx.reportError`) is its status unless its agent has a problem
+    /// of its own to report: the reconcile brief and the retry then read the shader error itself,
+    /// not "(no status reported)".
     var nodeStatusLines: [SZNodeID: String] {
-        nodeAgentState.compactMapValues { $0.phase == .idle ? nil : $0.line }
+        var lines = nodeAgentState.compactMapValues { $0.phase == .idle ? nil : $0.line }
+        for (id, fault) in nodeRuntimeErrors {
+            let phase = nodeAgentState[id]?.phase
+            if phase != .error, phase != .needsInput { lines[id] = "the node reports at runtime: \(fault)" }
+        }
+        return lines
     }
 
     /// Mark a node to force-fail its next coding dispatch (debug test affordance, `debug_fail_node_once`),

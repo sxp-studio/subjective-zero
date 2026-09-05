@@ -28,6 +28,30 @@ struct SZHostRunAccountingTests {
         SZNode(kind: .prompt, title: "Draft", prompt: "p", position: SZPoint(x: 0, y: 0))
     }
 
+    /// A node this run promoted that reports a fault at render stays owed: the Director brief lists
+    /// it with the fault as its status, the run does not end over it, and at the cap it is counted
+    /// unfinished with the fault as its reason. A fault on a node the run never promoted changes
+    /// nothing about this run.
+    @Test func aPromotedNodeReportingARuntimeFaultStaysOwedAndCountsUnfinished() {
+        let faulting = Self.built(), bystander = Self.built()
+        let host = host([faulting], promoted: [faulting.id])
+        host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [faulting, bystander])))
+        let run = host.activeRuns.values.first!
+        #expect(host.owedWork(of: run).isEmpty)                      // clean and promoted: done
+
+        host.nodeRuntimeErrors = [faulting.id: "program_source:73: error: cannot combine with previous 'float'",
+                                  bystander.id: "unrelated"]
+        #expect(host.owedWork(of: run) == [faulting.id])
+        #expect(host.nodeStatusLines[faulting.id]?.hasPrefix("the node reports at runtime: program_source") == true)
+
+        let counts = host.surfaceUnresolvedNodes(run)
+        #expect(counts.implemented == 0 && counts.failed == 1)
+        #expect(host.nodeAgentState[faulting.id]?.phase == .error)
+        #expect(host.nodeAgentState[faulting.id]?.message.contains("reports at runtime") == true)
+        #expect(host.nodeAgentState[bystander.id] == nil)
+        #expect(host.store.messages(for: .director).last?.text.contains("Built was built, but reports an error at runtime") == true)
+    }
+
     /// A node the host failed (a spent budget) with a surviving session is dispatched as a retry, so
     /// its agent continues rather than starting over. An agent's own report, a clean node, or a node
     /// with no session to continue all cold-start.

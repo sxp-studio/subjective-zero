@@ -90,6 +90,25 @@ import Testing
         }
     }
 
+    /// The incident this row exists for: a node promotes green, its shader fails at first frame, and
+    /// the run ended "built 6 nodes" over a red card the user had to point at. The fault fails the
+    /// build this run made; a fault on a node the run never promoted is not its verdict.
+    @Test func aPromotedNodeReportingARuntimeFaultFails() {
+        for phase in Self.quietPhases {
+            #expect(V.classify(node: Self.node(nil), promoted: true, state: Self.reported(phase),
+                               runtimeFault: "half is a reserved type") == .failedRuntimeFault)
+            #expect(V.classify(node: Self.node(nil), promoted: false, state: Self.reported(phase),
+                               runtimeFault: "half is a reserved type") == .implemented)
+        }
+        #expect(V.classify(node: Self.node(nil), promoted: true, state: nil, runtimeFault: "x") == .failedRuntimeFault)
+        #expect(!V.failedRuntimeFault.isImplemented)
+        // The agent's own report and the audit still outrank it: their words are more specific.
+        #expect(V.classify(node: Self.node(nil), promoted: true, state: Self.reported(.error), runtimeFault: "x")
+                == .failedAsReported)
+        #expect(V.classify(node: Self.node(.sourceMismatch), promoted: true, state: nil, runtimeFault: "x")
+                == .failedSourceMismatch)
+    }
+
     @Test func aReportedProblemWinsWhenNotPromoted() {
         for phase in Self.reportedPhases {
             #expect(V.classify(node: Self.draft(), promoted: false, state: Self.reported(phase)) == .failedAsReported)

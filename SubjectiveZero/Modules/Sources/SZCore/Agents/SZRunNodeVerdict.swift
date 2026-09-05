@@ -23,6 +23,9 @@ public enum SZRunNodeVerdict: Equatable, Sendable {
     case failedSourceMismatch
     /// The agent reported `.error` / `.needsInput` itself — failed; keep its own message untouched.
     case failedAsReported
+    /// Promoted this run, yet the node reports a fault at render (`ctx.reportError`, a shader that
+    /// failed at first frame) — failed; the node's own words are the detail.
+    case failedRuntimeFault
     /// Nothing happened: no promote, no agent explanation — failed with whatever reason the run holds.
     case failedSilently
 
@@ -30,21 +33,25 @@ public enum SZRunNodeVerdict: Equatable, Sendable {
     public var isImplemented: Bool {
         switch self {
         case .implemented, .implementedButRebriefed, .implementedButContractMoved: return true
-        case .failedSourceMismatch, .failedAsReported, .failedSilently: return false
+        case .failedSourceMismatch, .failedAsReported, .failedRuntimeFault, .failedSilently: return false
         }
     }
 
     /// - node: the work-set node as it stands NOW (`needsImplementation` / `rebuildReason` are derived).
     /// - promoted: `promoteStagedNode` ran for the node during THIS dispatch.
     /// - state: the node's agent state now — its phase and WHO wrote it.
+    /// - runtimeFault: what the node itself reports at render right now, if anything.
     public static func classify(node: SZNode, promoted: Bool,
-                                state: SZNodeAgentState?) -> SZRunNodeVerdict {
+                                state: SZNodeAgentState?, runtimeFault: String? = nil) -> SZRunNodeVerdict {
         let stillDirty = node.needsImplementation
         // The promoted source disagrees with the contract: a real defect in what landed.
         if promoted, stillDirty, node.rebuildReason == .sourceMismatch { return .failedSourceMismatch }
         // The agent's own report — newer than the build it followed (a promote clears a stale one), and
         // the only judgement that beats a clean stamp. A host-written `.error` is not one of these.
         if state?.reportedProblem == true { return .failedAsReported }
+        // The build landed and the node says at render that it does not work: only THIS run's
+        // promote is judged, a fault on a node the run never touched is not its verdict.
+        if promoted, runtimeFault != nil { return .failedRuntimeFault }
         // Clean now = nothing left to do, whether this run's promote or an edit that healed it got it there.
         if !stillDirty { return .implemented }
         if promoted, node.rebuildReason == .intentChanged { return .implementedButRebriefed }
