@@ -77,22 +77,10 @@ struct SZBackendParityTests {
         return try #require(runtime.captureFrame(), "the Metal runtime captured nothing")
     }
 
-    /// A WKWebView only renders inside a window: a plain one, shown, sized to the fixture's aspect.
+    /// The page in a shown window sized to the fixture's aspect (SZWebPageTestSupport).
     private static func renderWeb(project: URL) async throws -> CGImage {
-        let runtime = SZWebRuntime(projectURL: project, threeVersion: SZProjectWeb.currentThreeVersion)
-        await runtime.start()
-        let webView = try #require(runtime.webView, "the web runtime made no page: \(runtime.phase)")
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
-                              styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = webView
-        window.orderFrontRegardless()
+        let (runtime, window) = try await SZWebPageTestSupport.readyPage(project: project)
         defer { runtime.unmount(); window.orderOut(nil) }
-
-        for _ in 0..<200 where runtime.phase != .ready {
-            if case .failed = runtime.phase { break }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        try #require(runtime.phase == .ready, "the web page never became ready: \(runtime.phase)")
         try runtime.loadProject(try SZProjectIO.load(from: project), at: project)
         try await Task.sleep(for: .seconds(1))
         let snapshot = await runtime.captureViewport(maxDimension: 320)

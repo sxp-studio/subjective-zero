@@ -5,7 +5,8 @@
 // lifecycle, the compile gate and the capture; the last two await the page.
 //
 // Wire protocol, both ways JSON: the app posts `{op: ...}` through `window.__szDispatch` (queued until
-// the page says `ready`); the page posts `{channel: ready | errors | loadError | check}` back.
+// the page says `ready`); the page posts `{channel: ready | errors | loadError | check | previewLayout}`
+// back. Thumbnail atlases come the other way as a POST to `subz://app/previews` (SZWebPreviewSink).
 import AppKit
 import AVFoundation
 import Foundation
@@ -54,6 +55,11 @@ final class SZWebRuntime: NSObject {
     private var pendingStrings: [SZNodeID: [String: String]] = [:]
     private var inputFlushScheduled = false
     private var errorCallback: (@Sendable ([SZNodeID: String]) -> Void)?
+    /// The watched thumbnails, kept so a page that died and came back gets them again.
+    private var watchedPreviews: [(node: SZNodeID, port: String)] = []
+    private var previewMaxDimension = 0
+    /// Turns the page's posted atlases into published surfaces (fed by the scheme handler).
+    private let previewSink = SZWebPreviewSink()
 
     init(projectURL: URL, threeVersion: String) {
         self.projectURL = projectURL
@@ -94,10 +100,10 @@ final class SZWebRuntime: NSObject {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         config.mediaTypesRequiringUserActionForPlayback = []   // a camera node plays its stream without a click
-        config.setURLSchemeHandler(
-            SZWebSchemeHandler(runtimeDirectory: Self.runtimeDirectory, libraryDirectory: library,
-                               projectURL: projectURL, threeVersion: threeVersion),
-            forURLScheme: SZWebSchemeHandler.scheme)
+        let handler = SZWebSchemeHandler(runtimeDirectory: Self.runtimeDirectory, libraryDirectory: library,
+                                         projectURL: projectURL, threeVersion: threeVersion)
+        handler.onPreviewBody = { [previewSink] body, url in previewSink.receive(body, url: url) }
+        config.setURLSchemeHandler(handler, forURLScheme: SZWebSchemeHandler.scheme)
         if let rules = try? await Self.sealRuleList() { config.userContentController.add(rules) }
         proxy.handler = self
         config.userContentController.add(proxy, name: "sz")
@@ -373,6 +379,21 @@ extension SZWebRuntime: SZRenderBackend {
     func setNodeErrorCallback(_ callback: (@Sendable ([SZNodeID: String]) -> Void)?) {
         errorCallback = callback
     }
+
+    func setWatchedPreviews(_ requests: [(node: SZNodeID, port: String)], maxDimension: Int) {
+        watchedPreviews = requests
+        previewMaxDimension = maxDimension
+        pushWatchedPreviews()
+    }
+
+    private func pushWatchedPreviews() {
+        push(["op": "setWatchedPreviews", "keys": watchedPreviews.map { "\($0.node.uuidString):\($0.port)" },
+              "maxDimension": previewMaxDimension])
+    }
+
+    func setPreviewFrameCallback(_ callback: (@Sendable ([SZNodePreviewSurface]) -> Void)?) {
+        previewSink.onFrames = callback
+    }
 }
 
 // MARK: - The page's messages
@@ -388,6 +409,7 @@ extension SZWebRuntime: WKScriptMessageHandler {
                 reloadOnReady = false
                 queue.removeAll()
                 if let project = try? SZProjectIO.load(from: projectURL) { try? loadProject(project, at: projectURL) }
+                if !watchedPreviews.isEmpty { pushWatchedPreviews() }
             }
             flushQueue()
         case "errors":
@@ -397,6 +419,8 @@ extension SZWebRuntime: WKScriptMessageHandler {
             errorCallback?(errors)
         case "loadError":
             print("[SZWebRuntime] \(body["id"] ?? "?"): \(body["message"] ?? "")")
+        case "previewLayout":
+            previewSink.setLayout(from: body)
         case "check":
             guard let token = body["token"] as? String, let continuation = checks.removeValue(forKey: token) else { return }
             let ok = body["ok"] as? Bool ?? false

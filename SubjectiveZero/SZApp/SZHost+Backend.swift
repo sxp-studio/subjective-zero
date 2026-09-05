@@ -38,11 +38,18 @@ extension SZHost {
     }
 
     /// Install a prepared backend after `runtime.commit` took its Metal side: the old page goes, the new
-    /// one (if any) becomes `backend`, and node errors route to it. Synchronous, so nothing interleaves.
+    /// one (if any) becomes `backend`, and node errors and thumbnails route to it. Synchronous, so
+    /// nothing interleaves.
     func mountBackend(_ prepared: SZPreparedBackend) {
         webRuntime?.unmount()
         webRuntime = prepared.page
-        if let page = prepared.page { installNodeErrorSink(page) }
+        lastPushedWatchKeys = []   // so the next refreshPreviewStream reaches the new backend even with the same set
+        if let page = prepared.page {
+            installNodeErrorSink(page)
+            installPreviewFrameSink(page)
+            // the Metal runtime holds an empty graph under a web project: nothing for it to thumbnail
+            runtime?.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
+        }
     }
 
     /// Push the open project's graph to its renderer again after an edit that is already saved.

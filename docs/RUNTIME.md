@@ -234,6 +234,15 @@ server.
   for a Mac node; `agent_view_frame` is `captureViewport`, a page snapshot ([MCP.md](MCP.md)).
 - **Live inputs** are coalesced: the page reads once per frame, so the runtime sends one message
   per run-loop pass with the latest value of every port written since the last one.
+- **Node thumbnails** come from `sz-previews.js` (`index.html` only, never the export). The host
+  names the watched `<node>:<port>` keys through `SZRenderBackend.setWatchedPreviews`, the same call
+  the Metal runtime gets. At most 15 times a second, after present, the page draws every watched
+  target into one fixed 1024x576 atlas (rows flipped, swizzled to BGRA in the tile shader), reads it
+  back without stalling and POSTs the bytes to `subz://app/previews`, one body per tick, so traffic
+  is constant whatever the count. The layout (which key sits where) crosses the script bridge only
+  when the set changes. `SZWebPreviewSink` row-copies each tile off the main thread into that key's
+  double-buffered IOSurface pair and publishes `SZNodePreviewSurface`s, so the cards never learn
+  which renderer drew them.
 - **Switching in place.** Settings ▸ Target Platform flips the open project's target and brings the
   renderer up again on the same project through the one prepare-and-mount path a project open uses
   (`SZHost+Backend`): the Metal runtime always gets a prepare and commit (an empty graph for a web
@@ -244,8 +253,8 @@ server.
 - **What a renderer can do** beyond drawing (record, stream thumbnails, mount cards, clone the
   viewport, read a node's output back, export a web page) is declared once per backend in
   `SZBackendCapabilities`; the host and UI gate on those, never on the project's target. Today's
-  web set says no to all but export. Also not there yet for a web project: the camera, microphone,
-  MIDI, OSC, system-audio and file nodes.
+  web set says yes to thumbnails and export, no to the rest. Also not there yet for a web project:
+  the microphone, MIDI, OSC, system-audio and file nodes.
 
 ## Two backends, one contract
 
@@ -257,7 +266,8 @@ straight:
   layout, the library catalog, the prompts (the ABI doc is picked per target at the one compose
   site, `SZAgentDocs.abiReference(for:)`), the MCP tools, the host's lifecycle through
   `SZRenderBackend` (load, reload, the compile gate, the capture, live inputs, endpoint, pause,
-  rewind, the error sink, the capability set), the new-project flow and the in-place target switch.
+  rewind, the error sink, the thumbnail watch set and sink, the capability set), the new-project
+  flow and the in-place target switch.
 - **Mirrored, because the language changes.** The per-frame scheduler (`SZScheduler.encodeFrame` and
   `sz-runtime.js` `encode()`), the node kit surface (`SZNodeKit` and the page `ctx`, same accessor
   names), the two ABI docs (`node-abi.md` and `node-abi-web.md`, same skeleton), and each dual

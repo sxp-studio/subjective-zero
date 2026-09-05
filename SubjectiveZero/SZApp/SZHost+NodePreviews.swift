@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Live node previews — the host half. Owns the Graph ▸ Live Previews pref, the
 // per-node preview toggle op (the card's photo icon + `ui_set_node_body`), and the WATCH SET the
-// runtime's zero-copy preview stream captures: effective-preview nodes ∩ the editor's visible set,
-// capped. Event-driven end to end — graph edits arrive via Observation on the store, camera moves
-// via the panel's visible-set callback, frames via the runtime's completion callback. No polling
-// loop, no CPU pixels: the runtime publishes IOSurfaces that go straight into the cards' frame
-// boxes (and from there to CALayer.contents). With no viewport showing, the watch set is what keeps
-// the render loop paced (SZHost+Viewports.applyRenderDrive).
+// renderer's preview stream captures: effective-preview nodes ∩ the editor's visible set, capped.
+// Event-driven end to end — graph edits arrive via Observation on the store, camera moves via the
+// panel's visible-set callback, frames via the backend's publish callback. Either renderer publishes
+// IOSurfaces (the Metal runtime zero-copy, the web page through an atlas readback, SZWebPreviewSink)
+// that go straight into the cards' frame boxes (and from there to CALayer.contents). With no
+// viewport showing, a native watch set is what keeps the Metal loop paced
+// (SZHost+Viewports.applyRenderDrive).
 import Foundation
 import SZCore
 import SZRuntime
@@ -102,23 +103,22 @@ extension SZHost {
         previewWatchDebounce = nil
         visiblePreviewNodes = nil
         lastPushedWatchKeys = []
-        runtime?.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
+        backend?.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
         applyRenderDrive()
     }
 
-    /// Recompute the watched set NOW and push it to the runtime iff it changed. Cheap (one graph
+    /// Recompute the watched set NOW and push it to the renderer iff it changed. Cheap (one graph
     /// scan + ordered-key compare), so every mutation chokepoint just calls it. The watch set is also
     /// the thumbs' demand on the render loop (each push re-applies the render drive), and it empties
     /// when the main window — the node editor's only home — can't show pixels.
     func refreshPreviewStream() {
         cardHostStorage?.graphDidChange()   // custom cards ride the same graph hook (SZCardHostController)
-        guard let runtime else { return }
-        // a renderer without thumbnails leaves the Metal loop nothing to run for
+        guard let backend else { return }
         guard livePreviews, capabilities.streamsPreviews, popoutManager.mainWindowIsDisplayable,
               let graph = store.project?.graph else {
             if lastPushedWatchKeys != [] {
                 lastPushedWatchKeys = []
-                runtime.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
+                backend.setWatchedPreviews([], maxDimension: Self.previewMaxDimension)
                 applyRenderDrive()
             }
             return
@@ -134,7 +134,7 @@ extension SZHost {
         let keys = wanted.map { "\($0.node.uuidString):\($0.port)" }
         guard keys != lastPushedWatchKeys else { return }
         lastPushedWatchKeys = keys
-        runtime.setWatchedPreviews(wanted, maxDimension: Self.previewMaxDimension)
+        backend.setWatchedPreviews(wanted, maxDimension: Self.previewMaxDimension)
         applyRenderDrive()
     }
 
@@ -165,12 +165,15 @@ extension SZHost {
 
     // MARK: - Frame delivery
 
-    /// Install the runtime→host publish path (called once from `start()`). The runtime callback
-    /// fires on Metal's completion thread — hop to the main actor and apply.
-    func installPreviewFrameSink(_ runtime: SZRuntime) {
-        runtime.setPreviewFrameCallback { [weak self] frames in
+    /// Install a renderer's publish path (the Metal runtime from `start()`, a page when it mounts). Fires
+    /// off the main actor: hop, and apply only for the backend that renders now, since the Metal runtime
+    /// stays alive under a web project.
+    func installPreviewFrameSink(_ backend: any SZRenderBackend) {
+        let identity = ObjectIdentifier(backend)
+        backend.setPreviewFrameCallback { [weak self] frames in
             Task { @MainActor [weak self] in
-                self?.applyPreviewFrames(frames)
+                guard let self, let live = self.backend, ObjectIdentifier(live) == identity else { return }
+                self.applyPreviewFrames(frames)
             }
         }
     }
@@ -179,7 +182,6 @@ extension SZHost {
     /// graph first: a publish races project switches, deletes, and retargets (the pass was encoded
     /// against an older world), and a stale write would resurrect pruned boxes.
     private func applyPreviewFrames(_ frames: [SZNodePreviewSurface]) {
-        // a pass encoded before a switch to a renderer without thumbnails lands after the clear
         guard livePreviews, capabilities.streamsPreviews, let graph = store.project?.graph else { return }
         for frame in frames {
             guard let node = graph.node(id: frame.node),

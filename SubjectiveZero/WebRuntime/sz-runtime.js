@@ -143,6 +143,14 @@ renderer.debug.onShaderError = (glc, program, vertexShader, fragmentShader) => {
   console.error("sz: shader error", log);
 };
 
+// The door for other page modules (sz-previews.js, loaded by index.html only): the renderer and the
+// texture pool, `afterPresent` hooks run once per frame, and `ops` for messages this file does not
+// handle. Nothing here is for nodes.
+export const engine = Object.freeze({
+  renderer, targets, state, passScene, passCamera, passMesh, passMaterial,
+  afterPresent: [], ops: new Map(),
+});
+
 // MARK: - Nodes
 
 function describe(e) {
@@ -337,6 +345,9 @@ function frame(now) {
     state.frameIndex += 1;
   }
   present();
+  for (const fn of engine.afterPresent) {
+    try { fn(now); } catch (e) { console.error("sz: frame hook failed", e); }
+  }
   publishErrors();
 }
 
@@ -455,10 +466,16 @@ window.sz.onMessage((msg) => {
     case "setEndpoint": state.endpoint = msg.endpoint || null; break;
     case "setPaused": setPaused(!!msg.paused); break;
     case "resetTimeline": state.time = 0; state.frameIndex = 0; break;
-    default: console.warn("sz: unknown op", msg.op);
+    default: {
+      const fn = engine.ops.get(msg.op);
+      if (fn) { fn(msg); } else { console.warn("sz: unknown op", msg.op); }
+    }
   }
 });
 
 if (window.sz.boot) { enqueue(() => applyLoad(window.sz.boot)); }
 requestAnimationFrame(frame);
-window.sz.post({ channel: "ready" });
+// Ready once every page module has run (sz-previews.js registers its op after this file), so the first
+// ops the app flushes on the handshake all have a handler.
+const ready = () => window.sz.post({ channel: "ready" });
+if (document.readyState === "complete") { ready(); } else { window.addEventListener("load", ready, { once: true }); }

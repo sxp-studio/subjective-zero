@@ -72,7 +72,8 @@ extension SZHost {
         let drive: SZRenderDrive
         if let surface {
             drive = .viewport(ObjectIdentifier(surface.layer))
-        } else if !lastPushedWatchKeys.isEmpty, mainWindow != nil {
+        } else if !lastPushedWatchKeys.isEmpty, mainWindow != nil, webRuntime == nil {
+            // a web project's thumbnails come from the page's own frame loop, not the Metal one
             drive = .thumbnails
         } else {
             drive = .idle

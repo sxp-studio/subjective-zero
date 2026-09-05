@@ -38,7 +38,8 @@ overlays: a binary split tree
   back restores normal tile rendering. Mirrors are aspect-fit, letterboxed when shapes differ.
   With no viewport showing at all (closed, maximized-away), the runtime's loop keeps running for
   the node editor's live thumbnails as long as any are watched - closing the viewport never
-  freezes the cards.
+  freezes the cards. A web project's page renders only while its tile is in a window, so hiding
+  that viewport does freeze them.
 - **Pop out** (header button / View ▸ Pop Out Viewport / `ui_popout_panel` — or **drag the tile's
   header out of the window**: releasing outside the container tears it out into a window under
   the cursor): moves a viewport into its own floating window; via the button it opens exactly
@@ -97,8 +98,9 @@ overlays: a binary split tree
   the per-output **display** toggle in the node editor (`ui_toggle_display`).
 - In a web project the tile is `SZWebViewportPanel` instead: it re-parents the page view the host
   owns (a WKWebView, though SZUI only sees an `NSView`), so panel moves never reload the page, and
-  it shows why in plain words while the page is not up. Clones, pop-outs, node thumbnails and
-  recording are not there for a web project yet ([RUNTIME.md](RUNTIME.md#web-runtime)).
+  it shows why in plain words while the page is not up. Node thumbnails work as on the Mac (the
+  page streams them, [RUNTIME.md](RUNTIME.md#web-runtime)); clones, pop-outs and recording are not
+  there for a web project yet.
 
 ## Node Editor
 

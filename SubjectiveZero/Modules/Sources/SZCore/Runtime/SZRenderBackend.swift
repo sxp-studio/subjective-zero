@@ -3,12 +3,40 @@
 // browser runtime for a web one. Only what both implement for real; a backend's own extras (surfaces,
 // captures, recording) stay on the concrete type.
 import Foundation
+import IOSurface
 
 /// Result of a compile-check (`compileNodeSource`). `.failed` carries the compiler log for the agent's
 /// fix loop / `debug_get_build_errors`.
 public enum SZBuildResult: Sendable, Equatable {
     case ok
     case failed(String)
+}
+
+/// One published thumbnail frame, whichever renderer drew it: the surface goes straight to
+/// `CALayer.contents`. Publishers alternate two surfaces per port (the compositor may still be reading
+/// the one on screen), so every frame is a new identity, which is what makes the layer recomposite.
+public struct SZNodePreviewSurface: @unchecked Sendable {
+    public let node: SZNodeID
+    public let port: String
+    public let surface: IOSurface
+
+    public init(node: SZNodeID, port: String, surface: IOSurface) {
+        self.node = node
+        self.port = port
+        self.surface = surface
+    }
+
+    /// A BGRA8 surface sized for one thumbnail; row bytes rounded to IOSurface's own alignment.
+    public static func makeSurface(width: Int, height: Int) -> IOSurface? {
+        let bytesPerRow = IOSurfaceAlignProperty(kIOSurfaceBytesPerRow as CFString, width * 4)
+        return IOSurface(properties: [
+            .width: width,
+            .height: height,
+            .bytesPerElement: 4,
+            .bytesPerRow: bytesPerRow,
+            .pixelFormat: UInt32(0x4247_5241),   // 'BGRA'
+        ])
+    }
 }
 
 /// What a backend can do beyond drawing the graph. The host and UI gate features on these, never on
@@ -43,7 +71,7 @@ public struct SZBackendCapabilities: Sendable, Equatable {
         readsNodeOutputs: true, exportsWebApp: false)
     /// The browser page.
     public static let web = SZBackendCapabilities(
-        canRecord: false, streamsPreviews: false, supportsCards: false, supportsViewportClones: false,
+        canRecord: false, streamsPreviews: true, supportsCards: false, supportsViewportClones: false,
         readsNodeOutputs: false, exportsWebApp: true)
 }
 
@@ -81,4 +109,9 @@ public protocol SZRenderBackend: AnyObject {
     /// Install the sink for node-reported faults. Fires only when the reported set changes and carries
     /// the whole set; runs off the main actor.
     func setNodeErrorCallback(_ callback: (@Sendable ([SZNodeID: String]) -> Void)?)
+    /// Replace the node outputs streamed as thumbnails, `maxDimension` the long edge in pixels. Pushed on
+    /// watch-list changes only, never per frame.
+    func setWatchedPreviews(_ requests: [(node: SZNodeID, port: String)], maxDimension: Int)
+    /// Install the thumbnail sink. Fires off the main actor after each publish; hop and return.
+    func setPreviewFrameCallback(_ callback: (@Sendable ([SZNodePreviewSurface]) -> Void)?)
 }

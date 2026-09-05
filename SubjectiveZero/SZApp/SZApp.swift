@@ -937,7 +937,7 @@ struct SZApp: App {
                               snapToGrid: host.snapToGrid,
                               gridCursorTrail: host.gridCursorTrail,
                               showMiniMap: host.showMiniMap,
-                              livePreviews: host.livePreviews,
+                              livePreviews: host.livePreviews && host.capabilities.streamsPreviews,
                               previewFrames: host.previewFrames,
                               cardProvider: host.cardHost,
                               onVisibleNodesChanged: { host.setVisiblePreviewNodes($0) },
