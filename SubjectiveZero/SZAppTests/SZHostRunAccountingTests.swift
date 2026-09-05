@@ -43,6 +43,9 @@ struct SZHostRunAccountingTests {
                                   bystander.id: "unrelated"]
         #expect(host.owedWork(of: run) == [faulting.id])
         #expect(host.nodeStatusLines[faulting.id]?.hasPrefix("the node reports at runtime: program_source") == true)
+        // A redispatch clears the per-dispatch promote; the fault is still this run's to answer.
+        run.promoted.remove(faulting.id)
+        #expect(host.owedWork(of: run) == [faulting.id])
 
         let counts = host.surfaceUnresolvedNodes(run)
         #expect(counts.implemented == 0 && counts.failed == 1)
@@ -82,6 +85,7 @@ struct SZHostRunAccountingTests {
         let run = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "run"), instruction: "",
                              ownsGraphOp: false, workSet: Set(nodes.map(\.id)))
         run.promoted = promoted
+        run.everPromoted = promoted
         host.activeRuns[run.taskID] = run
         return host
     }
@@ -234,6 +238,16 @@ struct SZHostRunAccountingTests {
 
     /// Nothing was left unfinished, so the receipt says what the run BUILT instead of naming a
     /// shortfall that isn't there — and still badges the stop, because that is how it ended.
+    @Test func cancelCountsAPromotedNodeReportingARuntimeFaultAsUnfinished() {
+        let a = Self.built()
+        let host = host([a], promoted: [a.id])
+        host.nodeRuntimeErrors = [a.id: "program_source:73: error: cannot combine with previous 'float'"]
+        host.cancelRun()
+        let receipts = host.store.messages(for: .director).compactMap(\.receipt)
+        #expect(receipts.map(\.label) == ["1 node unfinished"])
+        #expect(receipts.map(\.conclusion) == [.cancelled])
+    }
+
     @Test func cancelWithNothingLeftUnfinishedReportsWhatItBuilt() {
         let host = host([Self.built()])
         host.cancelRun()

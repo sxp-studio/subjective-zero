@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The bytes a cold turn reads ABOVE its brief when its node declares `context: conversation`: the
-// scope's prior conversation as `SZWorld.conversation` projects it, labeled and bounded. The user's
-// opening message always rides (it is what the conversation is for), then the tail: the last 20
-// messages within ~8 KB, whole messages dropped oldest-first when the budget runs out, and the
-// agents' own past replies cut to 600 characters so the budget goes to what the user said. Data
-// only — the transcript IS the context, no framing prose beyond the one-line header. The seam a
-// future memory system replaces.
+// scope's prior conversation as `SZWorld.conversation` projects it, labeled and bounded (the user's
+// opening message, then the last 20 messages within ~8 KB). Data only — the transcript IS the
+// context, no framing prose beyond the one-line header. The seam a future memory system replaces.
 import Foundation
 import SZCore
 
 public enum SZConversationRecap {
     public static let messageLimit = 20
     public static let characterLimit = 8_000
-    /// An assistant's or Director's own past reply is kept to this many characters. User words and
-    /// build receipts are never cut: a Director that wrote 3 KB a turn once pushed the user's brief
-    /// out of an 8 KB window by turn four and spent the night building the wrong shape.
+    /// An agent's own past reply is kept to this many characters, so its narration cannot crowd out
+    /// the user's words. User words and build receipts are never cut.
     public static let narrationLimit = 600
 
     /// nil when there is nothing to catch up on.
@@ -22,7 +18,13 @@ public enum SZConversationRecap {
                               nodes: [(id: SZNodeID, title: String)]) -> String? {
         guard !messages.isEmpty else { return nil }
         let brief = messages.first { $0.role == .user }
-        let briefBlock = brief.map(block)
+        // The opening message is pinned whole, up to the budget: a giant paste is cut from the end,
+        // keeping the label and the opening words the pin exists for.
+        let briefBlock = brief.map { first -> String in
+            let rendered = block(first)
+            guard rendered.count > characterLimit else { return rendered }
+            return String(rendered.prefix(characterLimit)) + "\n(…truncated)"
+        }
         // Newest to oldest over the tail, whole messages, until the budget is spent. The newest
         // block always stays, however large.
         var kept: [(message: SZChatMessage, block: String)] = []
@@ -38,7 +40,7 @@ public enum SZConversationRecap {
         let omitted = messages.count - kept.count - (pinned == nil ? 0 : 1)
 
         var lines: [String] = []
-        if let pinned { lines.append(block(pinned)) }
+        if pinned != nil, let briefBlock { lines.append(briefBlock) }
         if omitted > 0 { lines.append("(…\(omitted) earlier turns omitted)") }
         var body = kept.map(\.block).joined(separator: "\n")
         // One message alone past the budget (a giant paste) is cut from the front, as before.

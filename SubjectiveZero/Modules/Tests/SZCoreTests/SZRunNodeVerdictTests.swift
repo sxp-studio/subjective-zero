@@ -90,15 +90,17 @@ import Testing
         }
     }
 
-    /// The incident this row exists for: a node promotes green, its shader fails at first frame, and
-    /// the run ended "built 6 nodes" over a red card the user had to point at. The fault fails the
-    /// build this run made; a fault on a node the run never promoted is not its verdict.
+    /// A node promotes green, then its shader fails at first frame: the fault fails the build. The
+    /// caller passes a fault only for a build this run made (`everPromoted`), so `promoted` here is
+    /// the per-dispatch flag and does not gate it.
     @Test func aPromotedNodeReportingARuntimeFaultFails() {
         for phase in Self.quietPhases {
             #expect(V.classify(node: Self.node(nil), promoted: true, state: Self.reported(phase),
                                runtimeFault: "half is a reserved type") == .failedRuntimeFault)
             #expect(V.classify(node: Self.node(nil), promoted: false, state: Self.reported(phase),
-                               runtimeFault: "half is a reserved type") == .implemented)
+                               runtimeFault: "half is a reserved type") == .failedRuntimeFault)
+            #expect(V.classify(node: Self.node(nil), promoted: false, state: Self.reported(phase),
+                               runtimeFault: nil) == .implemented)
         }
         #expect(V.classify(node: Self.node(nil), promoted: true, state: nil, runtimeFault: "x") == .failedRuntimeFault)
         #expect(!V.failedRuntimeFault.isImplemented)

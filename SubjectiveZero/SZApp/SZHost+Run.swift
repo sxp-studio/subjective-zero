@@ -220,17 +220,13 @@ extension SZHost {
         return (result, turnID)
     }
 
-    /// The nodes a run still owes, read live for every Director brief and dispatch: its work-set
-    /// nodes that still need implementing, plus any it promoted that now report a fault at render
-    /// (a shader that failed at first frame). THIS run's work set, never the host-wide union:
-    /// another live run's nodes are not ours to dispatch to, and delivering to one would present a
-    /// claim we do not hold (deliver's holder guard would trip). The faulting node stays owed so the
-    /// reconcile turn reads the fault and the retry continues the agent's own session; a run once
-    /// ended "built 6 nodes" over a red card the user had to point at.
+    /// What a run still owes, read live for every Director brief and dispatch: its own work-set
+    /// nodes that need implementing (another run's are not ours to dispatch), plus any node it
+    /// promoted that reports a fault at render, so the reconcile turn sees the fault.
     func owedWork(of run: SZRunState) -> [SZNodeID] {
         let nodes = store.project?.graph.nodes ?? []
         var owed = nodes.filter(\.needsImplementation).map(\.id).filter(run.workSet.contains)
-        for node in nodes where run.promoted.contains(node.id) && nodeRuntimeErrors[node.id] != nil
+        for node in nodes where run.everPromoted.contains(node.id) && nodeRuntimeErrors[node.id] != nil
             && !owed.contains(node.id) {
             owed.append(node.id)
         }
@@ -247,13 +243,10 @@ extension SZHost {
         return agentSessions[SZChatScope.node(id).key] != nil
     }
 
-    /// Whether a finished turn's session is kept for the scope's next one. A FAILED turn leaves no
-    /// session behind: codex emits a resumable `thread.started` before the backend rejects the
-    /// request, and resuming it would replay that error (a failed resume is the chat lane's
-    /// business, `dropSessionAfterFailedResume`). The one exception is a turn OUR budget stopped:
-    /// the CLI was working when the host killed it and its session holds that work, so the next
-    /// attempt continues it instead of starting the node over (two 15-minute attempts on one node
-    /// once both started from nothing).
+    /// Whether a finished turn's session is kept for the scope's next one. A failed turn leaves no
+    /// session (codex emits a resumable `thread.started` before rejecting the request, and resuming
+    /// it would replay the error), except one our budget stopped: that session holds the work, so
+    /// the next attempt continues it instead of starting over.
     nonisolated static func keepsSession(pin: Bool, slotUnchanged: Bool, failed: Bool, timedOut: Bool) -> Bool {
         pin && slotUnchanged && (!failed || timedOut)
     }
@@ -1362,7 +1355,7 @@ extension SZHost {
             guard let node = store.project?.graph.node(id: id) else { continue }   // removed mid-run (merge)
             let verdict = SZRunNodeVerdict.classify(node: node, promoted: run.promoted.contains(id),
                                                     state: nodeAgentState[id],
-                                                    runtimeFault: nodeRuntimeErrors[id])
+                                                    runtimeFault: run.everPromoted.contains(id) ? nodeRuntimeErrors[id] : nil)
             if verdict.isImplemented {
                 implemented += 1
                 retireHostFailure(id)   // no red pill on a node this run just counted built
@@ -1460,7 +1453,9 @@ extension SZHost {
         var implemented = 0, unfinished = 0
         for id in accountedWork(run) {
             guard let node = store.project?.graph.node(id: id) else { continue }
-            if node.needsImplementation { unfinished += 1 } else { implemented += 1 }
+            // A promoted node that reports a fault at render is still owed (`owedWork`).
+            let faulted = run.everPromoted.contains(id) && nodeRuntimeErrors[id] != nil
+            if node.needsImplementation || faulted { unfinished += 1 } else { implemented += 1 }
         }
         return (implemented, unfinished)
     }
@@ -1549,11 +1544,9 @@ extension SZHost {
         return orphaned
     }
 
-    /// A run that ended without handing its agent a note leaves the words undelivered. They are
-    /// dropped and the transcript says so once. They are never re-minted as a build: a note is
-    /// words about a node's code, and seven notes once came back as seven Director builds that
-    /// each read the whole graph to find nothing to do. Wiring the Director could not lay is a
-    /// flow arrow (`addConnection`), which the next build over that node wires.
+    /// A run that ended without handing its agent a note leaves the words undelivered: dropped, and
+    /// said once in the transcript. Never re-minted as a build, which would only re-read a graph
+    /// with nothing to do.
     func dropUndeliveredSteers(for run: SZRunState) {
         let orphaned = takeUnconsumedSteers(for: run)
         guard !orphaned.isEmpty else { return }

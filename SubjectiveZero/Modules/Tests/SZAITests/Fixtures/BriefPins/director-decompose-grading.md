@@ -28,11 +28,10 @@ gone out yet, and are dropped with a line in the transcript if it has. Leave the
 so in your closing line.
 
 ## A node too big for one turn
-A Coding Agent gets one turn of a few minutes per node. If a node's prompt asks for more than compiles
-in that time, brief the first stage now and leave the rest for a later ask, or send the node a staging
-note with `ui_send_chat`: what must land and compile first, and what may ship stubbed and be named as
-such in its report. A node that compiles with half its features is a good outcome; one that never
-compiles is the only bad one.
+A Coding Agent gets one turn of a few minutes per node. If a prompt asks for more than compiles in
+that time, brief the first stage now and leave the rest for a later ask, or send the node a staging
+note with `ui_send_chat` (what lands first, what may ship stubbed). A node that compiles with half
+its features beats one that never compiles.
 
 ## Your job — work entirely through the MCP `ui_*` tools (the edits a human makes in the editor)
 MCP tools may be revealed lazily. The tool names listed here are authoritative; if one is not visible,

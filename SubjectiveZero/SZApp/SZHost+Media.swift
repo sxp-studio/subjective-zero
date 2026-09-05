@@ -24,14 +24,10 @@ extension SZHost {
         return SZProjectMedia.resolve(value, in: projectURL)
     }
 
-    /// Copy a file port's newly-set file into the project, then re-point the port at the copy. No-op
-    /// unless the value names a file OUTSIDE the bundle or a chat attachment — which is what makes it
-    /// idempotent: the value it writes back can never satisfy the guard a second time.
-    ///
-    /// An absolute path that already points into `media/` is a reference, not a new copy: it is
-    /// stored in the portable relative form with no bytes moved. Left absolute, it breaks the moment
-    /// the bundle moves (Save As out of an Untitled project deletes the old folder), which is how a
-    /// Director-placed photo went dark mid-show.
+    /// Bring a file port's newly-set file into the project: a file outside the bundle or a chat
+    /// attachment is copied into `media/` and the port re-pointed at the copy; an absolute path
+    /// already under `media/` is stored relative with no bytes moved (left absolute, it breaks when
+    /// the bundle moves). Idempotent: the value written back never satisfies either guard again.
     func importMediaIfExternal(node: SZNodeID, port: String, value: SZPortValue,
                                origin: SZMutationOrigin = .user) {
         guard case .string(let path) = value,

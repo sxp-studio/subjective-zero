@@ -70,7 +70,7 @@ extension SZStore {
     @discardableResult
     public func tryConnect(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind) -> SZConnectResult {
         guard let graph = project?.graph else { return .noProject }
-        if kind == .data { assertFenceCleared([from.node, to.node]) }   // a flow arrow is open by design
+        if kind == .data { assertFenceCleared([from.node, to.node]) }   // an agent's arrow is open (SZHost.addConnection)
         // Flow compares node + pin per end (markers "" / "flow" agree); a different pin is a new intent.
         if let existing = graph.connections.first(where: {
             $0.kind == kind && (kind == .flow

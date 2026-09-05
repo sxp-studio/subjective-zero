@@ -1194,6 +1194,7 @@ final class SZHost {
         clearTransientAgentStateAfterPromote(id)  // a green compile outranks any earlier utterance
         classifyRebuild(node: id)                 // re-audit the promoted source: mismatch is derived, never latched
         activeRun(holding: id)?.promoted.insert(id)   // that run's success evidence
+        activeRun(holding: id)?.everPromoted.insert(id)
         // The staged folder has done its job — drop it so a later compile can't re-promote stale bytes
         // (it must re-stage). Failed promotes above keep it for inspection; the rest of `.staging/`
         // (instance.lock, message-queue.json) is not ours to touch.
@@ -1773,9 +1774,8 @@ final class SZHost {
 
     /// The status lines for every node that has reported one — the reconcile loop's signal
     /// (`SZOrchestrationContext.nodeStatus`) and `debug_agent_state`'s `statuses` payload. A fault
-    /// the node reports at render (`ctx.reportError`) is its status unless its agent has a problem
-    /// of its own to report: the reconcile brief and the retry then read the shader error itself,
-    /// not "(no status reported)".
+    /// the node reports at render (`ctx.reportError`) becomes its status unless a red pill already
+    /// sits on it, so the reconcile brief and the retry read the shader error itself.
     var nodeStatusLines: [SZNodeID: String] {
         var lines = nodeAgentState.compactMapValues { $0.phase == .idle ? nil : $0.line }
         for (id, fault) in nodeRuntimeErrors {

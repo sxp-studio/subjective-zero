@@ -82,7 +82,7 @@ A node takes **exactly one of three forms** — enforced at decode:
 | form | body | outcomes |
 |---|---|---|
 | `"step": "<folder>"` | the compiled `Step.swift` in the agent's pack | whatever the step's own exported declaration names |
-| `"turn": { "brief", "session"?, "tools"?, "slot"?, "context"? }` | a full agent turn; the mustache brief (named by stem) IS the body. `"context": "conversation"` puts the scope's prior conversation above a spawned turn's brief (a resumed session already holds it, so the pair is shape-gated); the recap keeps the user's opening message plus the last 20 messages within about 8,000 characters, dropping whole older messages first and cutting the agents' own past replies to 600 characters | fixed `ok` / `error` — process truth only, content never routes |
+| `"turn": { "brief", "session"?, "tools"?, "slot"?, "context"? }` | a full agent turn; the mustache brief (named by stem) IS the body. `"context": "conversation"` puts the scope's prior conversation above a spawned turn's brief (a resumed session already holds it, so the pair is shape-gated); the recap keeps the user's opening message plus a bounded tail (last 20 messages, about 8,000 characters) | fixed `ok` / `error` — process truth only, content never routes |
 | `"dispatch": { "to" }` | fan the run's work set out to a seat — and **wait for the set** | `settled`, when the last lands (or the watchdog synthesizes the stragglers) |
 
 **Model slots** are the graph's declared kinds of model work — what a routing profile fills

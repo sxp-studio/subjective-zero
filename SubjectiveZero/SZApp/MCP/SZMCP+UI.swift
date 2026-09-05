@@ -486,9 +486,9 @@ extension SZHostBridge {
             }
             return (upsert, obj["remove"] as? [String] ?? [])
         }
-        // A file-port default declared here stays exactly as written, absolute path and all: this tool
-        // declares a port SURFACE, and an agent that means to set a VALUE has `ui_set_input_default`,
-        // which brings the file into the project. Deliberate, not an omission.
+        // This tool declares a port SURFACE; `ui_set_input_default` is how an agent sets a VALUE. A
+        // file-port `def` that does change a value here rides the same import tail as any committed
+        // write (`applyPortValueChanges`), so a machine path never persists.
         let inputs = try ports("inputs"), outputs = try ports("outputs")
         let problems = inputs.upsert.compactMap(\.enumDefaultProblem)
         guard problems.isEmpty else { throw SZMCPError.message(problems.joined(separator: " ")) }

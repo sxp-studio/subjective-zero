@@ -79,7 +79,7 @@ struct SZConversationRecapTests {
         let many = (1...30).map { SZChatMessage(role: .user, text: String(repeating: "y", count: 600) + "\($0)") }
         let recap = try #require(SZConversationRecap.render(many, nodes: []))
         #expect(!recap.contains("(…truncated)"))
-        #expect(recap.contains("user: yyy"))
+        #expect(recap.contains("omitted)\nuser: " + String(repeating: "y", count: 600)))   // the oldest kept message starts whole
         #expect(recap.contains("y1\n(…"))                       // the brief, then the omission header
         #expect(recap.contains("y30\n"))                         // the newest message, whole
         let kept = recap.components(separatedBy: "user: ").count - 1
@@ -103,6 +103,23 @@ struct SZConversationRecapTests {
         let short = try #require(SZConversationRecap.render(Array(messages.prefix(3)), nodes: []))
         #expect(short.components(separatedBy: "projection mapping").count == 2)
         #expect(!short.contains("omitted"))
+    }
+
+    /// A giant opening paste is pinned only up to the budget, cut from the end so the label and the
+    /// opening words survive, and the newest message still rides.
+    @Test func aGiantOpeningMessageIsPinnedOnlyUpToTheBudget() throws {
+        let recap = try #require(SZConversationRecap.render([
+            SZChatMessage(role: .user, text: String(repeating: "x", count: 50_000)),
+            SZChatMessage(role: .user, text: "hi"),
+        ], nodes: []))
+        #expect(recap.hasPrefix("""
+        Prior conversation restored from the project (you are a fresh session; catch up from this):
+        ---
+        user: xxxx
+        """))
+        #expect(recap.contains("(…truncated)"))
+        #expect(recap.hasSuffix("user: hi\n---"))
+        #expect(recap.count < 8_400)
     }
 
     /// The budget is spent on the user's words: an agent's own past reply is cut, the user's and a

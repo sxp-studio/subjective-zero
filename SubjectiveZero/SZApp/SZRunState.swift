@@ -54,6 +54,9 @@ import SZCore
     /// Nodes `promoteStagedNode` landed for their LATEST dispatch — this run's success evidence.
     /// Cleared per node at each redispatch: a redispatch says the previous build did not settle it.
     var promoted: Set<SZNodeID> = []
+    /// Nodes this run promoted at any point, never cleared: a render fault on one of these is this
+    /// run's to answer even after a redispatch that died.
+    var everPromoted: Set<SZNodeID> = []
     /// This run's finished turns, folded into the run-complete rollup.
     var turnLog: [SZTurnBreakdown.RunTurn] = []
     /// The traversal task, so Stop can cancel exactly this run.
