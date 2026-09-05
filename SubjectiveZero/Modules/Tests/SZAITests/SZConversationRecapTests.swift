@@ -56,7 +56,14 @@ struct SZConversationRecapTests {
     @Test func theTailIsBoundedByMessagesAndCharacters() throws {
         let many = (1...25).map { SZChatMessage(role: .user, text: "m\($0)") }
         let recap = try #require(SZConversationRecap.render(many, nodes: []))
-        #expect(recap.contains("(…5 earlier turns omitted)"))
+        // The opening message rides above the cut; the four between it and the tail are omitted.
+        #expect(recap.hasPrefix("""
+        Prior conversation restored from the project (you are a fresh session; catch up from this):
+        ---
+        user: m1
+        (…4 earlier turns omitted)
+        user: m6
+        """))
         #expect(!recap.contains("user: m5\n"))
         #expect(recap.contains("user: m25"))
 
@@ -66,12 +73,52 @@ struct SZConversationRecapTests {
         #expect(clipped.count < 8_200)
     }
 
-    @Test func theOmissionHeaderSurvivesTheCharacterCut() throws {
+    /// The character budget drops WHOLE older messages, never shears one in half: a sheared
+    /// message lost its label and its first words, and the shear once ate the user's brief.
+    @Test func theCharacterBudgetDropsWholeOlderMessages() throws {
         let many = (1...30).map { SZChatMessage(role: .user, text: String(repeating: "y", count: 600) + "\($0)") }
         let recap = try #require(SZConversationRecap.render(many, nodes: []))
-        #expect(recap.contains("(…10 earlier turns omitted)"))
-        #expect(recap.contains("(…truncated)"))
-        #expect(recap.range(of: "omitted")!.lowerBound < recap.range(of: "truncated")!.lowerBound)
+        #expect(!recap.contains("(…truncated)"))
+        #expect(recap.contains("user: yyy"))
+        #expect(recap.contains("y1\n(…"))                       // the brief, then the omission header
+        #expect(recap.contains("y30\n"))                         // the newest message, whole
+        let kept = recap.components(separatedBy: "user: ").count - 1
+        #expect(kept < 20 && kept > 8)                           // budget-bound, not message-bound
+        #expect(recap.contains("(…\(30 - kept) earlier turns omitted)"))
+        #expect(recap.count < 8_800)
+    }
+
+    /// The first thing the user said is what the conversation is for. It stays in view with its
+    /// attachment when the tail has long moved past it, and is not repeated while the tail holds it.
+    @Test func theOpeningMessageIsPinnedAboveTheTailWithItsAttachment() throws {
+        let photo = SZChatAttachment(filename: "wall.jpg", url: URL(filePath: "/tmp/wall.jpg"),
+                                     bundlePath: "attachments/wall.jpg", byteCount: 1, isImage: true)
+        let brief = SZChatMessage(role: .user, text: "projection mapping on this wall", attachments: [photo])
+        var messages = [brief]
+        for i in 1...29 { messages.append(SZChatMessage(role: i.isMultiple(of: 2) ? .assistant : .user, text: "t\(i)")) }
+        let recap = try #require(SZConversationRecap.render(messages, nodes: []))
+        #expect(recap.contains("user: projection mapping on this wall\n[attached: /tmp/wall.jpg]\n(…9 earlier turns omitted)"))
+        #expect(recap.components(separatedBy: "projection mapping").count == 2)
+
+        let short = try #require(SZConversationRecap.render(Array(messages.prefix(3)), nodes: []))
+        #expect(short.components(separatedBy: "projection mapping").count == 2)
+        #expect(!short.contains("omitted"))
+    }
+
+    /// The budget is spent on the user's words: an agent's own past reply is cut, the user's and a
+    /// build's never are.
+    @Test func anAgentsOwnPastReplyIsCutAndTheUsersIsNot() throws {
+        let long = String(repeating: "z", count: 2_000)
+        let recap = try #require(SZConversationRecap.render([
+            SZChatMessage(role: .user, text: long),
+            SZChatMessage(role: .assistant, text: long),
+            SZChatMessage(role: .director, text: long),
+            SZChatMessage(role: .assistant, text: long, receipt: SZChatReceipt(label: long, conclusion: .ended)),
+        ], nodes: []))
+        #expect(recap.contains("user: " + long + "\n"))
+        #expect(recap.contains("assistant: " + String(repeating: "z", count: 600) + " […]\n"))
+        #expect(recap.contains("director agent: " + String(repeating: "z", count: 600) + " […]\n"))
+        #expect(recap.contains("build: " + long + "\n"))
     }
 
     @Test func aRunReplaysInOrderWithItsReceipt() throws {
