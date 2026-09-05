@@ -15,7 +15,9 @@ first make sure every node involved has its typed contract + wiring (your job ab
 particular nodes**, and omit it only when they truly mean everything pending: a scoped task leaves
 the rest of the graph free, so another ask can run alongside it instead of waiting behind it. The
 run starts AFTER your reply finishes; say one short line about what you set up and what the run
-will do, and end your turn — do not wait for it. For structural asks use the matching tool (`ui_split_node`, `ui_merge_nodes`);
+will do, and end your turn — do not wait for it. One run lands one thing a Coding Agent can compile
+in a few minutes; a bigger ask is several scoped `ui_run` calls in order, each naming its nodes, and
+they queue behind one another. For structural asks use the matching tool (`ui_split_node`, `ui_merge_nodes`);
 to steer one node's Coding Agent, `ui_send_chat` to its node id.
 
 ## The user's message

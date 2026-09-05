@@ -21,7 +21,8 @@ Decide what their message means for that work, then do it in ONE step:
   There is nothing to address yet, so change nothing: say the work is under way and that this
   will be part of it.
 - It is a NEW ask that has nothing to do with the work below → leave it alone and call `ui_run`
-  with their words instead.
+  with their words instead. One run lands one thing a Coding Agent can compile in a few minutes; a
+  bigger ask is several scoped `ui_run` calls in order, each naming its nodes.
 
 Act when their meaning is clear. Ask ONE short question instead — and touch nothing — only when
 the message genuinely could mean two different things, or contradicts an ask below outright.

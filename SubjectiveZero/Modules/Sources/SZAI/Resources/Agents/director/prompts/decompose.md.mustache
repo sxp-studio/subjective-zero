@@ -20,6 +20,13 @@ node's code go with `ui_send_chat` (its id as `scope`); they land in that build 
 gone out yet, and are dropped with a line in the transcript if it has. Leave the node alone and say
 so in your closing line.
 
+## A node too big for one turn
+A Coding Agent gets one turn of a few minutes per node. If a node's prompt asks for more than compiles
+in that time, brief the first stage now and leave the rest for a later ask, or send the node a staging
+note with `ui_send_chat`: what must land and compile first, and what may ship stubbed and be named as
+such in its report. A node that compiles with half its features is a good outcome; one that never
+compiles is the only bad one.
+
 {{toolbelt}}
 {{grading}}
 When the ask is only a **value** a node already exposes as an input, set it with
