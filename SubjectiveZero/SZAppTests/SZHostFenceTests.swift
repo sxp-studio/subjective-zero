@@ -45,6 +45,37 @@ struct SZHostFenceTests {
         }
     }
 
+    /// A flow arrow is drawing intent, not a mutation of the held node: a bystander Director may
+    /// draw the wire it could not lay, and the next build over that node wires it. The data edge
+    /// it stands for stays fenced.
+    @Test func aBystanderAgentsFlowArrowLandsOnAHeldNodeWhileItsDataEdgeIsRefused() {
+        let host = SZHost()
+        let out = SZPort(name: "output", type: .texture), inp = SZPort(name: "plate", type: .texture)
+        let source = SZNode(kind: .generated, title: "Plate Source",
+                            contract: SZNodeContract(title: "Plate Source", sfSymbol: "cube", summary: "",
+                                                     outputs: [out]),
+                            position: SZPoint(x: 0, y: 0))
+        let held = SZNode(kind: .generated, title: "Brick Cells",
+                          contract: SZNodeContract(title: "Brick Cells", sfSymbol: "cube", summary: "",
+                                                   inputs: [inp]),
+                          position: SZPoint(x: 1, y: 0))
+        host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [source, held])))
+        _ = hold(held.id, on: host, label: "run")
+
+        SZToolCaller.$claim.withValue(SZClaimToken(label: "director turn")) {
+            let data = host.addConnection(from: SZPortRef(node: source.id, port: "output"),
+                                          to: SZPortRef(node: held.id, port: "plate"), kind: .data,
+                                          origin: .agent)
+            #expect(data == nil)
+            let arrow = host.addConnection(from: SZPortRef(node: source.id, port: "output"),
+                                           to: SZPortRef(node: held.id, port: "plate"), kind: .flow,
+                                           origin: .agent)
+            #expect(arrow != nil)
+        }
+        #expect(host.store.project?.graph.connections.filter { $0.kind == .flow }.count == 1)
+        #expect(host.store.project?.graph.connections.filter { $0.kind == .data }.isEmpty == true)
+    }
+
     @Test func aBystanderAgentIsRefusedOnAHeldNode() {
         let host = SZHost()
         let node = SZNodeID()

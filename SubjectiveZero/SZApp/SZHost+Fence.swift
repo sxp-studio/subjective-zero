@@ -12,7 +12,8 @@
 // - FENCED (this file's concern): delete, connect/disconnect/reconnect, port edits, content
 //   updates, input defaults, display toggle, node body, split/merge target.
 // - OPEN by documented design: move/tidy (a locked node stays repositionable —
-//   SZNodeCanvasContentView) and add (a new node can't be held by anyone).
+//   SZNodeCanvasContentView), add (a new node can't be held by anyone), and an agent's flow
+//   arrow (drawing intent for a wire it could not lay; `SZHost.addConnection`).
 // Delete is fenced one notch tighter than the rest (`deleteDenial`): a node the fleet is still
 // implementing keeps its card live but cannot be removed, because there is no undo.
 import Foundation
@@ -63,11 +64,12 @@ extension SZHost {
             }
             if origin == .user, !userLockDenies(holder: holder, node: id) { continue }
             // Two readers, two remedies. A user can wait and can press Stop; an agent turn can do
-            // neither, so telling it to wait buys a promise the turn cannot keep. Its remedy is to
-            // hand the words to the build that holds the node, which `ui_send_chat` does.
+            // neither, so telling it to wait buys a promise the turn cannot keep. A wire it could
+            // not lay is drawn as a flow arrow; words about the node's code go to its build.
             return origin == .agent
-                ? "node '\(title)' is being built by another request. Send your note for it with "
-                    + "ui_send_chat, then leave the node alone."
+                ? "node '\(title)' is being built by another request. Draw a wire as a flow arrow "
+                    + "(ui_connect kind flow, both ports named); send words about its code with "
+                    + "ui_send_chat; then leave the node alone."
                 : "node '\(title)' is held by \(holder.label) — wait for it to finish or stop it"
         }
         return nil

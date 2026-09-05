@@ -595,8 +595,7 @@ extension SZHost {
                 return .waiting
             }
             // Words are not nothing to do. "Nothing to build there — say what should change" used
-            // to answer an ask that had just said, and it is what a steer coming back as its own
-            // ask hits once its node is built and clean. A run with an instruction goes through:
+            // to answer an ask that had just said. A run with an instruction goes through:
             // the Director's turn can set a default, re-brief, or retype a port, and the work it
             // creates joins the run. Only a WORDLESS ask over nothing buildable is a dead end.
             if instruction.isEmpty {
@@ -702,8 +701,8 @@ extension SZHost {
                 // The CAPTURED run, never a live lookup — after an eager `cancelRun` this is the
                 // zombie task's idempotent second settle, and the slot may hold a newer run.
                 let live = isLive(run)
-                let orphanedSteers = live ? takeUnconsumedSteers(for: run) : []
                 if live {
+                    dropUndeliveredSteers(for: run)
                     activeRuns[taskID] = nil
                     // Only THIS run's dispatch prompts — a sibling run's are still live evidence.
                     dispatchPrompts = dispatchPrompts.filter {
@@ -722,14 +721,6 @@ extension SZHost {
                 sealLeakedAgentGraphRuns(thread: thread)
                 flushAllTranscripts()      // run end = flush point (success, throw, or cancel)
                 persistAgentSessions()
-                // A steer this run never delivered becomes an ordinary scheduled ask over its
-                // node. Last in the defer so the claim is gone and the run deregistered: minting
-                // re-enters the pump, and a task whose node still read as held would fold itself
-                // straight back into the run that is dying. Queueing is a strip row, not a line.
-                for (node, text) in orphanedSteers {
-                    mintRun(instruction: text, title: SZTask.title(fromInstruction: text,
-                                                                   nodeCount: 1), nodes: [node])
-                }
             }
             do {
                 try await runBuildDelivery(
@@ -1500,9 +1491,8 @@ extension SZHost {
     /// words back. A steer is run-scoped: leaving one queued would leak a dead run's steering
     /// into an unrelated next run.
     ///
-    /// The caller decides what the words are worth. A run that ENDED never gave its agent the
-    /// note, so the ask comes back scheduled (the defer); a run the user STOPPED should not
-    /// resurrect the work they stopped, so its notes are dropped with it.
+    /// The caller decides what the words are worth: a run that ENDED says so once
+    /// (`dropUndeliveredSteers`); a run the user STOPPED drops them silently.
     ///
     /// Scoped to the run's own nodes for the same reason the drain is: sweeping the host-wide
     /// mailbox meant one run ending destroyed every concurrent run's pending steering.
@@ -1516,6 +1506,19 @@ extension SZHost {
             mailbox.markFailed(envelope.id, reason: "the run ended before the steer was consumed")
         }
         return orphaned
+    }
+
+    /// A run that ended without handing its agent a note leaves the words undelivered. They are
+    /// dropped and the transcript says so once. They are never re-minted as a build: a note is
+    /// words about a node's code, and seven notes once came back as seven Director builds that
+    /// each read the whole graph to find nothing to do. Wiring the Director could not lay is a
+    /// flow arrow (`addConnection`), which the next build over that node wires.
+    func dropUndeliveredSteers(for run: SZRunState) {
+        let orphaned = takeUnconsumedSteers(for: run)
+        guard !orphaned.isEmpty else { return }
+        let titles = Set(orphaned.map { store.project?.graph.node(id: $0.node)?.title ?? "a node" }).sorted()
+        narrateDirector("A note for \(titles.joined(separator: ", ")) was not delivered before that build "
+            + "ended. Ask again if it still matters.")
     }
 }
 

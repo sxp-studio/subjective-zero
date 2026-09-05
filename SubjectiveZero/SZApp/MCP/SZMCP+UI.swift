@@ -355,7 +355,7 @@ extension SZHostBridge {
             }
             throw SZMCPError.message("incompatible \(kindRaw) connection \(fromNode.title):\(fromPort) → \(toNode.title):\(toPort) (port types differ)")
         }
-        try requireUnfenced([from, to])
+        if kind == .data { try requireUnfenced([from, to]) }   // an arrow is open, see addConnection
         // A flow ref is the plain node-to-node marker unless the caller explicitly named a declared
         // data port — then the flow edge is PINNED to that slot (`SZConnection.pinnedPort`), like a
         // canvas drop on a blue dot. The "output"/"input" defaults never pin.

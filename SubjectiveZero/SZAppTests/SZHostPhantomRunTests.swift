@@ -102,9 +102,9 @@ struct SZHostPhantomRunTests {
         #expect(pair.host.pendingDirectorMessages(dispatching: [node.uuidString]).isEmpty)
     }
 
-    /// The line #48 is named for. A steer that comes back as its own ask lands here once its node
-    /// is built and clean, and "Nothing to build there — say what should change" answered an ask
-    /// that had just said. Words earn a run; the Director's turn is what acts on them.
+    /// The line #48 is named for. A worded ask over a node that is built and clean used to get
+    /// "Nothing to build there — say what should change", answering an ask that had just said.
+    /// Words earn a run; the Director's turn is what acts on them.
     @Test func aWordedAskOverACleanNamedNodeIsNotRefusedOutright() {
         let host = SZHost()
         let node = SZNodeID()

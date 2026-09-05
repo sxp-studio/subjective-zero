@@ -342,12 +342,11 @@ extension SZChatReceipt {
         return "waiting on \(target)"
     }
 
-    /// The quiet line under the pill: where that part of the ask went, and that nobody has to
-    /// ask again. Says what happens, not more: it lands in that build if the order has not gone
-    /// out, or runs after it. A Stop on that build drops it, by that build's own rule.
+    /// The quiet line under the pill: where that part of the ask went. It lands in that build if
+    /// the order has not gone out; a note that build never delivers is dropped and said once.
     private static func busyReason(_ busy: [String]) -> String {
         let who = busy.count == 1 && !busy[0].isEmpty ? "\(busy[0]) is" : "\(busy.count) nodes are"
-        return "\(who) being built by another request. That part was sent to it: it lands there, or runs after it."
+        return "\(who) being built by another request. That part was sent to it and lands there."
     }
 }
 

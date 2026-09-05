@@ -365,6 +365,25 @@ struct SZHostRunScopingTests {
         #expect(host.mailbox.envelope(for: other)?.state == .queued)
     }
 
+    /// A note the run never delivered is dropped and said once. It is never minted as a build:
+    /// seven such notes once came back as seven Director builds that found nothing to do.
+    @Test func aRunEndingDropsItsUndeliveredSteersAndSaysSo() {
+        let host = SZHost()
+        let node = SZNode(kind: .prompt, title: "Warm Orange", prompt: "warm it",
+                          position: SZPoint(x: 0, y: 0))
+        host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [node])))
+        let a = run(host, [node.id], "run a")
+        let id = steer(host, to: node.id, "make it cooler")
+
+        host.dropUndeliveredSteers(for: a)
+
+        #expect(host.mailbox.envelope(for: id)?.state == .failed)
+        #expect(host.pendingTasks.isEmpty)
+        let said = host.store.messages(for: .director).last?.text ?? ""
+        #expect(said.contains("Warm Orange"))
+        #expect(said.contains("not delivered"))
+    }
+
     @Test func onlyTheOwningRunSettlesAStagedGraphOp() {
         let host = SZHost()
         let a = run(host, [SZNodeID()], "run a")

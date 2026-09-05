@@ -1365,7 +1365,11 @@ final class SZHost {
     @discardableResult
     func addConnection(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind,
                        origin: SZMutationOrigin = .user) -> SZConnectionID? {
-        if let denial = fenceDenial(nodes: [from.node, to.node], origin: origin) {
+        // An agent's flow arrow is drawing intent, not a mutation of a held node: it is how the
+        // Director records a wire it could not lay because another build holds an end, for the
+        // next build over that node to wire. Data edges stay fenced.
+        if !(kind == .flow && origin == .agent),
+           let denial = fenceDenial(nodes: [from.node, to.node], origin: origin) {
             status = denial
             return nil
         }

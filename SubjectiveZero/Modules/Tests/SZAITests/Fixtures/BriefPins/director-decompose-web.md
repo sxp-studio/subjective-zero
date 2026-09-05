@@ -25,9 +25,11 @@ make the camera feed grayscale
 
 ## A node another build is holding
 If an edit is refused because a node is being built by another request, do not wait for it: a turn
-cannot wait. Send your note for that node with `ui_send_chat` (its id as `scope`), leave the node
-alone, and say so in your closing line. The note lands in that build if its order has not gone out
-yet, or runs as its own build after it. Either way nothing is lost and nobody has to ask again.
+cannot wait. A wire you could not lay is drawn instead: `ui_connect` with `"kind": "flow"` and both
+ports named. The host owes that arrow and the next build over the node wires it. Words about the
+node's code go with `ui_send_chat` (its id as `scope`); they land in that build if its order has not
+gone out yet, and are dropped with a line in the transcript if it has. Leave the node alone and say
+so in your closing line.
 
 ## Your job — work entirely through the MCP `ui_*` tools (the edits a human makes in the editor)
 MCP tools may be revealed lazily. The tool names listed here are authoritative; if one is not visible,
