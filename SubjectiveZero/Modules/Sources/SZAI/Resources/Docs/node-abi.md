@@ -91,9 +91,10 @@ bytes. `image-file` and `video-file` in the library both do exactly this.
 
 ## Rules
 
-- **Textures are BGRA8.** The host allocates every node texture as `bgra8Unorm` — you cannot choose the
-  output pixel format. Build any pipeline ONCE in `setup()`; do per-frame work in `update()`, encoding onto
-  `ctx.commandBuffer` (the host commits it).
+- **Textures are BGRA8, at the graph's render size.** The host allocates every node texture as `bgra8Unorm`
+  at the project's render resolution — you cannot choose the output pixel format or size; a source of
+  another size is fitted, letterboxed or cropped inside it by your own sampling. Build any pipeline ONCE in
+  `setup()`; do per-frame work in `update()`, encoding onto `ctx.commandBuffer` (the host commits it).
 - **Read every declared scalar/string input LIVE inside `update(ctx)` every frame** — never hardcode it,
   or the user's editor control becomes a dead knob.
 - A node is **self-contained**: capabilities (camera, microphone, etc.) live in the node's own code (e.g.

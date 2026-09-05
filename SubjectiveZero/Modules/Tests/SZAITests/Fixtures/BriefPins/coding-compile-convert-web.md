@@ -491,13 +491,19 @@ If the node already has a `Card.swift` (it is shown after the source above), kee
 
 ## Workflow — call these MCP tools in order
 
-1. `agent_write_node_staged { "node": "22222222-2222-4222-8222-222222222222", "contract": <the json OBJECT>, "source": "<full Node.js>", "card": "<full Card.swift — optional, see Custom cards>" }`
+1. `agent_write_node_staged { "node": "22222222-2222-4222-8222-222222222222", "contract": <the json OBJECT>, "source": "<full Node.js>" }`
+   — the node first, without a card. Only staged files compile and promote: never draft node source
+   with a general file-writing tool.
 2. `agent_compile_node { "node": "22222222-2222-4222-8222-222222222222" }`
    - if it returns `{ "ok": false, "errors": "..." }` → fix `Node.js` and repeat from step 1.
    - if it returns `{ "ok": true }` → continue.
-3. `agent_report_status { "node": "22222222-2222-4222-8222-222222222222", "status": "ok" }`
+3. If the prompt asks for a custom card, stage it now in a second `agent_write_node_staged` call (same
+   contract and source, plus `"card": "<full Card.swift>"`, see Custom cards) and compile again.
+4. `agent_report_status { "node": "22222222-2222-4222-8222-222222222222", "status": "ok" }`
 
-Keep iterating step 1 ↔ 2 until the build is ok, then report status ok and stop.
+Keep iterating step 1 ↔ 2 until the build is ok, then report status ok and stop. Your turn has a
+budget of minutes, not hours: stage and compile early, and if it runs short, stub what is left so the
+node compiles, and name the stubs in your report.
 
 If after a genuine attempt you CANNOT satisfy the boundary or get a clean build — e.g. the contract
 looks wrong for what's asked, or something only the Director can decide is missing — do NOT loop
