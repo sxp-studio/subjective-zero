@@ -862,7 +862,8 @@ final class SZHost {
     /// then deleted, so a live video node would keep an fd on a path that no longer exists until the
     /// next launch. Re-push every file port resolved against the new home: nodes reload on a changed
     /// path string, which costs a re-seek and is the honest price of moving the file. The stored value
-    /// is untouched — it is relative, so it already followed the bundle.
+    /// is untouched — a file brought in is relative (`importMediaIfExternal` keeps it so), so it
+    /// already followed the bundle; an absolute path outside the bundle stays where it points.
     private func repushMediaPaths(to newURL: URL) {
         guard let graph = store.project?.graph else { return }
         for node in graph.nodes {
@@ -1555,6 +1556,8 @@ final class SZHost {
             if let string = value.string {
                 backend?.setInputString(node: node, port: change.port,
                                         string: runtimeString(string, port: inputs.first { $0.name == change.port }))
+                // The same duty as `setInputDefault`: a file an agent named comes into the project.
+                importMediaIfExternal(node: node, port: change.port, value: value, origin: .agent)
             }
         }
     }

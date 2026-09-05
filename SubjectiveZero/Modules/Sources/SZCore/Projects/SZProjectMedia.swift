@@ -66,18 +66,32 @@ public enum SZProjectMedia {
         return (relative, projectURL.appending(path: relative))
     }
 
-    /// Whether this value names a file OUTSIDE the bundle that should be brought in. False for an
-    /// unset value, for an already-relative one, and for an absolute path already inside the bundle
-    /// — which is what makes the import idempotent however many times a value is re-committed.
+    /// The chat's folder inside the bundle. A file port pointing here is brought into `media/` like
+    /// an outside file: the chat owns these bytes and clearing the chat deletes them, so a node that
+    /// shows one needs its own copy.
+    public static let attachmentsDirectoryName = "attachments"
+
+    /// Whether a bundle-relative path lies in the chat's folder.
+    public static func isAttachment(_ relative: String) -> Bool {
+        relative.hasPrefix(attachmentsDirectoryName + "/")
+    }
+
+    /// Whether this value names a file that should be brought in: one outside the bundle, or a chat
+    /// attachment inside it. False for an unset value, for a relative `media/` one, and for an
+    /// absolute path already under `media/` (that one is stored relative instead, see
+    /// `SZHost.importMediaIfExternal`), which is what makes the import idempotent however many
+    /// times a value is re-committed.
     public static func needsImport(_ value: String, in projectURL: URL) -> Bool {
-        guard !value.isEmpty, isAbsolute(value) else { return false }
-        return relativePath(for: URL(fileURLWithPath: expanded(value)), in: projectURL) == nil
+        guard !value.isEmpty else { return false }
+        guard isAbsolute(value) else { return isAttachment(value) }
+        guard let relative = relativePath(for: URL(fileURLWithPath: expanded(value)), in: projectURL) else { return true }
+        return isAttachment(relative)
     }
 
     /// A leading `~` counts as absolute: it names a place on this machine, not a place in the bundle.
-    static func isAbsolute(_ value: String) -> Bool { value.hasPrefix("/") || value.hasPrefix("~") }
+    public static func isAbsolute(_ value: String) -> Bool { value.hasPrefix("/") || value.hasPrefix("~") }
 
-    static func expanded(_ value: String) -> String { (value as NSString).expandingTildeInPath }
+    public static func expanded(_ value: String) -> String { (value as NSString).expandingTildeInPath }
 }
 
 public extension SZGraph {

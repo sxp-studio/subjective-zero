@@ -37,6 +37,16 @@ private let bundle = URL(fileURLWithPath: "/Volumes/Work/Patches/Depth.subz")
     #expect(!SZProjectMedia.needsImport("media/ABC/IMG.MOV", in: bundle))
 }
 
+/// The chat owns `attachments/`; a node that shows one of its files gets its own copy in `media/`.
+@Test func aChatAttachmentIsBroughtIntoMedia() {
+    let inside = bundle.appending(path: "attachments/53723509/IMG_3171.jpg")
+    #expect(SZProjectMedia.relativePath(for: inside, in: bundle) == "attachments/53723509/IMG_3171.jpg")
+    #expect(SZProjectMedia.isAttachment("attachments/53723509/IMG_3171.jpg"))
+    #expect(SZProjectMedia.needsImport(inside.path, in: bundle))
+    #expect(SZProjectMedia.needsImport("attachments/53723509/IMG_3171.jpg", in: bundle))
+    #expect(!SZProjectMedia.isAttachment("media/ABC/attachments.jpg"))
+}
+
 @Test func aFileOutsideTheBundleIsBroughtIn() {
     #expect(SZProjectMedia.relativePath(for: URL(fileURLWithPath: "/Users/c/Downloads/IMG.MOV"), in: bundle) == nil)
     #expect(SZProjectMedia.needsImport("/Users/c/Downloads/IMG.MOV", in: bundle))

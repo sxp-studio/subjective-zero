@@ -146,12 +146,45 @@ struct SZHostMediaImportTests {
     }
 
     /// An ABSOLUTE path that already points inside the bundle is a reference, not a new copy: it
-    /// becomes the relative form with no second set of bytes.
-    @Test func anAbsolutePathInsideTheProjectBecomesRelativeWithoutCopying() {
-        let project = URL(fileURLWithPath: "/tmp/Patch.subz")
-        let inside = project.appending(path: "media/ABCD/already.MOV")
-        #expect(!SZProjectMedia.needsImport(inside.path, in: project))
-        #expect(SZProjectMedia.relativePath(for: inside, in: project) == "media/ABCD/already.MOV")
+    /// becomes the relative form with no second set of bytes. Left absolute it would break the
+    /// moment the bundle moved, which is how a Director-placed photo went dark after a Save As.
+    @Test func anAbsolutePathInsideTheProjectBecomesRelativeWithoutCopying() async throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let id = SZNodeID()
+        let url = try Self.bundle(in: dir, node: id, path: "")
+        let host = try Self.host(at: url)
+        let existing = "media/ABCD/already.MOV"
+        try Self.file(url.appending(path: existing))
+
+        host.setInputDefault(node: id, port: "path", value: .string(url.appending(path: existing).path))
+        try? await Task.sleep(for: .milliseconds(150))
+        let stored = host.store.project?.graph.node(id: id)?.contract?.inputs
+            .first { $0.name == "path" }?.def
+        #expect(stored == .string(existing))
+        let dirs = try FileManager.default.contentsOfDirectory(atPath: url.appending(path: "media").path)
+        #expect(dirs == ["ABCD"], "a reference into the bundle must not be copied, got \(dirs)")
+    }
+
+    /// A chat attachment is the chat's: clearing the chat deletes it. A node pointed at one gets its
+    /// own copy under `media/`, whoever pointed it there (the Director does, from the recap's path).
+    @Test func aChatAttachmentPointedAtByANodeGetsItsOwnCopyInMedia() async throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let id = SZNodeID()
+        let url = try Self.bundle(in: dir, node: id, path: "")
+        let host = try Self.host(at: url)
+        let attachment = url.appending(path: "attachments/53723509/IMG_3171_wall_texture.jpg")
+        try Self.file(attachment, bytes: "photo")
+
+        host.setInputDefault(node: id, port: "path", value: .string(attachment.path))
+        let settled = await Self.settledPath(host, node: id)
+        #expect(settled?.hasPrefix("media/") == true)
+        #expect(settled?.hasSuffix("/IMG_3171_wall_texture.jpg") == true)
+        if let settled {
+            #expect(try String(contentsOf: url.appending(path: settled), encoding: .utf8) == "photo")
+        }
+        #expect(FileManager.default.fileExists(atPath: attachment.path))   // the chat keeps its record
     }
 
     /// A live slider tick is not a decision, so it must never start a copy. Only committed writes do.

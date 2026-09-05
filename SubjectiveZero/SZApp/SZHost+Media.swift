@@ -25,18 +25,32 @@ extension SZHost {
     }
 
     /// Copy a file port's newly-set file into the project, then re-point the port at the copy. No-op
-    /// unless the value names a file OUTSIDE the bundle — which is what makes it idempotent: the
-    /// value it writes back can never satisfy the guard a second time.
+    /// unless the value names a file OUTSIDE the bundle or a chat attachment — which is what makes it
+    /// idempotent: the value it writes back can never satisfy the guard a second time.
+    ///
+    /// An absolute path that already points into `media/` is a reference, not a new copy: it is
+    /// stored in the portable relative form with no bytes moved. Left absolute, it breaks the moment
+    /// the bundle moves (Save As out of an Untitled project deletes the old folder), which is how a
+    /// Director-placed photo went dark mid-show.
     func importMediaIfExternal(node: SZNodeID, port: String, value: SZPortValue,
                                origin: SZMutationOrigin = .user) {
         guard case .string(let path) = value,
               let projectURL = loadedProjectURL,
               store.project?.graph.node(id: node)?.contract?.inputs
-                  .first(where: { $0.name == port })?.ui?.kind == .filePicker,
-              SZProjectMedia.needsImport(path, in: projectURL)
+                  .first(where: { $0.name == port })?.ui?.kind == .filePicker
         else { return }
+        if SZProjectMedia.isAbsolute(path),
+           let relative = SZProjectMedia.relativePath(for: URL(fileURLWithPath: SZProjectMedia.expanded(path)),
+                                                      in: projectURL),
+           !SZProjectMedia.isAttachment(relative) {
+            // Machinery, not a decision: no journal line, and the runtime already holds the
+            // resolved path, so only the stored value changes.
+            if store.setInputDefault(node: node, port: port, value: .string(relative)) { persistProject() }
+            return
+        }
+        guard SZProjectMedia.needsImport(path, in: projectURL) else { return }
 
-        let source = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        let source = URL(fileURLWithPath: SZProjectMedia.resolve(path, in: projectURL))
         let filename = source.lastPathComponent
         let (relative, destination) = SZProjectMedia.destination(for: filename, in: projectURL)
         status = "bringing \(filename) into the project…"
@@ -64,8 +78,13 @@ extension SZHost {
             }
             // Back through the funnel: persists, pushes the resolved path into the runtime live, and
             // re-audits the port. A node the fence holds refuses, which leaves the port on the original
-            // file — still rendering, and the next committed write imports it.
-            self.setInputDefault(node: node, port: port, value: .string(relative), origin: origin)
+            // file — still rendering, and the next committed write imports it. The refused copy is
+            // removed so nothing references it.
+            let applied = self.setInputDefault(node: node, port: port, value: .string(relative), origin: origin)
+            guard applied == .string(relative) else {
+                try? FileManager.default.removeItem(at: destination.deletingLastPathComponent())
+                return
+            }
             self.status = "\(filename) is in the project"
         }
     }
