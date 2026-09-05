@@ -217,8 +217,8 @@ extension SZHost {
                     (try? String(contentsOf: nodeDir.appending(path: "node-contract.json"), encoding: .utf8))
                     ?? "(no contract yet)"
                 extras.nodeSource =
-                    (try? String(contentsOf: nodeDir.appending(path: "Node.swift"), encoding: .utf8))
-                    ?? "(this node has no Node.swift yet)"
+                    (try? String(contentsOf: nodeDir.appending(path: nodeSourceFileName), encoding: .utf8))
+                    ?? "(this node has no \(nodeSourceFileName) yet)"
                 // The node's custom card rides along: an edit that renames a port must re-stage the
                 // card that reads it (the brief's card section says so).
                 if let card = try? String(contentsOf: SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: nodeID),

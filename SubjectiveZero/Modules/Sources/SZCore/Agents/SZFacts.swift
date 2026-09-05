@@ -78,7 +78,7 @@ public struct SZRun: Codable, Sendable {
 }
 
 public struct SZAssignment: Codable, Sendable {
-    /// The 1-based attempt this delivery is — the coding door's retry fork.
+    /// The 1-based attempt this delivery is — the coding door's retry fork. A node whose last attempt the host failed (a spent budget) and whose session survived counts its next dispatch as a retry, so the agent continues rather than starting over.
     public var attempt: Int
     /// The sender's note riding the handoff, when there is one — the work brief's `{{director_message}}`.
     public var note: String?

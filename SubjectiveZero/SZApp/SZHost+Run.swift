@@ -147,14 +147,13 @@ extension SZHost {
         if let stats = result.outcome.reportedStats {
             SZTrace.record(stats.turnEvent(started: started), turnID: assistantID)
         }
-        // A FAILED turn leaves no session behind: codex emits a resumable `thread.started` before
-        // the backend rejects the request, and resuming it would replay that error. A failed
-        // resume is the chat lane's business (`dropSessionAfterFailedResume`).
         // A resume re-pins only while the slot still holds the thread it continued; a slot
         // retired mid-turn (a run's receipt, a failed resume) stays retired.
         let slotUnchanged = request.resumeSessionID == nil
             || agentSessions[scope.key]?.sessionID == request.resumeSessionID
-        if pinSession, slotUnchanged, !result.outcome.failed, let sessionID = result.outcome.sessionID {
+        if Self.keepsSession(pin: pinSession, slotUnchanged: slotUnchanged, failed: result.outcome.failed,
+                             timedOut: result.process.timedOut),
+           let sessionID = result.outcome.sessionID {
             agentSessions[scope.key] = SZAgentSession(providerID: provider.id, sessionID: sessionID,
                                                       opening: request)
         } else if pinSession, !result.outcome.failed, request.resumeSessionID == nil {
@@ -219,6 +218,27 @@ extension SZHost {
             break
         }
         return (result, turnID)
+    }
+
+    /// A node whose last attempt the HOST failed (a spent budget, a dead CLI) and whose session
+    /// survived counts its next dispatch as a retry: the coding door then continues that session
+    /// on the node's own blocker instead of starting the node over. An agent's own report is the
+    /// reconcile loop's business within its run, and a clean node cold-starts.
+    func resumesUnfinishedWork(_ id: SZNodeID) -> Bool {
+        guard let state = nodeAgentState[id], !state.reportedByAgent,
+              state.phase == .error || state.phase == .needsInput else { return false }
+        return agentSessions[SZChatScope.node(id).key] != nil
+    }
+
+    /// Whether a finished turn's session is kept for the scope's next one. A FAILED turn leaves no
+    /// session behind: codex emits a resumable `thread.started` before the backend rejects the
+    /// request, and resuming it would replay that error (a failed resume is the chat lane's
+    /// business, `dropSessionAfterFailedResume`). The one exception is a turn OUR budget stopped:
+    /// the CLI was working when the host killed it and its session holds that work, so the next
+    /// attempt continues it instead of starting the node over (two 15-minute attempts on one node
+    /// once both started from nothing).
+    nonisolated static func keepsSession(pin: Bool, slotUnchanged: Bool, failed: Bool, timedOut: Bool) -> Bool {
+        pin && slotUnchanged && (!failed || timedOut)
     }
 
     /// The one timeout sentence every lane reports — `deliver` stamps it onto the turn's outcome so
@@ -1056,7 +1076,8 @@ extension SZHost {
                         node: nodeID,
                         resuming: coding.graph.resumes(self.agentSessions[scopeKey],
                                                        agent: coding.id, router: childRouter),
-                        assignment: SZAssignment(attempt: order.attempt, note: order.senderNote),
+                        assignment: SZAssignment(attempt: order.attempt + (self.resumesUnfinishedWork(nodeID) ? 1 : 0),
+                                                 note: order.senderNote),
                         conversation: self.conversation(for: .node(nodeID)))
                 },
                 turn: { [weak self] turnOrder, opened in

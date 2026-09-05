@@ -32,6 +32,16 @@ struct SZHostSessionPinTests {
         return run
     }
 
+    /// A failed turn leaves no pin, except one the host's own budget stopped: that session holds
+    /// the work, and the next attempt continues it instead of starting the node over.
+    @Test func aTimedOutTurnKeepsItsSessionAndAFailedOneDoesNot() {
+        #expect(SZHost.keepsSession(pin: true, slotUnchanged: true, failed: false, timedOut: false))
+        #expect(SZHost.keepsSession(pin: true, slotUnchanged: true, failed: true, timedOut: true))
+        #expect(!SZHost.keepsSession(pin: true, slotUnchanged: true, failed: true, timedOut: false))
+        #expect(!SZHost.keepsSession(pin: true, slotUnchanged: false, failed: true, timedOut: true))
+        #expect(!SZHost.keepsSession(pin: false, slotUnchanged: true, failed: false, timedOut: false))
+    }
+
     @Test func aReceiptRetiresTheDirectorThreadAndLeavesNodePins() {
         let host = host()
         let node = SZChatScope.node(SZNodeID()).key

@@ -28,6 +28,28 @@ struct SZHostRunAccountingTests {
         SZNode(kind: .prompt, title: "Draft", prompt: "p", position: SZPoint(x: 0, y: 0))
     }
 
+    /// A node the host failed (a spent budget) with a surviving session is dispatched as a retry, so
+    /// its agent continues rather than starting over. An agent's own report, a clean node, or a node
+    /// with no session to continue all cold-start.
+    @Test func aHostFailedNodeWithASessionResumesAndOthersColdStart() {
+        let node = Self.draft()
+        let host = host([node])
+        let scope = SZChatScope.node(node.id).key
+        #expect(!host.resumesUnfinishedWork(node.id))                       // clean
+
+        host.recordRunFailure(node: node.id, fallback: "the agent timed out after 15m")
+        #expect(!host.resumesUnfinishedWork(node.id))                       // no session to continue
+        host.agentSessions[scope] = SZAgentSession(providerID: "claude", sessionID: "s",
+                                                   envelope: SZRouteEnvelope(providerID: "claude"))
+        #expect(host.resumesUnfinishedWork(node.id))
+
+        host.recordNodeStatus(node: node.id, phase: .needsInput, message: "which colour?")
+        #expect(!host.resumesUnfinishedWork(node.id))                       // the agent's own report
+        host.retireHostFailure(node.id)
+        host.nodeAgentState[node.id] = SZNodeAgentState(phase: .ok)
+        #expect(!host.resumesUnfinishedWork(node.id))
+    }
+
     /// A host with one live run over every given node — the accounting reads that run's own
     /// captured work set and promote evidence, so the fixture builds a real `SZRunState`.
     private func host(_ nodes: [SZNode], promoted: Set<SZNodeID> = []) -> SZHost {
