@@ -554,13 +554,14 @@ private struct SZAgentGraphActivityTokens: View {
     var body: some View {
         if let usage = store.chatMessage(id: turnID)?.usage {
             // The unit once, up front: after each number it no longer fitted beside the clock.
-            Text("tok \(szFormatTokensCompact(usage.inputTokens)) in / \(szFormatTokensCompact(usage.outputTokens)) out")
+            // No room for the cached share here; the hover carries it.
+            Text(szFormatTokenUsageCompact(usage, cached: false))
                 .font(.system(size: 8.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(Color.white.opacity(0.45))
                 .lineLimit(1)
                 .contentTransition(.identity)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .help("\(usage.inputTokens) tokens in, \(usage.outputTokens) out")
+                .help(szFormatTokenUsageCompact(usage))
         }
     }
 }

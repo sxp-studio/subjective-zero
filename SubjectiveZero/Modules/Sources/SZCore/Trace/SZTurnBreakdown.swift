@@ -603,9 +603,7 @@ public enum SZTurnBreakdown {
     /// "166.6k in (89% cached) / 1.2k out (321 reasoning) · $0.31" — a single usage, spelled out.
     public static func tokenLine(_ usage: SZTokenUsage) -> String {
         var s = "\(formatTokens(usage.inputTokens)) in"
-        if let cached = usage.cachedInputTokens, usage.inputTokens > 0 {
-            s += " (\(Int((Double(cached) / Double(usage.inputTokens) * 100).rounded()))% cached)"
-        }
+        if let cached = usage.cachedPercent { s += " (\(cached)% cached)" }
         s += " / \(formatTokens(usage.outputTokens)) out"
         if let reasoning = usage.reasoningOutputTokens, reasoning > 0 {
             s += " (\(formatTokens(reasoning)) reasoning)"
@@ -628,9 +626,7 @@ public enum SZTurnBreakdown {
     private static func totalsDetail(turns: [RunTurn]) -> String? {
         guard let usage = totalUsage(of: turns) else { return nil }
         var s = "\(formatTokens(usage.inputTokens)) in / \(formatTokens(usage.outputTokens)) out"
-        if let cached = usage.cachedInputTokens, usage.inputTokens > 0 {
-            s += " (\(Int((Double(cached) / Double(usage.inputTokens) * 100).rounded()))% cached)"
-        }
+        if let cached = usage.cachedPercent { s += " (\(cached)% cached)" }
         if let cost = usage.costUSD { s += String(format: " · $%.2f", cost) }
         return s
     }

@@ -180,6 +180,12 @@ public struct SZTokenUsage: Sendable, Equatable, Codable {
         self.reasoningOutputTokens = reasoningOutputTokens
         self.costUSD = costUSD
     }
+
+    /// The cached share of the prompt side as a whole percent, where the CLI reports one.
+    public var cachedPercent: Int? {
+        guard let cached = cachedInputTokens, inputTokens > 0 else { return nil }
+        return Int((Double(cached) / Double(inputTokens) * 100).rounded())
+    }
 }
 
 /// The generation envelope a finished turn actually ran — the transcript's per-turn record.

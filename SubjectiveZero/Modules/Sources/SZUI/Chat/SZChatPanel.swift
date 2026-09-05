@@ -1016,11 +1016,7 @@ private struct SZChatTurnRow: View, Equatable {
                     // carries the full envelope + the routing rule that picked it. Not every CLI
                     // reports usage, so the tokens are absent rather than zero. A turn without a
                     // receipt renders exactly as before receipts existed.
-                    // "tok" once, up front, so the numbers read as tokens rather than as
-                    // anything else a turn counts. Same wording the Agent Graph's cards wear.
-                    let tokens = message.usage.map {
-                        " · tok \(szFormatTokensCompact($0.inputTokens)) in / \(szFormatTokensCompact($0.outputTokens)) out"
-                    } ?? ""
+                    let tokens = message.usage.map { " · \(szFormatTokenUsageCompact($0))" } ?? ""
                     let ran = message.generation.map {
                         " · \($0.model ?? $0.providerID)\($0.fastMode ? " · fast" : "")"
                     } ?? ""
@@ -1160,6 +1156,14 @@ private func szFormatDurationCompact(_ interval: TimeInterval) -> String {
 /// `internal` (not private) for the unit tests.
 func szFormatTokensCompact(_ tokens: Int) -> String {
     SZTurnBreakdown.formatTokens(tokens)   // one tiered implementation (SZCore)
+}
+
+/// "tok 326.5k in (92% cached) / 4.5k out". The prompt side sums every request of the turn, so
+/// without the cached share it reads as one enormous prompt; `cached: false` where there is no room.
+func szFormatTokenUsageCompact(_ usage: SZTokenUsage, cached: Bool = true) -> String {
+    var s = "tok \(szFormatTokensCompact(usage.inputTokens)) in"
+    if cached, let percent = usage.cachedPercent { s += " (\(percent)% cached)" }
+    return s + " / \(szFormatTokensCompact(usage.outputTokens)) out"
 }
 
 /// Whether a file should preview as an image (by its extension's UTType) — the composer's pending
