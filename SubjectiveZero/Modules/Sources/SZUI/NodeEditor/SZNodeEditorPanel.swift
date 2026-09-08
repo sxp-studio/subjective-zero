@@ -59,6 +59,9 @@ public struct SZNodeEditorPanel: View {
     /// Debounced visible-node reports for the host's preview watch-set culling (the camera is
     /// panel-local @State — this closure is how visibility leaves the panel).
     private let onVisibleNodesChanged: ((Set<SZNodeID>) -> Void)?
+    /// The centre of the visible canvas in graph space, published with the visible set: where a
+    /// placement from the Library panel lands when no click point was asked for.
+    private let onVisibleCenterChanged: ((SZPoint) -> Void)?
     @State private var visiblePublishTask: Task<Void, Never>?
     @State private var lastPublishedVisible: Set<SZNodeID>?
     private let cameraCommand: SZCameraCommand?   // host-raised one-shot: Center View / Zoom to Fit / reveal agent-added nodes
@@ -96,6 +99,13 @@ public struct SZNodeEditorPanel: View {
     // Files dropped on the canvas → create media library nodes (video-file / image-file) with `path`
     // pre-set. The panel classifies + converts the drop point to graph space; the host instantiates.
     private let onCreateMediaNodes: ([(libraryID: String, path: String, position: SZPoint)]) -> Void
+    // the library verbs, all routed to the host, which owns the copy; `applyToCopiesCount` 0 hides the Apply row.
+    private let onPlaceLibraryItem: (SZLibraryRef, SZPoint) -> Void
+    private let onAddFromLibrary: (SZPoint) -> Void
+    private let onDuplicateNode: (SZNodeID) -> Void
+    private let onSaveNodeToLibrary: (SZNodeID) -> Void
+    private let applyToCopiesCount: (SZNodeID) -> Int
+    private let onApplyToCopies: (SZNodeID) -> Void
     /// A prompt node the user just created on the canvas (HUD "+", double-click, wire-drop spawn).
     /// Those adds write the store directly — there is no host funnel for an add — so this callback is
     /// where the host learns who added a node.
@@ -188,8 +198,16 @@ public struct SZNodeEditorPanel: View {
                 onContextFreeText: @escaping (SZCanvasContextTarget, String) -> Void = { _, _ in },
                 onCreateMediaNodes: @escaping ([(libraryID: String, path: String, position: SZPoint)]) -> Void = { _ in },
                 onNodeAdded: @escaping (SZNodeID) -> Void = { _ in },
-                gearMenu: AnyView = AnyView(EmptyView())) {
+                gearMenu: AnyView = AnyView(EmptyView()),
+                onPlaceLibraryItem: @escaping (SZLibraryRef, SZPoint) -> Void = { _, _ in },
+                onAddFromLibrary: @escaping (SZPoint) -> Void = { _ in },
+                onDuplicateNode: @escaping (SZNodeID) -> Void = { _ in },
+                onSaveNodeToLibrary: @escaping (SZNodeID) -> Void = { _ in },
+                applyToCopiesCount: @escaping (SZNodeID) -> Int = { _ in 0 },
+                onApplyToCopies: @escaping (SZNodeID) -> Void = { _ in },
+                onVisibleCenterChanged: ((SZPoint) -> Void)? = nil) {
         self.store = store
+        self.onVisibleCenterChanged = onVisibleCenterChanged
         self.project = project
         self.status = status
         self.isRunning = isRunning
@@ -245,6 +263,12 @@ public struct SZNodeEditorPanel: View {
         self.onCreateMediaNodes = onCreateMediaNodes
         self.onNodeAdded = onNodeAdded
         self.gearMenu = gearMenu
+        self.onPlaceLibraryItem = onPlaceLibraryItem
+        self.onAddFromLibrary = onAddFromLibrary
+        self.onDuplicateNode = onDuplicateNode
+        self.onSaveNodeToLibrary = onSaveNodeToLibrary
+        self.applyToCopiesCount = applyToCopiesCount
+        self.onApplyToCopies = onApplyToCopies
     }
 
     /// The semantic-zoom tier, derived once from the panel-local camera — the ONE definition shared
@@ -267,6 +291,10 @@ public struct SZNodeEditorPanel: View {
     }
 
     private func publishVisibleNodes(override: Set<SZNodeID>? = nil) {
+        if let onVisibleCenterChanged, viewSize != .zero {
+            let center = camera.worldPoint(screen: CGPoint(x: viewSize.width / 2, y: viewSize.height / 2))
+            onVisibleCenterChanged(SZPoint(x: center.x, y: center.y))
+        }
         guard let onVisibleNodesChanged else { return }
         let visible = override ?? project.map {
             SZCanvasVisibility.visibleNodes(in: $0.graph, camera: camera, viewSize: viewSize,
@@ -356,9 +384,11 @@ public struct SZNodeEditorPanel: View {
             // NSEvent monitor (SwiftUI has no right-click gesture); its NSView frame == this space.
             .background(SZCanvasRightClickCatcher(onMouseDown: handleCanvasMouseDown))
             // Drop a video/image file → auto-create a video-file / image-file node under the cursor with
-            // its `path` pre-set. Whole-area catcher (same "szcanvas" frame, so its top-left drop point
-            // matches the double-tap gesture's screen point); non-media files are ignored (not consumed).
-            .background(SZFileDropCatcher(onDrop: handleFileDrop, onTargeted: { dropTargeted = $0 }))
+            // its `path` pre-set; drop a Library row → the host adds that node there. Whole-area catcher
+            // (same "szcanvas" frame, so its top-left drop point matches the double-tap gesture's screen
+            // point); non-media files are ignored (not consumed).
+            .background(SZFileDropCatcher(onDrop: handleFileDrop, onTargeted: { dropTargeted = $0 },
+                                          onDropLibrary: handleLibraryDrop))
             // Trackpad/mouse scroll → pan (⌘+scroll → zoom). Also a monitor behind a background
             // view framed to this space: its frame is what claims a scroll for THIS canvas.
             .monitorCanvasScrollWheel { handleScroll($0) }
@@ -723,7 +753,8 @@ public struct SZNodeEditorPanel: View {
         noteUserTouch()   // a reveal would otherwise close the menu and slide the canvas under it
         contextMenuSize = .zero   // re-measure; the menu stays invisible until it has a size
         contextMenu = SZContextMenuSession(target: target, anchor: anchor,
-                                           suggestions: contextSuggestionsFor(target))
+                                           suggestions: contextSuggestionsFor(target),
+                                           actions: contextActions(for: target))
     }
 
     private func dismissContextMenu() {
@@ -758,7 +789,7 @@ public struct SZNodeEditorPanel: View {
             let origin = session.origin(menuSize: contextMenuSize, in: viewSize)
             SZCanvasContextMenuView(
                 suggestions: session.suggestions,
-                actions: contextActions(for: session.target),
+                actions: session.actions,
                 freeTextPlaceholder: freeTextPlaceholder(for: session.target),
                 onPickSuggestion: { suggestion in
                     dismissContextMenu()
@@ -810,12 +841,25 @@ public struct SZNodeEditorPanel: View {
                                                    label: showing ? "Hide Plugs" : "Show Plugs",
                                                    sfSymbol: showing ? "chevron.up" : "chevron.down"))
                 }
+                // Copies: another of this node beside it, this node into your library, or this
+                // node's edits onto its unedited copies (only when it has some).
+                actions.append(SZContextAction(kind: .duplicate(id), label: "Duplicate",
+                                               sfSymbol: "plus.square.on.square"))
+                actions.append(SZContextAction(kind: .saveToLibrary(id), label: "Save to Library…",
+                                               sfSymbol: "books.vertical.fill"))
+                let copies = applyToCopiesCount(id)
+                if copies > 0 {
+                    actions.append(SZContextAction(kind: .applyToCopies(id),
+                                                   label: copies == 1 ? "Apply to 1 Copy" : "Apply to \(copies) Copies",
+                                                   sfSymbol: "arrow.triangle.branch"))
+                }
             }
             return actions
         case .canvas:
-            // The direct add-node action — the successor to double-click-adds-a-node (now the
-            // double-click opens this menu).
-            return [SZContextAction(kind: .addNode, label: "Add Node Here", sfSymbol: "plus.square")]
+            // Two direct adds at the click point: a prompt node (the double-click still adds one too)
+            // or a node picked from the Library panel.
+            return [SZContextAction(kind: .addNode, label: "Add Node Here", sfSymbol: "plus.square"),
+                    SZContextAction(kind: .addFromLibrary, label: "Add from Library", sfSymbol: "books.vertical")]
         case .selection:
             return []
         }
@@ -832,6 +876,14 @@ public struct SZNodeEditorPanel: View {
         case .openCard(let id): cardProvider?.openCardSource(node: id)
         case .newCard(let id): cardProvider?.createCard(node: id)
         case .togglePlugs(let id, _): withAnimation(SZCardFold.animation) { onTogglePlugs(id) }
+        case .addFromLibrary:
+            if let anchor {
+                let center = snappedPromptCenter(camera.worldPoint(screen: anchor))
+                onAddFromLibrary(SZPoint(x: center.x, y: center.y))
+            }
+        case .duplicate(let id): onDuplicateNode(id)
+        case .saveToLibrary(let id): onSaveNodeToLibrary(id)
+        case .applyToCopies(let id): onApplyToCopies(id)
         }
     }
 
@@ -1213,6 +1265,14 @@ public struct SZNodeEditorPanel: View {
         let specs = SZMediaSource.specs(for: urls, origin: SZPoint(x: origin.x, y: origin.y))
         guard !specs.isEmpty else { return false }
         onCreateMediaNodes(specs)
+        return true
+    }
+
+    /// A Library row dropped on the canvas: decode the ref, land it where a media drop would.
+    private func handleLibraryDrop(_ data: Data, at screen: CGPoint) -> Bool {
+        guard let ref = SZLibraryDrag.ref(from: data) else { return false }
+        let center = snappedPromptCenter(camera.worldPoint(screen: screen))
+        onPlaceLibraryItem(ref, SZPoint(x: center.x, y: center.y))
         return true
     }
 

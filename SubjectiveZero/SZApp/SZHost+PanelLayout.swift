@@ -167,7 +167,10 @@ extension SZHost {
                                                 crop: recordCrop,
                                                 soundSource: recordSoundSource == .off ? nil : recordSoundSource.rawValue,
                                                 seenSettings: recordSettingsSeen ? true : nil),
-                                             lastProjectTarget: lastProjectTarget))
+                                             lastProjectTarget: lastProjectTarget,
+                                             myLibraryPath: myLibraryPath,
+                                             libraryCollapsedGroups: libraryCollapsedGroups.isEmpty
+                                                 ? nil : libraryCollapsedGroups.map(\.rawValue).sorted()))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

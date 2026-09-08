@@ -89,6 +89,7 @@ extension SZHost {
         await remountBackend(at: projectURL)
         rewatchNodeSources()
         classifyRebuildsAfterLoad()
+        refreshLibraryItems()   // the panel offers what the new platform can run
         // 4. Everything still missing or behind its contract goes to a conversion run.
         let queued = Set((store.project?.graph.nodes ?? [])
             .filter { $0.kind == .generated && !$0.hasCurrentBuild(for: target) }.map(\.id))
@@ -120,9 +121,9 @@ extension SZHost {
     /// source still is the library's own (so the twin implements the same thing). An edited node keeps
     /// its edits: it goes to the agent with them instead.
     private func libraryTwin(of node: SZNode, for target: SZProjectTarget) -> (file: URL, from: SZProjectTarget)? {
-        guard let libraryID = node.libraryID, let projectURL = loadedProjectURL else { return nil }
+        guard let ref = node.libraryRef, let projectURL = loadedProjectURL,
+              let folder = libraryFolder(ref) else { return nil }
         let fm = FileManager.default
-        let folder = Self.libraryURL.appending(path: libraryID)
         let twin = folder.appending(path: target.sourceFileName)
         guard fm.fileExists(atPath: twin.path) else { return nil }
         let pristine = node.builtTargets.first { built in

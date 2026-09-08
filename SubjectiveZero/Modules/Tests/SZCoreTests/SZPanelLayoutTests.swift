@@ -6,19 +6,25 @@ import Foundation
 import Testing
 @testable import SZCore
 
-// The default layout: (viewport / nodeEditor) | chat.
+// The default layout is library | (viewport / nodeEditor) | chat. The tree-surgery tests below work on
+// the three-panel tree they were written against, so a layout change never rewrites them.
+private let classic = SZPanelLayoutState(
+    root: .split(orientation: .horizontal, fraction: 0.75,
+                 leading: .split(orientation: .vertical, fraction: 0.6,
+                                 leading: .panel(.viewport), trailing: .panel(.nodeEditor)),
+                 trailing: .panel(.chat)))
 
 @Test func defaultLayoutShowsAllProductionPanelsOnce() {
     let layout = SZPanelLayoutState.default
-    #expect(layout.root.leafIDs == [.viewport, .nodeEditor, .chat])
+    #expect(layout.root.leafIDs == [.library, .viewport, .nodeEditor, .chat])
     // The Debug panel is opt-in, never part of the launch layout.
-    #expect(layout.presentIDs == Set([.viewport, .nodeEditor, .chat]))
+    #expect(layout.presentIDs == Set([.library, .viewport, .nodeEditor, .chat]))
 }
 
 @Test func normalizeStripsTheProfilerPanelWhereUnavailable() {
     // A DEBUG build's saved layout lands in a build without the surface (release): the leaf
     // collapses to its sibling and the restore position is forgotten; production panels survive.
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.insertPanel(.profiler)
     #expect(layout.contains(.profiler))
     layout.normalize(allowingProfiler: false)
@@ -26,7 +32,7 @@ import Testing
     #expect(layout.restorePositions[.profiler] == nil)
     #expect(layout.presentIDs == Set([.viewport, .nodeEditor, .chat]))
     // Where available, the same layout keeps it.
-    var kept = SZPanelLayoutState.default
+    var kept = classic
     kept.insertPanel(.profiler)
     kept.normalize(allowingProfiler: true)
     #expect(kept.contains(.profiler))
@@ -35,7 +41,7 @@ import Testing
 @Test func normalizeResetsWhenTheProfilerIsTheWholeTree() {
     // A DEBUG session that closed everything but the Profiler saves a single-leaf tree; a
     // release build must land on the default layout, not an unremovable empty tile.
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.root = .panel(.profiler)
     layout.normalize(allowingProfiler: false)
     #expect(layout == .default)
@@ -49,7 +55,7 @@ import Testing
 
 @Test(arguments: [SZPanelDropZone.left, .right, .top, .bottom])
 func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.movePanel(.chat, onto: .viewport, zone: zone)
 
     // Chat left the right dock and now shares the viewport's slot.
@@ -83,17 +89,17 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 }
 
 @Test func centerDropSwapsPanelsKeepingTreeShape() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.movePanel(.chat, onto: .viewport, zone: .center)
     #expect(layout.root.leafIDs == [.chat, .nodeEditor, .viewport])
     layout.movePanel(.chat, onto: .viewport, zone: .center)
-    #expect(layout == .default)   // swap twice = identity, fractions untouched
+    #expect(layout == classic)   // swap twice = identity, fractions untouched
 }
 
 @Test func moveOntoSelfOrMissingPanelIsANoOp() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.movePanel(.chat, onto: .chat, zone: .left)
-    #expect(layout == .default)
+    #expect(layout == classic)
     layout.removePanel(.chat)
     var removed = layout
     removed.movePanel(.chat, onto: .viewport, zone: .left)     // chat not in tree
@@ -103,7 +109,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 }
 
 @Test func removeCollapsesParentAndRecordsRestorePosition() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.removePanel(.chat)
 
     guard case .split(let orientation, _, let leading, let trailing) = layout.root else {
@@ -125,7 +131,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 }
 
 @Test func insertRestoresRememberedSpot() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.removePanel(.chat)
     layout.insertPanel(.chat)
     // Chat's remembered neighbor is the viewport, so it re-splits THAT leaf (which, after the outer
@@ -155,13 +161,13 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 }
 
 @Test func insertIsIdempotent() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.insertPanel(.chat)
-    #expect(layout == .default)
+    #expect(layout == classic)
 }
 
 @Test func setFractionFollowsPath() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.setFraction(0.3, at: [])                 // root split
     layout.setFraction(0.8, at: [.leading])         // viewport/nodeEditor split
     guard case .split(_, let rootFraction, let leading, _) = layout.root,
@@ -173,7 +179,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 }
 
 @Test func normalizeClampsFractions() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.setFraction(0.01, at: [])
     layout.setFraction(0.99, at: [.leading])
     layout.normalize()
@@ -193,7 +199,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 }
 
 @Test func codableRoundTripPreservesLayout() throws {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.movePanel(.chat, onto: .nodeEditor, zone: .bottom)
     layout.removePanel(.viewport)
     let data = try JSONEncoder().encode(layout)
@@ -237,7 +243,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
      "restorePositions":["profiler",{"neighbor":"chat","zone":"bottom","share":0.4}]}
     """
     let decoded = try JSONDecoder().decode(SZPanelLayoutState.self, from: Data(legacy.utf8))
-    #expect(decoded.root == SZPanelLayoutState.default.root)
+    #expect(decoded.root == classic.root)
     #expect(decoded.root.leafIDs.allSatisfy { $0.instance == 0 })
     #expect(decoded.restorePositions[.profiler]
             == SZPanelRestorePosition(neighbor: .chat, zone: .bottom, share: 0.4))
@@ -246,7 +252,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 @Test func primaryOnlyStateReencodesInLegacyShape() throws {
     // Forward-compat guard: as long as no clone exists, the encoded bytes must look exactly like
     // the kind-keyed era (bare kind strings, no ":" tokens) so OLD builds keep decoding new files.
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.removePanel(.chat)   // populate restorePositions too
     let data = try JSONEncoder().encode(layout)
     let json = String(decoding: data, as: UTF8.self)
@@ -257,7 +263,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 }
 
 @Test func codableRoundTripPreservesCloneLayout() throws {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.clonePanel(.viewport)
     let data = try JSONEncoder().encode(layout)
     #expect(String(decoding: data, as: UTF8.self).contains(#""viewport:2""#))
@@ -265,7 +271,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 }
 
 @Test func clonePanelAllocatesLowestFreeInstanceAndSplitsFiftyFifty() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     let first = layout.clonePanel(.viewport)
     #expect(first == SZPanelID(.viewport, instance: 1))
     // The source slot became a horizontal 50/50 [viewport | viewport:2].
@@ -286,13 +292,13 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 }
 
 @Test func clonePanelRefusesAtCapAbsenceAndSingleInstanceKinds() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     for _ in 1..<SZPanelKind.viewport.maxInstances {
         #expect(layout.clonePanel(.viewport) != nil)
     }
     #expect(layout.clonePanel(.viewport) == nil)             // all instances placed
     #expect(layout.clonePanel(.chat) == nil)                 // maxInstances 1 — same rule, no special case
-    layout = SZPanelLayoutState.default
+    layout = classic
     layout.removePanel(.chat)
     #expect(layout.clonePanel(.chat) == nil)                 // source absent
 }
@@ -300,7 +306,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 @Test func clonePanelHonorsExcludedInstances() {
     // A popped-out clone lives outside the tree but keeps its identity — the caller passes it as
     // excluded so a new clone never reuses the number of a live window.
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     #expect(layout.clonePanel(.viewport, excluding: [SZPanelID(.viewport, instance: 1)])
             == SZPanelID(.viewport, instance: 2))
 }
@@ -308,7 +314,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 @Test func cloneCloseRecordsRestoreAndInsertPutsItBack() {
     // Clones close/reopen exactly like primaries — the uniform restore record is what dock-back
     // (pop-out → insertPanel) rides on.
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     guard let clone = layout.clonePanel(.viewport) else { Issue.record("clone failed"); return }
     let cloned = layout
     layout.removePanel(clone)
@@ -323,7 +329,7 @@ func edgeDropSplitsTargetFiftyFifty(zone: SZPanelDropZone) {
 func insertOntoDocksDetachedPanelAtExplicitSpot(zone: SZPanelDropZone) {
     // The drag-to-dock commit: a panel that is NOT in the tree lands beside an explicit target,
     // ignoring any remembered restore position.
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.removePanel(.chat)   // root collapses to the viewport/nodeEditor split
     layout.insertPanel(.chat, onto: .nodeEditor, zone: zone, share: 0.3)
     guard case .split(_, _, _, let editorSlot) = layout.root,
@@ -344,7 +350,7 @@ func insertOntoDocksDetachedPanelAtExplicitSpot(zone: SZPanelDropZone) {
 }
 
 @Test func insertOntoRefusesPresentPanelOrMissingTarget() {
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     var copy = layout
     copy.insertPanel(.chat, onto: .viewport, zone: .left)        // chat already in the tree
     #expect(copy == layout)
@@ -357,7 +363,7 @@ func insertOntoDocksDetachedPanelAtExplicitSpot(zone: SZPanelDropZone) {
 @Test func normalizeStripsOutOfRangeInstancesAndPrunesRestoreRecords() {
     // A hand-edited or stale app-state.json can carry instances beyond a kind's cap: the leaf
     // degrades (collapses to its sibling), the rest of the layout survives.
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.clonePanel(.viewport)
     guard case .split(let orientation, let fraction, let leading, _) = layout.root else {
         Issue.record("unexpected tree shape"); return
@@ -480,13 +486,13 @@ func pinningSpansTheWholeSide(zone: SZPanelDropZone) {
 @Test func pinningToTheSideAPanelAlreadyOccupiesChangesNothing() {
     // The default layout already has the chat down the right, so re-pinning it there must not
     // rewrite the divider the user dragged.
-    var layout = SZPanelLayoutState.default
+    var layout = classic
     layout.movePanel(.chat, toWindowEdge: .right)
-    #expect(layout == .default)
+    #expect(layout == classic)
 }
 
 @Test func pinningRefusesCenterAbsentAndLastPanel() {
-    let untouched = SZPanelLayoutState.default
+    let untouched = classic
     var swap = untouched
     swap.movePanel(.chat, toWindowEdge: .center)
     #expect(swap == untouched)

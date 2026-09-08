@@ -46,11 +46,7 @@ struct SZMentionAutocompleteView: View {
             }
         }
         .frame(width: 260)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .background(Color(white: 0.09).opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
-        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+        .szGlassCard(cornerRadius: 8)
     }
 
     // Plain Buttons only — nothing here can steal first responder from the composer's text view.

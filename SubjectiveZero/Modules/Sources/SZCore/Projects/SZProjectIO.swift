@@ -134,15 +134,19 @@ public enum SZProjectIO {
         })
     }
 
+    /// A node's folder inside a `.subz` directory: `nodes/<uuid>/`.
+    public static func nodeFolderURL(projectURL: URL, nodeID: SZNodeID) -> URL {
+        projectURL.appending(path: nodesDirName).appending(path: nodeID.description)
+    }
+
     /// The on-disk path of a node's source inside a `.subz` directory: `Node.swift` on this Mac,
     /// `Node.js` in a web project.
     public static func nodeSourceURL(projectURL: URL, nodeID: SZNodeID, target: SZProjectTarget) -> URL {
-        projectURL.appending(path: nodesDirName).appending(path: nodeID.description)
-            .appending(path: target.sourceFileName)
+        nodeFolderURL(projectURL: projectURL, nodeID: nodeID).appending(path: target.sourceFileName)
     }
 
     /// The on-disk path of a node's optional `Card.swift` (its custom card), beside `Node.swift`.
     public static func cardSourceURL(projectURL: URL, nodeID: SZNodeID) -> URL {
-        projectURL.appending(path: nodesDirName).appending(path: nodeID.description).appending(path: "Card.swift")
+        nodeFolderURL(projectURL: projectURL, nodeID: nodeID).appending(path: "Card.swift")
     }
 }

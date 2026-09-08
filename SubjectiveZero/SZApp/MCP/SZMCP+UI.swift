@@ -25,11 +25,28 @@ extension SZHostBridge {
                               "description": "absolute paths to image/video files (≥1)"],
                     "x": ["type": "number"], "y": ["type": "number"],
                  ]),
-            tool("ui_add_library_node", "Add a built-in library node verbatim (see agent_library_index for ids, e.g. `corner-pin`, `checkerboard`) — mirrors placing one from the palette. Copies its Node.swift (and Card.swift, when the node ships a custom card — a card that draws over the node's output lands ON, others wait in the context menu) into the project, compiles, and returns the new node id. Placement as ui_add_prompt_node: omit x/y and pass `after` to land beside the node it reads from.",
+            tool("ui_add_library_node", "Add a library node verbatim (see agent_library_index for ids, e.g. `corner-pin`, `checkerboard`) — mirrors placing one from the Library panel. Copies its Node.swift (and Card.swift, when the node ships a custom card — a card that draws over the node's output lands ON, others wait in the context menu) into the project, compiles, and returns the new node id with its `origin`. Pass `source` when the index line names a library. Placement as ui_add_prompt_node: omit x/y and pass `after` to land beside the node it reads from.",
                  properties: [
-                    "library": ["type": "string", "description": "the NodeLibrary id"],
+                    "library": ["type": "string", "description": "the library node id"],
+                    "source": ["type": "string", "description": "which library (default: the first that has the id, built in first)"],
                     "after": ["type": "string", "description": "id of the node this one reads from; the card lands beside it"],
                     "x": ["type": "number"], "y": ["type": "number"],
+                 ]),
+            tool("ui_duplicate_node", "Copy a built node in this project: same code, card, ports and values, placed beside it unless x/y are given. The copy records where it came from, so agent_read_node shows both as copies of each other; returns the new node id with its `origin`.",
+                 properties: [
+                    "node": ["type": "string", "description": "node id (UUID) to copy"],
+                    "x": ["type": "number"], "y": ["type": "number"],
+                 ]),
+            tool("ui_apply_to_copies", "Copy one node's code onto its copies (nodes placed from the same library entry or duplicated from one another; agent_read_node lists them under `copies`). Each copy keeps its own input values where the port still exists. Without `copies`, every copy still in sync is updated and one changed on its own is skipped and named; name `copies` to include such a node on purpose. Refused whole when a target is being built by another request. Returns {applied, skipped: [{node, reason}]}.",
+                 properties: [
+                    "node": ["type": "string", "description": "the node whose code to copy from (UUID)"],
+                    "copies": ["type": "array", "items": ["type": "string"], "description": "node ids to update (default: every copy still in sync)"],
+                 ]),
+            tool("ui_save_to_library", "Save a built node into the user's own library (My Library) so it can be added to any project later, from the Library panel or with ui_add_library_node { source: \"mine\" }. A node that came from My Library updates its own entry. Returns {library, id, updated}.",
+                 properties: [
+                    "node": ["type": "string", "description": "node id (UUID)"],
+                    "name": ["type": "string", "description": "the entry's name (default: the node's title)"],
+                    "description": ["type": "string", "description": "one line on what it does (default: the node's summary)"],
                  ]),
             tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged. Data edges must keep the graph acyclic: a data connection that would close a cycle is refused with {status: \"refused\", reason} naming the path — rewire or drop an edge instead. A flow (intent) edge is refused the same way when it would run in a circle, counting the arrows already drawn, since only one edge of a ring could ever be laid; nothing about ports refuses an arrow. A flow edge given an explicit fromPort/toPort naming a declared data port is PINNED to that slot (the user-drop-on-a-blue-dot semantics) — omit the ports for plain node-to-node intent.",
                  properties: [
@@ -181,6 +198,9 @@ extension SZHostBridge {
         case "ui_add_prompt_node": return try uiAddPromptNode(arguments)
         case "ui_add_source_node": return try uiAddSourceNode(arguments)
         case "ui_add_library_node": return try uiAddLibraryNode(arguments)
+        case "ui_duplicate_node":  return try uiDuplicateNode(arguments)
+        case "ui_apply_to_copies": return try uiApplyToCopies(arguments)
+        case "ui_save_to_library": return try uiSaveToLibrary(arguments)
         case "ui_connect":         return try uiConnect(arguments)
         case "ui_disconnect":      return try uiDisconnect(arguments)
         case "ui_update_node":     return try uiUpdateNode(arguments)
@@ -914,17 +934,72 @@ extension SZHostBridge {
         return SZJSONRPC.encode(["body": applied])
     }
 
-    /// Materialize a built-in library node into the graph — the human's drag/drop and palette path,
-    /// exposed so a test drive (and an agent that wants a shipped node verbatim, e.g. `corner-pin`)
-    /// can place one without authoring it.
+    /// Place a library node into the graph — the Library panel's path, exposed so a test drive (and an
+    /// agent that wants a shipped node verbatim, e.g. `corner-pin`) can place one without authoring it.
     private func uiAddLibraryNode(_ arguments: [String: Any]) throws -> String {
-        guard let library = arguments.string("library") else { throw SZMCPError.message("ui_add_library_node needs `library` (a NodeLibrary id, e.g. corner-pin)") }
+        guard let library = arguments.string("library"), SZHost.isLibraryID(library) else {
+            throw SZMCPError.message("ui_add_library_node needs `library` (a library node id, e.g. corner-pin)")
+        }
         let position = try placedPosition(arguments, cardSize: SZNodeLayout.promptCardSize)
-        let id = try host.instantiateLibraryNode(libraryID: library, position: position, origin: .agent)
+        let wanted = try librarySource(arguments, key: "source", tool: "ui_add_library_node")
+        guard let found = host.libraryFolder(id: library, library: wanted) else {
+            throw SZMCPError.message("no library node \(library)")
+        }
+        let id = try host.placeLibraryItem(.library(source: found.source, id: library), position: position, origin: .agent)
+        return placedNodeResponse(id, extra: ["library": library])
+    }
+
+    /// Copy a node already in the project, beside it unless placed: the Duplicate command's path.
+    private func uiDuplicateNode(_ arguments: [String: Any]) throws -> String {
+        guard let source = arguments.uuid("node") else { throw SZMCPError.message("ui_duplicate_node needs `node` (UUID)") }
+        var position: SZPoint?
+        if let x = arguments.double("x"), let y = arguments.double("y") { position = SZPoint(x: x, y: y) }
+        let id = try host.duplicateNode(source, at: position, origin: .agent)
+        return placedNodeResponse(id, extra: [:])
+    }
+
+    /// The reply to a placement: the new id, its body mode and lineage, plus the caller's own fields.
+    private func placedNodeResponse(_ id: SZNodeID, extra: [String: Any]) -> String {
         host.noteRunCreatedWork([id])   // added by the run's own tooling, so it joins its work set
-        var response: [String: Any] = ["node": id.uuidString, "library": library]
+        var response: [String: Any] = ["node": id.uuidString]
+        response.merge(extra) { _, new in new }
         if let body = host.store.project?.graph.node(id: id)?.body { response["body"] = body.mode.rawValue }
+        if let lineage = host.lineage(of: id) { response.merge(lineageJSON(lineage)) { _, new in new } }
         return SZJSONRPC.encode(response)
+    }
+
+    /// Copy one node's code onto its copies (SZHost+Lineage).
+    private func uiApplyToCopies(_ arguments: [String: Any]) throws -> String {
+        guard let source = arguments.uuid("node") else { throw SZMCPError.message("ui_apply_to_copies needs `node` (UUID)") }
+        var targets: [SZNodeID]?
+        if let raw = arguments["copies"] as? [Any] {
+            targets = try raw.map { item in
+                guard let id = (item as? String).flatMap(SZNodeID.init(uuidString:)) else {
+                    throw SZMCPError.message("ui_apply_to_copies `copies` must be node ids (UUID)")
+                }
+                return id
+            }
+        }
+        let result = try host.applyNodeToCopies(source: source, to: targets, origin: .agent)
+        return SZJSONRPC.encode([
+            "applied": result.applied.map(\.uuidString),
+            "skipped": result.skipped.map { ["node": $0.0.uuidString, "reason": $0.1] },
+        ])
+    }
+
+    /// Save a node into My Library (SZHost+LibrarySave); the fence is checked inside the host call.
+    private func uiSaveToLibrary(_ arguments: [String: Any]) throws -> String {
+        guard let id = arguments.uuid("node") else { throw SZMCPError.message("ui_save_to_library needs `node` (UUID)") }
+        guard host.store.project?.graph.node(id: id) != nil else { throw SZMCPError.message("no node \(id)") }
+        let preview = host.saveToLibraryPreview(node: id)
+        func given(_ key: String) -> String? {
+            let value = arguments.string(key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return value.isEmpty ? nil : value
+        }
+        let ref = try host.saveNodeToLibrary(node: id, name: given("name") ?? preview.name,
+                                             line: given("description") ?? preview.line, origin: .agent)
+        guard case .library(_, let entryID) = ref else { throw SZMCPError.message("save failed") }
+        return SZJSONRPC.encode(["library": SZLibrarySourceID.mine.displayName, "id": entryID, "updated": preview.updates])
     }
 
     /// Coerce a JSON `value` to the port's declared type. Numbers arrive as JSON numbers or as numeric

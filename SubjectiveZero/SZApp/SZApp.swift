@@ -383,6 +383,19 @@ struct SZApp: App {
                                       onPickCodec: { host.setRecordCodec($0) },
                                       onPickSound: { host.setRecordSoundSource($0) })
             }
+            // Save to Library: the node menu's door into the user's own library. The host owns which
+            // node is being saved; the sheet only carries the name and the line.
+            .sheet(isPresented: Binding(get: { host.saveToLibraryNode != nil },
+                                        set: { if !$0 { host.saveToLibraryNode = nil } })) {
+                if let id = host.saveToLibraryNode, let preview = host.saveToLibraryPreview {
+                    SZSaveToLibrarySheet(name: preview.name, line: preview.line,
+                                         updates: preview.updates, changes: preview.changes,
+                                         onSave: { name, line in
+                                             host.saveToLibraryFromSheet(node: id, name: name, line: line)
+                                         },
+                                         onCancel: { host.saveToLibraryNode = nil })
+                }
+            }
             // The New Project sheet: where the project will run. A set-false (Esc / swipe) is a
             // Cancel, which the host ignores while the sheet is required (nothing else is loaded).
             .sheet(isPresented: Binding(get: { host.newProjectPresented },
@@ -419,7 +432,15 @@ struct SZApp: App {
                                      onJoinDiscord: { host.joinDiscord() },
                                      // First run = the default provider is still unconfirmed;
                                      // afterwards the Providers pane closes with a plain Done.
-                                     isFirstRun: host.defaultProviderID == nil)
+                                     isFirstRun: host.defaultProviderID == nil,
+                                     library: librarySettingsView)
+                // A menu item asked for a section: land there once, then the sheet remembers as usual.
+                .onAppear {
+                    if let requested = host.requestedSetupSection {
+                        setupSection = requested
+                        host.requestedSetupSection = nil
+                    }
+                }
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)
@@ -548,6 +569,10 @@ struct SZApp: App {
                     .keyboardShortcut("l", modifiers: [.command, .option])
                     .disabled(host.store.project?.graph.nodes.isEmpty ?? true)
                 Divider()
+                Button("Duplicate") { if let id = selectedNodeID { host.duplicateNode(id) } }
+                    .keyboardShortcut("d", modifiers: [.command])
+                    .disabled(!host.canDuplicate(selectedNodeID))
+                Divider()
                 // Stopping ONE build is done from its lane in the chat strip; this is the
                 // everything-at-once escape hatch, reachable with the panel closed.
                 Button("Stop All Builds") { host.cancelRun() }
@@ -635,6 +660,15 @@ struct SZApp: App {
             onStop: { host.stopConversion() },
             onDone: { host.skipProviderSetup() },
             onInstall: { _ in host.installDeveloperTools() })
+    }
+
+    /// Settings ▸ Library: the libraries the panel reads, with My Library's folder actions.
+    private var librarySettingsView: SZLibrarySettingsView {
+        SZLibrarySettingsView(builtInCount: host.libraryNodeCount(.builtIn) ?? 0,
+                              myLibraryCount: host.libraryNodeCount(.mine),
+                              myLibraryPath: host.myLibraryURL.path,
+                              onShowInFinder: { host.revealMyLibrary() },
+                              onMove: { host.moveMyLibraryViaPanel() })
     }
 
     /// The AI Settings Routing pane, wired to the host mapping (SZHost+RoutingSettings).
@@ -763,6 +797,9 @@ struct SZApp: App {
             Divider()
             Button("Tidy Graph") { host.tidyGraph() }
                 .disabled(host.store.project?.graph.nodes.isEmpty ?? true)
+            Divider()
+            Button("Duplicate") { if let id = selectedNodeID { host.duplicateNode(id) } }
+                .disabled(!host.canDuplicate(selectedNodeID))
             Divider()
             Toggle("Snap to Grid", isOn: Binding(get: { host.snapToGrid },
                                                  set: { host.setSnapToGrid($0) }))
@@ -988,7 +1025,24 @@ struct SZApp: App {
                               // `host`, panelVisibilityBinding, and the app-bundle Discord asset are in
                               // scope; erased to AnyView for the pure SZUI panel. Re-evaluates on host
                               // changes (Observation) so disabled states / toggles stay live.
-                              gearMenu: AnyView(gearMenuContent))
+                              gearMenu: AnyView(gearMenuContent),
+                              // library placements and node-menu copy actions go to the host's one copy
+                              // path; the canvas centre is where a Return in the panel lands
+                              onPlaceLibraryItem: { host.placeFromLibrary($0, at: $1) },
+                              onAddFromLibrary: { host.addFromLibrary(at: $0) },
+                              onDuplicateNode: { host.duplicateNode($0) },
+                              onSaveNodeToLibrary: { host.saveToLibraryNode = $0 },
+                              applyToCopiesCount: { host.applyToCopiesCount($0) },
+                              onApplyToCopies: { host.applyToCopies($0) },
+                              onVisibleCenterChanged: { host.canvasVisibleCenter = $0 })
+        case .library:
+            SZLibraryPanel(items: host.libraryItems, target: host.projectTarget,
+                           offPlatformCount: host.libraryOffPlatformCount,
+                           collapsed: host.libraryCollapsedGroups,
+                           focusRequest: host.libraryFocusRequest,
+                           onPlace: { host.placeFromLibrary($0) },
+                           onToggleGroup: { host.toggleLibraryGroup($0) },
+                           onOpenLibrarySettings: { host.presentLibrarySettings() })
         case .chat:
             // One pass over the (small) live queue per body evaluation, not a scan per bubble row —
             // the panel calls isQueued for every user message on every streamed token.

@@ -13,27 +13,28 @@ private let divider = SZPanelLayoutGeometry.dividerThickness
 
 @Test func defaultLayoutTilesTheWindow() {
     let frames = SZPanelLayoutGeometry.leafFrames(root: SZPanelLayoutState.default.root, in: window)
-    let viewport = frames[.viewport]!, editor = frames[.nodeEditor]!, chat = frames[.chat]!
+    let library = frames[.library]!, viewport = frames[.viewport]!, editor = frames[.nodeEditor]!, chat = frames[.chat]!
 
-    // Chat = right column, full height; viewport over editor fill the left column.
+    // Library = left column, chat = right column, both full height; viewport over editor between them.
+    #expect(library.minX == 0 && library.minY == 0 && library.height == window.height)
     #expect(chat.maxX == window.maxX && chat.minY == 0 && chat.height == window.height)
-    #expect(viewport.minX == 0 && viewport.minY == 0)
+    #expect(viewport.minX == library.maxX + divider && viewport.minY == 0)
     #expect(editor.maxY == window.maxY)
     #expect(viewport.width == editor.width)
     // Dividers carve exact gaps: columns and rows sum back to the window.
-    #expect(viewport.width + divider + chat.width == window.width)
+    #expect(library.width + divider + viewport.width + divider + chat.width == window.width)
     #expect(viewport.height + divider + editor.height == window.height)
-    // Fractions honored (0.75 of the width net of the divider, 0.6 of the left column's height).
-    #expect(abs(viewport.width - (window.width - divider) * 0.75) < 0.5)
+    // Fractions honored (0.18 of the width net of its divider, 0.6 of the middle column's height).
+    #expect(abs(library.width - (window.width - divider) * 0.18) < 0.5)
     #expect(abs(viewport.height - (window.height - divider) * 0.6) < 0.5)
 }
 
 @Test func minSizeWinsOverFraction() {
     var layout = SZPanelLayoutState.default
-    layout.setFraction(0.95, at: [])   // squeeze chat below its 280 min width
+    layout.setFraction(0.95, at: [.trailing])   // squeeze chat below its 280 min width
     let frames = SZPanelLayoutGeometry.leafFrames(root: layout.root, in: window)
     #expect(frames[.chat]!.width == SZPanelLayoutGeometry.minSize(for: .chat).width)
-    #expect(frames[.viewport]!.width == window.width - divider - frames[.chat]!.width)
+    #expect(frames[.viewport]!.width == window.width - frames[.library]!.width - 2 * divider - frames[.chat]!.width)
 }
 
 @Test func undersizedWindowDegradesProportionallyNeverNegative() {
@@ -51,13 +52,15 @@ private let divider = SZPanelLayoutGeometry.dividerThickness
 
 @Test func dividerFramesAddressEverySplit() {
     let dividers = SZPanelLayoutGeometry.dividerFrames(root: SZPanelLayoutState.default.root, in: window)
-    #expect(dividers.count == 2)
+    #expect(dividers.count == 3)
     let byPath = Dictionary(uniqueKeysWithValues: dividers.map { ($0.path, $0) })
-    let outer = byPath[[]]!, inner = byPath[[.leading]]!
+    let outer = byPath[[]]!, middle = byPath[[.trailing]]!, inner = byPath[[.trailing, .leading]]!
     #expect(outer.orientation == .horizontal && outer.rect.width == divider
             && outer.rect.height == window.height)
+    #expect(middle.orientation == .horizontal && middle.rect.height == window.height)
     #expect(inner.orientation == .vertical && inner.rect.height == divider)
-    #expect(inner.splitRect.width == outer.rect.minX)   // inner split = the left column
+    #expect(inner.splitRect.minX == outer.rect.maxX)     // inner split = the middle column
+    #expect(inner.splitRect.maxX == middle.rect.minX)
 }
 
 @Test func dividerDragMapsLocationToFraction() {

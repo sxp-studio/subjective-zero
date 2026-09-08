@@ -14,11 +14,14 @@ extension SZHostBridge {
             tool("agent_read_graph", "Return the full project graph (nodes with contracts, connections, render endpoint) as JSON. A built node that needs a rebuild carries `rebuildReason` (contractChanged | intentChanged | sourceMismatch) and, for the first and third, `rebuildDetail` (the audit's offending lines, or the ports off the build stamp). A node whose file input can't be read carries `inputFileErrors` (port → why) — that node is built and broken for a reason no rebuild fixes."),
             tool("agent_read_node", "Return one node (title, kind, prompt, contract, hasCard) as JSON, plus `rebuildReason` when it needs a rebuild, `rebuildDetail` when there is evidence to name (an intentChanged node has none — its prompt is the evidence), and `inputFileErrors` (port → why) when a file input can't be read. Check that BEFORE assuming a black node needs code.",
                  properties: ["node": ["type": "string", "description": "node id (UUID)"]]),
-            tool("agent_library_index", "The built-in node library, grouped by category: one line per node saying what it does. Cheap — read it whole and decide for yourself whether any node does YOUR node's job. Nothing is ranked or filtered; a similar name is not a match. Fetch at most once per turn (it does not change), and not at all if your brief already includes it."),
-            tool("agent_library_card", "Read one library node's card (CARD.md) — reuse guidance, gotchas, and setup notes — to confirm or reject it as a reference without fetching full source. When the node is already the likely reference, request its card and source together in one round.",
-                 properties: ["node": ["type": "string", "description": "library node id (e.g. camera.macos)"]]),
-            tool("agent_library_source", "Fetch one library node's full Node.swift source, to copy-as-is, adapt, or study before writing your own. Batchable with agent_library_card in the same round. `file: \"Card.swift\"` fetches the node's custom card instead (nodes marked \"ships a card\" in the index) — the worked example for authoring one.",
+            tool("agent_library_index", "The node libraries (built in and the user's own), grouped by what the nodes do: one line per node saying what it does. Cheap — read it whole and decide for yourself whether any node does YOUR node's job. Nothing is ranked; a similar name is not a match. Pass `query` to list only the nodes matching every word of it (id, title, tags, purpose). Fetch at most once per turn (it does not change), and not at all if your brief already includes it.",
+                 properties: ["query": ["type": "string", "description": "optional search words; every word must match somewhere in the node's id, title, tags or purpose"]]),
+            tool("agent_library_card", "Read one library node's card (CARD.md) — reuse guidance, gotchas, and setup notes — to confirm or reject it as a reference without fetching full source. When the node is already the likely reference, request its card and source together in one round. Pass `library` when the index line names one (the same id can exist in two libraries).",
                  properties: ["node": ["type": "string", "description": "library node id (e.g. camera.macos)"],
+                              "library": ["type": "string", "description": "which library (default: the first that has the id, built in first)"]]),
+            tool("agent_library_source", "Fetch one library node's full Node.swift source, to copy-as-is, adapt, or study before writing your own. Batchable with agent_library_card in the same round. `file: \"Card.swift\"` fetches the node's custom card instead (nodes marked \"ships a card\" in the index) — the worked example for authoring one. Pass `library` when the index line names one.",
+                 properties: ["node": ["type": "string", "description": "library node id (e.g. camera.macos)"],
+                              "library": ["type": "string", "description": "which library (default: the first that has the id, built in first)"],
                               "file": ["type": "string", "enum": ["Node.swift", "Node.js", "Card.swift"], "description": "which file (default: the project's node source, Node.swift or Node.js)"]]),
             tool("agent_write_node_staged", "Write a node's source (Node.swift, or Node.js in a web project) (+ optional node-contract.json, + optional Card.swift — the node's custom card, see agent_docs_read {topic:\"card-abi\"}) to the project's .staging area. Does NOT touch live state. Omitting `card` also drops any previously staged card.",
                  properties: [
@@ -97,7 +100,7 @@ extension SZHostBridge {
         switch name {
         case "agent_read_graph":         return try agentReadGraph()
         case "agent_read_node":          return try agentReadNode(arguments)
-        case "agent_library_index":      return Self.libraryIndexText(target: host.projectTarget)
+        case "agent_library_index":      return libraryIndexText(query: arguments.string("query"))
         case "agent_library_card":       return try agentLibraryCard(arguments)
         case "agent_library_source":     return try agentLibrarySource(arguments)
         case "agent_write_node_staged":  return try agentWriteNodeStaged(arguments)
@@ -213,57 +216,40 @@ extension SZHostBridge {
         // And a node can open its file and still not use it: a missing codec, a pipeline that would not
         // build. Only the node sees that, so this is its own words (`ctx.reportError`).
         if let reported = host.nodeRuntimeErrors[id] { json["nodeError"] = reported }
+        // Where the node was copied from and its copies (SZHost+Lineage): what tells "edit this card"
+        // from "edit one and apply to the others". Above the early return: a clean node has copies too.
+        if let lineage = host.lineage(of: id) { json.merge(lineageJSON(lineage)) { _, new in new } }
         guard let reason = node.rebuildReason else { return json }
         json["rebuildReason"] = reason.rawValue
         if let detail = host.rebuildDetail(node: id) { json["rebuildDetail"] = detail }
         return json
     }
 
-    /// Scan the repo's `NodeLibrary/` for node folders (a `node-contract.json` inside) and assemble the
-    /// Tier-1 catalog (docs/NODE_LIBRARY.md): each record's identity + typed I/O + permissions come from the
-    /// node's contract (the single source of truth — so `io` can't drift), merged with the hand-curated
-    /// `useWhen`/`avoidWhen`/`purpose`/`tags` from `NodeLibrary/index.json`.
-    /// One scan behind the index, so what an agent browses is exactly what ships.
-    nonisolated private static func libraryCatalog() -> [SZLibraryIndexEntry] {
-        let fm = FileManager.default
-        let root = SZHost.libraryURL
-        let curation = (try? Data(contentsOf: root.appending(path: "index.json")))
-            .flatMap { try? JSONDecoder().decode(SZLibraryCurationFile.self, from: $0) }?
-            .byID ?? [:]
-        let folders = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
-        var entries: [SZLibraryIndexEntry] = []
-        for folder in folders {
-            let contractURL = folder.appending(path: "node-contract.json")
-            guard let data = try? Data(contentsOf: contractURL),
-                  let contract = try? JSONDecoder().decode(SZNodeContract.self, from: data) else { continue }
-            let id = folder.lastPathComponent
-            let hasCard = fm.fileExists(atPath: folder.appending(path: "Card.swift").path)
-            entries.append(SZLibraryIndexEntry(id: id, contract: contract, curation: curation[id], hasCard: hasCard))
+    /// The lineage fields on the agent surface: `origin` (`{library, source?}` or `{node, title}`),
+    /// `originChanged`, and `copies` `[{node, title, inSync}]`; each omitted when there is nothing to say.
+    func lineageJSON(_ lineage: SZNodeLineage) -> [String: Any] {
+        var json: [String: Any] = [:]
+        switch lineage.origin {
+        case .library(.library(let source, let id)):
+            json["origin"] = ["library": id, "source": source.rawValue]
+        case .node(let id, let title):
+            json["origin"] = ["node": id.uuidString, "title": title]
+        case .library(.projectNode), nil:
+            break
         }
-        entries.sort { $0.id < $1.id }
-        return entries
+        if lineage.origin != nil { json["originChanged"] = lineage.changed }
+        if !lineage.copies.isEmpty {
+            json["copies"] = lineage.copies.map { ["node": $0.id.uuidString, "title": $0.title, "inSync": $0.inSync] }
+        }
+        return json
     }
 
-    /// A node's category — its first curated tag, which is the family it belongs to (`color`, `generator`,
-    /// `source`, `audio`, …). Nodes without curation fall under `other`.
-    nonisolated private static func libraryCategory(_ entry: SZLibraryIndexEntry) -> String {
-        entry.tags?.first ?? "other"
-    }
-
-    /// Tier 1: the whole catalog, grouped by category — one line per node with what it does, its typed I/O,
-    /// and whether its source drops in unchanged. Everything needed to PICK; nothing needed to implement.
-    ///
-    /// Deliberately NOT ranked. Scoring a node against a request guesses at "does this do this job", which
-    /// is a semantic judgement, and the thing reading this IS a language model. A ranker only moved the
-    /// guess earlier and hid its working: it withheld what it scored low and lent authority to what it
-    /// scored high, on token overlap. Hand over the evidence and let the reader judge. This costs ~1k tokens
-    /// where the old typed-JSON dump cost ~4.4k, so reading it whole is cheaper than a shortlist was.
-    /// The tool's payload: the categories block wrapped in the tool-response framing (how to spend
-    /// the deeper tiers). The framing stays OUT of the brief embed below — a brief carries its own
-    /// framing (`reference-inline`), and the two must not ship together (they disagree on how to
-    /// spend the deeper tiers).
-    nonisolated static func libraryIndexText(target: SZProjectTarget = .native) -> String {
-        let categories = libraryCategoriesBlock(target: target) ?? "(the library is empty)"
+    /// Tier 1: the offered libraries as the grouped block (`SZHost.libraryCategoriesBlock`), wrapped in
+    /// the tool-response framing (how to spend the deeper tiers). The framing stays OUT of the brief
+    /// embed — a brief carries its own (`reference-inline`), and the two must not ship together.
+    private func libraryIndexText(query: String?) -> String {
+        let categories = host.libraryCategoriesBlock(target: host.projectTarget, query: query)
+            ?? query.map { "(no library node matches \"\($0)\")" } ?? "(the library is empty)"
         // The framing template lives in the coding pack (the ONE home for agent prose;
         // the equivalence gate pins the bytes). No packs, or a render refusal → the bare
         // categories block, which is the payload's substance — degrade, never invent.
@@ -273,45 +259,11 @@ extension SZHostBridge {
             ?? categories
     }
 
-    /// The categories block for inlining into cold-start coding briefs
-    /// (`SZHost+Run.makeOrchestrationContext`) — the shared assembly under both surfaces, so the
-    /// brief and the tool cannot drift on content. nil when the catalog is empty (a packaging
-    /// regression): the brief then falls back to the call-the-tool framing rather than asserting
-    /// "the full catalog is right here" around nothing while forbidding the tool that would show
-    /// the live state.
-    nonisolated static func libraryCategoriesBlock(target: SZProjectTarget = .native) -> String? {
-        func ports(_ list: [SZLibraryIndexEntry.Port]) -> String {
-            list.isEmpty ? "none" : list.map { "\($0.name):\($0.type.rawValue)" }.joined(separator: ",")
-        }
-        // a node is offered to a target iff its folder ships that target's source file
-        let entries = libraryCatalog().filter { entry in
-            FileManager.default.fileExists(
-                atPath: SZHost.libraryURL.appending(path: entry.id).appending(path: target.sourceFileName).path)
-        }
-        let byCategory = Dictionary(grouping: entries, by: Self.libraryCategory)
-        guard !byCategory.isEmpty else { return nil }
-        let categories = byCategory.keys.sorted().map { category -> String in
-            let lines = (byCategory[category] ?? []).map { entry in
-                let permissions = (entry.permissions?.map(\.rawValue) ?? []).joined(separator: ",")
-                let tags = (entry.tags ?? []).joined(separator: " ")
-                return "  \(entry.id) — \(entry.purpose ?? entry.summary)"
-                    + " [in \(ports(entry.io.inputs)) | out \(ports(entry.io.outputs))"
-                    + (permissions.isEmpty ? "" : " | needs \(permissions)")
-                    + (entry.card == true ? " | ships a card" : "")
-                    + (entry.reuse.map { " | \($0)" } ?? "")
-                    + (tags.isEmpty ? "" : " | \(tags)") + "]"
-            }
-            return "\(category):\n\(lines.joined(separator: "\n"))"
-        }
-        return categories.joined(separator: "\n")
-    }
-
     /// Tier-2: the node's CARD.md (reuse guidance + gotchas) — cheap confirmation before fetching source.
     /// Returned as raw text (not JSON-wrapped): the card is a single blob the agent just reads.
     private func agentLibraryCard(_ arguments: [String: Any]) throws -> String {
-        let id = try libraryNodeID(arguments, tool: "agent_library_card")
-        let url = SZHost.libraryURL.appending(path: "\(id)/CARD.md")
-        guard let card = try? String(contentsOf: url, encoding: .utf8) else {
+        let (id, folder) = try libraryNodeFolder(arguments, tool: "agent_library_card")
+        guard let card = try? String(contentsOf: folder.appending(path: "CARD.md"), encoding: .utf8) else {
             throw SZMCPError.message("no library card for \(id)")
         }
         return card
@@ -320,33 +272,43 @@ extension SZHostBridge {
     /// Tier-3: the node's full Node.swift, for an agent that picked it as a reference. Raw source text
     /// (not JSON-wrapped) so copy-as-is stays byte-faithful and cheap to read.
     private func agentLibrarySource(_ arguments: [String: Any]) throws -> String {
-        let id = try libraryNodeID(arguments, tool: "agent_library_source")
+        let (id, folder) = try libraryNodeFolder(arguments, tool: "agent_library_source")
         // `file: "Card.swift"` reads the node's custom card instead of its Node.swift — the worked
         // example an agent studies before authoring one (only nodes flagged "ships a card" have one).
         let file = arguments.string("file") ?? host.nodeSourceFileName
         guard file == "Node.swift" || file == "Node.js" || file == "Card.swift" else {
             throw SZMCPError.message("agent_library_source `file` must be Node.swift, Node.js or Card.swift")
         }
-        let url = SZHost.libraryURL.appending(path: "\(id)/\(file)")
-        guard let source = try? String(contentsOf: url, encoding: .utf8) else {
+        guard let source = try? String(contentsOf: folder.appending(path: file), encoding: .utf8) else {
             throw SZMCPError.message("no library \(file) for \(id)")
         }
         return source
     }
 
-    /// Validate a `node` argument as a library id: a single path component naming a real `NodeLibrary/` folder
-    /// (rejects empty / traversal ids before they touch the filesystem).
-    private func libraryNodeID(_ arguments: [String: Any], tool: String) throws -> String {
+    /// The `library` argument as a source id, when given.
+    /// The library a tool names under `key` ("library" for the agent tools, "source" for ui_add_library_node,
+    /// whose `library` is the node id); nil when omitted, refused when it is not one the host has.
+    func librarySource(_ arguments: [String: Any], key: String = "library", tool: String) throws -> SZLibrarySourceID? {
+        guard let raw = arguments.string(key) else { return nil }
+        let source = SZLibrarySourceID(rawValue: raw)
+        guard host.libraryRoots.contains(where: { $0.source == source }) else {
+            throw SZMCPError.message("\(tool) `\(key)` must be one of \(host.libraryRoots.map(\.source.rawValue).joined(separator: ", "))")
+        }
+        return source
+    }
+
+    /// Validate a `node` argument as a library id (a single path component, no traversal) and resolve
+    /// its folder: in the `library` named, else the first library that has it, built in first.
+    private func libraryNodeFolder(_ arguments: [String: Any], tool: String) throws -> (id: String, folder: URL) {
         guard let id = arguments.string("node"), !id.isEmpty else {
             throw SZMCPError.message("\(tool) needs `node` (library id, e.g. camera.macos)")
         }
-        guard !id.contains("/"), id != "." , id != ".." else { throw SZMCPError.message("invalid library id: \(id)") }
-        let folder = SZHost.libraryURL.appending(path: id)
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue else {
+        guard SZHost.isLibraryID(id) else { throw SZMCPError.message("invalid library id: \(id)") }
+        let library = try librarySource(arguments, tool: tool)
+        guard let found = host.libraryFolder(id: id, library: library) else {
             throw SZMCPError.message("no library node \(id)")
         }
-        return id
+        return (id, found.folder)
     }
 
     // MARK: write / compile / status (step 5)

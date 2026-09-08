@@ -310,6 +310,16 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// agent wrote. Lets a target switch copy the library's twin for the new platform without an agent.
     public var libraryID: String?
 
+    /// The library `libraryID` names; nil is the built-in one.
+    public var librarySource: SZLibrarySourceID?
+
+    /// The project node this one was copied from (Duplicate), when it was.
+    public var copiedFrom: SZNodeID?
+
+    /// Hash of the source file as it was copied, from a library entry or another node. Against the live
+    /// file it tells an untouched copy from an edited one.
+    public var copiedHash: String?
+
     /// What the card renders between header and rows (preview thumbnail / the node's custom card / nothing).
     /// `nil` = unset; the editor applies its legacy auto-preview fallback. Presentation-only: never affects
     /// the render graph or a rebuild.
@@ -362,7 +372,10 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         sourceMismatch: Bool = false,
         unreadableInputs: [String: String] = [:],
         body: SZNodeBody? = nil,
-        libraryID: String? = nil
+        libraryID: String? = nil,
+        librarySource: SZLibrarySourceID? = nil,
+        copiedFrom: SZNodeID? = nil,
+        copiedHash: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -377,6 +390,9 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         self.unreadableInputs = unreadableInputs
         self.body = body
         self.libraryID = libraryID
+        self.librarySource = librarySource
+        self.copiedFrom = copiedFrom
+        self.copiedHash = copiedHash
     }
 
     /// `sourceMismatch`, `unreadableInputs`, `builtTargets` and `activeTarget` are host state, not document
@@ -385,6 +401,7 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// legacy single `buildStamp` is this Mac's.
     private enum CodingKeys: String, CodingKey {
         case id, kind, title, sfSymbol, prompt, contract, position, buildStamp, buildStamps, body, libraryID
+        case librarySource, copiedFrom, copiedHash
     }
 
     public init(from decoder: any Decoder) throws {
@@ -398,6 +415,9 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         position = try c.decode(SZPoint.self, forKey: .position)
         body = try c.decodeIfPresent(SZNodeBody.self, forKey: .body)
         libraryID = try c.decodeIfPresent(String.self, forKey: .libraryID)
+        librarySource = try c.decodeIfPresent(SZLibrarySourceID.self, forKey: .librarySource)
+        copiedFrom = try c.decodeIfPresent(SZNodeID.self, forKey: .copiedFrom)
+        copiedHash = try c.decodeIfPresent(String.self, forKey: .copiedHash)
         var stamps: [SZProjectTarget: SZBuildStamp] = [:]
         for (key, stamp) in try c.decodeIfPresent([String: SZBuildStamp].self, forKey: .buildStamps) ?? [:] {
             if let target = SZProjectTarget(rawValue: key) { stamps[target] = stamp }
@@ -423,6 +443,9 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         }
         try c.encodeIfPresent(body, forKey: .body)
         try c.encodeIfPresent(libraryID, forKey: .libraryID)
+        try c.encodeIfPresent(librarySource, forKey: .librarySource)
+        try c.encodeIfPresent(copiedFrom, forKey: .copiedFrom)
+        try c.encodeIfPresent(copiedHash, forKey: .copiedHash)
     }
 }
 
@@ -530,6 +553,14 @@ public enum SZProjectTarget: String, Codable, Sendable, CaseIterable {
         switch self {
         case .native: "On this Mac"
         case .web: "In a browser"
+        }
+    }
+
+    /// The same words mid-sentence: "27 nodes on this Mac".
+    public var placeName: String {
+        switch self {
+        case .native: "on this Mac"
+        case .web: "in a browser"
         }
     }
 }
@@ -727,6 +758,13 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// The target picked for the last new project: the New Project sheet's preselection. Optional
     /// for the same decode-compatibility reason; nil means On this Mac.
     public var lastProjectTarget: SZProjectTarget?
+    /// Where the user's own node library lives, once moved (Settings ▸ Library ▸ Move…). Optional for
+    /// the same decode-compatibility reason; nil means the default folder under Application Support.
+    public var myLibraryPath: String?
+    /// Library panel groups the user collapsed (`SZLibraryGroup` raw values). A browsing habit, so it
+    /// lives here rather than in the project. Optional for the same decode-compatibility reason; nil
+    /// means every group is open.
+    public var libraryCollapsedGroups: [String]?
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
 
@@ -754,7 +792,9 @@ public struct SZAppState: Codable, Equatable, Sendable {
         routingSeededStarterNames: [String]? = nil,
         routingLastProfileName: String? = nil,
         recordPrefs: SZRecordPrefs? = nil,
-        lastProjectTarget: SZProjectTarget? = nil
+        lastProjectTarget: SZProjectTarget? = nil,
+        myLibraryPath: String? = nil,
+        libraryCollapsedGroups: [String]? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -780,6 +820,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.routingLastProfileName = routingLastProfileName
         self.recordPrefs = recordPrefs
         self.lastProjectTarget = lastProjectTarget
+        self.myLibraryPath = myLibraryPath
+        self.libraryCollapsedGroups = libraryCollapsedGroups
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

@@ -1052,6 +1052,11 @@ extension SZHost {
         }
 
         var deliveries: [(order: SZDispatchOrder, engine: SZGraphEngine?, sighting: UUID)] = []
+        // cold-start briefs inline the library index so a first dispatch spends no tool round fetching
+        // it (counts and a search pointer once it is large); SZ_BRIEF_PREFETCH=0 reverts. one block for
+        // the whole dispatch, not one scan per node.
+        let libraryBrief = ProcessInfo.processInfo.environment["SZ_BRIEF_PREFETCH"] == "0"
+            ? nil : libraryBriefBlock(target: projectTarget)
         for order in orders {
             let sighting = UUID()
             guard let nodeID = SZNodeID(uuidString: order.node) else {
@@ -1083,10 +1088,7 @@ extension SZHost {
                 agent: coding.id, message: "",
                 extras: SZBriefExtras(
                     preserveBehavior: hiddenPieces.contains(nodeID),
-                    // Cold-start briefs inline the library index so a first dispatch spends
-                    // no tool rounds fetching it; SZ_BRIEF_PREFETCH=0 reverts.
-                    libraryIndex: ProcessInfo.processInfo.environment["SZ_BRIEF_PREFETCH"] == "0"
-                        ? nil : SZHostBridge.libraryCategoriesBlock(target: projectTarget),
+                    libraryIndex: libraryBrief,
                     target: projectTarget,
                     convertSource: convertSource,
                     convertFrom: convertSource == nil ? nil : other.sourceFileName),

@@ -40,12 +40,7 @@ struct SZCanvasContextMenuView: View {
         }
         .padding(5)
         .frame(width: 264)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .background(Color(white: 0.09).opacity(0.55),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
-        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+        .szGlassCard()
         // The menu holds focus while open (parks the canvas's Delete/⌫ handling); the caller
         // restores canvas focus on dismiss.
         .focusable()

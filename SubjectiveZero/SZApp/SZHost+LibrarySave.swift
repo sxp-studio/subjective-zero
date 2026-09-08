@@ -1,0 +1,180 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Saving a node into the user's own library: the folder is created on the first save (library.json,
+// index.json, a git repository); a save writes one node folder and its index entry, commits, and stamps
+// the project node as a copy of the entry. Git trouble is printed and never fails a save.
+import Foundation
+import SZCore
+
+extension SZHost {
+    /// The library folder, created with its `library.json`, empty `index.json` and a git repository the
+    /// first time. Returns the folder.
+    func ensureMyLibrary() throws -> URL {
+        let url = myLibraryURL
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue { return url }
+        try fm.createDirectory(at: url, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: ["name": SZLibrarySourceID.mine.displayName], options: [.prettyPrinted])
+            .write(to: url.appending(path: "library.json"))
+        try SZJSON.encoder().encode(SZLibraryCurationFile(nodes: [])).write(to: url.appending(path: "index.json"))
+        Self.git(["init", "-q"], in: url)
+        return url
+    }
+
+    /// Save a built node as a My Library entry named from `name` (a node from My Library updates its own;
+    /// a taken name gets -2, -3): contract with file inputs cleared, every built source, card, CARD.md with
+    /// the prompt. The node then records the entry as its origin.
+    @discardableResult
+    func saveNodeToLibrary(node id: SZNodeID, name: String, line: String,
+                           origin: SZMutationOrigin = .user) throws -> SZLibraryRef {
+        if let denial = fenceDenial(nodes: [id], origin: origin) { throw SZMCPError.message(denial) }
+        guard let projectURL = loadedProjectURL else { throw SZMCPError.message("no project loaded") }
+        guard let node = store.project?.graph.node(id: id) else { throw SZMCPError.message("no node \(id)") }
+        let fm = FileManager.default
+        let sources = SZProjectTarget.allCases.map { target in
+            (target, SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: id, target: target))
+        }.filter { fm.fileExists(atPath: $0.1.path) }
+        guard node.kind == .generated, var contract = node.contract, !sources.isEmpty else {
+            throw SZMCPError.message("This node has not been built yet")
+        }
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw SZMCPError.message("The node needs a name") }
+
+        let library = try ensureMyLibrary()
+        let entryID: String
+        if node.librarySource == .mine, let own = node.libraryID {
+            entryID = own
+        } else {
+            let base = SZLibrarySlug.make(name)
+            var candidate = base
+            var n = 2
+            while fm.fileExists(atPath: library.appending(path: candidate).path) {
+                candidate = "\(base)-\(n)"
+                n += 1
+            }
+            entryID = candidate
+        }
+        let folder = library.appending(path: entryID)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        contract.title = name
+        contract.summary = line
+        for i in contract.inputs.indices where contract.inputs[i].ui?.kind == .filePicker {
+            contract.inputs[i].def = nil
+        }
+        try SZProjectIO.contractData(contract).write(to: folder.appending(path: "node-contract.json"))
+        for (target, url) in sources {
+            try Self.replaceFile(at: folder.appending(path: target.sourceFileName), with: url)
+        }
+        let cardURL = SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: id)
+        let libraryCard = folder.appending(path: "Card.swift")
+        if fm.fileExists(atPath: cardURL.path) {
+            try Self.replaceFile(at: libraryCard, with: cardURL)
+        } else {
+            try? fm.removeItem(at: libraryCard)   // the node dropped its card since the last save
+        }
+        let prompt = node.prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        try Data("# \(name)\n\n\(line)\n\n## Prompt\n\n\(prompt.isEmpty ? "(none)" : prompt)\n".utf8)
+            .write(to: folder.appending(path: "CARD.md"))
+
+        var index = Self.libraryCuration(root: library)
+        if let i = index.nodes.firstIndex(where: { $0.id == entryID }) {
+            index.nodes[i].purpose = line
+        } else {
+            index.nodes.append(SZLibraryCurationEntry(id: entryID, tags: [], purpose: line))
+        }
+        try SZJSON.encoder().encode(index).write(to: library.appending(path: "index.json"))
+        // the files are complete; the commit is bookkeeping and never holds up the save
+        Task.detached {
+            Self.git(["add", "-A"], in: library)
+            Self.git(["commit", "-q", "-m", "Save \(name)"], in: library)
+        }
+
+        // the project node is a copy of the entry from here on
+        let liveBytes = sources.first { $0.0 == projectTarget }.flatMap { try? Data(contentsOf: $0.1) }
+        store.mutate { project in
+            guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
+            project.graph.nodes[i].libraryID = entryID
+            project.graph.nodes[i].librarySource = .mine
+            if let liveBytes { project.graph.nodes[i].copiedHash = Self.contentHash(liveBytes) }
+        }
+        if let project = store.project { try SZProjectIO.save(project, to: projectURL) }
+        noteMutation("saved node to library", [name], origin: origin)
+        refreshLibraryItems()
+        status = "Saved \(name) to \(SZLibrarySourceID.mine.displayName)"
+        return .library(source: .mine, id: entryID)
+    }
+
+    /// What the Save to Library sheet opens with: the node's title and summary, whether the save would
+    /// update an entry the node came from, and which parts differ from that entry (source, ports, card).
+    func saveToLibraryPreview(node id: SZNodeID) -> (name: String, line: String, updates: Bool, changes: [String]) {
+        guard let node = store.project?.graph.node(id: id) else { return ("", "", false, []) }
+        let name = node.title
+        let line = node.contract?.summary ?? ""
+        guard node.librarySource == .mine, let own = node.libraryID,
+              let folder = libraryFolder(.library(source: .mine, id: own)), let projectURL = loadedProjectURL
+        else { return (name, line, false, []) }
+        let fm = FileManager.default
+        var changes: [String] = []
+        let live = SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: id, target: projectTarget)
+        let saved = folder.appending(path: projectTarget.sourceFileName)
+        if fm.fileExists(atPath: live.path), !fm.contentsEqual(atPath: live.path, andPath: saved.path) {
+            changes.append("source changed")
+        }
+        let savedContract = (try? Data(contentsOf: folder.appending(path: "node-contract.json")))
+            .flatMap { try? JSONDecoder().decode(SZNodeContract.self, from: $0) }
+        if let contract = node.contract, contract.portSurface != savedContract?.portSurface {
+            changes.append("ports changed")
+        }
+        let liveCard = SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: id)
+        let savedCard = folder.appending(path: "Card.swift")
+        let hasLiveCard = fm.fileExists(atPath: liveCard.path)
+        if hasLiveCard != fm.fileExists(atPath: savedCard.path)
+            || (hasLiveCard && !fm.contentsEqual(atPath: liveCard.path, andPath: savedCard.path)) {
+            changes.append("card changed")
+        }
+        return (name, line, true, changes)
+    }
+
+    /// Move My Library so that `folder` is the library folder itself; an empty folder there is replaced.
+    /// The path is remembered across launches. A library not created yet is simply created there later.
+    func moveMyLibrary(to folder: URL) throws {
+        let fm = FileManager.default
+        let current = myLibraryURL
+        guard folder.standardizedFileURL != current.standardizedFileURL else { return }
+        if fm.fileExists(atPath: folder.path) {
+            let contents = try fm.contentsOfDirectory(atPath: folder.path).filter { $0 != ".DS_Store" }
+            guard contents.isEmpty else { throw SZMCPError.message("That folder is not empty") }
+            try fm.removeItem(at: folder)
+        }
+        if fm.fileExists(atPath: current.path) {
+            try fm.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fm.moveItem(at: current, to: folder)
+        }
+        myLibraryPath = folder.path
+        persistAppState()
+        refreshLibraryItems()
+        status = "Moved \(SZLibrarySourceID.mine.displayName)"
+    }
+
+    /// Run one git command in `directory` through xcrun (the command line tools the app already needs
+    /// for swiftc). A failure is printed and swallowed: the library on disk is complete without it.
+    nonisolated static func git(_ arguments: [String], in directory: URL) {
+        let process = Process()
+        process.executableURL = URL(filePath: "/usr/bin/xcrun")
+        process.arguments = ["git"] + arguments
+        process.currentDirectoryURL = directory
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus != 0 else { return }
+            let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            print("[SZHost] git \(arguments.joined(separator: " ")) failed (\(process.terminationStatus)): \(text)")
+        } catch {
+            print("[SZHost] git \(arguments.joined(separator: " ")) could not run: \(error)")
+        }
+    }
+}

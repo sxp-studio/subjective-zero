@@ -30,12 +30,14 @@ public struct SZContextSuggestion: Identifiable, Equatable, Sendable {
 }
 
 /// One open right-click menu: the target under the click, the click point (panel space), and the
-/// suggestion rows SNAPSHOTTED at open (mid-run promotes don't reshuffle an open menu).
+/// suggestion and action rows SNAPSHOTTED at open (mid-run promotes don't reshuffle an open menu, and
+/// the action rows are not recomputed per render).
 struct SZContextMenuSession: Identifiable {
     let id = UUID()
     let target: SZCanvasContextTarget
     let anchor: CGPoint
     let suggestions: [SZContextSuggestion]
+    let actions: [SZContextAction]
 
     /// Shift-clamped placement: the menu opens at the click point and slides inward near the
     /// right/bottom edges (8pt margin), NSMenu-like.
@@ -49,15 +51,15 @@ struct SZContextMenuSession: Identifiable {
     }
 }
 
-/// A plain (non-message) action row: open transcript / open Node.swift / add a node here / show or
-/// hide a node's custom card. Distinct glyphs on purpose — bubble = say something, transcript glyph
-/// = read, doc = the source file, plus = a direct structural edit (the deterministic node add, not
-/// a message), the card glyphs = a body-mode flip.
+/// A plain (non-message) action row: transcript, source, add node, card flips, the library verbs.
+/// Distinct glyphs on purpose: bubble = say, transcript = read, doc = source, plus = a direct add,
+/// card glyphs = body mode, books = library.
 public struct SZContextAction: Identifiable, Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case mentionInChat(SZNodeID), openSource(SZNodeID), addNode
         case toggleCard(SZNodeID, on: Bool), openCard(SZNodeID), newCard(SZNodeID)
         case togglePlugs(SZNodeID, on: Bool)
+        case addFromLibrary, duplicate(SZNodeID), saveToLibrary(SZNodeID), applyToCopies(SZNodeID)
     }
     public let kind: Kind
     public let label: String

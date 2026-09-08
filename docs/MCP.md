@@ -58,8 +58,18 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
                                             // on the canvas (same classifier, stagger, and "last node
                                             // takes the render endpoint"). Rejects the whole call on a
                                             // missing or non-media path
-- `ui_add_library_node`                     // a built-in library node verbatim (Node.swift + its Card.swift
-                                            // when it ships one); a contract declaring `card` lands with it ON
+- `ui_add_library_node`                     // a library node verbatim (Node.swift + its Card.swift when it
+                                            // ships one); a contract declaring `card` lands with it ON. Optional
+                                            // `library` picks the library when two carry the same id (built
+                                            // in wins by default); the response echoes the node's `origin`.
+                                            // Mirrors placing a row from the Library panel
+- `ui_duplicate_node`                       // a second copy of a graph node beside it, own values, lineage kept
+- `ui_apply_to_copies`                      // carry one copy's source + ports to its siblings that are still
+                                            // untouched since they were copied (each keeps its own values);
+                                            // changed copies are skipped and listed unless named in `copies`;
+                                            // refused while a target is held by a run
+- `ui_save_to_library`                      // copy a built node into the user's own library (name,
+                                            // description); the first save creates the library
 - `binding_learn_start/stop/state`,        // controller nodes (midi.macos, osc-input): arm learn, poll the
   `binding_commit`, `binding_remove`        // moved control ({armed, seen, key, value01}), commit it as a
                                             // mappings row + derived float output (+ data edge with `target`),
@@ -118,7 +128,10 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
 - `agent_read_graph`, `agent_read_node`         // a built node that needs a rebuild carries `rebuildReason`
                                             // (contractChanged | intentChanged | sourceMismatch | notBuiltForTarget), plus `rebuildDetail`
                                             // when there is evidence to name (the audit's offending lines / the ports
-                                            // off the build stamp; an intentChanged node has none - its prompt is it)
+                                            // off the build stamp; an intentChanged node has none - its prompt is it).
+                                            // A copy carries `origin` (the library node or graph node it came
+                                            // from), `originChanged` (its source was edited since) and `copies`
+                                            // (its siblings, each `inSync` or not) - see GRAPH_AND_NODES.md
 - `agent_view_frame` - **real framebuffer readback** of a node's texture output, returned as an inline
   image (base64 PNG) the agent's model actually sees, so it can reason on its VFX result. Pixel-perfect
   but downscaled to fit the token budget (default 768px long edge; `maxSize` overrides). `node` (+
@@ -131,7 +144,9 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
                                             // (in a web project the source is Node.js, and the compile is a
                                             // JavaScriptCore parse plus the page importing, constructing and
                                             // running the module a few frames)
-- `agent_library_index`, `agent_library_card`, `agent_library_source`  // 3-tier, see NODE_LIBRARY.md
+- `agent_library_index`, `agent_library_card`, `agent_library_source`  // 3-tier over every library, see
+                                            // NODE_LIBRARY.md; `query` narrows the index, `library` picks one
+                                            // when two libraries carry the same id
                                             // (`source` takes `file`: Node.swift, Node.js for a web version, or
                                             // Card.swift for a node that ships a card; default: the project's source file)
   (`index` built M3; `card` + `source` built M4 - `card`/`source` return raw text, `index` returns JSON)

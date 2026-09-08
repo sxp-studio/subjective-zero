@@ -16,7 +16,7 @@ MyProject.subz/
 │  ├─ n1/
 │  │  ├─ node-contract.json
 │  │  ├─ Node.swift          // the Mac source; Node.js sits beside it once built for the browser
-│  │  └─ Card.swift          // optional: the node's custom card (see below)
+│  │  └─ Card.swift          // optional: the node's custom card (see below); Mac projects only
 │  └─ n2/
 │     ├─ node-contract.json
 │     └─ Node.swift
@@ -49,9 +49,9 @@ is ephemeral, never written to `project.json`: read from disk at load
 `notBuiltForTarget`, wears the pill "Not built for this platform", counts as work for any run, and
 is left out of the render graph: `SZGraph.renderable` keeps only the generated nodes built for the
 target, the connections among them, and the endpoint if its node is one, so a missing file never
-fails a load. `SZNode.libraryID`, persisted in `project.json`, records which library node a placed
-node came from, so a switch copies the library's twin for the new platform without an agent. Every
-other node goes to a conversion run: its coding agent is handed the other platform's source as a
+fails a load. `SZNode.libraryID` (with `librarySource`), persisted in `project.json`, records which
+library node a placed node came from, so a switch copies the library's twin for the new platform
+without an agent. Every other node goes to a conversion run: its coding agent is handed the other platform's source as a
 reference, translates it first, regenerates from the prompt if a translation cannot work, and
 answers `needsInput` with a reason when the platform cannot do it at all
 ([AGENT_GRAPHS.md](AGENT_GRAPHS.md)).
@@ -221,6 +221,23 @@ visible intent and narrated, never silently dropped.
    then behind the contract (`isStale(for:)`), the Target Platform pane says NEEDS BUILD for it, and
    the next switch converts it.
 4. User iterates: edit defaults, draw data connections, chat with the node's agent, or split/merge.
+
+## Copies and lineage
+
+A node placed from a library or duplicated on the canvas is a **copy**: its own folder, source and
+values, no link back. It keeps where it came from, in `project.json`: `libraryID` + `librarySource`
+(the entry it was placed from; nil source is the built-in library, `"mine"` the user's own; a save
+stamps these too), `copiedFrom` (the node it was duplicated from), and `copiedHash` (the source as
+copied, so the live file tells an untouched copy from an edited one).
+
+The rest is derived: nodes sharing a library entry, or the same first node in their `copiedFrom`
+chain, are copies of each other; a copy is **in sync** while its source still hashes to
+`copiedHash`. Agents read `origin`, `originChanged` and `copies` on `agent_read_node`, and the
+Director's graph summary says `copy of "gaussian-blur" (2 other copies)`. **Apply to N Copies** (a
+node's menu, `ui_apply_to_copies`) carries one copy's source, ports and card to its in-sync
+siblings, keeping each one's own input values and leaving changed siblings alone. It writes the
+current platform's file only; the other platform's build turns stale and a target switch regenerates
+it. A sibling held by a run is refused until the run settles ([MCP.md](MCP.md)).
 
 ## Split / merge as graph transactions
 

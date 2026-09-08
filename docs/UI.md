@@ -77,14 +77,14 @@ overlays: a binary split tree
   lives in the runtime).
 
 ```
-┌─ SZApp window ──────────────────────────────────┐
-│ ┌ Viewport ────────────────┐  ┌ Chat ─────────┐ │
-│ │  (Metal live render)     │  │  one feed     │ │
-│ ├ Node Editor ─────────────┤  │               │ │
-│ │  ●Camera ─▶ ●Grayscale   │  │  run strip    │ │
-│ │            [HUD capsule] │  │  composer     │ │
-│ └──────────────────────────┘  └───────────────┘ │
-└──────────────────────────────────────────────────┘
+┌─ SZApp window ─────────────────────────────────────────────┐
+│ ┌ Library ──┐ ┌ Viewport ────────────────┐  ┌ Chat ─────────┐ │
+│ │ search    │ │  (Metal live render)     │  │  one feed     │ │
+│ │ Sources   │ ├ Node Editor ─────────────┤  │               │ │
+│ │ Effects   │ │  ●Camera ─▶ ●Grayscale   │  │  run strip    │ │
+│ │ Audio …   │ │            [HUD capsule] │  │  composer     │ │
+│ └───────────┘ └──────────────────────────┘  └───────────────┘ │
+└────────────────────────────────────────────────────────────┘
     (default arrangement - every panel can move)
 ```
 
@@ -146,13 +146,45 @@ Node anatomy should be **compact and sleek** (right anatomy, minimal bulk). The 
 is derived from the node's contract, so reflow on `ui_update_node` is
 a state-driven re-render - no per-node-type view code.
 
-Interactions (each backed by a `ui_` command): add prompt node, move, connect/disconnect (flow vs
-data), edit input defaults, toggle display. Dragging a fresh wire into empty canvas spawns a
+Interactions (each backed by a `ui_` command): add prompt node, place a library node, duplicate,
+move, connect/disconnect (flow vs data), edit input defaults, toggle display. Dragging a fresh wire into empty canvas spawns a
 prompt node joined by that wire: a flow wire adds a flow edge; a data wire also seeds the new
 node's contract with one port of the dragged port's exact type (`input`/`output`, the
 contract-draft naming) so the typed edge is legal immediately. Split/merge and run are asked for
 in MESSAGES now - see the context menu below; the deterministic ops live on as the agents'
 `ui_split_node` / `ui_merge_nodes` / `ui_run` tools.
+
+## Library panel
+
+The nodes a person can place without an agent (`SZLibraryPanel`, model in `SZLibraryPanelModel`).
+Open by default down the left; View ▸ Library and `ui_show_panel library` bring it back. Rows come
+from every library the app knows ([NODE_LIBRARY.md](NODE_LIBRARY.md#where-library-nodes-come-from)),
+only those with a source for the project's platform; the footer is the count, and a note under the
+search field names how many the other platform holds. A row is a symbol and a title, nothing else.
+
+- **Groups, not categories.** Empty search: four sections read off the ports (Sources, Effects,
+  Audio, Control), each with a colour carried by its chevron, header and row symbols. Clicking a
+  header shuts the group; its header and count stay, its rows leave the keyboard walk, and the
+  choice is remembered with the prefs rather than the project. Typing collapses the groups into one
+  ranked list (id, title prefix, title, then tags and description), so a shut group never hides a
+  search hit. With two or more libraries a chip row filters by library.
+- **The strip below the list describes what the pointer is on**: the whole summary, and what the
+  node needs written out ("Uses the camera"), never a glyph to decode. It is sticky (leaving the
+  list keeps the last node) and holds no control at all — every way to place a node is on the row
+  itself, so choosing one never means dragging the pointer down across rows that would repaint the
+  strip on the way past.
+- **Placing copies.** The row's **Add**, a double-click, or Return lands the node at the centre of
+  the visible canvas; dragging a row lands it under the cursor; the canvas menu's **Add from
+  Library** focuses the search and remembers the click point for the next Return. One host path for
+  all of it (`SZHost.placeLibraryItem`, also `ui_add_library_node`). The card and its Reloading pill
+  paint before the compile blocks (`deferBuild`), so the wait is visible instead of reading as a
+  dead click. No AI provider needed.
+- **Copies, never links.** A placed or duplicated node remembers its origin and the hash of the
+  source it was copied with, which is what **Apply to N Copies** and the agents' `copies` read
+  ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md#copies-and-lineage)).
+- **Save to Library…** on a built node's menu, or in chat (`ui_save_to_library`), copies it into My
+  Library: name and one line prefilled, the project's node untouched. The first save creates the
+  library; saving a node that came from it updates its entry. **Add library…** opens Settings ▸ Library.
 
 ## Canvas context menu - right-click = "what can I say here"
 
@@ -166,10 +198,14 @@ are REAL messages to real agents; determinism stays in the agents' `ui_*` tools)
   (generated), plus **Mention in Chat** (`text.bubble` — puts the node in the composer, since one
   conversation has no tab to open) and **Open Node.swift** (`doc.text`) action rows. A generated node with a `Card.swift` adds **Show Custom Card / Hide Custom Card** and
   **Open Card.swift**; one without adds **New Custom Card…** (scaffolds a starter and opens it).
-  A generated node with a body region also adds **Hide Plugs / Show Plugs**.
+  A generated node with a body region also adds **Hide Plugs / Show Plugs**. A built node adds
+  **Duplicate**, **Save to Library…**, and, when other copies of it are untouched since they were
+  copied, **Apply to N Copies** ([Library panel](#library-panel)).
   Right-click also selects the node (a multi-selection member keeps the set).
 - **A multi-selection** → "@project merge @A, @B and @C into one node".
-- **Empty canvas** → "@project implement the N pending nodes".
+- **Empty canvas** → "@project implement the N pending nodes", plus **Add Node Here** (a prompt node
+  at the click point) and **Add from Library** (the Library panel's search, with the click point
+  remembered for the next placement).
 - Every menu has a **free-text row** seeded with the target's mention - the recipient is always
   explicit in the message itself.
 
@@ -258,9 +294,14 @@ the agent it is for.
 
 - **Settings sheet** - on ⌘, (`CommandGroup(replacing: .appSettings)`), the gear menu's
   Settings… item, the chat ⋯ menu's "AI Settings" item, and auto-presented on first run until a
-  default provider is confirmed. Titled "Settings", with a sidebar of three panes, **Target
-  Platform | Providers | Routing**; Target Platform is listed only while a project is open, and
+  default provider is confirmed. Titled "Settings", with a sidebar of four panes, **Target
+  Platform | Providers | Routing | Library**; Target Platform is listed only while a project is open, and
   File ▸ Target Platform… opens the sheet straight on it.
+- **Library** (`SZLibrarySettingsView`) - the libraries the panel reads, one row each: **Built in**
+  (ships with the app, its node count) and **My Library** (created by the first Save to Library…;
+  node count and folder, with Show in Finder and Move…, which relocates the folder and remembers
+  the new place in `app-state.json`). Adding a library by link or folder, updating one, and
+  publishing yours are the next step ([NODE_LIBRARY.md](NODE_LIBRARY.md#where-library-nodes-come-from)).
 - **Target Platform** (`SZTargetPlatformPane`) - where the open project runs, switched in place.
   One row per platform, This Mac and Browser (BETA), each with its description, an ACTIVE badge on
   the current one and "N of M nodes built" (a source file for that platform that is not behind the

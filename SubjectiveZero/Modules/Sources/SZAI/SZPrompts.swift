@@ -249,6 +249,7 @@ public enum SZDirectorPrompt {
     /// cannot drift under it while the user keeps drawing.
     static func graphSummary(_ graph: SZGraph, arrows: [SZConnection]? = nil) -> String {
         func short(_ id: SZNodeID) -> String { String(id.uuidString.prefix(8)) }
+        let familySizes = Dictionary(graph.nodes.map { (graph.lineageFamily(of: $0.id), 1) }, uniquingKeysWith: +)
         let nodes = graph.nodes.map { n -> String in
             let io = contractIO(n.contract, fallback: "no contract yet")
             // A blank prompt node is rendered EXPLICITLY, not as an absent clause: the Director must be
@@ -266,7 +267,7 @@ public enum SZDirectorPrompt {
             // `generated`, and the Director must see that it is nonetheless pending work. The derived reason
             // rides along; the toolbelt defines the three and `agent_read_node` carries the detail.
             let rebuild = n.rebuildReason.map { " (NEEDS REBUILD — \($0.rawValue))" } ?? ""
-            return "- `\(n.id.uuidString)` \"\(n.title)\" — \(n.kind.rawValue)\(rebuild), \(io)\(prompt)"
+            return "- `\(n.id.uuidString)` \"\(n.title)\" — \(n.kind.rawValue)\(rebuild), \(io)\(prompt)\(lineageClause(n, in: graph, familySizes: familySizes))"
         }.joined(separator: "\n")
 
         // A pinned end prints as `node.port` — the user dropped the arrow on that exact slot.
@@ -288,6 +289,24 @@ public enum SZDirectorPrompt {
         Data edges: \(data.isEmpty ? "none" : data.joined(separator: ", "))
         Render endpoint (blitted to the viewport): \(endpoint)
         """
+    }
+
+    /// ` — copy of "gaussian-blur" (2 other copies)` for a placed or duplicated node, empty otherwise.
+    /// sync state is host state (`agent_read_node`), so this only counts. `familySizes` is the graph's
+    /// copies grouped once by `SZGraph.lineageFamily`.
+    static func lineageClause(_ node: SZNode, in graph: SZGraph, familySizes: [String: Int]) -> String {
+        let origin: String?
+        if let libraryID = node.libraryID {
+            origin = "\"\(libraryID)\""
+        } else if let from = node.copiedFrom {
+            origin = graph.node(id: from).map { "\"\($0.title)\"" } ?? "a node no longer in the graph"
+        } else {
+            origin = nil
+        }
+        let others = (familySizes[graph.lineageFamily(of: node.id)] ?? 1) - 1
+        guard origin != nil || others > 0 else { return "" }
+        let copies = others == 0 ? "" : (others == 1 ? " (1 other copy)" : " (\(others) other copies)")
+        return " — copy of \(origin ?? "an earlier node")\(copies)"
     }
 
     /// A node's typed boundary as `contract[in: …; out: …]` for an agent prompt, or `fallback` when it has

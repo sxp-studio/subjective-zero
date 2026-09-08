@@ -14,7 +14,32 @@ write from scratch.
 
 Library nodes are **reference points, not runtime dependencies**: when reused, their source is
 **copied into the new node's folder and edited there**. We never link a generated node against a
-library node.
+library node. A person places them the same way, from the **Library panel**
+([UI.md](UI.md#library-panel)), with no agent and no provider configured; the copy keeps its
+origin so the agents can tell copies apart ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md#copies-and-lineage)).
+
+## Where library nodes come from
+
+A library is a **folder of node folders** in the layout below. The app reads every library it knows
+through one list of roots (`SZHost.libraryRoots`), so the panel, the agents' index and placement see
+the same nodes.
+
+- **Built in** - `NodeLibrary/` in this repo, bundled as a folder reference and read in place.
+  Tested against the app it ships with; works offline on first launch.
+- **My Library** - the user's own, created by the first **Save to Library…** under Application
+  Support (movable from Settings ▸ Library). A save writes one node folder (contract with file
+  inputs cleared, each source file the node has, `Card.swift` if any, `CARD.md` with the description
+  and prompt) and one `index.json` entry, then commits; git is never required and never shown.
+  Saving the same node again updates its entry, and the project's node is stamped as a copy of it.
+- **Next**: a library added by link is the same folder cloned at a commit, updated on request with
+  the diff shown first, behind a one-time trust note. Publishing My Library is a push. Not built yet.
+
+Ids may repeat across libraries, so rows are keyed by library and id, and the agents' tools take an
+optional `library` argument when two libraries carry the same id (built in wins when omitted).
+
+**Groups, not categories.** Every surface groups nodes by their ports (`SZLibraryGroup.derived`):
+Sources (a texture out, none in), Effects (texture in and out), Audio (sample arrays either way),
+Control (anything else with outputs). Nothing is curated; `tags` are search terms.
 
 ## Static and fast by design
 
@@ -52,17 +77,20 @@ lets discovery climb without changing the agent contract or the on-disk format:
 
 1. **Reason over `index.json`** (today) - the whole catalog fits cheaply in context; the agent does
    full-information semantic matching. Best while the library is small (tens of nodes).
-2. **Narrow before reasoning** - once the index no longer fits cheaply in every agent's context, add a
-   host-side `agent_library_search {q|tags|io}` returning a shortlist. Start lexical/tag/port-shape
-   (still plain files); reach for an **embedding / vector index only if lexical recall proves too weak**
-   at that scale - that's the point where an indexer earns its keep. Same seam either way.
+2. **Narrow before reasoning** - once the index no longer fits cheaply in every agent's context, narrow
+   it first. `agent_library_index { "query": "..." }` does the lexical half today (every term of the
+   query must appear in a node's id, title, tags, purpose or summary), and the cold-start brief inlines
+   the whole block only while the offered nodes number 60 or fewer; above that it inlines the group
+   counts and tells the agent to query. Reach for an **embedding / vector index only if lexical recall
+   proves too weak** at that scale - that's the point where an indexer earns its keep. Same seam either way.
 3. **Lift discovery to the Director / a librarian agent** - search once per graph and hand each coding
    agent a pre-selected `ref` (amortizes across the fan-out); an LLM-judge reranks the shortlist when
    fit needs real judgment. Multi-agent reasoning belongs *here*, over a pre-narrowed set - never agents
    scanning the full catalog first-pass.
 
-Rungs 2–3 are unbuilt: earned when the catalog actually outgrows rung 1, not before. Embeddings aren't
-rejected - they're simply not worth their cost until the catalog stops fitting cheaply in context.
+Rung 3 is unbuilt, and rung 2 has only its lexical half: earned when the catalog actually outgrows
+rung 1, not before. Embeddings aren't rejected - they're simply not worth their cost until the
+catalog stops fitting cheaply in context.
 
 ### Tier 1 - the assembled index (cheap, loaded whole)
 
@@ -76,7 +104,8 @@ Each record is **assembled** by `agent_library_index`, not stored whole:
   `summary`, `io`, `permissions`) - the contract is the single source of truth, so `io` can never drift
   from what the node actually declares.
 - **Discovery metadata is curated in `index.json`** (`tags`, `purpose`, `useWhen`, `avoidWhen`, `reuse`,
-  `platform`) - the fields that can't be derived from the contract.
+  `platform`) - the fields that can't be derived from the contract. `platform` is informational only:
+  whether a node is offered to a platform is decided by which source files its folder holds.
 
 So `index.json` holds **only curation**, one entry per node keyed by folder `id`:
 
@@ -199,6 +228,8 @@ A node folder has three files (four with a web version):
 
 Then add **one curation entry** to `NodeLibrary/index.json`, keyed by folder `id`, carrying only the
 fields that aren't in the contract: `tags`, `purpose`, `useWhen`, `avoidWhen`, `reuse`, `platform`.
+A test pins that the index names exactly the shipped folders, so a folder without an entry (or an
+entry without a folder) fails `swift test`.
 
 > **Derive, don't duplicate.** `title`, `sfSymbol`, `summary`, `io`, and `permissions` are read from
 > `node-contract.json` and merged into the served record automatically. **Never restate them in

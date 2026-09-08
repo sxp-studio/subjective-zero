@@ -18,6 +18,7 @@ public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
     case viewport
     case nodeEditor
     case chat
+    case library
     case profiler
     case agentGraph
 
@@ -28,6 +29,7 @@ public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
         case .viewport: "Viewport"
         case .nodeEditor: "Node Editor"
         case .chat: "Chat"
+        case .library: "Library"
         case .profiler: "Profiler"
         case .agentGraph: "Agent Graph"
         }
@@ -116,6 +118,7 @@ public struct SZPanelID: Hashable, Codable, Sendable, Comparable {
     public static let viewport = SZPanelID(.viewport)
     public static let nodeEditor = SZPanelID(.nodeEditor)
     public static let chat = SZPanelID(.chat)
+    public static let library = SZPanelID(.library)
     public static let profiler = SZPanelID(.profiler)
     public static let agentGraph = SZPanelID(.agentGraph)
 
@@ -263,13 +266,14 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
         self.restorePositions = restorePositions
     }
 
-    /// The launch layout (matches the pre-refactor SplitView arrangement): viewport over node editor,
-    /// chat docked right.
+    /// The launch layout: the library down the left, viewport over node editor, chat docked right.
     public static let `default` = SZPanelLayoutState(
-        root: .split(orientation: .horizontal, fraction: 0.75,
-                     leading: .split(orientation: .vertical, fraction: 0.6,
-                                     leading: .panel(.viewport), trailing: .panel(.nodeEditor)),
-                     trailing: .panel(.chat)))
+        root: .split(orientation: .horizontal, fraction: 0.18,
+                     leading: .panel(.library),
+                     trailing: .split(orientation: .horizontal, fraction: 0.72,
+                                      leading: .split(orientation: .vertical, fraction: 0.6,
+                                                      leading: .panel(.viewport), trailing: .panel(.nodeEditor)),
+                                      trailing: .panel(.chat))))
 
     public var presentIDs: Set<SZPanelID> { Set(root.leafIDs) }
     public func contains(_ id: SZPanelID) -> Bool { root.contains(id) }
@@ -429,6 +433,7 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
         case .viewport: SZPanelRestorePosition(neighbor: .nodeEditor, zone: .top, share: 0.6)
         case .nodeEditor: SZPanelRestorePosition(neighbor: .viewport, zone: .bottom, share: 0.4)
         case .chat: SZPanelRestorePosition(neighbor: .viewport, zone: .right, share: 0.25)
+        case .library: SZPanelRestorePosition(neighbor: .nodeEditor, zone: .left, share: 0.3)
         case .profiler: SZPanelRestorePosition(neighbor: .chat, zone: .bottom, share: 0.4)
         case .agentGraph: SZPanelRestorePosition(neighbor: .nodeEditor, zone: .right, share: 0.5)
         }

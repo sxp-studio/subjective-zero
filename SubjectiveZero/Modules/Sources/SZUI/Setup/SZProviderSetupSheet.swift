@@ -25,6 +25,7 @@ public enum SZProviderSetupSection: String, CaseIterable, Sendable {
     case target
     case providers
     case routing
+    case library
 }
 
 /// One provider's card — a pure view-model the host maps from its merged health truth.
@@ -106,6 +107,8 @@ public struct SZProviderSetupSheet: View {
     /// The Routing pane's content, built by the presenter (the gearMenu AnyView pattern).
     /// nil = no Routing section (previews/tests); the sidebar hides it.
     private let routing: SZRoutingSettingsView?
+    /// The Library pane, built by the presenter. nil = no such section (previews/tests).
+    private let library: SZLibrarySettingsView?
     private let onSelect: (String) -> Void
     private let onRefresh: () -> Void
     private let onTest: (String) -> Void
@@ -144,12 +147,15 @@ public struct SZProviderSetupSheet: View {
                 onConfirm: @escaping () -> Void, onSkip: @escaping () -> Void,
                 onOpenSetupGuide: @escaping () -> Void,
                 onJoinDiscord: @escaping () -> Void,
-                isFirstRun: Bool = true) {
+                onSectionChange: @escaping (SZProviderSetupSection) -> Void = { _ in },
+                isFirstRun: Bool = true,
+                library: SZLibrarySettingsView? = nil) {
         self.cards = cards
         self.selectedID = selectedID
         self.activeID = activeID
         self.targetPlatform = targetPlatform
         self.routing = routing
+        self.library = library
         self.isFirstRun = isFirstRun
         _section = section
         self.onSelect = onSelect
@@ -177,6 +183,7 @@ public struct SZProviderSetupSheet: View {
                 case .target: targetPlatformPane
                 case .providers: providersPane
                 case .routing: routingPane
+                case .library: libraryPane
                 }
             }
             .padding(24)
@@ -199,6 +206,9 @@ public struct SZProviderSetupSheet: View {
             sidebarItem(.providers, label: "Providers", systemImage: "cpu")
             if routing != nil {
                 sidebarItem(.routing, label: "Routing", systemImage: "arrow.triangle.branch")
+            }
+            if library != nil {
+                sidebarItem(.library, label: "Library", systemImage: "books.vertical")
             }
             Spacer()
         }
@@ -312,6 +322,21 @@ public struct SZProviderSetupSheet: View {
                 HStack {
                     Spacer()
                     Button("Done") { onSkip() }   // post-first-run close; routing never gates Confirm
+                }
+            }
+        }
+    }
+
+    // MARK: - Library pane (presenter-built content; a Done that mirrors the sheet's dismiss)
+
+    @ViewBuilder
+    private var libraryPane: some View {
+        if let library {
+            VStack(alignment: .leading, spacing: 10) {
+                library
+                HStack {
+                    Spacer()
+                    Button("Done") { onSkip() }
                 }
             }
         }

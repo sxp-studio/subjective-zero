@@ -6,7 +6,7 @@ import Testing
 @testable import SZUI
 
 private func session(anchor: CGPoint) -> SZContextMenuSession {
-    SZContextMenuSession(target: .canvas, anchor: anchor, suggestions: [])
+    SZContextMenuSession(target: .canvas, anchor: anchor, suggestions: [], actions: [])
 }
 
 private let menu = CGSize(width: 240, height: 180)

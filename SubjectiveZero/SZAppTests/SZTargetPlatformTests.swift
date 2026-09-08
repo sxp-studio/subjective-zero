@@ -97,7 +97,7 @@ struct SZTargetPlatformTests {
 
         // with the library's own Mac source in place, the browser twin is copied without an agent
         let projectURL = try #require(host.loadedProjectURL)
-        let shipped = SZHost.libraryURL.appending(path: "brightness").appending(path: "Node.swift")
+        let shipped = SZHost.builtInLibraryURL.appending(path: "brightness").appending(path: "Node.swift")
         let bMac = SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: b, target: .native)
         try FileManager.default.removeItem(at: bMac)
         try FileManager.default.copyItem(at: shipped, to: bMac)

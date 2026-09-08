@@ -450,38 +450,71 @@ struct SZFileDropCatcher: NSViewRepresentable {
     /// shares this view's frame. Callers that don't care about placement (the chat panel) ignore it.
     var onDrop: ([URL], CGPoint) -> Bool
     var onTargeted: (Bool) -> Void
+    /// A Library row dropped here (`SZLibraryDrag` JSON, same top-left point). nil = library drags bounce.
+    var onDropLibrary: ((Data, CGPoint) -> Bool)? = nil
+
+    private static let libraryType = NSPasteboard.PasteboardType(SZLibraryDrag.typeIdentifier)
 
     func makeNSView(context: Context) -> NSView {
         let v = DropView()
         v.onDrop = onDrop
         v.onTargeted = onTargeted
-        v.registerForDraggedTypes([.fileURL])
+        v.onDropLibrary = onDropLibrary
+        v.registerForDraggedTypes([.fileURL, Self.libraryType])
         return v
     }
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let v = nsView as? DropView else { return }
         v.onDrop = onDrop
         v.onTargeted = onTargeted
+        v.onDropLibrary = onDropLibrary
     }
 
     final class DropView: NSView {
         var onDrop: (([URL], CGPoint) -> Bool)?
         var onTargeted: ((Bool) -> Void)?
+        var onDropLibrary: ((Data, CGPoint) -> Bool)?
+
+        /// Whether this drag CARRIES a library ref. Asks what types are registered, not for the bytes:
+        /// a SwiftUI `.onDrag` provider fills its data in lazily, so `data(forType:)` is nil while the
+        /// drag is still in flight and the drop would be refused before it ever started.
+        private func hasLibraryRef(_ sender: NSDraggingInfo) -> Bool {
+            onDropLibrary != nil
+                && sender.draggingPasteboard.availableType(from: [SZFileDropCatcher.libraryType]) != nil
+        }
+
+        /// The ref itself, at drop time, when the lazy data has been provided. The per-item read is the
+        /// fallback for a provider that registered the type on its item rather than the pasteboard.
+        private func libraryData(_ sender: NSDraggingInfo) -> Data? {
+            let pasteboard = sender.draggingPasteboard
+            if let data = pasteboard.data(forType: SZFileDropCatcher.libraryType) { return data }
+            return pasteboard.pasteboardItems?
+                .compactMap { $0.data(forType: SZFileDropCatcher.libraryType) }.first
+        }
 
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-            guard sender.draggingPasteboard.hasFileURLs else { return [] }
+            guard sender.draggingPasteboard.hasFileURLs || hasLibraryRef(sender) else { return [] }
             onTargeted?(true)
             return .copy
+        }
+        // Without this, AppKit reuses the entered answer for every update; being explicit keeps the
+        // copy cursor while the pointer moves over the canvas.
+        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+            sender.draggingPasteboard.hasFileURLs || hasLibraryRef(sender) ? .copy : []
         }
         override func draggingExited(_ sender: NSDraggingInfo?) { onTargeted?(false) }
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
             onTargeted?(false)
-            let urls = sender.draggingPasteboard.fileURLs
-            guard !urls.isEmpty else { return false }
             // AppKit's draggingLocation is window-space, bottom-left origin; convert to this view then
             // flip Y so the point is top-left (what SwiftUI coordinate spaces use).
             let inView = convert(sender.draggingLocation, from: nil)
             let point = CGPoint(x: inView.x, y: bounds.height - inView.y)
+            if hasLibraryRef(sender), let onDropLibrary {
+                guard let data = libraryData(sender) else { return false }
+                return onDropLibrary(data, point)
+            }
+            let urls = sender.draggingPasteboard.fileURLs
+            guard !urls.isEmpty else { return false }
             return onDrop?(urls, point) ?? false
         }
     }

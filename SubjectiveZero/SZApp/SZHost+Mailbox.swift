@@ -130,8 +130,8 @@ extension SZHost {
         let workingDirectory = cacheDirectory.appending(path: "agent/\(scope.key)")
         try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
 
-        status = "chatting (\(scope.key.prefix(8))…)"
         let workingNodeID = scope.nodeID
+        status = workingNodeID.map { "Chatting with \(mutationTitle($0))" } ?? "Chatting with the Director"
         if let workingNodeID { setNodeChatting(workingNodeID, true) }
         defer { if let workingNodeID { setNodeChatting(workingNodeID, false) } }
 

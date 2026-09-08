@@ -361,6 +361,32 @@ final class SZHost {
     @ObservationIgnored var pendingReveal: Set<SZNodeID> = []
     @ObservationIgnored var revealDebounce: Task<Void, Never>?
 
+    /// Every node folder across the libraries, scanned once by `refreshLibraryItems` (SZHost+Library).
+    internal(set) var libraryEntries: [SZLibraryEntry] = []
+    /// The Library panel's rows for the open project's target, derived from `libraryEntries`.
+    internal(set) var libraryItems: [SZLibraryItem] = []
+    /// Library nodes built for the other platform only; the panel footer's "N more" count.
+    internal(set) var libraryOffPlatformCount = 0
+    /// Where the user's own library lives once moved from its default folder; persisted with the prefs.
+    internal(set) var myLibraryPath: String? = SZAppStateIO.load()?.myLibraryPath
+    /// Library panel groups the user shut. A browsing habit, so it is remembered with the prefs
+    /// rather than the project: opening someone else's project never rearranges the panel.
+    internal(set) var libraryCollapsedGroups: Set<SZLibraryGroup> =
+        Set((SZAppStateIO.load()?.libraryCollapsedGroups ?? []).compactMap(SZLibraryGroup.init(rawValue:)))
+    /// Bumped to focus the Library panel's search field (the canvas menu's Add from Library).
+    internal(set) var libraryFocusRequest = 0
+    /// Where the next placement from the Library panel lands: the canvas click that asked for it.
+    /// Consumed by the placement; nil means the centre of the visible canvas.
+    internal(set) var libraryPlacementRequest: SZPoint?
+    /// The centre of the node editor's visible canvas, in graph space, as the editor last reported it.
+    var canvasVisibleCenter: SZPoint?
+    /// The node the Save to Library sheet is open for; nil closes it. The preview is computed once here,
+    /// not per render of the sheet.
+    var saveToLibraryNode: SZNodeID? {
+        didSet { saveToLibraryPreview = saveToLibraryNode.map(saveToLibraryPreview(node:)) }
+    }
+    internal(set) var saveToLibraryPreview: (name: String, line: String, updates: Bool, changes: [String])?
+
     // Project lifecycle (roadmap Task 1) — same app-state.json home + restore story as the prefs
     // above; mutated by `switchProject` (and Open Recent ▸ Clear via SZHost+ProjectLifecycle).
     /// File ▸ Open Recent, newest first (`.subz` paths).
@@ -602,19 +628,6 @@ final class SZHost {
         return URL(filePath: path)
     }
 
-    /// The built-in node library (umbrella root `NodeLibrary/`), browsed by the coding agents through
-    /// the `agent_library_*` tools and copied into a project by `instantiateLibraryNode` (drag-and-drop).
-    /// Prefer the copy bundled in the app (`NodeLibrary` is a folder reference in Resources), so a packaged
-    /// build works; fall back to the source tree via `#filePath` for `swift test` / running from the
-    /// checkout, where the bundle has no resources.
-    nonisolated static var libraryURL: URL {
-        if let bundled = Bundle.main.resourceURL?.appending(path: "NodeLibrary"),
-           FileManager.default.fileExists(atPath: bundled.path) {
-            return bundled
-        }
-        return URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appending(path: "NodeLibrary")
-    }
-
     /// Instantiate the runtime, vend the viewport render closure, open the launch project (env
     /// override → last open → fresh untitled project; SZHost+ProjectLifecycle.swift), and start
     /// the app-level services. Loading is delegated to `switchProject` — launch is just the first
@@ -795,6 +808,7 @@ final class SZHost {
         // cards show WHY, not just that. After clearPerProjectState, so the details survive.
         classifyRebuildsAfterLoad()
         watchNodeSources(in: newURL)
+        refreshLibraryItems()   // the panel offers what this project's platform can run
         // Fresh graph, fresh thumbs: blank every box (old-project frames must not flash on the new
         // canvas) and re-point the runtime's watch set — the refresh also prunes dead boxes.
         previewFrames.clear()
@@ -1046,7 +1060,7 @@ final class SZHost {
     /// and re-runnable: it tracks already-watched node ids and only adds watchers for new folders, so it can
     /// be called again after a promote / graph edit to pick up nodes created this session. A folder with no
     /// `Node.swift` yet (an un-implemented prompt node) is skipped and watched on a later pass once promoted.
-    private func watchNodeSources(in url: URL) {
+    func watchNodeSources(in url: URL) {
         let nodesDir = url.appending(path: "nodes")
         let folders = (try? FileManager.default.contentsOfDirectory(
             at: nodesDir, includingPropertiesForKeys: nil)) ?? []
@@ -1223,60 +1237,95 @@ final class SZHost {
         // (it must re-stage). Failed promotes above keep it for inspection; the rest of `.staging/`
         // (instance.lock, message-queue.json) is not ours to touch.
         try? fm.removeItem(at: staging)
-        status = "promoted \(id.uuidString.prefix(8))"
+        status = "Built \(mutationTitle(id))"
     }
 
-    // MARK: - Instantiate a library node
+    // MARK: - Place a library node
 
-    /// Materialize a built-in `NodeLibrary/<libraryID>/` node directly into the live graph — the same
-    /// end-state `promoteStagedNode` reaches, but sourced from the library instead of an agent's staging
-    /// folder and creating a NEW node rather than promoting a `.prompt` one. Copies the library's
-    /// `Node.swift` into the project's per-node folder (`nodes/<uuid>/`, addressed by id like every other
-    /// node), folds its contract into the store as a `.generated` node, applies any `inputDefaults`
-    /// (e.g. a dropped file's `path`), then persists + reloads so the runtime compiles and renders it.
-    /// This is the placement path the drag-and-drop media feature needs (and the seed of any future node
-    /// palette). Returns the new node's id.
+    /// Copy a node into the graph as a new `.generated` node, from a library folder or a node already in
+    /// the project: source into `nodes/<uuid>/`, contract into the store, `inputDefaults` applied, lineage
+    /// recorded, then save and reload. Returns the new id.
     @discardableResult
-    func instantiateLibraryNode(libraryID: String, position: SZPoint,
-                                inputDefaults: [String: SZPortValue] = [:],
-                                origin: SZMutationOrigin = .user) throws -> SZNodeID {
+    /// `deferBuild` is for the doors a person drives: the card and its Reloading pill paint before
+    /// the (blocking) compile starts, so the wait is visible instead of reading as a dead click. Tools
+    /// leave it off — they answer for whether the node built, so they need the build to finish here.
+    func placeLibraryItem(_ ref: SZLibraryRef, position: SZPoint,
+                          inputDefaults: [String: SZPortValue] = [:],
+                          origin: SZMutationOrigin = .user,
+                          deferBuild: Bool = false) throws -> SZNodeID {
         guard let projectURL = loadedProjectURL else { throw SZMCPError.message("no project loaded") }
         let fm = FileManager.default
-        let src = Self.libraryURL.appending(path: libraryID)
-        let sourceURL = src.appending(path: nodeSourceFileName)
-        guard fm.fileExists(atPath: sourceURL.path) else {
-            throw SZMCPError.message(projectTarget == .web
-                ? "library node '\(libraryID)' has no web version yet"
-                : "library node '\(libraryID)' has no Node.swift")
+        var contract: SZNodeContract
+        var node: SZNode
+        let sourceURL: URL
+        let cardURL: URL
+        switch ref {
+        case .library(let source, let id):
+            guard let folder = libraryFolder(ref) else { throw SZMCPError.message("no library node \(id)") }
+            sourceURL = folder.appending(path: nodeSourceFileName)
+            cardURL = folder.appending(path: "Card.swift")
+            guard fm.fileExists(atPath: sourceURL.path) else {
+                throw SZMCPError.message(projectTarget == .web
+                    ? "library node '\(id)' has no browser version yet"
+                    : "library node '\(id)' has no \(nodeSourceFileName)")
+            }
+            contract = try JSONDecoder().decode(
+                SZNodeContract.self, from: Data(contentsOf: folder.appending(path: "node-contract.json")))
+            node = SZNode(kind: .generated, title: contract.title, sfSymbol: contract.sfSymbol,
+                          contract: contract, position: position,
+                          buildStamp: .trusting(contract: contract, prompt: nil),   // a shipped build: trusted as-is
+                          target: projectTarget,
+                          libraryID: id,                                             // so a target switch can copy its twin
+                          librarySource: source == .builtIn ? nil : source)
+        case .projectNode(let id):
+            guard let original = store.project?.graph.node(id: id), let originalContract = original.contract else {
+                throw SZMCPError.message("no built node \(id)")
+            }
+            sourceURL = SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: id, target: projectTarget)
+            cardURL = SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: id)
+            guard fm.fileExists(atPath: sourceURL.path) else {
+                throw SZMCPError.message("\(original.title) has no version \(projectTarget.placeName) yet")
+            }
+            contract = originalContract   // defaults kept: the copy starts where the original stands
+            node = SZNode(kind: .generated, title: original.title, sfSymbol: original.sfSymbol,
+                          prompt: original.prompt, contract: contract, position: position,
+                          buildStamp: original.buildStamps[projectTarget]
+                              ?? .trusting(contract: contract, prompt: original.prompt),
+                          target: projectTarget,
+                          libraryID: original.libraryID, librarySource: original.librarySource,
+                          copiedFrom: id)
+            node.body = original.body
         }
-        var contract = try JSONDecoder().decode(
-            SZNodeContract.self, from: Data(contentsOf: src.appending(path: "node-contract.json")))
         // Pre-select inputs (the dropped file's path) by pinning the port defaults; SZProjectIO.save
         // writes these into the copied node-contract.json, so they survive reload and show in the picker.
         for (port, value) in inputDefaults {
             if let pi = contract.inputs.firstIndex(where: { $0.name == port }) { contract.inputs[pi].def = value }
         }
-        var node = SZNode(kind: .generated, title: contract.title, sfSymbol: contract.sfSymbol,
-                          contract: contract, position: position,
-                          buildStamp: .trusting(contract: contract, prompt: nil),   // a shipped build: trusted as-is
-                          target: projectTarget,
-                          libraryID: libraryID)                                     // so a target switch can copy its twin
+        node.contract = contract
         node.builtTargets = [projectTarget]
-        let live = projectURL.appending(path: "nodes/\(node.id.uuidString)")
+        let bytes = try Data(contentsOf: sourceURL)
+        node.copiedHash = Self.contentHash(bytes)
+        let live = SZProjectIO.nodeFolderURL(projectURL: projectURL, nodeID: node.id)
         try fm.createDirectory(at: live, withIntermediateDirectories: true)
-        try fm.copyItem(at: sourceURL, to: live.appending(path: nodeSourceFileName))
-        // A library node that ships a custom card copies it along. A contract that DECLARES a `card`
-        // block lands with the card ON — it is the node's face (corner-pin's handles over the output,
-        // a controller's learn strips); a Card.swift with no `card` block is an optional control
-        // surface on an existing effect: the node keeps its familiar auto-preview and the card waits
-        // in the context menu ("Show Custom Card").
-        let cardURL = src.appending(path: "Card.swift")
-        if fm.fileExists(atPath: cardURL.path) {
+        try bytes.write(to: live.appending(path: nodeSourceFileName))
+        // A node that ships a custom card copies it along (cards are native only). A contract that
+        // DECLARES a `card` block lands with the card ON — it is the node's face (corner-pin's handles
+        // over the output, a controller's learn strips); a Card.swift with no `card` block is an optional
+        // control surface on an existing effect: the node keeps its familiar auto-preview and the card
+        // waits in the context menu ("Show Custom Card"). A duplicate keeps the original's choice.
+        if projectTarget == .native, fm.fileExists(atPath: cardURL.path) {
             try fm.copyItem(at: cardURL, to: SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: node.id))
-            if contract.card != nil { node.body = SZNodeBody(mode: .custom, custom: SZCustomCardRef()) }
+            if case .library = ref, contract.card != nil { node.body = SZNodeBody(mode: .custom, custom: SZCustomCardRef()) }
         }
 
-        store.mutate { $0.graph.nodes.append(node) }
+        store.mutate { project in
+            project.graph.nodes.append(node)
+            // The original now has a copy to compare against: an untouched root counts as in sync.
+            if case .projectNode(let id) = ref, let i = project.graph.nodes.firstIndex(where: { $0.id == id }),
+               project.graph.nodes[i].copiedHash == nil {
+                project.graph.nodes[i].copiedHash = node.copiedHash
+            }
+        }
         noteNodeAdded(node.id, origin: origin)
         if let project = store.project { try SZProjectIO.save(project, to: projectURL) }
         // A node declaring a permission the app doesn't hold yet (microphone, camera) prompts BEFORE its
@@ -1285,19 +1334,29 @@ final class SZHost {
         if let runtime, contract.requiredPermissions.contains(where: { !runtime.permissions.isAuthorized($0) }) {
             Task { @MainActor [weak self] in
                 await runtime.requestDeclaredPermissions(for: SZProject(name: "", graph: SZGraph(nodes: [node])))
-                guard let self else { return }
-                do { try self.finishInstantiate(libraryID, in: projectURL) } catch { self.status = "add failed: \(error)" }
+                try? self?.finishPlacement(node.id, in: projectURL)   // the failure is already on the pill and the status line
+            }
+        } else if deferBuild {
+            nodeAgentState[node.id] = SZNodeAgentState(phase: .reloading)
+            Task { @MainActor [weak self] in
+                await Task.yield()                                    // let the card and pill paint
+                try? self?.finishPlacement(node.id, in: projectURL)   // failure lands on the pill and the status line
             }
         } else {
-            try finishInstantiate(libraryID, in: projectURL)
+            try finishPlacement(node.id, in: projectURL)
         }
         return node.id
     }
 
-    private func finishInstantiate(_ libraryID: String, in projectURL: URL) throws {
-        try reloadBackendGraph(at: projectURL)     // diffs node ids → compiles + loads the new module
+    /// Compile the placed node under a Reloading pill (SZHost+Lineage) and start watching its source.
+    private func finishPlacement(_ id: SZNodeID, in projectURL: URL) throws {
+        let title = mutationTitle(id)
+        guard reloadNodeUnderPill(id, in: projectURL) else {
+            status = "Couldn't add \(title): \(nodeAgentState[id]?.message ?? "the build failed")"
+            throw SZMCPError.message("\(title) failed to build")
+        }
         watchNodeSources(in: projectURL)           // the new node becomes hot-reloadable
-        status = "added \(libraryID)"
+        status = "Added \(title)"
     }
 
     /// Create library media nodes for a set of media files — the canvas drop (drag & drop) and the
@@ -1312,8 +1371,8 @@ final class SZHost {
         var created: [SZNodeID] = []
         for spawn in spawns {
             do {
-                created.append(try instantiateLibraryNode(
-                    libraryID: spawn.libraryID, position: spawn.position,
+                created.append(try placeLibraryItem(
+                    .library(source: .builtIn, id: spawn.libraryID), position: spawn.position,
                     inputDefaults: ["path": .string(spawn.path)], origin: origin))
             } catch {
                 status = "drop failed: \(error)"
@@ -1876,7 +1935,7 @@ final class SZHost {
     /// Ready. Incremental — only the edited node rebuilds (`reloadNode`); falls back to a full `loadProject`
     /// only when the node isn't currently in the live graph (e.g. a graph stuck failing wholesale).
     private func reloadEditedNode(id: SZNodeID) {
-        guard let backend, let url = loadedProjectURL else { return }
+        guard backend != nil, let url = loadedProjectURL else { return }
         // Edge case — an agent owns this node: a Director run (isRunning) or its Coding Agent mid-chat
         // (isChatting). The agent's own compile→promote path reloads it and drives its pill; reloading
         // here would clobber that. Leave it to the agent (its promote write fires the watcher while guarded).
@@ -1892,25 +1951,12 @@ final class SZHost {
             nodeAgentState[id] = SZNodeAgentState(phase: .reloading)   // pill → Reloading, prior error cleared
             await Task.yield()                          // let the pill paint before the (blocking) compile
             guard isInGraph(id) else { nodeAgentState[id] = nil; return }   // deleted mid-yield: take the pill back
-            let source = SZProjectIO.nodeSourceURL(projectURL: url, nodeID: id, target: projectTarget)
-            do {
-                if backend.isNodeLoaded(id) {
-                    try backend.reloadNode(id: id, source: source)   // incremental: just this node
-                } else {
-                    try reloadBackendGraph(at: url)                  // fallback: node not yet in live graph
-                }
-                nodeAgentState[id] = nil                 // → derived .ready
+            let title = mutationTitle(id)
+            if reloadNodeUnderPill(id, in: url) {
                 classifyRebuild(node: id)                // the hand edit may have opened or closed a port mismatch
-                status = "hot-reloaded \(id.uuidString.prefix(8))"
-                print("[SZHost] hot-reloaded node \(id.uuidString.prefix(8))")
-            } catch {
-                let log = "\(error)"
-                recordBuildErrors(log)
-                // pill → Error (concise first line); full swiftc log → the copyable popover.
-                nodeAgentState[id] = SZNodeAgentState(
-                    phase: .error, message: Self.firstErrorLine(in: log), errorDetail: log)
-                status = "reload failed \(id.uuidString.prefix(8))"
-                print("[SZHost] reload failed for \(id.uuidString.prefix(8)): \(log)")
+                status = "Reloaded \(title)"
+            } else {
+                status = "Couldn't reload \(title): \(nodeAgentState[id]?.message ?? "the build failed")"
             }
         }
     }
