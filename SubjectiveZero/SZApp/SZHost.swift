@@ -486,8 +486,9 @@ final class SZHost {
     var newProjectPresented = false
     /// The sheet cannot be cancelled: nothing else is loaded, so a target must be picked.
     var newProjectRequired = false
-    /// The Settings section a menu item asked for; the sheet lands there once, then clears it.
-    var requestedSetupSection: SZProviderSetupSection?
+    /// The Settings sidebar section. The sheet binds to it: a menu item or a refusal sets it
+    /// before (or while) the sheet shows, and reopening returns to the last-viewed one.
+    var setupSection: SZProviderSetupSection = .providers
     /// The first-run sheet auto-presents at most once per launch. Transient: without it, every
     /// Help ▸ Welcome round-trip would re-nag a user who chose Skip for Now.
     var providerSetupAutoPresented = false
@@ -499,10 +500,19 @@ final class SZHost {
     /// The sheet's cheap-tier re-check loop (~3s) — alive only while the sheet is open, so a just
     /// installed / just-logged-in CLI flips its card green without a manual Refresh.
     var providerHealthPollTask: Task<Void, Never>?
+    /// Whether this Mac has Apple's developer tools (SZHost+Toolchain.swift). Probed at launch
+    /// before anything can pick a project, and re-probed while a surface shows the requirement.
+    var toolchainAvailability: SZToolchainAvailability = .missing
+    /// The requirement's re-check loop, alive only while a sheet shows it and the tools are missing.
+    var toolchainPollTask: Task<Void, Never>?
+    /// A Mac project was opened with nothing built because the tools were missing; the install
+    /// landing rebuilds it.
+    var nativeProjectAwaitingTools = false
     /// The compiled-step execution table for the graph orchestrator's condition steps — one
     /// instance for the host's lifetime, so a re-scheduled step coalesces into the runtime's
-    /// latest-source-wins compile instead of rebuilding a cold table every run.
-    let stepRuntime = SZStepRuntime()
+    /// latest-source-wins compile instead of rebuilding a cold table every run. A release bundle
+    /// carries the shipped steps prebuilt in Contents/PlugIns; dev builds have none and compile.
+    let stepRuntime = SZStepRuntime(prebuiltStepsDir: Bundle.main.builtInPlugInsURL)
     /// In-flight interactive chat turns by scope key (`sendChat`'s tasks) — retained so the
     /// transcript's per-turn stop control can cancel ONE scope's turn (`cancelChatTurn`) without
     /// touching the others; a run's coding turns ride `runTask` instead.
@@ -641,6 +651,9 @@ final class SZHost {
         // A Finder .subz open bypasses welcome and opens directly. CLI (`--skip-welcome` /
         // `--open <path>`, SZLaunchOptions) also bypasses it — the deterministic entry point for
         // automated tests, which need a live rendered viewport to capture.
+        // Can this Mac compile? Answered before any project can be picked, so the New Project
+        // sheet and a native project open already know (SZHost+Toolchain.swift).
+        await refreshToolchainAvailability()
         let options = SZLaunchOptions.parse()
         let fileToOpen = launchFileURL ?? options.projectURL
         if !options.skipWelcome && shouldRouteToWelcomeOnLaunch(launchedWithFile: fileToOpen != nil) {
@@ -662,6 +675,8 @@ final class SZHost {
         checkProviderSetupOnLaunch()
         // Anonymous usage telemetry (SZHost+Telemetry.swift) — a no-op without a bundled key.
         startTelemetry()
+        // The launch probe's answer is a funnel fact, sent once telemetry can send it.
+        if toolchainMissing { trackToolchainMissingTelemetry() }
     }
 
     /// Switch the live document to another `.subz` — THE project-open path for launch, File ▸
@@ -795,6 +810,9 @@ final class SZHost {
         print("[SZHost] loaded project — edit any node's \(nodeSourceFileName) to hot-reload:\n  \(newURL.path)")
         // A project is now live — leave the welcome/home surface (SZHost+Welcome).
         leaveWelcomeForLiveProject()
+        // A Mac project on a Mac without the tools opened with nothing built: show the requirement
+        // with the fix and the browser switch on it, in place of a viewport of build errors.
+        if nativeProjectAwaitingTools { presentTargetPlatformSettings() }
         return true
     }
 

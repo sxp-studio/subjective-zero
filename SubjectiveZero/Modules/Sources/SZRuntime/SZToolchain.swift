@@ -16,8 +16,55 @@ import CryptoKit
 import Foundation
 import Synchronization
 
+/// Whether this Mac can compile at all: Apple's developer tools (the Xcode Command Line Tools or
+/// Xcode) present with a swiftc and a macOS SDK, or not.
+public enum SZToolchainAvailability: Equatable, Sendable {
+    case ready(developerDir: String)
+    case missing
+}
+
 public struct SZToolchain {
-    public init() {}
+    /// Where a release bundle keeps its prebuilt step dylibs (Contents/PlugIns). nil, or a
+    /// directory that does not exist, means every step compiles.
+    public let prebuiltStepsDir: URL?
+
+    public init(prebuiltStepsDir: URL? = nil) {
+        self.prebuiltStepsDir = prebuiltStepsDir
+    }
+
+    // MARK: - Availability
+
+    /// Filesystem only: never runs xcrun or a /usr/bin tool shim, which would open Apple's
+    /// install dialog on a Mac without the tools. Never cached, so a re-check sees an install land.
+    public static func availability(
+        developerDir: () -> String? = { activeDeveloperDir() },
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> SZToolchainAvailability {
+        guard let dir = developerDir(), !dir.isEmpty, fileExists(dir) else { return .missing }
+        // Command Line Tools layout, then Xcode's.
+        let compilers = ["\(dir)/usr/bin/swiftc",
+                         "\(dir)/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+        let sdks = ["\(dir)/SDKs/MacOSX.sdk",
+                    "\(dir)/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"]
+        guard compilers.contains(where: fileExists), sdks.contains(where: fileExists) else { return .missing }
+        return .ready(developerDir: dir)
+    }
+
+    /// The active developer directory: `DEVELOPER_DIR` when set, else what `xcode-select -p`
+    /// prints. `xcode-select -p` exits 2 with an error on a clean Mac and opens no dialog; only
+    /// the tool shims and `--install` do.
+    public static func activeDeveloperDir(environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+        if let dir = environment["DEVELOPER_DIR"], !dir.isEmpty { return dir }
+        guard let result = try? SZToolchain().run("/usr/bin/xcode-select", ["-p"]), result.status == 0 else { return nil }
+        let path = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? nil : path
+    }
+
+    /// Open Apple's Command Line Tools installer. The dialog belongs to the system; the caller
+    /// re-probes to learn the outcome.
+    public static func openInstallDialog() {
+        _ = try? SZToolchain().run("/usr/bin/xcode-select", ["--install"])
+    }
 
     /// The app-wide swiftc gate, shared by every tier that compiles off the main thread (steps,
     /// cards): a burst of schedules must not fan out into a compile storm — a swiftc storm has
@@ -35,12 +82,18 @@ public struct SZToolchain {
         case sdkNotFound(log: String)
         case compileFailed(log: String)
         case signFailed(log: String)
+        case lipoFailed(log: String)
+
+        /// What a user reads if a compile still runs with the tools gone.
+        static let toolsMissingMessage =
+            "Apple's developer tools are not installed. Install the Xcode Command Line Tools, then build again."
 
         var description: String {
             switch self {
-            case .sdkNotFound(let log): "macOS SDK not found via xcrun.\n\(log)"
+            case .sdkNotFound(let log): "\(Self.toolsMissingMessage)\n\(log)"
             case .compileFailed(let log): "swiftc failed:\n\(log)"
             case .signFailed(let log): "codesign failed:\n\(log)"
+            case .lipoFailed(let log): "lipo failed:\n\(log)"
             }
         }
     }
@@ -101,18 +154,8 @@ public struct SZToolchain {
         let moduleName = modulePrefix + UUID().uuidString.prefix(8)
 
         let staged = staging.appending(path: product)
-        let build = try run("/usr/bin/xcrun", [
-            "swiftc", "-emit-library",
-            "-module-name", String(moduleName),
-            "-sdk", sdk,
-            "-o", staged.path,
-            supportURL.path, source.path,
-        ])
-        guard build.status == 0 else { throw CompileError.compileFailed(log: build.combined) }
-
-        // Ad-hoc sign in place (-f overwrites any stale signature). Required before dlopen.
-        let sign = try run("/usr/bin/codesign", ["-s", "-", "-f", staged.path])
-        guard sign.status == 0 else { throw CompileError.signFailed(log: sign.combined) }
+        try swiftc(moduleName: moduleName, sdk: sdk, output: staged, sources: [supportURL, source], target: nil)
+        try adHocSign(staged)
         guard cached else { return staged }
 
         // Publish in one atomic move. Losing the race to another process is success: same key, same
@@ -127,6 +170,99 @@ public struct SZToolchain {
             try? fm.removeItem(at: stale)
         }
         return entry.appending(path: product)
+    }
+
+    /// The one swiftc invocation, shared by the runtime compile and the release prebuild so the
+    /// flag lists cannot drift; `target` is the only difference between them.
+    private func swiftc(moduleName: String, sdk: String, output: URL, sources: [URL], target: String?) throws {
+        var arguments = ["swiftc", "-emit-library", "-module-name", moduleName, "-sdk", sdk]
+        if let target { arguments += ["-target", target] }
+        arguments += ["-o", output.path] + sources.map(\.path)
+        let build = try run("/usr/bin/xcrun", arguments)
+        guard build.status == 0 else { throw CompileError.compileFailed(log: build.combined) }
+    }
+
+    /// Ad-hoc sign in place (-f overwrites any stale signature). Required before dlopen.
+    private func adHocSign(_ dylib: URL) throws {
+        let sign = try run("/usr/bin/codesign", ["-s", "-", "-f", dylib.path])
+        guard sign.status == 0 else { throw CompileError.signFailed(log: sign.combined) }
+    }
+
+    // MARK: - Prebuilt steps
+
+    /// The slices a shipped step is built for: both Mac architectures, pinned to the app's
+    /// minimum macOS so a kit API newer than that fails at release time, not at a user's dlopen.
+    public static let prebuiltStepTargets = ["arm64-apple-macos15.0", "x86_64-apple-macos15.0"]
+    /// Bump when the prebuild pipeline changes shape in a way the hashed inputs cannot see.
+    private static let prebuiltFormatSalt = "1"
+
+    /// A shipped step's artifact name: a hash of every input that changes what swiftc emits, minus
+    /// the compiler itself (a user's Mac has none). Agent and step are in the key so two steps with
+    /// identical source never share a module.
+    public static func prebuiltStepArtifactName(key: SZStepKey, source: Data) -> String {
+        prebuiltStepArtifactName(key: key, source: source, kit: SZStepKit.source, abi: SZStepABI.version,
+                                 targets: prebuiltStepTargets, salt: prebuiltFormatSalt)
+    }
+
+    static func prebuiltStepArtifactName(key: SZStepKey, source: Data, kit: String, abi: Int32,
+                                         targets: [String], salt: String) -> String {
+        var hasher = SHA256()
+        hasher.update(data: source)
+        for part in [key.agent, key.step, kit, "\(abi)", "Step.dylib", targets.joined(separator: ","), salt] {
+            hasher.update(data: Data(part.utf8))
+            hasher.update(data: Data([0]))
+        }
+        let hex = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        return "SZStep-\(key.agent)-\(key.step)-\(hex).dylib"
+    }
+
+    /// The bundled artifact for exactly these source bytes, or nil: an edited step, a dev build,
+    /// or a stale bundle all compile instead.
+    public func prebuiltStep(key: SZStepKey, source: URL) -> URL? {
+        guard let dir = prebuiltStepsDir, let bytes = try? Data(contentsOf: source) else { return nil }
+        let candidate = dir.appending(path: Self.prebuiltStepArtifactName(key: key, source: bytes))
+        return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+    }
+
+    /// True when `dylib` is one of the bundle's prebuilt artifacts.
+    public func isPrebuilt(_ dylib: URL) -> Bool {
+        guard let dir = prebuiltStepsDir else { return false }
+        return dylib.standardizedFileURL.path.hasPrefix(dir.standardizedFileURL.path + "/")
+    }
+
+    /// Build one shipped step for every slice in `prebuiltStepTargets`, join them with lipo, ad-hoc
+    /// sign, and publish as `outDir/<artifact name>` (replacing an earlier file of that name).
+    /// The release script re-signs the result with the Developer ID.
+    public func prebuildStep(key: SZStepKey, source: URL, into outDir: URL) throws -> URL {
+        let fm = FileManager.default
+        let bytes = try Data(contentsOf: source)
+        let name = Self.prebuiltStepArtifactName(key: key, source: bytes)
+        let staging = outDir.appending(path: ".prebuilding-\(UUID().uuidString)")
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: staging) }
+        let supportURL = staging.appending(path: SZStepKit.fileName)
+        try SZStepKit.source.write(to: supportURL, atomically: true, encoding: .utf8)
+
+        let sdk = try Self.sdk()
+        let moduleName = "SZStep_" + UUID().uuidString.prefix(8)
+        var slices: [URL] = []
+        for target in Self.prebuiltStepTargets {
+            let slice = staging.appending(path: "\(target)/Step.dylib")
+            try fm.createDirectory(at: slice.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try swiftc(moduleName: String(moduleName), sdk: sdk, output: slice,
+                       sources: [supportURL, source], target: target)
+            slices.append(slice)
+        }
+        let joined = staging.appending(path: name)
+        let lipo = try run("/usr/bin/lipo", ["-create"] + slices.map(\.path) + ["-output", joined.path])
+        guard lipo.status == 0 else { throw CompileError.lipoFailed(log: lipo.combined) }
+        try adHocSign(joined)
+
+        try fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+        let published = outDir.appending(path: name)
+        try? fm.removeItem(at: published)
+        try fm.moveItem(at: joined, to: published)
+        return published
     }
 
     /// The content key an artifact is filed under: everything that changes what swiftc would emit.

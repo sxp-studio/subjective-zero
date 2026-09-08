@@ -399,6 +399,12 @@ extension SZHostBridge {
         let (id, projectURL, staged) = try stagedSourceForCompile(arguments)
         guard let backend = host.backend else { throw SZMCPError.message("no project/runtime") }
         guard let node = host.store.project?.graph.node(id: id) else { throw SZMCPError.message("no node \(id)") }
+        // The tools vanished mid-session (a run started before that): answer in plain words rather
+        // than spawn a compiler that is not there.
+        if host.projectTarget == .native, host.toolchainMissing {
+            return try finishCompile(id: id, projectURL: projectURL, staged: staged,
+                                     result: .failed(SZHost.toolsMissingMessage))
+        }
         let result = await backend.checkNodeSource(at: staged, for: node)
         return try finishCompile(id: id, projectURL: projectURL, staged: staged, result: result)
     }

@@ -21,10 +21,12 @@ public struct SZTargetPlatformRow: Identifiable, Equatable, Sendable {
     public var ready: Bool?
     /// The row's tooltip ("three.js 0.185.1" on the browser row).
     public var help: String?
+    /// What this Mac still lacks for the platform to render at all; nil = the platform is available.
+    public var requirement: SZTargetRequirement?
 
     public init(id: SZProjectTarget, name: String, description: String, beta: Bool, active: Bool,
                 builtCount: Int, nodeCount: Int, converting: Bool, ready: Bool? = nil,
-                help: String? = nil) {
+                help: String? = nil, requirement: SZTargetRequirement? = nil) {
         self.id = id
         self.name = name
         self.description = description
@@ -35,6 +37,7 @@ public struct SZTargetPlatformRow: Identifiable, Equatable, Sendable {
         self.converting = converting
         self.ready = ready
         self.help = help
+        self.requirement = requirement
     }
 
     var symbol: String {
@@ -115,6 +118,8 @@ public struct SZTargetPlatformPane: View {
     private let onSwitch: (SZProjectTarget) -> Void
     private let onStop: () -> Void
     private let onDone: () -> Void
+    /// The Install button of a row's requirement.
+    private let onInstall: (SZProjectTarget) -> Void
     /// The card picked but not yet confirmed.
     @State private var picked: SZProjectTarget?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -124,7 +129,8 @@ public struct SZTargetPlatformPane: View {
                 preview: @escaping (SZProjectTarget) -> String,
                 onSwitch: @escaping (SZProjectTarget) -> Void,
                 onStop: @escaping () -> Void,
-                onDone: @escaping () -> Void) {
+                onDone: @escaping () -> Void,
+                onInstall: @escaping (SZProjectTarget) -> Void = { _ in }) {
         self.rows = rows
         self.report = report
         self.note = note
@@ -133,10 +139,15 @@ public struct SZTargetPlatformPane: View {
         self.onSwitch = onSwitch
         self.onStop = onStop
         self.onDone = onDone
+        self.onInstall = onInstall
     }
 
     private var converting: Bool { report?.running ?? false }
     private var pickedRow: SZTargetPlatformRow? { rows.first { $0.id == picked && !$0.active } }
+    /// The row whose requirement shows under the cards: the picked one, else the active one.
+    private var requirementRow: SZTargetPlatformRow? {
+        (pickedRow ?? rows.first { $0.active }).flatMap { $0.requirement == nil ? nil : $0 }
+    }
 
     // The Providers pane's rhythm: title row, 12pt copy, the cards, the footer row.
     public var body: some View {
@@ -156,6 +167,9 @@ public struct SZTargetPlatformPane: View {
                     ForEach(rows) { row in
                         platformCard(row)
                     }
+                    if let requirementRow, let requirement = requirementRow.requirement {
+                        SZTargetRequirementRow(requirement: requirement, onInstall: { onInstall(requirementRow.id) })
+                    }
                     if let report {
                         reportCard(report)
                     }
@@ -165,7 +179,7 @@ public struct SZTargetPlatformPane: View {
             .frame(minHeight: 260)
 
             HStack(spacing: 10) {
-                Text(pickedRow.map { preview($0.id) } ?? note)
+                Text(pickedRow.map { $0.requirement == nil ? preview($0.id) : "" } ?? note)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -179,6 +193,7 @@ public struct SZTargetPlatformPane: View {
                     }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .disabled(pickedRow.requirement != nil)
                 } else if converting {
                     Button("Stop") { onStop() }
                 } else if let webActions {
@@ -232,7 +247,11 @@ public struct SZTargetPlatformPane: View {
                         HStack(spacing: 6) {
                             SZSetupBadge(label: "ACTIVE", color: .accentColor)
                                 .hidden(!row.active)
-                            if let ready = row.ready {
+                            // What this Mac lacks comes first: nothing else about the row matters
+                            // until the platform can render at all.
+                            if row.requirement != nil {
+                                SZSetupBadge(label: "NEEDS SETUP", color: .orange)
+                            } else if let ready = row.ready {
                                 SZSetupBadge(label: ready ? "READY" : "NEEDS BUILD", color: ready ? .green : .orange)
                             }
                         }

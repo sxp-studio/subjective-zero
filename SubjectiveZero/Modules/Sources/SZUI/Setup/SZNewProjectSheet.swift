@@ -7,21 +7,38 @@ import SZCore
 
 public struct SZNewProjectSheet: View {
     private let required: Bool
+    /// What the Mac target still needs before a project can be created for it; nil = ready.
+    private let nativeRequirement: SZTargetRequirement?
     private let onCreate: (SZProjectTarget) -> Void
     private let onCancel: () -> Void
+    private let onInstall: () -> Void
+    /// The sheet is up: the host starts what a pick would need (the re-check, the browser library).
+    private let onAppear: () -> Void
+    private let onDisappear: () -> Void
 
     @State private var selection: SZProjectTarget
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(initial: SZProjectTarget, required: Bool,
+                nativeRequirement: SZTargetRequirement? = nil,
                 onCreate: @escaping (SZProjectTarget) -> Void,
-                onCancel: @escaping () -> Void) {
+                onCancel: @escaping () -> Void,
+                onInstall: @escaping () -> Void = {},
+                onAppear: @escaping () -> Void = {},
+                onDisappear: @escaping () -> Void = {}) {
         _selection = State(initialValue: initial)
         self.required = required
+        self.nativeRequirement = nativeRequirement
         self.onCreate = onCreate
         self.onCancel = onCancel
+        self.onInstall = onInstall
+        self.onAppear = onAppear
+        self.onDisappear = onDisappear
     }
+
+    /// The picked target cannot be created yet.
+    private var blocked: Bool { selection == .native && nativeRequirement != nil }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -35,17 +52,23 @@ public struct SZNewProjectSheet: View {
             HStack(spacing: 12) {
                 SZTargetCard(symbol: "desktopcomputer",
                              title: "On this Mac",
+                             needsSetup: nativeRequirement != nil,
                              text: "High performance with Metal. Full access to this Mac's hardware, files and accessories.",
                              selected: selection == .native,
                              animated: !reduceMotion) { selection = .native }
                 SZTargetCard(symbol: "globe",
-                             title: "In a browser",
+                             title: "In a Browser",
                              badge: "BETA",
                              text: "Runs in any web browser (desktop or mobile). Limited to browser capabilities.",
                              selected: selection == .web,
                              animated: !reduceMotion) { selection = .web }
             }
             .padding(.top, 16)
+
+            if blocked, let nativeRequirement {
+                SZTargetRequirementRow(requirement: nativeRequirement, onInstall: onInstall)
+                    .padding(.top, 14)
+            }
 
             Text("You can change this later in Settings.")
                 .font(.system(size: 11))
@@ -63,6 +86,7 @@ public struct SZNewProjectSheet: View {
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .tint(SZWelcomeStyle.accent)
+                    .disabled(blocked)
             }
             .controlSize(.regular)
         }
@@ -74,7 +98,8 @@ public struct SZNewProjectSheet: View {
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
-        .onAppear { focused = true }
+        .onAppear { focused = true; onAppear() }
+        .onDisappear { onDisappear() }
         .onKeyPress(.leftArrow) { selection = .native; return .handled }
         .onKeyPress(.rightArrow) { selection = .web; return .handled }
         .onKeyPress(.tab) { selection = selection == .native ? .web : .native; return .handled }
@@ -89,6 +114,9 @@ private struct SZTargetCard: View {
     let title: String
     /// A short mark beside the title, "BETA" on the browser card; nil for none.
     var badge: String? = nil
+    /// The target cannot be created yet. A card with nothing to do carries no mark: only what
+    /// needs attention is worth a pill here.
+    var needsSetup: Bool = false
     let text: String
     let selected: Bool
     let animated: Bool
@@ -105,12 +133,10 @@ private struct SZTargetCard: View {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
                     if let badge {
-                        Text(badge)
-                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                            .tracking(0.8)
-                            .foregroundStyle(SZWelcomeStyle.accentSoft)
-                            .padding(.horizontal, 7).padding(.vertical, 2)
-                            .overlay(Capsule().strokeBorder(SZWelcomeStyle.accentSoft.opacity(0.45), lineWidth: 1))
+                        pill(badge, SZWelcomeStyle.accentSoft)
+                    }
+                    if needsSetup {
+                        pill("NEEDS SETUP", Color.orange)
                     }
                 }
                 .padding(.top, 10)
@@ -139,6 +165,15 @@ private struct SZTargetCard: View {
         .onHover { hover = $0 }
         .animation(animated ? .easeInOut(duration: 0.15) : nil, value: selected)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func pill(_ label: String, _ color: Color) -> some View {
+        Text(label)
+            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+            .tracking(0.8)
+            .foregroundStyle(color)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .overlay(Capsule().strokeBorder(color.opacity(0.45), lineWidth: 1))
     }
 
     private var fill: Color {

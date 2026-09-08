@@ -185,6 +185,16 @@ small value types passed by the scheduler.
   the result synchronously and atomically, re-deriving the diff against the live graph so a reload
   landing in between cannot corrupt it. The previous project keeps rendering throughout. The
   synchronous `loadProject` stays for incremental edits, which compile at most one node.
+- **The compiler is Apple's, and may be absent.** Every compile here runs `xcrun swiftc`, which
+  needs the Xcode Command Line Tools (or Xcode). `SZToolchain.availability()` answers whether they
+  are present from the filesystem alone, never through a tool shim (a shim on a Mac without the
+  tools opens Apple's install dialog). The host probes at launch and refuses a Mac project's builds
+  while they are missing ([UI.md](UI.md) has the surfaces); a browser project never needs the
+  tools. To keep it that way, release builds ship the agent packs' decision steps **prebuilt**:
+  `SubjectiveZero --prebuild-steps <dir>` compiles each shipped `Step.swift` into a universal,
+  macOS 15 dylib named by a hash of its source, the step kit, the ABI version and the targets, into
+  `Contents/PlugIns`. `SZStepRuntime` maps a bundled artifact whose name matches the scheduled
+  source instead of compiling; an edited step misses and compiles as before.
 
 ## Custom cards
 

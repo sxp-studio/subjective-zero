@@ -10,7 +10,7 @@ extension SZHost {
     /// Open Settings on the Target Platform section.
     func presentTargetPlatformSettings() {
         refreshTargetBuilds()   // a source dropped in by hand shows on the rows
-        requestedSetupSection = .target
+        setupSection = .target
         presentProviderSetup()
     }
 
@@ -34,7 +34,8 @@ extension SZHost {
                 nodeCount: nodes.count,
                 converting: active && converting && conversion?.target == target,
                 ready: generated == 0 ? nil : built == generated,
-                help: target == .web ? "three.js \(threeVersion)" : nil)
+                help: target == .web ? "three.js \(threeVersion)" : nil,
+                requirement: target == .native ? nativeRequirement : nil)
         }
     }
 
@@ -86,6 +87,9 @@ extension SZHost {
         guard let project = store.project else { return "No project is open." }
         if let report = conversionReport, report.running {
             return "Converting \(report.done) of \(report.total)."
+        }
+        if nativeProjectAwaitingTools {
+            return "This project builds as soon as Apple's developer tools are installed."
         }
         // At rest the rows say it all; the page's own status shows while it loads or downloads.
         if project.target == .web, let status = webRuntime?.phase.status { return status }

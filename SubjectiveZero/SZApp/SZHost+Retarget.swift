@@ -46,6 +46,12 @@ extension SZHost {
             status = "busy: stop the run before switching platforms"
             return
         }
+        // The pane's Mac row keeps its Switch off without the tools; this covers every other caller.
+        guard target != .native || !toolchainMissing else {
+            status = "switching to this Mac needs Apple's developer tools"
+            presentTargetPlatformSettings()
+            return
+        }
         openingProject = project.name
         defer { openingProject = nil }
         // 1. The project is the other platform's from here: flip, pin, flag every node against disk.
@@ -130,7 +136,7 @@ extension SZHost {
 
     /// Bring up the new platform's renderer on the open project: the same prepare, commit and mount as
     /// opening it (SZHost+Backend).
-    private func remountBackend(at url: URL) async {
+    func remountBackend(at url: URL) async {
         guard let runtime, let project = store.project else { return }
         do {
             let prepared = try await prepareBackend(for: project, at: url, runtime: runtime)

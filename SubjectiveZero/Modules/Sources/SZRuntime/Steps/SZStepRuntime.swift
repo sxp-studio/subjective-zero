@@ -54,9 +54,15 @@ public final class SZStepRuntime {
         let loader = SZStepLoader()
         var compileTask: Task<Void, Never>?
         var queued: LoadRequest?
+        /// The bundled artifact currently answering, if any.
+        var loadedPrebuilt: URL?
+        /// The bundled artifact this entry has ever mapped. Nothing is dlclosed, so mapping it a
+        /// second time would put two images with one module name in the process; a later schedule
+        /// for the same bytes compiles instead.
+        var mappedPrebuilt: URL?
     }
 
-    private let toolchain = SZToolchain()
+    private let toolchain: SZToolchain
     private var entries: [SZStepKey: Entry] = [:]
 
     /// How long one evaluation may run before the watchdog cancels it. Var so a host (or a
@@ -69,7 +75,12 @@ public final class SZStepRuntime {
     /// of only the console. Called on the main actor.
     public var onRedCompile: ((SZStepKey, String) -> Void)?
 
-    public init() {}
+    /// `prebuiltStepsDir`: where a release bundle keeps its prebuilt step dylibs. A schedule whose
+    /// source bytes match a bundled artifact maps it instead of compiling; anything else compiles
+    /// as before. nil (dev and test builds) means every step compiles.
+    public init(prebuiltStepsDir: URL? = nil) {
+        toolchain = SZToolchain(prebuiltStepsDir: prebuiltStepsDir)
+    }
 
     // MARK: - Loading
 
@@ -94,11 +105,18 @@ public final class SZStepRuntime {
 
     private func startCompile(key: SZStepKey, entry: Entry, request: LoadRequest) {
         let toolchain = self.toolchain
+        let mapped = entry.mappedPrebuilt, live = entry.loadedPrebuilt
         entry.compileTask = Task { [weak self] in
             // The slow part, off the actor and gated by the toolchain's shared slots. Everything
             // the detached closure touches is Sendable; the toolchain is stateless.
-            let compiled = await Task.detached(priority: .utility) {
-                toolchain.gated { try toolchain.compile(stepSource: request.sourceURL, into: request.buildDir) }
+            let compiled = await Task.detached(priority: .utility) { () -> Result<URL, Error> in
+                // A bundled artifact for these exact bytes needs no compile slot and no compiler,
+                // unless this entry mapped it before and moved on: then it needs a fresh module.
+                if let prebuilt = toolchain.prebuiltStep(key: key, source: request.sourceURL),
+                   prebuilt != mapped || prebuilt == live {
+                    return .success(prebuilt)
+                }
+                return toolchain.gated { try toolchain.compile(stepSource: request.sourceURL, into: request.buildDir) }
             }.value
             self?.finishCompile(key: key, entry: entry, request: request, compiled: compiled)
         }
@@ -112,10 +130,18 @@ public final class SZStepRuntime {
         entry.compileTask = nil
         switch compiled {
         case .success(let dylib):
+            // The bundled artifact already answering for this key (a save that changed no bytes).
+            if entry.loadedPrebuilt == dylib, entry.loader.isLoaded { break }
             do {
                 // Swap on green; a throw here (unmappable dylib, ABI mismatch) leaves the
                 // previous module answering — the loader's contract.
                 try entry.loader.load(dylib: dylib, runtimeLoadsDir: request.runtimeLoadsDir)
+                if toolchain.isPrebuilt(dylib) {
+                    entry.loadedPrebuilt = dylib
+                    entry.mappedPrebuilt = dylib
+                } else {
+                    entry.loadedPrebuilt = nil
+                }
             } catch {
                 onRedCompile?(key, String(describing: error))
             }

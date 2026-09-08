@@ -38,6 +38,22 @@ the latest release *is* the source of truth.
 After the first install the app updates itself — **SubjectiveZero ▸ Check for Updates…** reads a
 signed Sparkle appcast, so later versions do not need this procedure.
 
+## What each kind of project needs
+
+A project runs either **in a browser** or **on this Mac**; the New Project sheet asks which.
+
+- **Browser projects** have no further requirement. Nodes are JavaScript, three.js is downloaded
+  by the app once, and the built-in agent steps ship prebuilt. A clean Mac renders one with
+  nothing else installed.
+- **Mac projects** are compiled with Apple's **Xcode Command Line Tools** (or Xcode). Check with
+  `xcode-select -p` (exit 0 and a path = installed; exit 2 = not). The app checks for them itself
+  and shows the requirement on the Mac card of the New Project sheet and in **Settings ▸ Target
+  Platform**, with an Install button that opens Apple's installer. To install from a terminal, ask the user first,
+  then run `xcode-select --install` and let them accept Apple's dialog and license; the app
+  re-checks every few seconds and clears the requirement without a relaunch. Never redistribute
+  the tools or the SDK; Apple's license forbids it.
+- **Agents** need one provider CLI on either kind of project; the next section covers them.
+
 ## Provider CLI setup
 
 SubjectiveZero drives agent CLIs as subprocesses. At least one provider must be **ready**
@@ -190,7 +206,12 @@ reopened any time with **⌘,**).
 
 ## Failure handling
 
-- `missingCLI` → offer the install command above; ask before running it.
+- `missingCLI` → offer the install command above; ask before running it. The in-app card has the
+  same command with an "Install in Terminal" button; the Codex and Pi commands go through npm, so
+  those cards ask for Node.js first when npm is absent.
+- Apple's developer tools missing (a Mac project's builds, chat and runs refuse with "Building for
+  this Mac needs Apple's developer tools") → `xcode-select --install`, ask first; or switch the
+  project to run in a browser in **Settings ▸ Target Platform**.
 - `authNeeded` → launch the provider's own interactive login (ask first), or point the user at
   the in-app card's "Open Terminal to Log In" button. While the sheet is open the card re-checks
   every few seconds and flips green on its own once login lands.

@@ -666,6 +666,11 @@ extension SZHost {
             trackPromptSentTelemetry(scope: "build", providerID: activeProviderID, rejected: true)
             surfaceProviderNotReady(); return .refused
         }
+        // A Mac project cannot build without Apple's developer tools (SZHost+Toolchain.swift).
+        if toolchainRefusal() != nil {
+            trackPromptSentTelemetry(scope: "build", providerID: activeProviderID, rejected: true)
+            return .refused
+        }
         // The packs root: the materialized bundled packs, or the SZ_AGENT_PACKS override —
         // without a valid root the run refuses up front with one honest line.
         guard let packsRoot = Self.graphAgentPacksRoot() else {

@@ -11,7 +11,9 @@ get stuck and keep the app healthy. This page lists exactly what that covers.
   first-session milestones — `prompt_sent`, `turn_ended`, `node_built` — that record only *that*
   a message was sent / an agent turn finished (and whether it failed or timed out) / a generated
   node compiled, with the provider name, chat scope (director/node/build), node count, and minutes
-  since launch. Never the message itself.
+  since launch. Never the message itself. One more milestone, `toolchain_missing`, records that
+  the launch check found no Apple developer tools on the Mac, with the same minutes since launch
+  and first-time-on-this-install flag the other milestones carry.
 - **Never sent**: project content, graphs, prompts, chat transcripts, file paths, or code.
 - **Opting out**: uncheck **"Share anonymous usage data"** on the welcome screen
   (Help ▸ Welcome). The preference persists in

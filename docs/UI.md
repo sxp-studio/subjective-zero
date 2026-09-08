@@ -223,8 +223,13 @@ the agent it is for.
 ([STATE.md](STATE.md) has the on-disk story):
 
 - **New Project** (⌘N) - a sheet asks where the project will run, **On this Mac** or **In a
-  browser** (`SZNewProjectSheet`, preselecting last time's pick, under the hint "You can change
-  this later in Settings"), then creates a fresh empty untitled project for that target
+  Browser** (`SZNewProjectSheet`, preselecting last time's pick, under the hint "You can change
+  this later in Settings"). The Mac card reads Needs setup while Apple's developer tools are
+  missing, and picking it then shows the requirement with an Install button (Apple's own
+  installer), the Terminal line, and a re-check
+  every few seconds that clears it without a relaunch, Create disabled meanwhile
+  (`SZTargetRequirementRow`, host side in `SZHost+Toolchain.swift`). The Target Platform pane
+  shows the same on its Mac row. Create makes a fresh empty untitled project for that target
   (`SZUntitledProjects` home); no "unsaved changes" prompt ever
   (persistence is automatic; the previous untitled stays reachable via Open Recent). The same sheet
   serves the welcome screen's New Project, Esc from the welcome with nothing open, and a launch

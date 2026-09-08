@@ -222,26 +222,19 @@ extension SZHost {
     /// own words.
     private func armAgentPackStepWatchers() {
         guard let root = Self.graphAgentPacksRoot() else { return }
-        let fm = FileManager.default
-        for agent in ((try? fm.contentsOfDirectory(atPath: root.path)) ?? []).sorted() {
-            let stepsDir = root.appending(path: "\(agent)/steps")
-            for step in ((try? fm.contentsOfDirectory(atPath: stepsDir.path)) ?? []).sorted() {
-                let source = stepsDir.appending(path: "\(step)/Step.swift")
-                guard fm.fileExists(atPath: source.path) else { continue }
-                let watchKey = "\(agent)/\(step)"
-                guard stepWatchers[watchKey] == nil else { continue }
-                let key = SZStepKey(agent: agent, step: step)
-                let watcher = SZSourceWatcher(watching: source)
-                watcher.start { [weak self] in
-                    print("[SZHost] step \(watchKey) source changed — recompiling")
-                    let buildRoot = SZHostStepRunning.buildRoot(for: key)
-                    self?.stepRuntime.scheduleLoad(
-                        key: key, sourceURL: source,
-                        buildDir: buildRoot.appending(path: "build"),
-                        runtimeLoadsDir: buildRoot.appending(path: "runtime-loads"))
-                }
-                stepWatchers[watchKey] = watcher
+        for (key, source) in SZPrebuiltSteps.stepSources(under: root) {
+            let watchKey = "\(key.agent)/\(key.step)"
+            guard stepWatchers[watchKey] == nil else { continue }
+            let watcher = SZSourceWatcher(watching: source)
+            watcher.start { [weak self] in
+                print("[SZHost] step \(watchKey) source changed — recompiling")
+                let buildRoot = SZHostStepRunning.buildRoot(for: key)
+                self?.stepRuntime.scheduleLoad(
+                    key: key, sourceURL: source,
+                    buildDir: buildRoot.appending(path: "build"),
+                    runtimeLoadsDir: buildRoot.appending(path: "runtime-loads"))
             }
+            stepWatchers[watchKey] = watcher
         }
     }
 

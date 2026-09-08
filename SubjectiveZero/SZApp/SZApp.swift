@@ -274,9 +274,6 @@ struct SZApp: App {
     @NSApplicationDelegateAdaptor(SZAppDelegate.self) private var appDelegate
     @State private var host = SZHost()
     @State private var selectedNodeID: SZNodeID?      // canvas selection (edit/move/wire) — NOT chat scope
-    /// The AI Settings section last viewed — reopening the sheet returns there (per launch,
-    /// like the edit selection above; not persisted).
-    @State private var setupSection: SZProviderSetupSection = .providers
     /// A Routing card's View Graph ask: land the Agent Graph panel on this agent's plan.
     /// Consumed by the panel, the same handshake as the host's run-focus request.
     @State private var agentGraphPlanFocus: String?
@@ -385,8 +382,12 @@ struct SZApp: App {
                                         set: { if !$0 { host.cancelNewProject() } })) {
                 SZNewProjectSheet(initial: host.lastProjectTarget ?? .native,
                                   required: host.newProjectRequired,
+                                  nativeRequirement: host.nativeRequirement,
                                   onCreate: { host.createNewProject(target: $0) },
-                                  onCancel: { host.cancelNewProject() })
+                                  onCancel: { host.cancelNewProject() },
+                                  onInstall: { host.installDeveloperTools() },
+                                  onAppear: { host.prepareTargetPick() },
+                                  onDisappear: { host.stopToolchainPolling() })
             }
             .sheet(isPresented: Binding(get: { host.providerSetupPresented },
                                         set: { if !$0 { host.skipProviderSetup() } })) {
@@ -395,29 +396,23 @@ struct SZApp: App {
                                      activeID: host.activeProviderID,
                                      targetPlatform: targetPlatformPane,
                                      routing: routingSettingsView,
-                                     initialSection: host.requestedSetupSection ?? setupSection,
+                                     section: Binding(get: { host.setupSection }, set: { host.setupSection = $0 }),
                                      onSelect: { host.selectSetupProvider($0) },
                                      onRefresh: { Task { await host.refreshProviderHealthOnce() } },
                                      onTest: { host.runProviderProbe($0) },
                                      onSetModel: { host.pickSetupModel($1, for: $0) },
                                      onOpenLogin: { host.openProviderLoginTerminal($0) },
+                                     onInstall: { host.openProviderInstallTerminal($0) },
+                                     onGetNode: { host.openNodeDownload() },
                                      onUseFallback: { host.adoptFallbackProvider(insteadOf: $0) },
                                      onSetEnabled: { host.setProviderEnabled($0, $1) },
                                      onConfirm: { host.confirmDefaultProvider() },
                                      onSkip: { host.skipProviderSetup() },
                                      onOpenSetupGuide: { host.openProviderSetupGuide() },
                                      onJoinDiscord: { host.joinDiscord() },
-                                     onSectionChange: { setupSection = $0 },
                                      // First run = the default provider is still unconfirmed;
                                      // afterwards the Providers pane closes with a plain Done.
                                      isFirstRun: host.defaultProviderID == nil)
-                // A menu item asked for a section: land there once, then the sheet remembers as usual.
-                .onAppear {
-                    if let requested = host.requestedSetupSection {
-                        setupSection = requested
-                        host.requestedSetupSection = nil
-                    }
-                }
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)
@@ -631,7 +626,8 @@ struct SZApp: App {
                 Task { await host.setProjectTarget(target) }
             },
             onStop: { host.stopConversion() },
-            onDone: { host.skipProviderSetup() })
+            onDone: { host.skipProviderSetup() },
+            onInstall: { _ in host.installDeveloperTools() })
     }
 
     /// The AI Settings Routing pane, wired to the host mapping (SZHost+RoutingSettings).

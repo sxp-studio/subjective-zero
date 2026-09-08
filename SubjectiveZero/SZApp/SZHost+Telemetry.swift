@@ -102,6 +102,12 @@ extension SZHost {
         ])
     }
 
+    /// The launch probe found no Apple developer tools on this Mac. Once per process;
+    /// `first_in_install` tells a fresh install apart.
+    func trackToolchainMissingTelemetry() {
+        SZTelemetry.shared.trackMilestone("toolchain_missing")
+    }
+
     /// The first agent-built node of the session compiled and went live — "it worked".
     func trackNodeBuiltTelemetry() {
         SZTelemetry.shared.trackMilestone("node_built", detail: [

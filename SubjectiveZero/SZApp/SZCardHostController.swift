@@ -123,6 +123,11 @@ final class SZCardHostController: SZCustomCardProvider {
         syncTicker()
     }
 
+    /// Apple's developer tools landed: every mount that waited for them compiles now.
+    func recompileAll() {
+        for id in Array(mounts.keys) { recompile(node: id) }
+    }
+
     /// Project switch: drop every mount and stop its watcher (a dead project's folder must not
     /// keep being polled).
     func unmountAll() {
@@ -204,6 +209,12 @@ final class SZCardHostController: SZCustomCardProvider {
         }
         guard FileManager.default.fileExists(atPath: source.path) else {
             mount.box.state = .failed(message: "no Card.swift in this node's folder")
+            return
+        }
+        // No compiler on this Mac: say so instead of spawning the shim, which on a Mac without the
+        // tools opens Apple's dialog. The tools landing recompiles every mount (SZHost+Toolchain).
+        guard !host.toolchainMissing else {
+            mount.box.state = .failed(message: "Needs Apple's developer tools")
             return
         }
         cardSources.insert(id)

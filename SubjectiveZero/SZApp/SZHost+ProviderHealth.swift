@@ -73,6 +73,7 @@ extension SZHost {
         seedRoutingStarterIfNeeded()   // the Routing pane's starter row exists before it's seen
         if defaultProviderID == nil { trackSetupShownTelemetry(auto: auto) }
         startProviderHealthPolling()
+        startToolchainPolling()   // the Target Platform pane shows the requirement while it stands
     }
 
     /// Dismiss without confirming (Skip for Now / sheet swipe-down). On a first-run launch the
@@ -83,6 +84,7 @@ extension SZHost {
         if providerSetupPresented, defaultProviderID == nil { trackSetupSkippedTelemetry() }
         providerSetupPresented = false
         stopProviderHealthPolling()
+        stopToolchainPolling()
     }
 
     /// Confirm the selected card as the default provider: activate it, persist it (which also
@@ -415,15 +417,36 @@ extension SZHost {
     /// itself launches it (incl. the Codex.app bundled binary).
     func openProviderLoginTerminal(_ id: String) {
         guard let provider = SZProviderRegistry.shared.provider(id: id) else { return }
+        openTerminal(running: provider.loginCommand, name: "sz-login-\(id)")
+    }
+
+    /// The missingCLI remedy's Install button: the provider's own install command, run in Terminal
+    /// where the user sees what it does. Same mechanism as the login.
+    func openProviderInstallTerminal(_ id: String) {
+        guard let provider = SZProviderRegistry.shared.provider(id: id) else { return }
+        openTerminal(running: provider.installCommand, name: "sz-install-\(id)")
+    }
+
+    /// An npm-installed provider on a Mac without Node.js: the download page is the first step.
+    func openNodeDownload() {
+        NSWorkspace.shared.open(URL(string: "https://nodejs.org")!)
+    }
+
+    /// `command` runs through npm and npm is not on the app's search path.
+    static func installNeedsNode(_ command: String) -> Bool {
+        command.hasPrefix("npm ") && SZAgentEnvironment.resolveExecutable("npm") == nil
+    }
+
+    private func openTerminal(running command: String, name: String) {
         let script = """
         #!/bin/zsh
         export PATH="\(SZAgentEnvironment.searchPath())"
-        \(provider.loginCommand)
+        \(command)
         """
         do {
             let dir = SZAppSupport.directory
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let file = dir.appending(path: "sz-login-\(id).command")
+            let file = dir.appending(path: "\(name).command")
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
             let terminal = URL(filePath: "/System/Applications/Utilities/Terminal.app")
@@ -474,6 +497,10 @@ extension SZHost {
             if readiness == .failed, models.count > 1 {
                 message += "  ·  Try a different model below."
             }
+            let needsNode = readiness == .needsInstall && Self.installNeedsNode(provider.installCommand)
+            if needsNode {
+                message += "  ·  Installs through npm, which needs Node.js. Node.js was not found."
+            }
             return SZProviderSetupCard(
                 id: provider.id,
                 displayName: provider.displayName,
@@ -483,6 +510,7 @@ extension SZHost {
                 detail: report.flatMap(Self.diagnosticsDetail),
                 cliPath: report?.cliPath,
                 installCommand: provider.installCommand,
+                installNeedsNode: needsNode,
                 models: models,
                 selectedModel: resolvedGenerationSettings(for: provider.id).model ?? "",
                 isTesting: probingProviders.contains(provider.id),

@@ -8,6 +8,7 @@
 import Foundation
 import SZAI
 import SZCore
+import SZRuntime
 
 @main
 enum SZMain {
@@ -21,7 +22,20 @@ enum SZMain {
         if arguments.contains("--verify-agent-providers") {
             runProviderVerifier(probe: arguments.contains("--probe"))
         }
+        // Release-time flags (SZPrebuiltSteps.swift): the shipped agent steps, prebuilt into the
+        // bundle by the release script and verified after signing.
+        if let dir = value(after: "--prebuild-steps", in: arguments) {
+            SZPrebuiltSteps.prebuild(into: URL(fileURLWithPath: dir))
+        }
+        if let dir = value(after: "--verify-prebuilt-steps", in: arguments) {
+            SZPrebuiltSteps.verify(in: URL(fileURLWithPath: dir))
+        }
         SZApp.main()
+    }
+
+    private static func value(after flag: String, in arguments: [String]) -> String? {
+        guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
+        return arguments[i + 1]
     }
 
     /// Bridge the async verifier onto the not-yet-running main thread: no runloop exists this

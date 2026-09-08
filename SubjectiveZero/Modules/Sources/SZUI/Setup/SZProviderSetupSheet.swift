@@ -51,6 +51,8 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
     public var detail: String?          // failure receipts (attempted command, exit, output tail)
     public var cliPath: String?         // the monospaced path line; nil = not found
     public var installCommand: String?  // the needsInstall remedy
+    /// The install command runs through npm and npm is not on this Mac: Install waits for Node.js.
+    public var installNeedsNode: Bool
     /// The provider's model catalog (menu order). The card shows a Model picker when this has ≥2
     /// entries — the only in-app way to change a FAILING provider's model, since a failing provider
     /// can't be made active and reach the composer's picker. Empty for a one-model or un-fetched
@@ -69,7 +71,7 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
 
     public init(id: String, displayName: String, statusLabel: String, message: String,
                 readiness: Readiness, detail: String? = nil, cliPath: String? = nil,
-                installCommand: String? = nil,
+                installCommand: String? = nil, installNeedsNode: Bool = false,
                 models: [SZProviderGenerationPickerModelItem] = [], selectedModel: String = "",
                 isTesting: Bool = false,
                 isSelectable: Bool = true, isConfirmable: Bool = false,
@@ -82,6 +84,7 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
         self.detail = detail
         self.cliPath = cliPath
         self.installCommand = installCommand
+        self.installNeedsNode = installNeedsNode
         self.models = models
         self.selectedModel = selectedModel
         self.isTesting = isTesting
@@ -108,6 +111,10 @@ public struct SZProviderSetupSheet: View {
     private let onTest: (String) -> Void
     private let onSetModel: (String, String) -> Void   // (providerID, modelID)
     private let onOpenLogin: (String) -> Void
+    /// Install in Terminal: the host runs the card's install command, shown beside the button.
+    private let onInstall: (String) -> Void
+    /// Get Node.js: the host opens the download page for an npm-installed provider.
+    private let onGetNode: () -> Void
     private let onUseFallback: (String) -> Void
     private let onSetEnabled: (String, Bool) -> Void
     private let onConfirm: () -> Void
@@ -117,27 +124,26 @@ public struct SZProviderSetupSheet: View {
     private let isFirstRun: Bool
     private let onOpenSetupGuide: () -> Void
     private let onJoinDiscord: () -> Void
-    /// The presenter remembers the last-viewed section, so reopening returns there.
-    private let onSectionChange: (SZProviderSetupSection) -> Void
-
-    /// The sidebar selection; seeded by the presenter (auto-present lands on Providers).
-    @State private var section: SZProviderSetupSection
+    /// The sidebar selection, the presenter's: it remembers the last-viewed section for the next
+    /// open and can move an open sheet (a Mac project opened without the tools lands on Target).
+    @Binding private var section: SZProviderSetupSection
 
     public init(cards: [SZProviderSetupCard], selectedID: String?,
                 activeID: String? = nil,
                 targetPlatform: SZTargetPlatformPane? = nil,
                 routing: SZRoutingSettingsView? = nil,
-                initialSection: SZProviderSetupSection = .providers,
+                section: Binding<SZProviderSetupSection> = .constant(.providers),
                 onSelect: @escaping (String) -> Void, onRefresh: @escaping () -> Void,
                 onTest: @escaping (String) -> Void,
                 onSetModel: @escaping (String, String) -> Void,
                 onOpenLogin: @escaping (String) -> Void,
+                onInstall: @escaping (String) -> Void = { _ in },
+                onGetNode: @escaping () -> Void = {},
                 onUseFallback: @escaping (String) -> Void,
                 onSetEnabled: @escaping (String, Bool) -> Void,
                 onConfirm: @escaping () -> Void, onSkip: @escaping () -> Void,
                 onOpenSetupGuide: @escaping () -> Void,
                 onJoinDiscord: @escaping () -> Void,
-                onSectionChange: @escaping (SZProviderSetupSection) -> Void = { _ in },
                 isFirstRun: Bool = true) {
         self.cards = cards
         self.selectedID = selectedID
@@ -145,19 +151,20 @@ public struct SZProviderSetupSheet: View {
         self.targetPlatform = targetPlatform
         self.routing = routing
         self.isFirstRun = isFirstRun
-        _section = State(initialValue: initialSection)
+        _section = section
         self.onSelect = onSelect
         self.onRefresh = onRefresh
         self.onTest = onTest
         self.onSetModel = onSetModel
         self.onOpenLogin = onOpenLogin
+        self.onInstall = onInstall
+        self.onGetNode = onGetNode
         self.onUseFallback = onUseFallback
         self.onSetEnabled = onSetEnabled
         self.onConfirm = onConfirm
         self.onSkip = onSkip
         self.onOpenSetupGuide = onOpenSetupGuide
         self.onJoinDiscord = onJoinDiscord
-        self.onSectionChange = onSectionChange
     }
 
     private var selectedCard: SZProviderSetupCard? { cards.first { $0.id == selectedID } }
@@ -176,7 +183,6 @@ public struct SZProviderSetupSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 820, height: 580)
-        .onChange(of: section) { _, new in onSectionChange(new) }
     }
 
     // MARK: - Sidebar (the Xcode-Settings shape: sections toggle, panes stay focused)
@@ -467,6 +473,21 @@ public struct SZProviderSetupSheet: View {
                     }
                     .controlSize(.small)
                     .help("Copy the install command")
+                    if card.installNeedsNode {
+                        Button("Get Node.js") { onGetNode() }
+                            .controlSize(.small)
+                            .help("Opens nodejs.org. \(card.displayName) installs through npm, which comes with Node.js")
+                    }
+                    Button {
+                        onInstall(card.id)
+                    } label: {
+                        Label("Install in Terminal", systemImage: "terminal")
+                    }
+                    .controlSize(.small)
+                    .disabled(card.installNeedsNode)
+                    .help(card.installNeedsNode
+                          ? "Install Node.js first, then this button runs the command shown here"
+                          : "Runs the install command shown here in Terminal. Log in afterwards if the provider asks")
                 }
                 disableButton(card)
             }

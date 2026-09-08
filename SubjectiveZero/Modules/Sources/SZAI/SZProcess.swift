@@ -393,7 +393,7 @@ public enum SZAgentEnvironment {
 
     /// Where `/usr/bin/env <name>` would find the CLI — the setup sheet's path line and the
     /// verifier's `cliPath`. Same walk env does, over the same synthesized PATH.
-    static func resolveExecutable(
+    public static func resolveExecutable(
         _ name: String,
         processEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default

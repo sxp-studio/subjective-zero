@@ -263,6 +263,12 @@ extension SZHost {
             flushTranscript(scope)
             return reject("(host not ready)")
         }
+        // A Mac project cannot build without Apple's developer tools; refuse before a turn is paid
+        // for, and open the requirement with its fix (SZHost+Toolchain.swift).
+        if let note = toolchainRefusal() {
+            flushTranscript(scope)
+            return reject(note)
+        }
         let providerID: String
         switch providerForTurn(scope, heal: false) {
         case .refused(let note):

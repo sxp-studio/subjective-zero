@@ -196,6 +196,11 @@ extension SZHostBridge {
     /// deterministically is this tool's whole contract).
     private func debugQuit() -> String {
         host.quitSkipsUntitledRescue = true
+        // AppKit refuses to terminate while a sheet is up ("App termination blocked by modal
+        // sheet"), and a drive can end with Settings open. Dismiss what a user would dismiss first.
+        host.skipProviderSetup()
+        host.recordSettingsPresented = false
+        host.newProjectPresented = false   // a required one too: quitting needs no project to return to
         DispatchQueue.main.async {
             NSApplication.shared.terminate(nil)
         }

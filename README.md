@@ -85,6 +85,10 @@ from, or decides none fits; it copies source only when that source would work as
 SubZ is a native app:
 
 - **macOS**: 15 (Sequoia) or later, on Apple Silicon or Intel.
+- **Browser projects** have no further requirement.
+- **Projects that run on this Mac** need Apple's Xcode Command Line Tools, which compile the
+  nodes. The app offers the install when you create one (or run `xcode-select --install`).
+- **Agents** need one provider CLI installed and logged in; see below.
 - **Windows**: not yet. Depending on interest it will absolutely be considered.
 
 Grab the signed, notarized build from
@@ -136,7 +140,8 @@ ABI, and MCP surface. The rest of `docs/` goes a level deeper on one area each:
 
 Release builds report a small set of anonymous events (a random install ID, OS and hardware, app
 launch, the first-run setup funnel, and first-session milestones: a prompt was sent, an agent
-turn ended, a node compiled) so we can see where new users get stuck. Project content,
+turn ended, a node compiled, Apple's developer tools were missing) so we can see where new users
+get stuck. Project content,
 prompts, chat, file paths, and code are never sent. To opt out, uncheck "Share anonymous usage
 data" on the welcome screen (Help ▸ Welcome). Full detail in [`docs/PRIVACY.md`](docs/PRIVACY.md).
 

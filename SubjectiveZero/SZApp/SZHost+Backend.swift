@@ -23,8 +23,13 @@ extension SZHost {
     /// project the page with its three.js. Drop the result to abandon it.
     func prepareBackend(for project: SZProject, at url: URL, runtime: SZRuntime) async throws -> SZPreparedBackend {
         await runtime.requestDeclaredPermissions(for: project)
-        let native = project.target == .web
-            ? SZProject(name: project.name, author: project.author, viewport: project.viewport, target: .web)
+        // A Mac project on a Mac without Apple's developer tools compiles nothing: the same empty
+        // prepare a browser project gets. The install landing rebuilds it (SZHost+Toolchain.swift).
+        // Re-probe first: an install that landed while no sheet was polling counts now.
+        if project.target == .native, toolchainMissing { await refreshToolchainAvailability() }
+        nativeProjectAwaitingTools = project.target == .native && toolchainMissing
+        let native = project.target == .web || nativeProjectAwaitingTools
+            ? SZProject(name: project.name, author: project.author, viewport: project.viewport, target: project.target)
             : project
         let prepared = try await runtime.prepareProject(native, at: url)
         var page: SZWebRuntime?
@@ -54,7 +59,9 @@ extension SZHost {
 
     /// Push the open project's graph to its renderer again after an edit that is already saved.
     func reloadBackendGraph(at url: URL) throws {
-        guard let project = store.project else { return }
+        // A Mac project waiting for the tools keeps its empty graph: a reload here would compile
+        // every node through the missing compiler. The install landing rebuilds it.
+        guard !nativeProjectAwaitingTools, let project = store.project else { return }
         try backend?.loadProject(project, at: url)
     }
 }
