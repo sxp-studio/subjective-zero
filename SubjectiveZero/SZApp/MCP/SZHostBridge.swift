@@ -294,4 +294,14 @@ extension [String: Any] {
     }
     func stringList(_ key: String) -> [String] { (self[key] as? [Any] ?? []).compactMap { $0 as? String } }
     func object(_ key: String) -> [String: Any]? { self[key] as? [String: Any] }
+    /// A string the user reads on a card (title, summary). An agent occasionally hands these over
+    /// HTML-escaped (`Swirl &amp; Trails`, seen 2026-09-06); the app never escapes, so decode the
+    /// five XML entities once here. `prompt` stays verbatim, it is the agent's own text.
+    func displayText(_ key: String) -> String? { string(key).map(Self.decodingXMLEntities) }
+
+    private static func decodingXMLEntities(_ text: String) -> String {
+        guard text.contains("&") else { return text }
+        return [("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&apos;", "'"), ("&#39;", "'"), ("&amp;", "&")]
+            .reduce(text) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
+    }
 }

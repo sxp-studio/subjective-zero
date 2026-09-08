@@ -437,10 +437,10 @@ extension SZHostBridge {
         try requireUnfenced([id])
         let updated = host.updateNodeContent(
             id: id,
-            title: arguments.string("title"),
+            title: arguments.displayText("title"),
             sfSymbol: arguments.string("sfSymbol"),
             prompt: arguments.string("prompt"),
-            summary: arguments.string("summary"),
+            summary: arguments.displayText("summary"),
             permissions: permissions,
             origin: .agent
         )
