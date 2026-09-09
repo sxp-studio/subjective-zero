@@ -7,13 +7,18 @@ import SZCore
 
 struct SZLibraryPanelModel {
     struct Section: Identifiable {
-        /// nil while a query is live: one ranked list, no group header.
+        /// The section's own id, which is also what `collapsed` is keyed by: a group's raw value when
+        /// sectioning by category, a library's key when sectioning by library, "search" for the one
+        /// ranked list a query produces.
+        let id: String
+        /// nil while a query is live: one ranked list, no header at all.
+        let title: String?
+        /// The group whose colour the header wears. nil when the section is a library, which has no
+        /// colour of its own.
         let group: SZLibraryGroup?
         let rows: [SZLibraryItem]
-        /// Shut groups keep their header (and its count) and hide their rows.
+        /// A shut section keeps its header (and its count) and hides its rows.
         let collapsed: Bool
-        var id: String { group?.rawValue ?? "search" }
-        var title: String? { group?.displayName }
     }
 
     /// One library the chips can narrow to.
@@ -25,11 +30,12 @@ struct SZLibraryPanelModel {
     var items: [SZLibraryItem] { didSet { rebuild(); clampHighlight() } }
     var query: String = "" { didSet { rebuild(); resetHighlight() } }
     var sourceFilter: SZLibrarySourceID? { didSet { rebuild(); resetHighlight() } }
-    /// Groups the user shut. Their rows stay out of `flatRows`, so the keyboard walks only what shows.
-    var collapsed: Set<SZLibraryGroup> { didSet { rebuild(); clampHighlight() } }
+    /// Sections the user shut, by section id. Their rows stay out of `flatRows`, so the keyboard walks
+    /// only what shows.
+    var collapsed: Set<String> { didSet { rebuild(); clampHighlight() } }
+    /// Whether sections are what a node does, or which library it came from.
+    var grouping: SZLibraryGrouping { didSet { rebuild(); clampHighlight() } }
     var target: SZProjectTarget
-    /// Library nodes the host left out because they have no source for this project's platform.
-    var offPlatformCount: Int
     /// Index into `flatRows`; nil = nothing highlighted.
     private(set) var highlight: Int?
     /// Rebuilt when items, query or the chip change, so rows never sort per render.
@@ -37,14 +43,15 @@ struct SZLibraryPanelModel {
     private(set) var flatRows: [SZLibraryItem] = []
     private(set) var rowIndex: [String: Int] = [:]
 
-    init(items: [SZLibraryItem], target: SZProjectTarget, offPlatformCount: Int = 0, query: String = "",
-         sourceFilter: SZLibrarySourceID? = nil, collapsed: Set<SZLibraryGroup> = []) {
+    init(items: [SZLibraryItem], target: SZProjectTarget, query: String = "",
+         sourceFilter: SZLibrarySourceID? = nil, collapsed: Set<String> = [],
+         grouping: SZLibraryGrouping = .category) {
         self.items = items
         self.target = target
-        self.offPlatformCount = offPlatformCount
         self.query = query
         self.sourceFilter = sourceFilter
         self.collapsed = collapsed
+        self.grouping = grouping
         rebuild()
         resetHighlight()
     }
@@ -62,11 +69,23 @@ struct SZLibraryPanelModel {
     /// one untitled list, best match first.
     private mutating func rebuild() {
         let needle = trimmedQuery
-        if needle.isEmpty {
+        if needle.isEmpty, grouping == .category {
             sections = SZLibraryGroup.allCases.compactMap { group in
                 let rows = scoped.filter { $0.group == group }.sorted(by: Self.byTitleThenSource)
-                return rows.isEmpty ? nil : Section(group: group, rows: rows,
-                                                    collapsed: collapsed.contains(group))
+                return rows.isEmpty ? nil : Section(id: group.rawValue, title: group.displayName,
+                                                    group: group, rows: rows,
+                                                    collapsed: collapsed.contains(group.rawValue))
+            }
+        } else if needle.isEmpty {
+            // By library, in the order the host reads them: built in, then the user's, then added.
+            var seen: [SZLibrarySourceID] = []
+            for item in scoped where !seen.contains(item.source) { seen.append(item.source) }
+            sections = seen.map { source in
+                let rows = scoped.filter { $0.source == source }.sorted { a, b in
+                    a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+                }
+                return Section(id: source.rawValue, title: rows.first?.sourceName ?? source.displayName,
+                               group: nil, rows: rows, collapsed: collapsed.contains(source.rawValue))
             }
         } else {
             let ranked = scoped.compactMap { item in Self.rank(item, needle: needle).map { (rank: $0, item: item) } }
@@ -75,8 +94,9 @@ struct SZLibraryPanelModel {
                     return Self.bySourceThenTitle(a.item, b.item)
                 }
                 .map(\.item)
-            // A live query drops groups for one ranked list, so a shut group never hides a search hit.
-            sections = ranked.isEmpty ? [] : [Section(group: nil, rows: ranked, collapsed: false)]
+            // A live query drops sections for one ranked list, so a shut section never hides a hit.
+            sections = ranked.isEmpty ? [] : [Section(id: "search", title: nil, group: nil,
+                                                      rows: ranked, collapsed: false)]
         }
         flatRows = sections.filter { !$0.collapsed }.flatMap(\.rows)
         rowIndex = Dictionary(uniqueKeysWithValues: flatRows.enumerated().map { ($1.id, $0) })
@@ -117,11 +137,6 @@ struct SZLibraryPanelModel {
         highlight = !trimmedQuery.isEmpty && !flatRows.isEmpty ? 0 : nil
     }
 
-    /// Open a shut group, or shut an open one.
-    mutating func toggle(_ group: SZLibraryGroup) {
-        if collapsed.contains(group) { collapsed.remove(group) } else { collapsed.insert(group) }
-    }
-
     mutating func setHighlight(_ index: Int?) {
         highlight = index.flatMap { flatRows.indices.contains($0) ? $0 : nil }
     }
@@ -148,6 +163,11 @@ struct SZLibraryPanelModel {
 
     var showsSourceChips: Bool { sources.count >= 2 }
 
+    /// Whether a row should name its library after the title. Only when more than one library is
+    /// offering rows AND the sections are not already libraries: otherwise two nodes with the same
+    /// name from different libraries are two identical-looking rows.
+    var rowsNameTheirLibrary: Bool { grouping == .category && sources.count >= 2 }
+
     var emptyText: String? {
         if items.isEmpty {
             return target == .web ? "No library nodes for browser projects yet" : "The library is empty"
@@ -159,15 +179,6 @@ struct SZLibraryPanelModel {
     var footerText: String {
         let count = items.count
         return "\(count) \(count == 1 ? "node" : "nodes")"
-    }
-
-    /// Nodes this project can't use because they have no source for its platform. Shown under the
-    /// search field only when there are some, where it says what to do about it.
-    var offPlatformNote: String? {
-        guard offPlatformCount > 0 else { return nil }
-        let other: SZProjectTarget = target == .native ? .web : .native
-        let noun = offPlatformCount == 1 ? "node needs" : "nodes need"
-        return "\(offPlatformCount) \(noun) a project \(other.placeName)"
     }
 }
 

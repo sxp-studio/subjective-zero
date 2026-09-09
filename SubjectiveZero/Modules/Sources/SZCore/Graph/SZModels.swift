@@ -768,10 +768,14 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// repository pinned to a commit. Optional for the same decode-compatibility reason; nil means
     /// none added.
     public var libraries: [SZAddedLibrary]?
-    /// Library panel groups the user collapsed (`SZLibraryGroup` raw values). A browsing habit, so it
-    /// lives here rather than in the project. Optional for the same decode-compatibility reason; nil
-    /// means every group is open.
+    /// Library panel sections the user collapsed, by section id: a `SZLibraryGroup` raw value when
+    /// grouping by category, a library key when grouping by library. A browsing habit, so it lives
+    /// here rather than in the project. Optional for the same decode-compatibility reason; nil means
+    /// every section is open.
     public var libraryCollapsedGroups: [String]?
+    /// Whether the Library panel sections by what a node does or by which library it came from
+    /// (`SZLibraryGrouping`). Optional for the same decode-compatibility reason; nil means category.
+    public var libraryGrouping: String?
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
 
@@ -803,7 +807,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         myLibraryPath: String? = nil,
         libraryCollapsedGroups: [String]? = nil,
         libraries: [SZAddedLibrary]? = nil,
-        libraryDetailHeight: Double? = nil
+        libraryDetailHeight: Double? = nil,
+        libraryGrouping: String? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -833,6 +838,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.libraryCollapsedGroups = libraryCollapsedGroups
         self.libraries = libraries
         self.libraryDetailHeight = libraryDetailHeight
+        self.libraryGrouping = libraryGrouping
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

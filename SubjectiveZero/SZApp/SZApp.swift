@@ -1056,12 +1056,13 @@ struct SZApp: App {
                               onVisibleCenterChanged: { host.canvasVisibleCenter = $0 })
         case .library:
             SZLibraryPanel(items: host.libraryItems, target: host.projectTarget,
-                           offPlatformCount: host.libraryOffPlatformCount,
                            collapsed: host.libraryCollapsedGroups,
+                           grouping: host.libraryGrouping,
                            focusRequest: host.libraryFocusRequest,
                            detailHeight: CGFloat(host.libraryDetailHeight),
                            onPlace: { host.placeFromLibrary($0) },
-                           onToggleGroup: { host.toggleLibraryGroup($0) },
+                           onToggleSection: { host.toggleLibrarySection($0) },
+                           onGroupingChanged: { host.setLibraryGrouping($0) },
                            onDetailHeightChanged: { host.setLibraryDetailHeight($0) },
                            onOpenLibrarySettings: { host.presentLibrarySettings() })
         case .chat:

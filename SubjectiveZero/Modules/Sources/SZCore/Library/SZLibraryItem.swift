@@ -22,6 +22,19 @@ public struct SZLibrarySourceID: RawRepresentable, Hashable, Codable, Sendable {
     }
 }
 
+/// How the Library panel splits its rows into sections: by what a node does, or by where it came
+/// from. A browsing preference, remembered with the prefs.
+public enum SZLibraryGrouping: String, CaseIterable, Codable, Sendable {
+    case category, library
+
+    public var displayName: String {
+        switch self {
+        case .category: "Category"
+        case .library: "Library"
+        }
+    }
+}
+
 /// What a placement copies from: a node folder in a library, or a node already in the project (Duplicate).
 public enum SZLibraryRef: Hashable, Codable, Sendable {
     case library(source: SZLibrarySourceID, id: String)

@@ -51,13 +51,13 @@ struct SZHostLibraryTests {
         #expect(ids.contains("builtin/gaussian-blur"))
         #expect(!ids.contains("builtin/camera.web"))
         #expect(native.libraryItems.allSatisfy { $0.source == .builtIn })
-        #expect(native.libraryOffPlatformCount == Self.builtInCount(onlyFor: .web))
-        #expect(native.libraryOffPlatformCount == 1)   // camera.web
-
+        // Exactly the Mac-only nodes are left out of a browser project, and vice versa: the rows are
+        // the set of folders holding a source file for this project's platform, nothing else.
         let web = try Self.host(in: dir.appending(path: "web"), target: .web)
         #expect(!web.libraryItems.map(\.id).contains("builtin/corner-pin"))
         #expect(web.libraryItems.map(\.id).contains("builtin/camera.web"))
-        #expect(web.libraryOffPlatformCount == Self.builtInCount(onlyFor: .native))
+        #expect(native.libraryItems.count - web.libraryItems.count
+                == Self.builtInCount(onlyFor: .native) - Self.builtInCount(onlyFor: .web))
     }
 
     @Test func aFolderUnderMyLibraryPathIsASecondSource() throws {

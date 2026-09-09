@@ -30,13 +30,21 @@ extension SZHost {
         libraryFocusRequest += 1
     }
 
-    /// The panel's section header: shut an open group or open a shut one, remembered with the prefs.
-    func toggleLibraryGroup(_ group: SZLibraryGroup) {
-        if libraryCollapsedGroups.contains(group) {
-            libraryCollapsedGroups.remove(group)
+    /// The panel's section header: shut an open section or open a shut one, remembered with the prefs.
+    func toggleLibrarySection(_ id: String) {
+        if libraryCollapsedGroups.contains(id) {
+            libraryCollapsedGroups.remove(id)
         } else {
-            libraryCollapsedGroups.insert(group)
+            libraryCollapsedGroups.insert(id)
         }
+        persistAppState()
+    }
+
+    /// The panel's grouping menu: sections become what a node does, or which library it came from.
+    /// Shut sections are keyed by section id, so each axis remembers its own independently.
+    func setLibraryGrouping(_ grouping: SZLibraryGrouping) {
+        guard grouping != libraryGrouping else { return }
+        libraryGrouping = grouping
         persistAppState()
     }
 

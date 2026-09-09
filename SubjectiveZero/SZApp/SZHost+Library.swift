@@ -96,7 +96,6 @@ extension SZHost {
         libraryItems = libraryEntries(target: projectTarget).map {
             SZLibraryItem(entry: $0.entry, source: $0.source, sourceName: libraryName($0.source))
         }
-        libraryOffPlatformCount = libraryEntries.filter { !$0.builtTargets.contains(projectTarget) && !$0.builtTargets.isEmpty }.count
     }
 
     /// The cached entries with a source file for `target`, root order then id.

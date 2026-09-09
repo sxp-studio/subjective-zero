@@ -8,7 +8,7 @@ import SZCore
 
 private func item(_ id: String, title: String, inputs: [SZPortType] = [.texture], outputs: [SZPortType] = [.texture],
                   tags: [String] = [], purpose: String? = nil, permissions: [SZEntitlement]? = nil,
-                  source: SZLibrarySourceID = .builtIn) -> SZLibraryItem {
+                  source: SZLibrarySourceID = .builtIn, sourceName: String? = nil) -> SZLibraryItem {
     let contract = SZNodeContract(
         title: title, sfSymbol: "circle", summary: "\(title) summary.",
         inputs: inputs.enumerated().map { SZPort(name: "in\($0.offset)", type: $0.element) },
@@ -16,7 +16,7 @@ private func item(_ id: String, title: String, inputs: [SZPortType] = [.texture]
         permissions: permissions)
     let entry = SZLibraryIndexEntry(id: id, contract: contract,
                                     curation: SZLibraryCurationEntry(id: id, tags: tags, purpose: purpose))
-    return SZLibraryItem(entry: entry, source: source)
+    return SZLibraryItem(entry: entry, source: source, sourceName: sourceName)
 }
 
 private let blur = item("gaussian-blur", title: "Gaussian Blur", tags: ["blur", "soften"])
@@ -36,6 +36,29 @@ private let mineBlur = item("gaussian-blur", title: "Gaussian Blur", tags: ["blu
     #expect(model.emptyText == nil)
 }
 
+@Test func groupingByLibrarySectionsTheSameRowsByWhereTheyCameFrom() {
+    let mine = item("gaussian-blur", title: "Gaussian Blur", source: .mine, sourceName: "My Library")
+    var model = SZLibraryPanelModel(items: [blur, camera, mine], target: .native, grouping: .library)
+    // One section per library, in the order the rows arrive, named by the library not its key.
+    #expect(model.sections.map(\.title) == ["Built in", "My Library"])
+    #expect(model.sections.map(\.id) == ["builtin", "mine"])
+    #expect(model.sections[0].group == nil)          // a library has no colour of its own
+    #expect(model.sections[1].rows.map(\.entryID) == ["gaussian-blur"])
+
+    // Shut sections are keyed by section id, so each axis remembers its own independently.
+    model.collapsed = ["mine"]
+    #expect(model.flatRows.map(\.source) == [.builtIn, .builtIn])
+    model.grouping = .category
+    #expect(model.sections.map(\.title) == ["Sources", "Effects"])
+    #expect(model.flatRows.count == 3)               // "mine" means nothing to the category axis
+
+    // A row names its library only when two of them could otherwise look identical.
+    #expect(model.rowsNameTheirLibrary)
+    #expect(!SZLibraryPanelModel(items: [blur, camera], target: .native).rowsNameTheirLibrary)
+    model.grouping = .library
+    #expect(!model.rowsNameTheirLibrary)             // the section already says it
+}
+
 @Test func everySectionCarriesItsGroupAndCount() {
     let many = (0..<9).map { item("fx-\($0)", title: "Effect \($0)") }
     let model = SZLibraryPanelModel(items: many + [camera], target: .native)
@@ -46,7 +69,7 @@ private let mineBlur = item("gaussian-blur", title: "Gaussian Blur", tags: ["blu
 
 @Test func aShutGroupKeepsItsHeaderAndLeavesTheKeyboardAlone() {
     var model = SZLibraryPanelModel(items: [blur, bloom, camera, noise], target: .native)
-    model.collapsed = [.effects]
+    model.collapsed = [SZLibraryGroup.effects.rawValue]
     // The header stays, with its count, so a shut group still says what is in it.
     #expect(model.sections.map(\.title) == ["Sources", "Effects"])
     #expect(model.sections[1].collapsed)
@@ -61,8 +84,7 @@ private let mineBlur = item("gaussian-blur", title: "Gaussian Blur", tags: ["blu
 
     model.query = ""
     #expect(model.flatRows.map(\.entryID) == ["camera", "noise"])   // and it comes back shut
-    model.toggle(.effects)
-    #expect(model.collapsed.isEmpty)
+    model.collapsed = []
     #expect(model.flatRows.count == 4)
 }
 
@@ -146,13 +168,6 @@ private let mineBlur = item("gaussian-blur", title: "Gaussian Blur", tags: ["blu
     #expect(SZLibraryPanelModel(items: [blur], target: .web).footerText == "1 node")
 }
 
-@Test func nodesLeftOutGetTheirOwnNoteOrNone() {
-    #expect(SZLibraryPanelModel(items: [blur, camera], target: .native).offPlatformNote == nil)
-    #expect(SZLibraryPanelModel(items: [blur, camera], target: .native, offPlatformCount: 1).offPlatformNote
-            == "1 node needs a project in a browser")
-    #expect(SZLibraryPanelModel(items: [blur], target: .web, offPlatformCount: 11).offPlatformNote
-            == "11 nodes need a project on this Mac")
-}
 
 @Test func sourceChipsAppearOnlyWithTwoLibraries() {
     let one = SZLibraryPanelModel(items: [blur, camera], target: .native)

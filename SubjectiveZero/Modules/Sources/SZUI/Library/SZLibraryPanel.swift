@@ -16,13 +16,13 @@ import SZCore
 public struct SZLibraryPanel: View {
     private let items: [SZLibraryItem]
     private let target: SZProjectTarget
-    /// Library nodes with no source for this platform; a note under the search field says how many.
-    private let offPlatformCount: Int
-    private let collapsed: Set<SZLibraryGroup>
+    private let collapsed: Set<String>
+    private let grouping: SZLibraryGrouping
     /// Bumped by the host to focus the search field (⌘L, Add from Library).
     private let focusRequest: Int
     private let onPlace: (SZLibraryRef) -> Void
-    private let onToggleGroup: (SZLibraryGroup) -> Void
+    private let onToggleSection: (String) -> Void
+    private let onGroupingChanged: (SZLibraryGrouping) -> Void
     private let onDetailHeightChanged: (CGFloat) -> Void
     private let onOpenLibrarySettings: () -> Void
 
@@ -45,32 +45,36 @@ public struct SZLibraryPanel: View {
     public static let defaultDetailHeight: CGFloat = 58
     private static let detailRange: ClosedRange<CGFloat> = 34...260
 
-    public init(items: [SZLibraryItem], target: SZProjectTarget, offPlatformCount: Int = 0,
-                collapsed: Set<SZLibraryGroup> = [], focusRequest: Int,
+    public init(items: [SZLibraryItem], target: SZProjectTarget,
+                collapsed: Set<String> = [], grouping: SZLibraryGrouping = .category,
+                focusRequest: Int,
                 detailHeight: CGFloat = SZLibraryPanel.defaultDetailHeight,
                 onPlace: @escaping (SZLibraryRef) -> Void,
-                onToggleGroup: @escaping (SZLibraryGroup) -> Void = { _ in },
+                onToggleSection: @escaping (String) -> Void = { _ in },
+                onGroupingChanged: @escaping (SZLibraryGrouping) -> Void = { _ in },
                 onDetailHeightChanged: @escaping (CGFloat) -> Void = { _ in },
                 onOpenLibrarySettings: @escaping () -> Void) {
         self.items = items
         self.target = target
-        self.offPlatformCount = offPlatformCount
         self.collapsed = collapsed
+        self.grouping = grouping
         self.focusRequest = focusRequest
         self.onPlace = onPlace
-        self.onToggleGroup = onToggleGroup
+        self.onToggleSection = onToggleSection
+        self.onGroupingChanged = onGroupingChanged
         self.onDetailHeightChanged = onDetailHeightChanged
         self.onOpenLibrarySettings = onOpenLibrarySettings
         _detailHeight = State(initialValue: detailHeight.clamped(to: SZLibraryPanel.detailRange))
         _model = State(initialValue: SZLibraryPanelModel(items: items, target: target,
-                                                         offPlatformCount: offPlatformCount,
-                                                         collapsed: collapsed))
+                                                         collapsed: collapsed, grouping: grouping))
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            searchField
-            if let note = model.offPlatformNote { offPlatformNote(note) }
+            HStack(spacing: 6) {
+                searchField
+                groupingMenu
+            }
             if model.showsSourceChips { sourceChips }
             list
             detailSection
@@ -78,8 +82,8 @@ public struct SZLibraryPanel: View {
         .padding(8)
         .onChange(of: items) { _, new in model.items = new }
         .onChange(of: target) { _, new in model.target = new }
-        .onChange(of: offPlatformCount) { _, new in model.offPlatformCount = new }
         .onChange(of: collapsed) { _, new in model.collapsed = new }
+        .onChange(of: grouping) { _, new in model.grouping = new }
         .onChange(of: focusRequest) { _, _ in focusSearch() }
         // Arrow keys describe what they land on, so the strip follows the keyboard as well as the mouse.
         .onChange(of: model.highlight) { _, _ in describeHighlight() }
@@ -124,12 +128,28 @@ public struct SZLibraryPanel: View {
         .szGlassCard(cornerRadius: 6)
     }
 
-    private func offPlatformNote(_ note: String) -> some View {
-        Text(note)
-            .font(.system(size: 10))
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
-            .padding(.horizontal, 2)
+    /// How the list is split. Two ways to read the same rows, so it is a menu rather than a control
+    /// competing with the search field for width.
+    private var groupingMenu: some View {
+        Menu {
+            Picker("Group by", selection: Binding(get: { grouping },
+                                                  set: { onGroupingChanged($0) })) {
+                ForEach(SZLibraryGrouping.allCases, id: \.self) { option in
+                    Text(option.displayName).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 26)
+        .help("Group by category or by library")
     }
 
     private func focusSearch() {
@@ -183,8 +203,9 @@ public struct SZLibraryPanel: View {
                     // top of a row's Add button and clips the section counts.
                     LazyVStack(alignment: .leading, spacing: 1, pinnedViews: []) {
                         ForEach(model.sections) { section in
-                            if let group = section.group {
-                                header(group, count: section.rows.count, collapsed: section.collapsed)
+                            if let title = section.title {
+                                header(section.id, title: title, tint: section.group?.tint,
+                                       count: section.rows.count, collapsed: section.collapsed)
                             }
                             if !section.collapsed {
                                 ForEach(section.rows) { item in
@@ -204,20 +225,23 @@ public struct SZLibraryPanel: View {
         }
     }
 
-    /// The whole header line toggles the group. The chevron carries the group's colour, so collapsing
-    /// costs no extra glyph and there is no small triangle to aim at.
-    private func header(_ group: SZLibraryGroup, count: Int, collapsed: Bool) -> some View {
-        Button { onToggleGroup(group) } label: {
+    /// The whole header line toggles the section. The chevron carries the section's colour when it has
+    /// one, so collapsing costs no extra glyph and there is no small triangle to aim at. A library
+    /// section has no colour of its own: the hue means what a node does, not where it came from.
+    private func header(_ id: String, title: String, tint: Color?, count: Int, collapsed: Bool) -> some View {
+        let accent = tint ?? Color.secondary
+        return Button { onToggleSection(id) } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(group.tint)
+                    .foregroundStyle(accent)
                     .rotationEffect(.degrees(collapsed ? -90 : 0))
                     .frame(width: 9)
-                Text(group.displayName)
+                Text(title)
                     .font(SZNodeCardStyle.labelFont)
                     .textCase(.uppercase)
-                    .foregroundStyle(group.tint)
+                    .foregroundStyle(accent)
+                    .lineLimit(1)
                 Rectangle()
                     .fill(Color.white.opacity(0.07))
                     .frame(height: 1)
@@ -247,6 +271,14 @@ public struct SZLibraryPanel: View {
             Text(item.title)
                 .font(.system(size: 12, weight: .medium))
                 .lineLimit(1)
+            if model.rowsNameTheirLibrary {
+                // Two libraries can both ship a "Gaussian Blur"; without this they are two identical rows.
+                Text(item.sourceName)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .layoutPriority(-1)
+            }
             Spacer(minLength: 4)
             // No permission glyph here: the strip says it in words, which leaves this edge free for
             // Add. That is what stops the two from trading places on hover.

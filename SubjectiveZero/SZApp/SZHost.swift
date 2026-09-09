@@ -365,8 +365,6 @@ final class SZHost {
     internal(set) var libraryEntries: [SZLibraryEntry] = []
     /// The Library panel's rows for the open project's target, derived from `libraryEntries`.
     internal(set) var libraryItems: [SZLibraryItem] = []
-    /// Library nodes built for the other platform only; the panel footer's "N more" count.
-    internal(set) var libraryOffPlatformCount = 0
     /// Where the user's own library lives once moved from its default folder; persisted with the prefs.
     internal(set) var myLibraryPath: String? = SZAppStateIO.load()?.myLibraryPath
     /// Libraries the user added: folders on this Mac and ones fetched from a link. Persisted with
@@ -381,10 +379,14 @@ final class SZHost {
     var pendingLibraryUpdates: [String: SZLibraryUpdate] = [:]
     /// Whether My Library has somewhere to publish to; filled in when Settings opens.
     internal(set) var myLibraryPublishable = false
-    /// Library panel groups the user shut. A browsing habit, so it is remembered with the prefs
-    /// rather than the project: opening someone else's project never rearranges the panel.
-    internal(set) var libraryCollapsedGroups: Set<SZLibraryGroup> =
-        Set((SZAppStateIO.load()?.libraryCollapsedGroups ?? []).compactMap(SZLibraryGroup.init(rawValue:)))
+    /// Library panel sections the user shut, by section id (a group, or a library key). A browsing
+    /// habit, so it is remembered with the prefs rather than the project: opening someone else's
+    /// project never rearranges the panel.
+    internal(set) var libraryCollapsedGroups: Set<String> =
+        Set(SZAppStateIO.load()?.libraryCollapsedGroups ?? [])
+    /// Whether the panel sections by what a node does or by which library it came from.
+    internal(set) var libraryGrouping: SZLibraryGrouping =
+        SZAppStateIO.load()?.libraryGrouping.flatMap(SZLibraryGrouping.init(rawValue:)) ?? .category
     /// Bumped to focus the Library panel's search field (the canvas menu's Add from Library).
     internal(set) var libraryFocusRequest = 0
     /// Where the next placement from the Library panel lands: the canvas click that asked for it.
