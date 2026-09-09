@@ -319,7 +319,7 @@ public struct SZLibraryPanel: View {
     private static func needs(_ item: SZLibraryItem) -> [String] {
         var out = item.permissions.map(permissionWords)
         if item.hasCard { out.append("Ships a custom card") }
-        if item.source != .builtIn { out.append("From \(item.source.displayName)") }
+        if item.source != .builtIn { out.append("From \(item.sourceName)") }
         return out
     }
 

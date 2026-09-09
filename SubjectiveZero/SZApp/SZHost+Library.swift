@@ -21,14 +21,29 @@ extension SZHost {
         myLibraryPath.map { URL(filePath: $0) } ?? SZAppSupport.directory.appending(path: "library")
     }
 
-    /// Every library to read, built in first; the user's only once its folder exists.
+    /// Every library to read: built in first, the user's own once its folder exists, then the ones
+    /// they added, in the order they added them. A library whose folder has gone (an unplugged disk,
+    /// a folder someone moved) is skipped rather than dropped, so it comes back when the folder does.
     var libraryRoots: [(source: SZLibrarySourceID, url: URL)] {
         var roots = [(source: SZLibrarySourceID.builtIn, url: Self.builtInLibraryURL)]
+        let fm = FileManager.default
         var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: myLibraryURL.path, isDirectory: &isDir), isDir.boolValue {
+        if fm.fileExists(atPath: myLibraryURL.path, isDirectory: &isDir), isDir.boolValue {
             roots.append((.mine, myLibraryURL))
         }
+        for library in addedLibraries {
+            let url = addedLibraryURL(library)
+            if fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                roots.append((library.source, url))
+            }
+        }
         return roots
+    }
+
+    /// Libraries whose folder is not there right now; the settings row says so.
+    var missingLibraryKeys: Set<String> {
+        let present = Set(libraryRoots.map(\.source.rawValue))
+        return Set(addedLibraries.map(\.key).filter { !present.contains($0) })
     }
 
     /// A root's `index.json`, empty when missing or unreadable.
@@ -78,7 +93,9 @@ extension SZHost {
                 return SZLibraryEntry(source: root.source, folder: folder, entry: entry, builtTargets: built)
             }
         }
-        libraryItems = libraryEntries(target: projectTarget).map { SZLibraryItem(entry: $0.entry, source: $0.source) }
+        libraryItems = libraryEntries(target: projectTarget).map {
+            SZLibraryItem(entry: $0.entry, source: $0.source, sourceName: libraryName($0.source))
+        }
         libraryOffPlatformCount = libraryEntries.filter { !$0.builtTargets.contains(projectTarget) && !$0.builtTargets.isEmpty }.count
     }
 
@@ -122,6 +139,11 @@ extension SZHost {
         return nil
     }
 
+    /// Node folders per added library, for the settings rows.
+    func addedLibraryCount(_ key: String) -> Int {
+        libraryEntries.filter { $0.source.rawValue == key }.count
+    }
+
     /// The title of a library entry, for status lines; the id when it is not in the cache.
     func libraryTitle(source: SZLibrarySourceID, id: String) -> String {
         libraryEntries.first { $0.source == source && $0.entry.id == id }?.entry.title ?? id
@@ -147,7 +169,7 @@ extension SZHost {
                 if entry.card == true { facts.append("ships a card") }
                 if let reuse = entry.reuse { facts.append(reuse) }
                 if !tags.isEmpty { facts.append(tags) }
-                if item.source != .builtIn { facts.append("library: \(item.source.displayName)") }
+                if item.source != .builtIn { facts.append("library: \(libraryName(item.source))") }
                 return "  \(entry.id) — \(entry.purpose ?? entry.summary) [\(facts.joined(separator: " | "))]"
             }
             return "\(group):\n\(lines.joined(separator: "\n"))"
@@ -166,7 +188,7 @@ extension SZHost {
         guard entries.count > Self.libraryInlineLimit else { return libraryCategoriesBlock(target: target) }
         let counts = Dictionary(grouping: entries, by: { $0.entry.group.rawValue })
             .sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.count)" }.joined(separator: ", ")
-        let libraries = libraryRoots.map(\.source.displayName).joined(separator: ", ")
+        let libraries = libraryRoots.map { libraryName($0.source) }.joined(separator: ", ")
         return "\(entries.count) library nodes (\(counts)) across \(libraries). "
             + "Search them with agent_library_index { \"query\": \"...\" } before writing your own."
     }

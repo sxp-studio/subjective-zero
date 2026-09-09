@@ -369,6 +369,15 @@ final class SZHost {
     internal(set) var libraryOffPlatformCount = 0
     /// Where the user's own library lives once moved from its default folder; persisted with the prefs.
     internal(set) var myLibraryPath: String? = SZAppStateIO.load()?.myLibraryPath
+    /// Libraries the user added: folders on this Mac and ones fetched from a link. Persisted with
+    /// the prefs; `libraryRoots` reads them in this order after the two built-in ones.
+    internal(set) var addedLibraries: [SZAddedLibrary] = SZAppStateIO.load()?.libraries ?? []
+    /// The Add Library sheet, opened from Settings ▸ Library.
+    var addLibraryPresented = false
+    /// What the last Check for Updates found per library, so Update applies exactly that revision.
+    var pendingLibraryUpdates: [String: SZLibraryUpdate] = [:]
+    /// Whether My Library has somewhere to publish to; filled in when Settings opens.
+    internal(set) var myLibraryPublishable = false
     /// Library panel groups the user shut. A browsing habit, so it is remembered with the prefs
     /// rather than the project: opening someone else's project never rearranges the panel.
     internal(set) var libraryCollapsedGroups: Set<SZLibraryGroup> =

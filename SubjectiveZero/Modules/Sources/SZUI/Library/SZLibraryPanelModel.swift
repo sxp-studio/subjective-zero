@@ -141,7 +141,7 @@ struct SZLibraryPanelModel {
     var sources: [Source] {
         var seen: [Source] = []
         for item in items where !seen.contains(where: { $0.id == item.source }) {
-            seen.append(Source(id: item.source, name: item.source.displayName))
+            seen.append(Source(id: item.source, name: item.sourceName))
         }
         return seen
     }

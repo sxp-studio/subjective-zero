@@ -31,8 +31,24 @@ the same nodes.
   inputs cleared, each source file the node has, `Card.swift` if any, `CARD.md` with the description
   and prompt) and one `index.json` entry, then commits; git is never required and never shown.
   Saving the same node again updates its entry, and the project's node is stamped as a copy of it.
-- **Next**: a library added by link is the same folder cloned at a commit, updated on request with
-  the diff shown first, behind a one-time trust note. Publishing My Library is a push. Not built yet.
+- **Added libraries** - a folder on this Mac, or a repository fetched from a link
+  (`SZAddedLibrary`, remembered in the prefs). A folder is read where it lives and never written to.
+  A link is cloned under `Application Support/libraries/<key>/` and pinned to the commit it arrived
+  on. Both are added from Settings ▸ Library ▸ Add Library, or by an agent with `ui_add_library`.
+  A library that is not there right now (an unplugged disk, a folder someone moved) is skipped, not
+  forgotten, so it comes back when the folder does.
+
+**Updating is always asked for.** `ui_update_library` and the settings row's Check for Updates
+fetch, then say what would change (nodes added, changed, removed) and move nothing until told. A
+library never changes under a project that is open, and nodes already on a canvas are copies, so an
+update never rewrites anyone's graph. **Publishing** (`ui_publish_library`) sends My Library where
+its remote points, and says plainly when the user has not set one up.
+
+**Trust.** A library's nodes are compiled and loaded into the app, so they run with everything the
+app can reach. No scan of ours would honestly change that, so the model is identity and consent
+rather than inspection: the Add sheet says it once, in those words, at the moment the person
+decides, and an agent is told to add only the library the user named. Commit pinning is what keeps
+an added library from changing under them afterwards.
 
 Ids may repeat across libraries, so rows are keyed by library and id, and the agents' tools take an
 optional `library` argument when two libraries carry the same id (built in wins when omitted).

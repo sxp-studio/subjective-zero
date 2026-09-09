@@ -70,6 +70,14 @@ Illustrative, not exhaustive - grouped to show coverage of the [core loop](CORE_
                                             // refused while a target is held by a run
 - `ui_save_to_library`                      // copy a built node into the user's own library (name,
                                             // description); the first save creates the library
+- `ui_add_library`                          // add a whole library: `link` (a repository) or `folder` (a
+                                            // path on this Mac). Fetches, so it is served on the async
+                                            // lane beside `agent_compile_node`
+- `ui_update_library`                       // what a newer version of an added library would change
+                                            // ({summary, added, changed, removed, revision}); moves
+                                            // nothing unless `apply: true`. Never automatic
+- `ui_publish_library`                      // send My Library where its remote points; says plainly
+                                            // when the user has not set one up
 - `binding_learn_start/stop/state`,        // controller nodes (midi.macos, osc-input): arm learn, poll the
   `binding_commit`, `binding_remove`        // moved control ({armed, seen, key, value01}), commit it as a
                                             // mappings row + derived float output (+ data edge with `target`),

@@ -761,6 +761,10 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// Where the user's own node library lives, once moved (Settings ▸ Library ▸ Move…). Optional for
     /// the same decode-compatibility reason; nil means the default folder under Application Support.
     public var myLibraryPath: String?
+    /// Libraries the user added beyond the built-in one and their own: a folder on this Mac, or a
+    /// repository pinned to a commit. Optional for the same decode-compatibility reason; nil means
+    /// none added.
+    public var libraries: [SZAddedLibrary]?
     /// Library panel groups the user collapsed (`SZLibraryGroup` raw values). A browsing habit, so it
     /// lives here rather than in the project. Optional for the same decode-compatibility reason; nil
     /// means every group is open.
@@ -794,7 +798,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         recordPrefs: SZRecordPrefs? = nil,
         lastProjectTarget: SZProjectTarget? = nil,
         myLibraryPath: String? = nil,
-        libraryCollapsedGroups: [String]? = nil
+        libraryCollapsedGroups: [String]? = nil,
+        libraries: [SZAddedLibrary]? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -822,6 +827,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.lastProjectTarget = lastProjectTarget
         self.myLibraryPath = myLibraryPath
         self.libraryCollapsedGroups = libraryCollapsedGroups
+        self.libraries = libraries
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

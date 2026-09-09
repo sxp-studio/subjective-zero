@@ -396,6 +396,13 @@ struct SZApp: App {
                                          onCancel: { host.saveToLibraryNode = nil })
                 }
             }
+            // Add a Library: a link or a folder, with the trust note. Presented over Settings, which
+            // is where the button is.
+            .sheet(isPresented: $host.addLibraryPresented) {
+                SZAddLibrarySheet(onChooseFolder: { host.chooseLibraryFolder() },
+                                  onAdd: { await host.addLibrary($0) },
+                                  onCancel: { host.addLibraryPresented = false })
+            }
             // The New Project sheet: where the project will run. A set-false (Esc / swipe) is a
             // Cancel, which the host ignores while the sheet is required (nothing else is loaded).
             .sheet(isPresented: Binding(get: { host.newProjectPresented },
@@ -662,13 +669,25 @@ struct SZApp: App {
             onInstall: { _ in host.installDeveloperTools() })
     }
 
-    /// Settings ▸ Library: the libraries the panel reads, with My Library's folder actions.
+    /// Settings ▸ Library: the libraries the panel reads, My Library's folder actions, and the added
+    /// ones with their update and remove rows.
     private var librarySettingsView: SZLibrarySettingsView {
         SZLibrarySettingsView(builtInCount: host.libraryNodeCount(.builtIn) ?? 0,
                               myLibraryCount: host.libraryNodeCount(.mine),
                               myLibraryPath: host.myLibraryURL.path,
+                              myLibraryCanPublish: host.myLibraryPublishable,
+                              added: host.addedLibraries,
+                              addedCounts: Dictionary(uniqueKeysWithValues:
+                                  host.addedLibraries.map { ($0.key, host.addedLibraryCount($0.key)) }),
+                              missing: host.missingLibraryKeys,
                               onShowInFinder: { host.revealMyLibrary() },
-                              onMove: { host.moveMyLibraryViaPanel() })
+                              onMove: { host.moveMyLibraryViaPanel() },
+                              onPublish: { await host.publishMyLibraryFromSettings() },
+                              onAdd: { host.addLibraryPresented = true },
+                              onReveal: { host.revealLibrary($0) },
+                              onCheckForUpdate: { await host.checkForLibraryUpdate(key: $0) },
+                              onApplyUpdate: { await host.applyLibraryUpdate(key: $0) },
+                              onRemove: { host.removeLibrary(key: $0) })
     }
 
     /// The AI Settings Routing pane, wired to the host mapping (SZHost+RoutingSettings).

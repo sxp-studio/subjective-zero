@@ -48,6 +48,18 @@ extension SZHostBridge {
                     "name": ["type": "string", "description": "the entry's name (default: the node's title)"],
                     "description": ["type": "string", "description": "one line on what it does (default: the node's summary)"],
                  ]),
+            tool("ui_add_library", "Add a library of nodes so the user can place them: a link to a repository (https://github.com/someone/their-nodes, or the owner/repo shorthand), or the path to a folder on this Mac. Fetching one runs its author's code on this Mac later, so only do this when the user asked for that library by name or link. Returns {library, id, nodes}.",
+                 properties: [
+                    "link": ["type": "string", "description": "a link to the library's repository"],
+                    "folder": ["type": "string", "description": "a folder on this Mac, instead of a link"],
+                 ]),
+            tool("ui_update_library", "Move an added library to its newest version, after saying what would change. Without `apply` it only reports {summary, added, changed, removed, revision} and moves nothing; with apply:true it moves. Never update without telling the user what changed. Nodes already on the canvas are copies and never change.",
+                 properties: [
+                    "library": ["type": "string", "description": "the library's id, from ui_add_library or agent_library_index"],
+                    "apply": ["type": "boolean", "description": "true to actually move it (default: just report)"],
+                 ]),
+            tool("ui_publish_library", "Send the user's own library (My Library) to wherever they set it to publish. Fails plainly when they have not set that up, which is the common case; say so rather than guessing at a destination.",
+                 properties: [:]),
             tool("ui_connect", "Connect one node's output port to another's input port; returns the connection id. A data input holds at most one incoming connection — connecting to an occupied data input replaces the existing connection. Repeating an existing connection returns its id unchanged. Data edges must keep the graph acyclic: a data connection that would close a cycle is refused with {status: \"refused\", reason} naming the path — rewire or drop an edge instead. A flow (intent) edge is refused the same way when it would run in a circle, counting the arrows already drawn, since only one edge of a ring could ever be laid; nothing about ports refuses an arrow. A flow edge given an explicit fromPort/toPort naming a declared data port is PINNED to that slot (the user-drop-on-a-blue-dot semantics) — omit the ports for plain node-to-node intent.",
                  properties: [
                     "from": ["type": "string"], "fromPort": ["type": "string"],
@@ -1000,6 +1012,50 @@ extension SZHostBridge {
                                              line: given("description") ?? preview.line, origin: .agent)
         guard case .library(_, let entryID) = ref else { throw SZMCPError.message("save failed") }
         return SZJSONRPC.encode(["library": SZLibrarySourceID.mine.displayName, "id": entryID, "updated": preview.updates])
+    }
+
+    /// Add a library from a link or a folder (SZHost+LibrarySources).
+    func uiAddLibrary(_ arguments: [String: Any]) async throws -> String {
+        func given(_ key: String) -> String? {
+            let value = arguments.string(key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return value.isEmpty ? nil : value
+        }
+        let library: SZAddedLibrary
+        if let folder = given("folder") {
+            library = try host.addLibraryFolder(at: URL(filePath: (folder as NSString).expandingTildeInPath))
+        } else if let link = given("link") {
+            library = try await host.addLibraryLink(link)
+        } else {
+            throw SZMCPError.message("ui_add_library needs `link` or `folder`")
+        }
+        return SZJSONRPC.encode(["library": library.name, "id": library.key,
+                                 "nodes": host.addedLibraryCount(library.key)])
+    }
+
+    /// Report what an added library would move to, and move it when asked (SZHost+LibrarySources).
+    func uiUpdateLibrary(_ arguments: [String: Any]) async throws -> String {
+        guard let key = arguments.string("library"), !key.isEmpty else {
+            throw SZMCPError.message("ui_update_library needs `library`")
+        }
+        let update = try await host.libraryUpdate(key: key)
+        guard !update.isEmpty else { return SZJSONRPC.encode(["summary": "up to date", "applied": false]) }
+        var payload: [String: Any] = ["summary": update.summary, "revision": update.revision,
+                                      "note": update.note, "added": update.added,
+                                      "changed": update.changed, "removed": update.removed]
+        if arguments["apply"] as? Bool == true {
+            try await host.applyLibraryUpdate(key: key, to: update)
+            payload["applied"] = true
+        } else {
+            payload["applied"] = false
+        }
+        return SZJSONRPC.encode(payload)
+    }
+
+    /// Publish My Library where its remote points (SZHost+LibrarySources).
+    func uiPublishLibrary() async throws -> String {
+        let remote = try await host.publishMyLibrary()
+        return SZJSONRPC.encode(["library": SZLibrarySourceID.mine.displayName, "published": true,
+                                 "destination": remote])
     }
 
     /// Coerce a JSON `value` to the port's declared type. Numbers arrive as JSON numbers or as numeric

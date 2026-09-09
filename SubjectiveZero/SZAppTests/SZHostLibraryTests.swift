@@ -19,7 +19,7 @@ struct SZHostLibraryTests {
     private static func host(in dir: URL, target: SZProjectTarget = .native) throws -> SZHost {
         let url = dir.appending(path: "Patch.subz")
         try SZProjectIO.save(SZProject(name: "Patch", target: target), to: url)
-        let host = SZHost()
+        let host = SZLibraryTestSupport.withoutAddedLibraries(SZHost())
         host.store.setProject(try SZProjectIO.load(from: url))
         host.loadedProjectURL = url
         host.refreshLibraryItems()

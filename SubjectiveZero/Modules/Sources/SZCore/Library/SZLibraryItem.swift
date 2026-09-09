@@ -81,12 +81,16 @@ public struct SZLibraryItem: Identifiable, Hashable, Sendable {
     public var searchTerms: [String]
     public var permissions: [SZEntitlement]
     public var hasCard: Bool
+    /// What this library calls itself. An added library's key is not a name, so the host passes the
+    /// one from its manifest; the two built-in ones name themselves.
+    public var sourceName: String
 
     public var id: String { "\(source.rawValue)/\(entryID)" }
     public var ref: SZLibraryRef { .library(source: source, id: entryID) }
 
-    public init(entry: SZLibraryIndexEntry, source: SZLibrarySourceID) {
+    public init(entry: SZLibraryIndexEntry, source: SZLibrarySourceID, sourceName: String? = nil) {
         self.source = source
+        self.sourceName = sourceName ?? source.displayName
         self.entryID = entry.id
         self.title = entry.title
         self.sfSymbol = entry.sfSymbol

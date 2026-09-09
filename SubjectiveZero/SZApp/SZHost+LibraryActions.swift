@@ -80,10 +80,85 @@ extension SZHost {
         }
     }
 
+    // MARK: adding, updating and publishing libraries
+
+    /// Settings ▸ Library ▸ Add Library: the folder picker, returning the path it chose.
+    func chooseLibraryFolder() -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose a folder of nodes"
+        return panel.runModal() == .OK ? panel.url?.path : nil
+    }
+
+    /// The Add Library sheet's Add. A path is a folder, anything else is read as a link. Returns nil
+    /// when it worked, else the sentence the sheet shows.
+    func addLibrary(_ entry: String) async -> String? {
+        do {
+            if entry.hasPrefix("/") || entry.hasPrefix("~") {
+                let path = (entry as NSString).expandingTildeInPath
+                try addLibraryFolder(at: URL(filePath: path))
+            } else {
+                try await addLibraryLink(entry)
+            }
+            addLibraryPresented = false
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Settings ▸ Library ▸ Check for Updates: the sentence for the row, and the offer kept for Update.
+    func checkForLibraryUpdate(key: String) async -> String {
+        do {
+            let update = try await libraryUpdate(key: key)
+            guard !update.isEmpty else {
+                pendingLibraryUpdates[key] = nil
+                return "Up to date"
+            }
+            pendingLibraryUpdates[key] = update
+            return "\(update.summary). \(update.note)"
+        } catch {
+            pendingLibraryUpdates[key] = nil
+            return error.localizedDescription
+        }
+    }
+
+    /// Settings ▸ Library ▸ Update: apply what the check found.
+    func applyLibraryUpdate(key: String) async -> String {
+        guard let update = pendingLibraryUpdates[key] else { return "Check for updates first" }
+        do {
+            try await applyLibraryUpdate(key: key, to: update)
+            pendingLibraryUpdates[key] = nil
+            return "Updated: \(update.summary)"
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Settings ▸ Library ▸ Publish, for My Library.
+    func publishMyLibraryFromSettings() async -> String {
+        do {
+            let remote = try await publishMyLibrary()
+            return "Published to \(remote)"
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Show an added folder library in the Finder.
+    func revealLibrary(_ library: SZAddedLibrary) {
+        NSWorkspace.shared.activateFileViewerSelecting([addedLibraryURL(library)])
+    }
+
     /// Open Settings on the Library section.
     func presentLibrarySettings() {
         requestedSetupSection = .library
         presentProviderSetup()
+        // Whether Publish has anywhere to go is a question for the folder, asked once as the pane opens.
+        Task { @MainActor in myLibraryPublishable = await myLibraryHasRemote() }
     }
 
     /// The Save to Library sheet's Save: a failure lands in the status line, the sheet closes either way.

@@ -37,7 +37,7 @@ struct SZHostLibrarySaveTests {
             try Data("// \(node.title) source\n".utf8)
                 .write(to: SZProjectIO.nodeSourceURL(projectURL: url, nodeID: node.id, target: .native))
         }
-        let host = SZHost()
+        let host = SZLibraryTestSupport.withoutAddedLibraries(SZHost())
         host.store.setProject(try SZProjectIO.load(from: url))
         host.loadedProjectURL = url
         host.myLibraryPath = dir.appending(path: "library").path

@@ -9,9 +9,12 @@
 import Foundation
 import SZCore
 
-enum SZMCPError: Error, CustomStringConvertible {
+enum SZMCPError: Error, CustomStringConvertible, LocalizedError {
     case message(String)
     var description: String { switch self { case .message(let m): m } }
+    /// Status lines print `error.localizedDescription`; without this they get Foundation's
+    /// "The operation couldn't be completed" instead of the sentence written at the throw.
+    var errorDescription: String? { description }
 }
 
 /// The result of one `tools/call`: a text payload (the norm) or an inline image (e.g. `agent_view_frame`).
