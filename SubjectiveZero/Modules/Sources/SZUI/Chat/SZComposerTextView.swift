@@ -493,7 +493,15 @@ struct SZFileDropCatcher: NSViewRepresentable {
         }
 
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-            guard sender.draggingPasteboard.hasFileURLs || hasLibraryRef(sender) else { return [] }
+            guard sender.draggingPasteboard.hasFileURLs || hasLibraryRef(sender) else {
+                // A canvas that refuses a drag says why once, in the log: the usual cause is the
+                // pasteboard carrying a rewritten dyn.* type because the UTI is not declared.
+                if onDropLibrary != nil {
+                    let types = (sender.draggingPasteboard.types ?? []).map(\.rawValue).joined(separator: ", ")
+                    print("[SZFileDropCatcher] refused a drag carrying: \(types)")
+                }
+                return []
+            }
             onTargeted?(true)
             return .copy
         }

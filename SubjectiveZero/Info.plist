@@ -53,6 +53,19 @@
 				</array>
 			</dict>
 		</dict>
+		<!-- A Library row being dragged onto the canvas. Declared because an UNDECLARED type
+		     identifier is rewritten to a dyn.* UTI on the drag pasteboard, so the canvas would
+		     never recognise its own drag. Not a file type: no extension, conforms to data. -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>studio.sxp.subjectivezero.library-ref</string>
+			<key>UTTypeDescription</key>
+			<string>SubjectiveZero Library Node</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
 	</array>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
