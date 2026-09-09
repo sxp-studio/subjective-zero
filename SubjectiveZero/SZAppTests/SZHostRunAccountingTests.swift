@@ -55,6 +55,34 @@ struct SZHostRunAccountingTests {
         #expect(host.store.messages(for: .director).last?.text.contains("Built was built, but reports an error at runtime") == true)
     }
 
+    /// A node whose code promoted clean but whose agent reported a blocker of its own (the card it
+    /// then staged would not compile) stays owed: the run does not end over it, and the reconcile
+    /// turn gets the same node the receipt counts unfinished. A promote is what clears it.
+    @Test func aPromotedNodeWhoseAgentReportedABlockerStaysOwedUntilAPromoteClearsIt() {
+        let blocked = Self.built(), bystander = Self.built()
+        let host = host([blocked, bystander], promoted: [blocked.id, bystander.id])
+        let run = host.activeRuns.values.first!
+        #expect(host.owedWork(of: run).isEmpty)                      // clean and promoted: done
+
+        host.recordNodeStatus(node: blocked.id, phase: .needsInput,
+                              message: "the custom card would not compile")
+        #expect(host.owedWork(of: run) == [blocked.id])
+        // The receipt and the reconcile turn now read the same node.
+        let (done, failed) = host.surfaceUnresolvedNodes(run)
+        #expect(done == 1 && failed == 1)
+
+        // Host-written bad news says the turn stopped, not that the build is bad: never owed.
+        host.nodeAgentState[blocked.id] = nil
+        host.recordRunFailure(node: blocked.id, fallback: "the agent timed out after 15m")
+        #expect(host.owedWork(of: run).isEmpty)
+
+        // A promote is strictly newer evidence than the report it answers.
+        host.recordNodeStatus(node: blocked.id, phase: .error, message: "still broken")
+        #expect(host.owedWork(of: run) == [blocked.id])
+        host.clearTransientAgentStateAfterPromote(blocked.id)
+        #expect(host.owedWork(of: run).isEmpty)
+    }
+
     /// A node the host failed (a spent budget) with a surviving session is dispatched as a retry, so
     /// its agent continues rather than starting over. An agent's own report, a clean node, or a node
     /// with no session to continue all cold-start.

@@ -221,22 +221,33 @@ extension SZHost {
     }
 
     /// What a run still owes, read live for every Director brief and dispatch: its own work-set
-    /// nodes that need implementing (another run's are not ours to dispatch), plus any node it
-    /// promoted that reports a fault at render, so the reconcile turn sees the fault.
+    /// nodes that need implementing (another run's are not ours to dispatch), plus a work-set node
+    /// whose code landed and is still not done — one reporting a fault at render, one whose agent
+    /// reported a blocker. Both are what `surfaceUnresolvedNodes` counts unfinished, and a node the
+    /// receipt calls unfinished but this call does not is a run that ends with nobody retrying it.
     func owedWork(of run: SZRunState) -> [SZNodeID] {
         let nodes = store.project?.graph.nodes ?? []
         var owed = nodes.filter(\.needsImplementation).map(\.id).filter(run.workSet.contains)
-        for node in nodes where run.everPromoted.contains(node.id) && nodeRuntimeErrors[node.id] != nil
-            && !owed.contains(node.id) {
+        for node in nodes where !owed.contains(node.id) && stillOwed(node.id, of: run) {
             owed.append(node.id)
         }
         return owed
     }
 
+    /// Whether a node that needs no rebuild is still this run's to answer: it promoted under this
+    /// run and faults at render, or its agent reported a blocker no later promote has cleared
+    /// (`clearTransientAgentStateAfterPromote`), with the round cap bounding the retries either way.
+    /// Host-written bad news is not the node's own verdict, hence `reportedProblem` over the phase.
+    private func stillOwed(_ id: SZNodeID, of run: SZRunState) -> Bool {
+        if run.everPromoted.contains(id) && nodeRuntimeErrors[id] != nil { return true }
+        return run.workSet.contains(id) && nodeAgentState[id]?.reportedProblem == true
+    }
+
     /// A node whose last attempt the HOST failed (a spent budget, a dead CLI) and whose session
     /// survived counts its next dispatch as a retry: the coding door then continues that session
     /// on the node's own blocker instead of starting the node over. An agent's own report is the
-    /// reconcile loop's business within its run, and a clean node cold-starts.
+    /// reconcile loop's business within its run — `stillOwed` keeps that node owed so the loop
+    /// actually reaches it — and both it and a clean node cold-start on the brief that turn writes.
     func resumesUnfinishedWork(_ id: SZNodeID) -> Bool {
         guard let state = nodeAgentState[id], !state.reportedByAgent,
               state.phase == .error || state.phase == .needsInput else { return false }
@@ -1458,7 +1469,9 @@ extension SZHost {
         var implemented = 0, unfinished = 0
         for id in accountedWork(run) {
             guard let node = store.project?.graph.node(id: id) else { continue }
-            // A promoted node that reports a fault at render is still owed (`owedWork`).
+            // A promoted node that reports a fault at render is still owed (`owedWork`). A blocker
+            // its AGENT reported is deliberately not counted here: a Stop is meant to revert the
+            // run's whole block, and until it does, this stays the accounting it shipped with.
             let faulted = run.everPromoted.contains(id) && nodeRuntimeErrors[id] != nil
             if node.needsImplementation || faulted { unfinished += 1 } else { implemented += 1 }
         }
