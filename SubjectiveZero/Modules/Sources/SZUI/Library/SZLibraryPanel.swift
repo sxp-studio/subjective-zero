@@ -267,28 +267,36 @@ public struct SZLibraryPanel: View {
                 .font(.system(size: 10, weight: .semibold))
                 .frame(width: 14)
                 .foregroundStyle(item.group.tint)
-            Text(item.title)
-                .font(.system(size: 12, weight: .medium))
-                .lineLimit(1)
-            if model.rowsNameTheirLibrary {
-                // Two libraries can both ship a "Gaussian Blur"; without this they are two identical rows.
-                Text(item.sourceName)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+            // The title and its library share a baseline: at 12pt against 10pt, centring the two
+            // reads as one sitting low. They get their own stack so the glyph and Add stay centred
+            // on the row, which is what those want.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(item.title)
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
-                    .layoutPriority(-1)
+                Spacer(minLength: 6)
+                if model.rowsNameTheirLibrary {
+                    // Two libraries can both ship a "Gaussian Blur"; without this they are two
+                    // identical rows. Right-aligned so the names read as one column rather than
+                    // trailing each title at its own width.
+                    Text(item.sourceName)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .layoutPriority(-1)
+                }
             }
-            Spacer(minLength: 4)
-            // No permission glyph here: the strip says it in words, which leaves this edge free for
-            // Add. That is what stops the two from trading places on hover.
-            if hovered || highlighted {
-                Button("Add") { onPlace(item.ref) }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .medium))
-                    .padding(.horizontal, 7)
-                    .frame(height: 16)
-                    .background(Capsule().fill(Color.white.opacity(0.16)))
-            }
+            // Add keeps its slot whether or not it is showing: the library names hold their column,
+            // and nothing shifts under the pointer on hover. No permission glyph here either, since
+            // the strip says that in words.
+            Button("Add") { onPlace(item.ref) }
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .medium))
+                .padding(.horizontal, 7)
+                .frame(height: 16)
+                .background(Capsule().fill(Color.white.opacity(0.16)))
+                .opacity(hovered || highlighted ? 1 : 0)
+                .allowsHitTesting(hovered || highlighted)
         }
         .padding(.leading, 6)
         .padding(.trailing, 4)
