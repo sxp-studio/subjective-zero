@@ -27,7 +27,7 @@ struct SZLibraryPanelModel {
         let name: String
     }
 
-    var items: [SZLibraryItem] { didSet { rebuild(); clampHighlight() } }
+    var items: [SZLibraryItem] { didSet { dropFilterForAGoneLibrary(); rebuild(); clampHighlight() } }
     var query: String = "" { didSet { rebuild(); resetHighlight() } }
     var sourceFilter: SZLibrarySourceID? { didSet { rebuild(); resetHighlight() } }
     /// Sections the user shut, by section id. Their rows stay out of `flatRows`, so the keyboard walks
@@ -54,6 +54,14 @@ struct SZLibraryPanelModel {
         self.grouping = grouping
         rebuild()
         resetHighlight()
+    }
+
+    /// A chip filter naming a library that is no longer offering rows would leave the panel showing
+    /// "Nothing matches" with an empty search field, and the chip row that could clear it is gone in
+    /// the same moment. Removing a library, or one whose folder disappeared, both do this.
+    private mutating func dropFilterForAGoneLibrary() {
+        guard let filter = sourceFilter, !items.contains(where: { $0.source == filter }) else { return }
+        sourceFilter = nil   // its own didSet rebuilds; the caller rebuilds again, which is cheap
     }
 
     private var trimmedQuery: String {

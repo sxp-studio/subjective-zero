@@ -27,7 +27,9 @@ extension SZHost {
     func addFromLibrary(at position: SZPoint) {
         libraryPlacementRequest = position
         if !panelLayout.contains(.library) { showPanel(.library) }
-        libraryFocusRequest += 1
+        // Next turn, not this one: when the panel was closed it is created by this same update, and
+        // a view does not see a change that happened before it existed.
+        Task { @MainActor in libraryFocusRequest += 1 }
     }
 
     /// The panel's section header: shut an open section or open a shut one, remembered with the prefs.

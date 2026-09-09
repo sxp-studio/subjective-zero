@@ -159,8 +159,8 @@ in MESSAGES now - see the context menu below; the deterministic ops live on as t
 The nodes a person can place without an agent (`SZLibraryPanel`, model in `SZLibraryPanelModel`).
 Open by default down the left; View ▸ Library and `ui_show_panel library` bring it back. Rows come
 from every library the app knows ([NODE_LIBRARY.md](NODE_LIBRARY.md#where-library-nodes-come-from)),
-only those with a source for the project's platform; the footer is the count, and a note under the
-search field names how many the other platform holds. A row is a symbol and a title, nothing else.
+only those with a source for the project's platform; the footer is the count. A row is a symbol and
+a title, plus the library's name once more than one library is offering rows.
 
 - **Groups, not categories.** Empty search: four sections read off the ports (Sources, Effects,
   Audio, Control), each with a colour carried by its chevron, header and row symbols. Clicking a

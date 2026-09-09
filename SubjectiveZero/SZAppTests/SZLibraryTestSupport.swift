@@ -14,10 +14,12 @@ enum SZLibraryTestSupport {
         return dir
     }
 
-    /// Forget any library a previous test added. The prefs live in one temp home for the whole test
-    /// process, so a suite that adds a library would otherwise be visible to every suite after it.
-    static func withoutAddedLibraries(_ host: SZHost) -> SZHost {
+    /// Forget the library prefs a previous test left behind. They live in one temp home for the whole
+    /// test process, so a suite that adds a library or moves My Library is otherwise visible to every
+    /// suite after it.
+    static func withDefaultLibraries(_ host: SZHost) -> SZHost {
         host.addedLibraries = []
+        host.myLibraryPath = nil
         return host
     }
 

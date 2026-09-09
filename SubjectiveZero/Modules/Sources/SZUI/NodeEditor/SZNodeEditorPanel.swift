@@ -1270,6 +1270,7 @@ public struct SZNodeEditorPanel: View {
 
     /// A Library row dropped on the canvas: decode the ref, land it where a media drop would.
     private func handleLibraryDrop(_ data: Data, at screen: CGPoint) -> Bool {
+        noteUserTouch()
         guard let ref = SZLibraryDrag.ref(from: data) else { return false }
         let center = snappedPromptCenter(camera.worldPoint(screen: screen))
         onPlaceLibraryItem(ref, SZPoint(x: center.x, y: center.y))

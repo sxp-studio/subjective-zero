@@ -22,8 +22,8 @@ struct SZSaveToLibraryModelTests {
         #expect(SZSaveToLibraryWording.note(updates: false, changes: []) == "The node in this project stays as it is.")
         #expect(SZSaveToLibraryWording.title(updates: true) == "Update Library Entry")
         #expect(SZSaveToLibraryWording.button(updates: true) == "Update Entry")
-        #expect(SZSaveToLibraryWording.note(updates: true, changes: ["source changed", "ports changed"])
-                == "Replaces the saved copy: source changed, ports changed.")
+        #expect(SZSaveToLibraryWording.note(updates: true, changes: ["code changed", "ports changed"])
+                == "Replaces the saved copy: code changed, ports changed.")
         #expect(SZSaveToLibraryWording.note(updates: true, changes: []).hasPrefix("The saved copy already matches"))
     }
 }

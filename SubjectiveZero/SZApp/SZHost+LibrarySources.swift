@@ -55,7 +55,7 @@ extension SZHost {
     nonisolated static func writeManifest(_ manifest: SZLibraryManifest, to root: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        try encoder.encode(manifest).write(to: root.appending(path: "library.json"))
+        try encoder.encode(manifest).write(to: root.appending(path: "library.json"), options: .atomic)
     }
 
     /// What makes a folder a library: at least one node folder in it. Checked before anything is
@@ -88,10 +88,11 @@ extension SZHost {
         let manifest = SZLibraryManifest(name: name, description: description, author: author,
                                          license: license, madeWith: Self.appVersion)
         try Self.writeManifest(manifest, to: root)
-        try SZJSON.encoder().encode(SZLibraryCurationFile(nodes: [])).write(to: root.appending(path: "index.json"))
-        SZHost.git(["init", "-q"], in: root)
-        SZHost.git(["add", "-A"], in: root)
-        SZHost.git(["commit", "-m", "Start \(name)"], in: root)
+        try SZJSON.encoder().encode(SZLibraryCurationFile(nodes: []))
+            .write(to: root.appending(path: "index.json"), options: .atomic)
+        _ = Self.runSync(["init", "-q"], in: root)
+        _ = Self.runSync(["add", "-A"], in: root)
+        _ = Self.runSync(["commit", "-q", "-m", "Start \(name)"], in: root)
 
         let library = SZAddedLibrary(key: key, name: name, kind: .folder, origin: root.path,
                                      manifest: manifest)
@@ -209,8 +210,10 @@ extension SZHost {
         var added: Set<String> = [], changed: Set<String> = [], removed: Set<String> = []
         for line in names.output.split(separator: "\n") {
             let parts = line.split(separator: "\t").map(String.init)
-            guard parts.count >= 2, let node = parts[1].split(separator: "/").first.map(String.init),
-                  node != "library.json", node != "index.json" else { continue }
+            // A node lives in a folder, so a change to a top-level file (README, LICENSE, the index)
+            // is not a node changing. A rename names two paths; the node is where it landed.
+            guard parts.count >= 2, let path = parts.last, path.contains("/"),
+                  let node = path.split(separator: "/").first.map(String.init) else { continue }
             switch parts[0].first {
             case "A": added.insert(node)
             case "D": removed.insert(node)
@@ -222,7 +225,8 @@ extension SZHost {
         changed.formUnion(both)
         added.subtract(both)
         removed.subtract(both)
-        changed.subtract(added)
+        // A folder that gained a file AND changed one was already there: any edit outranks the add.
+        added.subtract(changed)
         return SZLibraryUpdate(revision: target,
                                note: note.output.trimmingCharacters(in: .whitespacesAndNewlines),
                                added: added.sorted(), changed: changed.sorted(), removed: removed.sorted())
@@ -276,14 +280,14 @@ extension SZHost {
         let branch = await Self.run(["rev-parse", "--abbrev-ref", "HEAD"], in: folder)
         let name = branch.output.trimmingCharacters(in: .whitespacesAndNewlines)
         let push = await Self.run(["push", "origin", name.isEmpty ? "HEAD" : name], in: folder)
-        guard push.ok else { throw SZMCPError.message(Self.reachFailure(push.output)) }
+        guard push.ok else { throw SZMCPError.message(Self.reachFailure(push.output, sending: true)) }
         let where_ = remote.output.trimmingCharacters(in: .whitespacesAndNewlines)
         status = "Published My Library"
         // Not a refusal: it is published either way, but somebody receiving it cannot tell who wrote
         // it or whether they may use it, and this is the moment that starts to matter.
         let missing = (Self.libraryManifest(at: folder) ?? SZLibraryManifest(name: "")).missingForSharing
         if !missing.isEmpty {
-            status = "Published My Library. It still has no \(missing.joined(separator: " and ")) in its library.json."
+            status = "Published My Library. Its library.json is still missing \(missing.joined(separator: " and "))."
         }
         return where_
     }
@@ -303,38 +307,57 @@ extension SZHost {
         var output: String
     }
 
-    /// Run one command off the main thread and hand back what it said. The fire-and-forget `git` in
-    /// SZHost+LibrarySave stays for saving, where the answer never mattered.
-    nonisolated static func run(_ arguments: [String], in directory: URL) async -> SZGitResult {
-        await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            process.executableURL = URL(filePath: "/usr/bin/xcrun")
-            process.arguments = ["git"] + arguments
-            process.currentDirectoryURL = directory
-            // Never let a fetch stop on a credential or host-key question: there is no terminal here,
-            // and a prompt nobody can answer would hang the call forever.
-            var environment = ProcessInfo.processInfo.environment
-            environment["GIT_TERMINAL_PROMPT"] = "0"
-            environment["GIT_ASKPASS"] = "/usr/bin/true"
-            environment["SSH_ASKPASS"] = "/usr/bin/true"
-            process.environment = environment
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-            do {
-                try process.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                let text = String(decoding: data, as: UTF8.self)
-                if process.terminationStatus != 0 {
-                    print("[SZHost] library command failed (\(process.terminationStatus)): \(text)")
-                }
-                return SZGitResult(ok: process.terminationStatus == 0, output: text)
-            } catch {
-                print("[SZHost] library command could not run: \(error)")
-                return SZGitResult(ok: false, output: "\(error)")
+    /// Run one command and hand back what it said. Blocking; `run` is the off-main wrapper.
+    nonisolated static func runSync(_ arguments: [String], in directory: URL) -> SZGitResult {
+        let process = Process()
+        process.executableURL = URL(filePath: "/usr/bin/xcrun")
+        process.arguments = ["git"] + arguments
+        process.currentDirectoryURL = directory
+        // Never let a command stop on a credential or host-key question: there is no terminal here,
+        // and a prompt nobody can answer would hang the call forever.
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        environment["GIT_ASKPASS"] = "/usr/bin/true"
+        environment["SSH_ASKPASS"] = "/usr/bin/true"
+        process.environment = environment
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            // Read BEFORE waiting: a command that fills the pipe buffer blocks until someone drains it,
+            // so waiting first would wedge on any output over 64KB.
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let text = String(decoding: data, as: UTF8.self)
+            if process.terminationStatus != 0 {
+                print("[SZHost] \(arguments.joined(separator: " ")) failed (\(process.terminationStatus)): \(text)")
             }
-        }.value
+            return SZGitResult(ok: process.terminationStatus == 0, output: text)
+        } catch {
+            print("[SZHost] \(arguments.joined(separator: " ")) could not run: \(error)")
+            return SZGitResult(ok: false, output: "\(error)")
+        }
+    }
+
+    /// The same command, off the main thread.
+    nonisolated static func run(_ arguments: [String], in directory: URL) async -> SZGitResult {
+        await Task.detached(priority: .userInitiated) { runSync(arguments, in: directory) }.value
+    }
+
+    /// The repository a folder belongs to, or nil when it is not in one. Used to tell a library that
+    /// IS a repository from one that merely sits inside somebody else's.
+    nonisolated static func repositoryRoot(of folder: URL) -> String? {
+        let result = runSync(["rev-parse", "--show-toplevel"], in: folder)
+        let path = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.ok && !path.isEmpty ? path : nil
+    }
+
+    /// Whether this folder is a repository in its own right, which is the only case where committing
+    /// on the user's behalf is ours to do.
+    nonisolated static func isOwnRepository(_ folder: URL) -> Bool {
+        guard let root = repositoryRoot(of: folder) else { return false }
+        return URL(filePath: root).standardizedFileURL.path == folder.standardizedFileURL.path
     }
 
     /// The commit a fetched library sits on, for the settings row.
@@ -346,9 +369,11 @@ extension SZHost {
                 note.output.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    /// Turn a failed fetch into a sentence a person can act on. Offline is the common case and says
+    /// Turn a failed command into a sentence a person can act on. Offline is the common case and says
     /// so plainly; anything else keeps the tool's own last line, which usually names the real problem.
-    nonisolated static func reachFailure(_ output: String) -> String {
+    /// `sending` flips the permission case around: publishing fails because we cannot write there,
+    /// not because the library cannot be read.
+    nonisolated static func reachFailure(_ output: String, sending: Bool = false) -> String {
         let text = output.lowercased()
         if text.contains("could not resolve host") || text.contains("network is unreachable")
             || text.contains("timed out") || text.contains("no route to host") {
@@ -358,7 +383,9 @@ extension SZHost {
             return "There is nothing at that link, or it is private."
         }
         if text.contains("authentication") || text.contains("permission denied") || text.contains("terminal prompts disabled") {
-            return "That library is private, so it can't be read from here."
+            return sending
+                ? "Couldn't sign in to publish. Check you still have permission to write where My Library points."
+                : "That library is private, so it can't be read from here."
         }
         let lines = output.split(separator: "\n").map(String.init)
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }

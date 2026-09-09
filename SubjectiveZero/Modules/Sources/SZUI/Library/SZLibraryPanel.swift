@@ -3,9 +3,8 @@
 // does. The list is names only; the strip at the bottom describes whatever the pointer is on. Values
 // in (rows, target, collapsed groups, a focus counter), closures out; the host copies the folder.
 //
-// The strip holds NO control. Add sits on the row itself, so choosing a node never means dragging the
-// pointer down across other rows (which would repaint the strip on the way). Four ways in, all of them
-// where the pointer already is: Add on the row, double-click, drag onto the canvas, or Return.
+// Four ways to place, all where the pointer already is: Add on the row, double-click, drag onto the
+// canvas, or Return. The strip below the list explains why (`detail`).
 //
 // Keyboard: the search field owns focus. Arrows and Return are caught on the field's container (the
 // context menu's recipe) so typing keeps working; Esc clears the query.
@@ -18,7 +17,7 @@ public struct SZLibraryPanel: View {
     private let target: SZProjectTarget
     private let collapsed: Set<String>
     private let grouping: SZLibraryGrouping
-    /// Bumped by the host to focus the search field (⌘L, Add from Library).
+    /// Bumped by the host to focus the search field (the canvas menu's Add from Library).
     private let focusRequest: Int
     private let onPlace: (SZLibraryRef) -> Void
     private let onToggleSection: (String) -> Void
@@ -465,7 +464,7 @@ private struct SZLibraryAddButton: View {
             HStack(spacing: 4) {
                 Image(systemName: "plus")
                     .font(.system(size: 9, weight: .bold))
-                Text("Add library")
+                Text("Libraries…")
                     .font(.system(size: 10, weight: .semibold))
             }
             .foregroundStyle(hovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
@@ -483,7 +482,7 @@ private struct SZLibraryAddButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help("Add a library from a folder or a link")
+        .help("Open Library settings to add or update a library")
     }
 }
 

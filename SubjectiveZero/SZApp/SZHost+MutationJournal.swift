@@ -43,7 +43,6 @@ extension SZHost {
         }
     }
 
-    /// A node's title for the journal (short id when the node is gone/unknown).
     /// A node's title for journal and status lines; "node" once it is gone (people never see ids).
     func mutationTitle(_ id: SZNodeID) -> String {
         store.project?.graph.node(id: id)?.title ?? "node"

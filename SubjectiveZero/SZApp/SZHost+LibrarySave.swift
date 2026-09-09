@@ -68,7 +68,7 @@ extension SZHost {
         for i in contract.inputs.indices where contract.inputs[i].ui?.kind == .filePicker {
             contract.inputs[i].def = nil
         }
-        try SZProjectIO.contractData(contract).write(to: folder.appending(path: "node-contract.json"))
+        try SZProjectIO.contractData(contract).write(to: folder.appending(path: "node-contract.json"), options: .atomic)
         for (target, url) in sources {
             try Self.replaceFile(at: folder.appending(path: target.sourceFileName), with: url)
         }
@@ -81,7 +81,7 @@ extension SZHost {
         }
         let prompt = node.prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         try Data("# \(name)\n\n\(line)\n\n## Prompt\n\n\(prompt.isEmpty ? "(none)" : prompt)\n".utf8)
-            .write(to: folder.appending(path: "CARD.md"))
+            .write(to: folder.appending(path: "CARD.md"), options: .atomic)
 
         var index = Self.libraryCuration(root: library)
         if let i = index.nodes.firstIndex(where: { $0.id == entryID }) {
@@ -89,7 +89,7 @@ extension SZHost {
         } else {
             index.nodes.append(SZLibraryCurationEntry(id: entryID, tags: [], purpose: line))
         }
-        try SZJSON.encoder().encode(index).write(to: library.appending(path: "index.json"))
+        try SZJSON.encoder().encode(index).write(to: library.appending(path: "index.json"), options: .atomic)
         // the files are complete; the commit is bookkeeping and never holds up the save
         Task.detached {
             Self.git(["add", "-A"], in: library)
@@ -125,12 +125,6 @@ extension SZHost {
         return addedLibraryURL(library)
     }
 
-    /// Libraries a save can name: My Library, plus every folder library the user added.
-    var writableLibraries: [(source: SZLibrarySourceID, name: String)] {
-        [(.mine, SZLibrarySourceID.mine.displayName)]
-            + addedLibraries.filter { $0.kind == .folder }.map { ($0.source, $0.name) }
-    }
-
     /// What the Save to Library sheet opens with: the node's title and summary, whether the save would
     /// update an entry the node came from, and which parts differ from that entry (source, ports, card).
     func saveToLibraryPreview(node id: SZNodeID) -> (name: String, line: String, updates: Bool, changes: [String]) {
@@ -145,7 +139,7 @@ extension SZHost {
         let live = SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: id, target: projectTarget)
         let saved = folder.appending(path: projectTarget.sourceFileName)
         if fm.fileExists(atPath: live.path), !fm.contentsEqual(atPath: live.path, andPath: saved.path) {
-            changes.append("source changed")
+            changes.append("code changed")
         }
         let savedContract = (try? Data(contentsOf: folder.appending(path: "node-contract.json")))
             .flatMap { try? JSONDecoder().decode(SZNodeContract.self, from: $0) }

@@ -37,7 +37,7 @@ struct SZHostLibrarySaveTests {
             try Data("// \(node.title) source\n".utf8)
                 .write(to: SZProjectIO.nodeSourceURL(projectURL: url, nodeID: node.id, target: .native))
         }
-        let host = SZLibraryTestSupport.withoutAddedLibraries(SZHost())
+        let host = SZLibraryTestSupport.withDefaultLibraries(SZHost())
         host.store.setProject(try SZProjectIO.load(from: url))
         host.loadedProjectURL = url
         host.myLibraryPath = dir.appending(path: "library").path
@@ -144,7 +144,7 @@ struct SZHostLibrarySaveTests {
         try Data("// Blur source, sharper\n".utf8).write(to: source)
         let preview = host.saveToLibraryPreview(node: a.id)
         #expect(preview.updates == true)
-        #expect(preview.changes == ["source changed"])
+        #expect(preview.changes == ["code changed"])
         #expect(host.lineage(of: a.id)?.changed == true)
         #expect(try host.saveNodeToLibrary(node: a.id, name: "Blur Again", line: "three") == .library(source: .mine, id: "blur"))
         #expect(try Self.read(host.myLibraryURL.appending(path: "blur/Node.swift")) == "// Blur source, sharper\n")

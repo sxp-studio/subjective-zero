@@ -70,7 +70,6 @@ public struct SZAddLibrarySheet: View {
                 }
             }
 
-            // Said once, here, because this is the moment the decision is actually made.
             Text("Nodes from a library run inside SubjectiveZero with the same access to your Mac as the app has. Only add libraries from people you trust.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)

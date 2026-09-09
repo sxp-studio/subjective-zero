@@ -124,7 +124,13 @@ extension SZHost {
         watchNodeSources(in: projectURL)
         noteMutation("applied node to copies", [sourceNode.title] + chosen.map(mutationTitle), origin: origin)
         var line = "Applied \(sourceNode.title) to \(chosen.count) \(chosen.count == 1 ? "copy" : "copies")"
-        if !skipped.isEmpty { line += ", \(skipped.count) changed on \(skipped.count == 1 ? "its" : "their") own" }
+        // The reason belongs to the skip: naming targets explicitly skips them for a different one.
+        if !skipped.isEmpty {
+            let allDiverged = skipped.allSatisfy { $0.1.hasPrefix("changed") }
+            line += allDiverged
+                ? ", and left \(skipped.count) that changed on \(skipped.count == 1 ? "its" : "their") own"
+                : ", and left \(skipped.count) alone"
+        }
         status = line
         return (chosen, skipped)
     }

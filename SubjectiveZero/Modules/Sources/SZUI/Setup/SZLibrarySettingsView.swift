@@ -135,8 +135,13 @@ public struct SZLibrarySettingsView: View {
                 Button("Show in Finder") { onReveal(library) }
             } else if updatable.contains(key) {
                 Button(working ? "Updating…" : "Update") {
-                    run(key) { await onApplyUpdate(key) }
-                    updatable.remove(key)
+                    // Disarmed when the work finishes, not when the click lands: doing it here would
+                    // flip the row to the check branch and label the update "Checking…".
+                    run(key) {
+                        let note = await onApplyUpdate(key)
+                        updatable.remove(key)
+                        return note
+                    }
                 }
                 .disabled(working)
             } else {
@@ -150,6 +155,9 @@ public struct SZLibrarySettingsView: View {
                 .disabled(working || gone)
             }
             if confirmingRemoval == key {
+                // A way out, in the same cluster: without one, a second click on the trailing button
+                // lands on the armed Remove and takes the library (and a fetched one's folder) away.
+                Button("Cancel") { confirmingRemoval = nil }
                 Button("Remove", role: .destructive) {
                     confirmingRemoval = nil
                     onRemove(key)

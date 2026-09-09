@@ -15,7 +15,7 @@ struct SZHostLibrarySourcesTests {
     private static func host(in dir: URL, target: SZProjectTarget = .native) throws -> SZHost {
         let url = dir.appending(path: "Patch.subz")
         try SZProjectIO.save(SZProject(name: "Patch", target: target), to: url)
-        let host = SZLibraryTestSupport.withoutAddedLibraries(SZHost())
+        let host = SZLibraryTestSupport.withDefaultLibraries(SZHost())
         host.store.setProject(try SZProjectIO.load(from: url))
         host.loadedProjectURL = url
         host.refreshLibraryItems()
@@ -139,15 +139,13 @@ struct SZHostLibrarySourcesTests {
         let made = try host.createLibrary(name: "Their Nodes", at: dir.appending(path: "new-library"))
 
         // A library the user made is theirs to write into; My Library always is.
-        #expect(host.writableLibraries.map(\.source).contains(made.source))
-        #expect(host.writableLibraries.first?.source == .mine)
+        #expect(throws: Never.self) { try host.writableLibraryURL(.mine) }
         #expect(throws: Never.self) { try host.writableLibraryURL(made.source) }
 
         // One fetched from a link is not: the next update would overwrite whatever we put there.
         host.addedLibraries.append(SZAddedLibrary(key: "fetched", name: "Fetched", kind: .link,
                                                   origin: "https://example.com/a/b"))
         #expect(throws: (any Error).self) { try host.writableLibraryURL(SZLibrarySourceID(rawValue: "fetched")) }
-        #expect(!host.writableLibraries.contains { $0.source.rawValue == "fetched" })
     }
 
     // MARK: - what the manifest is allowed to refuse

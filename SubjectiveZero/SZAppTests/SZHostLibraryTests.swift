@@ -19,7 +19,7 @@ struct SZHostLibraryTests {
     private static func host(in dir: URL, target: SZProjectTarget = .native) throws -> SZHost {
         let url = dir.appending(path: "Patch.subz")
         try SZProjectIO.save(SZProject(name: "Patch", target: target), to: url)
-        let host = SZLibraryTestSupport.withoutAddedLibraries(SZHost())
+        let host = SZLibraryTestSupport.withDefaultLibraries(SZHost())
         host.store.setProject(try SZProjectIO.load(from: url))
         host.loadedProjectURL = url
         host.refreshLibraryItems()
@@ -239,7 +239,7 @@ struct SZHostLibraryTests {
         #expect(cNode.copiedHash == SZHost.contentHash(edited))
         #expect(try Self.node(host, a).copiedHash == SZHost.contentHash(edited))
         #expect(try #require(host.lineage(of: a)).changed == false)
-        #expect(host.status == "Applied Gaussian Blur to 1 copy, 1 changed on its own")
+        #expect(host.status == "Applied Gaussian Blur to 1 copy, and left 1 that changed on its own")
         #expect(!Self.containsUUIDPrefix(host.status))
         #expect(host.mutationJournal.entries.last?.kind == "applied node to copies")
 
