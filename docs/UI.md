@@ -158,9 +158,10 @@ in MESSAGES now - see the context menu below; the deterministic ops live on as t
 
 The nodes a person can place without an agent (`SZLibraryPanel`, model in `SZLibraryPanelModel`).
 Open by default down the left; View ▸ Library and `ui_show_panel library` bring it back. Rows come
-from every library the app knows ([NODE_LIBRARY.md](NODE_LIBRARY.md#where-library-nodes-come-from)),
-only those with a source for the project's platform; the footer is the count. A row is a symbol and
-a title, plus the library's name once more than one library is offering rows.
+from every library the app knows ([NODE_LIBRARY.md](NODE_LIBRARY.md#where-library-nodes-come-from)).
+A node is one row whatever it runs on; only a node its library says can never run on this project's
+platform is left out. The footer counts both ("27 nodes, 7 to port"). A row is a symbol and a title,
+plus the library's name once more than one library is offering rows.
 
 - **Groups, not categories.** Empty search: four sections read off the ports (Sources, Effects,
   Audio, Control), each with a colour carried by its chevron, header and row symbols. Clicking a
@@ -173,6 +174,11 @@ a title, plus the library's name once more than one library is offering rows.
   list keeps the last node) and holds no control at all — every way to place a node is on the row
   itself, so choosing one never means dragging the pointer down across rows that would repaint the
   strip on the way past.
+- **A node with no version for this platform yet is dimmed**, its button reads **Port**, and the
+  strip says so. Adding it starts a short run that translates the version it does have, and what the
+  run writes is kept beside the library, so the next project gets that node for free
+  ([NODE_LIBRARY.md](NODE_LIBRARY.md#where-a-port-lives)). With no provider configured the row is
+  still there and still says what it is; its button is simply inert.
 - **Placing copies.** The row's **Add**, a double-click, or Return lands the node at the centre of
   the visible canvas; dragging a row lands it under the cursor; the canvas menu's **Add from
   Library** focuses the search and remembers the click point for the next Return. One host path for
@@ -297,11 +303,14 @@ the agent it is for.
   default provider is confirmed. Titled "Settings", with a sidebar of four panes, **Target
   Platform | Providers | Routing | Library**; Target Platform is listed only while a project is open, and
   File ▸ Target Platform… opens the sheet straight on it.
-- **Library** (`SZLibrarySettingsView`) - the libraries the panel reads, one row each: **Built in**
-  (ships with the app, its node count) and **My Library** (created by the first Save to Library…;
-  node count and folder, with Show in Finder and Move…, which relocates the folder and remembers
-  the new place in `app-state.json`). Adding a library by link or folder, updating one, and
-  publishing yours are the next step ([NODE_LIBRARY.md](NODE_LIBRARY.md#where-library-nodes-come-from)).
+- **Library** (`SZLibrarySettingsView`) - the libraries the panel reads, one row each, told apart by
+  their glyph: **Built in** (ships with the app, read in place, its node count), **My Library**
+  (created by the first Save to Library…; node count and folder, with Show in Finder and Move…,
+  which relocates the folder and remembers the new place in `app-state.json`), and every added
+  library, with who wrote it, under what license, and Check for Updates / Update / Remove….
+  **Add Library…** sits under the rows and takes a link or a folder
+  ([NODE_LIBRARY.md](NODE_LIBRARY.md#where-library-nodes-come-from)). There is no publishing from
+  the app: a library is published by its author, wherever they keep it.
 - **Target Platform** (`SZTargetPlatformPane`) - where the open project runs, switched in place.
   One row per platform, This Mac and Browser (BETA), each with its description, an ACTIVE badge on
   the current one and "N of M nodes built" (a source file for that platform that is not behind the

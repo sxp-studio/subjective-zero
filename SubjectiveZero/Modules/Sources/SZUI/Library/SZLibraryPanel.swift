@@ -19,6 +19,9 @@ public struct SZLibraryPanel: View {
     private let grouping: SZLibraryGrouping
     /// Bumped by the host to focus the search field (the canvas menu's Add from Library).
     private let focusRequest: Int
+    /// Whether an agent could write a missing platform's source. Without one an unported row is
+    /// still shown, still says what it is, and simply cannot be added yet.
+    private let canPort: Bool
     private let onPlace: (SZLibraryRef) -> Void
     private let onToggleSection: (String) -> Void
     private let onGroupingChanged: (SZLibraryGrouping) -> Void
@@ -46,7 +49,7 @@ public struct SZLibraryPanel: View {
 
     public init(items: [SZLibraryItem], target: SZProjectTarget,
                 collapsed: Set<String> = [], grouping: SZLibraryGrouping = .category,
-                focusRequest: Int,
+                focusRequest: Int, canPort: Bool = true,
                 detailHeight: CGFloat = SZLibraryPanel.defaultDetailHeight,
                 onPlace: @escaping (SZLibraryRef) -> Void,
                 onToggleSection: @escaping (String) -> Void = { _ in },
@@ -58,6 +61,7 @@ public struct SZLibraryPanel: View {
         self.collapsed = collapsed
         self.grouping = grouping
         self.focusRequest = focusRequest
+        self.canPort = canPort
         self.onPlace = onPlace
         self.onToggleSection = onToggleSection
         self.onGroupingChanged = onGroupingChanged
@@ -262,6 +266,11 @@ public struct SZLibraryPanel: View {
         let index = model.rowIndex[item.id]
         let highlighted = index != nil && index == model.highlight
         let hovered = hoveredRow == item.id
+        // A node with no source for this platform yet is still a row: dimmed, and its button says
+        // Port rather than Add. Hiding it would be the worse failure — a browser project would show
+        // a short list and never say the rest is a porting job away rather than impossible.
+        let unported = item.portability == .portable
+        let addable = !unported || canPort
         return HStack(spacing: 7) {
             Image(systemName: item.sfSymbol)
                 .font(.system(size: 10, weight: .semibold))
@@ -289,15 +298,21 @@ public struct SZLibraryPanel: View {
             // Add keeps its slot whether or not it is showing: the library names hold their column,
             // and nothing shifts under the pointer on hover. No permission glyph here either, since
             // the strip says that in words.
-            Button("Add") { onPlace(item.ref) }
+            Button(unported ? "Port" : "Add") { onPlace(item.ref) }
                 .buttonStyle(.plain)
                 .font(.system(size: 10, weight: .medium))
                 .padding(.horizontal, 7)
                 .frame(height: 16)
-                .background(Capsule().fill(Color.white.opacity(0.16)))
-                .opacity(hovered || highlighted ? 1 : 0)
-                .allowsHitTesting(hovered || highlighted)
+                .background(Capsule().fill(Color.white.opacity(addable ? 0.16 : 0.06)))
+                .opacity(hovered || highlighted ? (addable ? 1 : 0.5) : 0)
+                .allowsHitTesting((hovered || highlighted) && addable)
+                .help(unported
+                      ? (addable
+                         ? "No \(target.sourceFileName) yet. Placing it asks an agent to write one."
+                         : "No \(target.sourceFileName) yet, and no agent set up to write one.")
+                      : "")
         }
+        .opacity(unported ? 0.55 : 1)
         .padding(.leading, 6)
         .padding(.trailing, 4)
         .frame(height: Self.rowHeight)
@@ -378,7 +393,7 @@ public struct SZLibraryPanel: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                let needs = Self.needs(item)
+                let needs = Self.needs(item, target: target, canPort: canPort)
                 if !needs.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(needs, id: \.self) { need in
@@ -405,8 +420,15 @@ public struct SZLibraryPanel: View {
     }
 
     /// What the node asks for, in words rather than a glyph nobody can decode.
-    private static func needs(_ item: SZLibraryItem) -> [String] {
-        var out = item.permissions.map(permissionWords)
+    private static func needs(_ item: SZLibraryItem, target: SZProjectTarget, canPort: Bool) -> [String] {
+        var out: [String] = []
+        // First, because it is the one that decides whether the row can be used at all.
+        if item.portability == .portable {
+            out.append(canPort
+                       ? "No \(target.placeName) version yet. Adding it asks an agent to write one."
+                       : "No \(target.placeName) version yet, and no agent set up to write one.")
+        }
+        out += item.permissions.map(permissionWords)
         if item.hasCard { out.append("Ships a custom card") }
         if item.source != .builtIn { out.append("From \(item.sourceName)") }
         return out

@@ -12,5 +12,8 @@
     { "name": "lastEvent", "type": "float2" },
     { "name": "lastKey", "type": "string" }
   ],
-  "card": { "cols": 10, "rows": 5, "plumbing": ["mappings"] }
+  "card": { "cols": 10, "rows": 5, "plumbing": ["mappings"] },
+  "unsupported": {
+    "web": "A browser has no raw UDP, so it can't receive OSC."
+  }
 }

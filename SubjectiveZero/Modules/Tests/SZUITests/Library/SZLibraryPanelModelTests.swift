@@ -8,7 +8,8 @@ import SZCore
 
 private func item(_ id: String, title: String, inputs: [SZPortType] = [.texture], outputs: [SZPortType] = [.texture],
                   tags: [String] = [], purpose: String? = nil, permissions: [SZEntitlement]? = nil,
-                  source: SZLibrarySourceID = .builtIn, sourceName: String? = nil) -> SZLibraryItem {
+                  source: SZLibrarySourceID = .builtIn, sourceName: String? = nil,
+                  portability: SZLibraryPortability = .runs) -> SZLibraryItem {
     let contract = SZNodeContract(
         title: title, sfSymbol: "circle", summary: "\(title) summary.",
         inputs: inputs.enumerated().map { SZPort(name: "in\($0.offset)", type: $0.element) },
@@ -16,7 +17,7 @@ private func item(_ id: String, title: String, inputs: [SZPortType] = [.texture]
         permissions: permissions)
     let entry = SZLibraryIndexEntry(id: id, contract: contract,
                                     curation: SZLibraryCurationEntry(id: id, tags: tags, purpose: purpose))
-    return SZLibraryItem(entry: entry, source: source, sourceName: sourceName)
+    return SZLibraryItem(entry: entry, source: source, sourceName: sourceName, portability: portability)
 }
 
 private let blur = item("gaussian-blur", title: "Gaussian Blur", tags: ["blur", "soften"])
@@ -25,6 +26,8 @@ private let camera = item("camera", title: "Camera", inputs: [], permissions: [.
 private let noise = item("noise", title: "Noise", inputs: [.float])
 private let lfo = item("lfo", title: "LFO", inputs: [.float], outputs: [.float])
 private let mineBlur = item("gaussian-blur", title: "Gaussian Blur", tags: ["blur"], source: .mine)
+/// A node whose algorithm is right there and whose file for this platform nobody has written.
+private let unported = item("corner-pin", title: "Corner Pin", portability: .portable)
 
 @Test func emptyQueryGroupsInFixedOrderAndSkipsEmptyGroups() {
     let model = SZLibraryPanelModel(items: [lfo, blur, camera, noise, bloom], target: .native)
@@ -156,16 +159,21 @@ private let mineBlur = item("gaussian-blur", title: "Gaussian Blur", tags: ["blu
 }
 
 @Test func emptyStatesNameTheReason() {
-    #expect(SZLibraryPanelModel(items: [], target: .web).emptyText == "No library nodes for browser projects yet")
+    // A node is a row whatever it runs on, so an empty browser panel means an empty library, not a
+    // platform with nothing for it.
+    #expect(SZLibraryPanelModel(items: [], target: .web).emptyText == "The library is empty")
     #expect(SZLibraryPanelModel(items: [], target: .native).emptyText == "The library is empty")
     var model = SZLibraryPanelModel(items: [blur], target: .native)
     model.sourceFilter = .mine
     #expect(model.emptyText == "Nothing matches")
 }
 
-@Test func footerIsJustTheCount() {
+@Test func footerIsTheCountAndWhatIsStillToPort() {
     #expect(SZLibraryPanelModel(items: [blur, camera], target: .native).footerText == "2 nodes")
     #expect(SZLibraryPanelModel(items: [blur], target: .web).footerText == "1 node")
+    // The short list in a browser project is a porting backlog, and says so rather than reading as
+    // the end of what the app can do.
+    #expect(SZLibraryPanelModel(items: [blur, unported], target: .web).footerText == "2 nodes, 1 to port")
 }
 
 

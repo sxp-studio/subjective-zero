@@ -17,7 +17,7 @@ import Testing
     // Curation deliberately carries no io — and even if a stale field existed, the entry never reads io from it.
     let curation = SZLibraryCurationEntry(
         id: "camera.macos", tags: ["source", "camera"], purpose: "camera feed",
-        useWhen: "need live camera", avoidWhen: "need a still", reuse: "copy-as-is", platform: "macos")
+        useWhen: "need live camera", avoidWhen: "need a still", reuse: "copy-as-is")
 
     let entry = SZLibraryIndexEntry(id: "camera.macos", contract: contract, curation: curation)
 
@@ -28,6 +28,18 @@ import Testing
     #expect(entry.title == "MacBook Camera")            // from contract, not curation
     #expect(entry.useWhen == "need live camera")         // from curation
     #expect(entry.tags == ["source", "camera"])
+    #expect(entry.unsupported == nil)                   // portable by default: nothing to say
+}
+
+@Test func aWallIsCarriedFromTheContractNotFromCuration() {
+    let contract = SZNodeContract(
+        title: "OSC In", sfSymbol: "antenna.radiowaves.left.and.right", summary: "OSC",
+        outputs: [SZPort(name: "value", type: .float)],
+        unsupported: ["web": "A browser has no raw UDP, so it can't receive OSC."])
+    let entry = SZLibraryIndexEntry(id: "osc-input", contract: contract, curation: nil)
+    #expect(entry.unsupported?["web"] != nil)
+    #expect(contract.unsupportedReason(for: .web) == "A browser has no raw UDP, so it can't receive OSC.")
+    #expect(contract.unsupportedReason(for: .native) == nil)
 }
 
 @Test func entryWithoutCurationKeepsContractSubset() {

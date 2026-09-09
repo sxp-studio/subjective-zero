@@ -78,30 +78,44 @@ extension SZHost {
         var entry: SZLibraryIndexEntry
         var builtTargets: Set<SZProjectTarget>
         var ref: SZLibraryRef { .library(source: source, id: entry.id) }
+
+        /// Runs here, could be ported here, or never will. One rule for the panel and the agents.
+        func portability(for target: SZProjectTarget) -> SZLibraryPortability {
+            SZLibraryPortability.of(target: target, builtTargets: builtTargets,
+                                    unsupported: entry.unsupported)
+        }
     }
 
     /// Scan every root once: the cache behind the panel, the agents' index and the settings counts.
     /// Called after a project open, a target switch, a save and a move.
     func refreshLibraryItems() {
-        let fm = FileManager.default
         libraryEntries = libraryRoots.flatMap { root in
             Self.libraryCatalog(root: root.url).map { entry in
                 let folder = root.url.appending(path: entry.id)
-                let built = Set(SZProjectTarget.allCases.filter {
-                    fm.fileExists(atPath: folder.appending(path: $0.sourceFileName).path)
-                })
+                // A node's platforms are its own files plus any port written into the overlay, so a
+                // port somebody wrote once is indistinguishable from one the library shipped.
+                let built = Self.builtTargets(folder: folder, source: root.source, id: entry.id)
                 return SZLibraryEntry(source: root.source, folder: folder, entry: entry, builtTargets: built)
             }
         }
-        libraryItems = libraryEntries(target: projectTarget).map {
-            SZLibraryItem(entry: $0.entry, source: $0.source, sourceName: libraryName($0.source))
+        // One row per node, whatever it runs on: a node with no source for this platform yet is
+        // still a row, dimmed and saying so. Only a declared wall is left out — nobody browsing a
+        // browser project needs a catalogue of things that can never work there.
+        libraryItems = libraryEntries.compactMap { entry in
+            let portability = entry.portability(for: projectTarget)
+            guard portability.wall == nil else { return nil }
+            return SZLibraryItem(entry: entry.entry, source: entry.source,
+                                 sourceName: libraryName(entry.source), portability: portability)
         }
     }
 
-    /// The cached entries with a source file for `target`, root order then id.
+    /// The cached entries an agent may be offered for `target`: everything that runs there, plus
+    /// everything portable there but not written yet. A declared wall is never offered — an agent
+    /// should not be tempted to attempt one.
     func libraryEntries(target: SZProjectTarget) -> [SZLibraryEntry] {
-        libraryEntries.filter { $0.builtTargets.contains(target) }
+        libraryEntries.filter { $0.portability(for: target).wall == nil }
     }
+
 
     /// Node folders per library, for the settings pane; nil for a library that does not exist yet.
     func libraryNodeCount(_ source: SZLibrarySourceID) -> Int? {
@@ -169,6 +183,11 @@ extension SZHost {
                 if let reuse = entry.reuse { facts.append(reuse) }
                 if !tags.isEmpty { facts.append(tags) }
                 if item.source != .builtIn { facts.append("library: \(libraryName(item.source))") }
+                // Portable but unwritten: the algorithm is right there and only this platform's file
+                // is missing. Saying so is what lets a reader offer to port it instead of guessing.
+                if item.portability(for: target) == .portable {
+                    facts.append("port: no \(target.sourceFileName) yet")
+                }
                 return "  \(entry.id) — \(entry.purpose ?? entry.summary) [\(facts.joined(separator: " | "))]"
             }
             return "\(group):\n\(lines.joined(separator: "\n"))"

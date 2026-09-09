@@ -9,5 +9,8 @@
       "default": { "type": "enum", "value": "system" } }
   ],
   "outputs": [ { "name": "samples", "type": "floatArray" } ],
-  "permissions": ["screenRecording"]
+  "permissions": ["screenRecording"],
+  "unsupported": {
+    "web": "A browser can't capture what the Mac is playing."
+  }
 }

@@ -12,7 +12,9 @@ import Foundation
 
 /// The hand-curated discovery fields for one library node, keyed by folder `id` — the metadata that isn't
 /// in its `node-contract.json`. Stored as one entry per node in `NodeLibrary/index.json`. Any `io`/`title`/
-/// `permissions` also present in that file are ignored (they're derived from the contract).
+/// `permissions` also present in that file are ignored (they're derived from the contract), and so is a
+/// `platform`: which platforms a node runs on is its source files plus its contract's `unsupported`,
+/// never a curated string.
 public struct SZLibraryCurationEntry: Codable, Sendable {
     public var id: String
     public var tags: [String]?
@@ -20,7 +22,6 @@ public struct SZLibraryCurationEntry: Codable, Sendable {
     public var useWhen: String?
     public var avoidWhen: String?
     public var reuse: String?
-    public var platform: String?
 
     public init(
         id: String,
@@ -28,8 +29,7 @@ public struct SZLibraryCurationEntry: Codable, Sendable {
         purpose: String? = nil,
         useWhen: String? = nil,
         avoidWhen: String? = nil,
-        reuse: String? = nil,
-        platform: String? = nil
+        reuse: String? = nil
     ) {
         self.id = id
         self.tags = tags
@@ -37,7 +37,6 @@ public struct SZLibraryCurationEntry: Codable, Sendable {
         self.useWhen = useWhen
         self.avoidWhen = avoidWhen
         self.reuse = reuse
-        self.platform = platform
     }
 }
 
@@ -81,7 +80,9 @@ public struct SZLibraryIndexEntry: Codable, Equatable, Sendable {
     public var useWhen: String?
     public var avoidWhen: String?
     public var reuse: String?
-    public var platform: String?
+    /// Where this node can never run, from its contract: target raw value to the reason, in words
+    /// for a person. Absent for almost every node (`SZLibraryPortability`).
+    public var unsupported: [String: String]?
     /// The node ships a `Card.swift` — a custom card mounted as its body — worth reading as the
     /// reference for authoring one. Derived from the folder (file presence), never curated.
     public var card: Bool?
@@ -105,6 +106,6 @@ public struct SZLibraryIndexEntry: Codable, Equatable, Sendable {
         self.useWhen = curation?.useWhen
         self.avoidWhen = curation?.avoidWhen
         self.reuse = curation?.reuse
-        self.platform = curation?.platform
+        self.unsupported = contract.unsupported
     }
 }

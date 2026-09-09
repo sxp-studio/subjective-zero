@@ -305,6 +305,17 @@ public struct SZNodeContract: Codable, Equatable, Sendable {
     public var outputs: [SZPort]
     public var permissions: [SZEntitlement]?   // nil/omitted == none
     public var card: SZCardHints?              // nil/omitted == no mount hints (a Card.swift may still ship)
+    /// Where this node can never run, by `SZProjectTarget` raw value, each with the reason in plain
+    /// words: `{"web": "A browser can't receive OSC over UDP."}`. Absent for almost every node.
+    ///
+    /// A node declares a limitation, never a capability, so the honest default is "this should work"
+    /// and only the few with a real wall carry anything. Absent, or a target not named, means the node
+    /// is portable and simply has not been written for that target yet.
+    ///
+    /// It explains a gap; it never creates or fills one. The source file on disk stays the only
+    /// evidence a node runs somewhere, so a contract naming a target it also ships a file for is a
+    /// contradiction, the file wins, and `SZLibraryPortability` says so.
+    public var unsupported: [String: String]?
 
     public init(
         title: String,
@@ -313,7 +324,8 @@ public struct SZNodeContract: Codable, Equatable, Sendable {
         inputs: [SZPort] = [],
         outputs: [SZPort] = [],
         permissions: [SZEntitlement]? = nil,
-        card: SZCardHints? = nil
+        card: SZCardHints? = nil,
+        unsupported: [String: String]? = nil
     ) {
         self.title = title
         self.sfSymbol = sfSymbol
@@ -322,6 +334,12 @@ public struct SZNodeContract: Codable, Equatable, Sendable {
         self.outputs = outputs
         self.permissions = permissions
         self.card = card
+        self.unsupported = unsupported
+    }
+
+    /// Why this node can never run on `target`, or nil when nothing says it cannot.
+    public func unsupportedReason(for target: SZProjectTarget) -> String? {
+        unsupported?[target.rawValue].flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// One port as generated code sees it: which side it's on, what it's called, what type it carries. Direction

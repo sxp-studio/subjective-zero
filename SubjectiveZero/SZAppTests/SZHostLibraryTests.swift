@@ -43,21 +43,42 @@ struct SZHostLibraryTests {
 
     // MARK: - what a project is offered
 
-    @Test func rowsFollowTheProjectPlatform() throws {
+    /// A node is one row whatever it runs on. Only a declared wall is left out: hiding a node that
+    /// could work is the worse failure, because the panel then shows a short list and never says the
+    /// rest is a porting job rather than the end of what the app can do.
+    @Test func everyNodeIsARowExceptTheOnesThatCanNeverRunHere() throws {
         let dir = try Self.scratchDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
         let native = try Self.host(in: dir)
-        let ids = native.libraryItems.map(\.id)
-        #expect(ids.contains("builtin/gaussian-blur"))
-        #expect(!ids.contains("builtin/camera.web"))
+        #expect(native.libraryItems.map(\.id).contains("builtin/gaussian-blur"))
         #expect(native.libraryItems.allSatisfy { $0.source == .builtIn })
-        // Exactly the Mac-only nodes are left out of a browser project, and vice versa: the rows are
-        // the set of folders holding a source file for this project's platform, nothing else.
+
         let web = try Self.host(in: dir.appending(path: "web"), target: .web)
-        #expect(!web.libraryItems.map(\.id).contains("builtin/corner-pin"))
-        #expect(web.libraryItems.map(\.id).contains("builtin/camera.web"))
-        #expect(native.libraryItems.count - web.libraryItems.count
-                == Self.builtInCount(onlyFor: .native) - Self.builtInCount(onlyFor: .web))
+        let ids = web.libraryItems.map(\.id)
+        // Ships a Node.js: it runs.
+        #expect(ids.contains("builtin/gaussian-blur"))
+        #expect(web.libraryItems.first { $0.id == "builtin/gaussian-blur" }?.portability == .runs)
+        // No Node.js and no wall: still a row, and it says a browser version has to be written.
+        #expect(ids.contains("builtin/corner-pin"))
+        #expect(web.libraryItems.first { $0.id == "builtin/corner-pin" }?.portability == .portable)
+        // The two real walls are not rows at all.
+        #expect(!ids.contains("builtin/osc-input"))
+        #expect(!ids.contains("builtin/system-audio.macos"))
+    }
+
+    @Test func aWallIsNeverOfferedToAnAgentEitherButAPortableNodeIs() throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let web = try Self.host(in: dir, target: .web)
+        let block = try #require(web.libraryCategoriesBlock(target: .web))
+        #expect(!block.contains("osc-input"), "an agent should never be tempted to attempt a wall")
+        // A node whose algorithm exists but has no Node.js says exactly that, so the reader can offer
+        // to port it instead of writing one from nothing.
+        #expect(block.contains("corner-pin"))
+        #expect(block.contains("port: no Node.js yet"))
+        // And what already runs carries no such fact.
+        let runs = try #require(block.split(separator: "\n").first { $0.contains("gaussian-blur") })
+        #expect(!runs.contains("port: no"))
     }
 
     @Test func aFolderUnderMyLibraryPathIsASecondSource() throws {

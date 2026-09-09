@@ -1051,6 +1051,7 @@ struct SZApp: App {
                            collapsed: host.libraryCollapsedGroups,
                            grouping: host.libraryGrouping,
                            focusRequest: host.libraryFocusRequest,
+                           canPort: host.defaultProviderID != nil,
                            detailHeight: CGFloat(host.libraryDetailHeight),
                            onPlace: { host.placeFromLibrary($0) },
                            onToggleSection: { host.toggleLibrarySection($0) },

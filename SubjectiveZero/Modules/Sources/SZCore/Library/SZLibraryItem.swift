@@ -94,6 +94,10 @@ public struct SZLibraryItem: Identifiable, Hashable, Sendable {
     public var searchTerms: [String]
     public var permissions: [SZEntitlement]
     public var hasCard: Bool
+    /// Whether this node runs on the open project's platform, could be ported to it, or never will.
+    /// A node is one row whatever it runs on: hiding one that could work is the worse failure, so
+    /// the row says which of the three it is instead of disappearing (`SZLibraryPortability`).
+    public var portability: SZLibraryPortability
     /// What this library calls itself. An added library's key is not a name, so the host passes the
     /// one from its manifest; the two built-in ones name themselves.
     public var sourceName: String
@@ -101,8 +105,10 @@ public struct SZLibraryItem: Identifiable, Hashable, Sendable {
     public var id: String { "\(source.rawValue)/\(entryID)" }
     public var ref: SZLibraryRef { .library(source: source, id: entryID) }
 
-    public init(entry: SZLibraryIndexEntry, source: SZLibrarySourceID, sourceName: String? = nil) {
+    public init(entry: SZLibraryIndexEntry, source: SZLibrarySourceID, sourceName: String? = nil,
+                portability: SZLibraryPortability = .runs) {
         self.source = source
+        self.portability = portability
         self.sourceName = sourceName ?? source.displayName
         self.entryID = entry.id
         self.title = entry.title

@@ -1272,22 +1272,37 @@ final class SZHost {
         var node: SZNode
         let sourceURL: URL
         let cardURL: URL
+        // Which platform's source is copied in. Normally the project's; for a library node nobody has
+        // written this platform's file for yet, the platform the library DOES have, so a conversion
+        // run has something to translate rather than starting cold.
+        var placeTarget = projectTarget
         switch ref {
         case .library(let source, let id):
             guard let folder = libraryFolder(ref) else { throw SZMCPError.message("no library node \(id)") }
-            sourceURL = folder.appending(path: nodeSourceFileName)
             cardURL = folder.appending(path: "Card.swift")
-            guard fm.fileExists(atPath: sourceURL.path) else {
-                throw SZMCPError.message(projectTarget == .web
-                    ? "library node '\(id)' has no browser version yet"
-                    : "library node '\(id)' has no \(nodeSourceFileName)")
-            }
             contract = try JSONDecoder().decode(
                 SZNodeContract.self, from: Data(contentsOf: folder.appending(path: "node-contract.json")))
+            // The library's own file, else a port written here for this platform. A node that has
+            // neither is a row the panel dims and offers to port; reaching this throw means somebody
+            // asked to place one anyway.
+            if let wall = contract.unsupportedReason(for: projectTarget) {
+                throw SZMCPError.message("\(contract.title) can't run \(projectTarget.placeName): \(wall)")
+            }
+            guard let resolved = Self.librarySourceURL(folder: folder, source: source, id: id,
+                                                       target: placeTarget)
+                ?? SZProjectTarget.allCases.lazy.compactMap({ other -> URL? in
+                    guard let file = Self.librarySourceURL(folder: folder, source: source, id: id,
+                                                           target: other) else { return nil }
+                    placeTarget = other
+                    return file
+                }).first else {
+                throw SZMCPError.message("\(contract.title) has no source to copy")
+            }
+            sourceURL = resolved
             node = SZNode(kind: .generated, title: contract.title, sfSymbol: contract.sfSymbol,
                           contract: contract, position: position,
                           buildStamp: .trusting(contract: contract, prompt: nil),   // a shipped build: trusted as-is
-                          target: projectTarget,
+                          target: placeTarget,
                           libraryID: id,                                             // so a target switch can copy its twin
                           librarySource: source == .builtIn ? nil : source)
         case .projectNode(let id):
@@ -1315,22 +1330,27 @@ final class SZHost {
             if let pi = contract.inputs.firstIndex(where: { $0.name == port }) { contract.inputs[pi].def = value }
         }
         node.contract = contract
-        node.builtTargets = [projectTarget]
+        node.builtTargets = [placeTarget]
         let bytes = try Data(contentsOf: sourceURL)
         node.copiedHash = Self.contentHash(bytes)
-        node.copiedTarget = projectTarget
+        node.copiedTarget = placeTarget
         let live = SZProjectIO.nodeFolderURL(projectURL: projectURL, nodeID: node.id)
         try fm.createDirectory(at: live, withIntermediateDirectories: true)
-        try bytes.write(to: live.appending(path: nodeSourceFileName))
+        try bytes.write(to: live.appending(path: placeTarget.sourceFileName))
         // A node that ships a custom card copies it along (cards are native only). A contract that
         // DECLARES a `card` block lands with the card ON — it is the node's face (corner-pin's handles
         // over the output, a controller's learn strips); a Card.swift with no `card` block is an optional
         // control surface on an existing effect: the node keeps its familiar auto-preview and the card
         // waits in the context menu ("Show Custom Card"). A duplicate keeps the original's choice.
-        if projectTarget == .native, fm.fileExists(atPath: cardURL.path) {
+        let hasCard = fm.fileExists(atPath: cardURL.path)
+        if projectTarget == .native, hasCard {
             try fm.copyItem(at: cardURL, to: SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: node.id))
             if case .library = ref, contract.card != nil { node.body = SZNodeBody(mode: .custom, custom: SZCustomCardRef()) }
         }
+        // A card is SwiftUI, so a browser project gets the node without it. Say so: the node still
+        // works and still previews, and silently losing its face is the kind of thing people spend
+        // an afternoon on.
+        let cardLeftBehind = projectTarget != .native && hasCard
 
         store.mutate { project in
             project.graph.nodes.append(node)
@@ -1342,10 +1362,17 @@ final class SZHost {
             }
         }
         noteNodeAdded(node.id, origin: origin)
+        if cardLeftBehind { status = "\(contract.title) placed without its card: cards are Mac only" }
         if let project = store.project { try SZProjectIO.save(project, to: projectURL) }
         // A node declaring a permission the app doesn't hold yet (microphone, camera) prompts BEFORE its
         // `setup()` runs — like project open and the run path do — otherwise the node boots unauthorized
         // and stays on its fallback (the mic's synthetic tone) until the next reload.
+        // Nothing to build: what landed is the other platform's source. Hand it to a conversion run,
+        // which already knows how to translate one platform's node into another's.
+        if placeTarget != projectTarget {
+            startPortRun(node.id, title: contract.title, from: placeTarget)
+            return node.id
+        }
         if let runtime, contract.requiredPermissions.contains(where: { !runtime.permissions.isAuthorized($0) }) {
             Task { @MainActor [weak self] in
                 await runtime.requestDeclaredPermissions(for: SZProject(name: "", graph: SZGraph(nodes: [node])))

@@ -152,6 +152,7 @@ extension SZHost {
                 try reloadBackendGraph(at: projectURL)
             }
             nodeAgentState[id] = nil
+            keepLibraryPortIfNew(id, in: projectURL)
             return true
         } catch {
             let log = "\(error)"

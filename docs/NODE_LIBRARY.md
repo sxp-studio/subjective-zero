@@ -154,6 +154,64 @@ published the way any repository is, by its author.
 A library fetched from a link **cannot be saved into**: the next update would overwrite whatever was
 written there. Save to My Library, or to a library the user created.
 
+## Which platforms a node runs on
+
+**Portable by default. A node declares a limitation, never a capability.**
+
+A node runs on a platform if it has that platform's source file. That is the only evidence, and it is
+the right rule, but on its own a missing file means two different things: nobody wrote it yet, or it
+can never exist. `gaussian-blur` is a separable 9-tap blur that a browser can obviously do; `osc-input`
+receives OSC over raw UDP, which a browser has no access to. Only the second is worth saying, so only
+the second is written down, in `node-contract.json`:
+
+```json
+"unsupported": {
+  "web": "A browser can't receive OSC over UDP."
+}
+```
+
+Absent, or a platform not named, means the node is portable and simply has not been written for that
+platform yet. The reason string is shown to people: plain words, one sentence, no api names.
+
+It explains a gap; it never creates or fills one. A node declaring `"web"` while shipping a `Node.js`
+is a contradiction, the file wins, and a test fails so the author finds out.
+
+Two of the 28 built-in nodes declare a wall: `system-audio.macos` and `osc-input`. Everything else
+that is missing a `Node.js` is a porting backlog.
+
+### What that means in the panel
+
+A node is **one row whatever it runs on**. Hiding a node that could work is the worse failure: a
+browser project would show a short list and never say the rest is a day's porting away rather than
+impossible.
+
+| the node | its row | adding it |
+| --- | --- | --- |
+| runs here | normal | copies the file. No agent, no provider, no wait. |
+| portable, unported | dimmed, and the strip says no version for this platform yet | starts a short run that translates the version it does have |
+| declared unsupported | not a row at all | - |
+
+The footer counts both ("27 nodes, 7 to port"). With no provider configured an unported row is still
+shown and still says what it is; it just cannot be added yet. The agents' index says the same thing
+in its own words (`port: no Node.js yet`), and never lists a declared wall, so an agent is not tempted
+to attempt one.
+
+### Where a port lives
+
+If an agent ports `gaussian-blur` to the browser, the result must not be redone by the next project.
+It does not go in the project. It cannot go in the node's own folder either: the built-in library is
+inside a read-only app bundle, and a library fetched from a link is replaced whole by its next update.
+
+So it goes beside the library, in the **ports overlay** at
+`Application Support/ports/<library key>/<node id>/Node.js`.
+
+- A node's platforms are the files in its folder plus the files in the overlay.
+- Placing copies from the overlay when the library folder has nothing for this platform.
+- A library update leaves the overlay alone, and so does an app update. Removing the library takes it.
+
+One rule falls out of that: **a port is a contribution to the library, not a fix to one project.** It
+is also the thing to send upstream, as a pull request against the library's repository.
+
 ## Static and fast by design
 
 The library is a set of **plain files on disk** - no database, no indexer, no embeddings. Search is
@@ -216,9 +274,9 @@ Each record is **assembled** by `agent_library_index`, not stored whole:
 - **Identity + I/O + permissions are DERIVED from the node's `node-contract.json`** (`title`, `sfSymbol`,
   `summary`, `io`, `permissions`) - the contract is the single source of truth, so `io` can never drift
   from what the node actually declares.
-- **Discovery metadata is curated in `index.json`** (`tags`, `purpose`, `useWhen`, `avoidWhen`, `reuse`,
-  `platform`) - the fields that can't be derived from the contract. `platform` is informational only:
-  whether a node is offered to a platform is decided by which source files its folder holds.
+- **Discovery metadata is curated in `index.json`** (`tags`, `purpose`, `useWhen`, `avoidWhen`,
+  `reuse`) - the fields that can't be derived from the contract. Which platforms a node runs on is not
+  one of them: that is its source files plus its contract's `unsupported`, never a curated string.
 
 So `index.json` holds **only curation**, one entry per node keyed by folder `id`:
 
@@ -229,7 +287,6 @@ So `index.json` holds **only curation**, one entry per node keyed by folder `id`
       "id": "camera.macos",
       "tags": ["source", "camera", "video", "macos"],
       "purpose": "Provides the built-in/selected Mac camera feed as an MTLTexture.",
-      "platform": "macos",
       "useWhen": "You need live camera input as a texture source.",
       "avoidWhen": "You need a still image or a non-camera video source.",
       "reuse": "copy-as-is"
@@ -257,7 +314,6 @@ So `index.json` holds **only curation**, one entry per node keyed by folder `id`
   "permissions": ["camera"],
   "tags": ["source", "camera", "video", "macos"],
   "purpose": "Provides the built-in/selected Mac camera feed as an MTLTexture.",
-  "platform": "macos",
   "useWhen": "You need live camera input as a texture source.",
   "avoidWhen": "You need a still image or a non-camera video source.",
   "reuse": "copy-as-is"
@@ -325,10 +381,11 @@ A node folder has three files (four with a web version):
   `ctx.setOutput*` must use a `name` declared in the contract. (Copying a clean library node keeps you on
   the right side of this; the same rule is enforced automatically for *generated* nodes - see
   [the port-name check](#the-port-name-check).)
-- **`Node.js`** *(optional)* - the same node for a web project. A node is offered to a target iff
-  its folder has that target's source file, so a folder with only `Node.swift` never shows up in a
-  web project. Every pure GPU effect ships both today, plus `camera.web` beside `camera.macos`. The
-  accessor names match the Swift kit, so one contract serves both files.
+- **`Node.js`** *(optional)* - the same node for a web project. A node runs on a platform if it has
+  that platform's source file, and nothing else decides it. Every pure GPU effect ships both today,
+  plus `camera.web` beside `camera.macos`. The accessor names match the Swift kit, so one contract
+  serves both files. A folder with only `Node.swift` is not hidden from a browser project: it is a
+  dimmed row that offers to port it (below).
 - **`CARD.md`** - prose reuse guidance + gotchas (Tier 2), short by design.
 - **`Card.swift`** *(optional, rare)* - a custom card ([GRAPH_AND_NODES.md](GRAPH_AND_NODES.md#custom-card-cardswift)),
   copied along when the node is instantiated (`ui_add_library_node` / the palette); a contract that
@@ -342,7 +399,7 @@ A node folder has three files (four with a web version):
   grid-warp's sixteen mesh points.
 
 Then add **one curation entry** to `NodeLibrary/index.json`, keyed by folder `id`, carrying only the
-fields that aren't in the contract: `tags`, `purpose`, `useWhen`, `avoidWhen`, `reuse`, `platform`.
+fields that aren't in the contract: `tags`, `purpose`, `useWhen`, `avoidWhen`, `reuse`.
 A test pins that the index names exactly the shipped folders, so a folder without an entry (or an
 entry without a folder) fails `swift test`.
 

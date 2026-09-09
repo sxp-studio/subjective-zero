@@ -177,16 +177,18 @@ struct SZLibraryPanelModel {
     var rowsNameTheirLibrary: Bool { grouping == .category && sources.count >= 2 }
 
     var emptyText: String? {
-        if items.isEmpty {
-            return target == .web ? "No library nodes for browser projects yet" : "The library is empty"
-        }
+        if items.isEmpty { return "The library is empty" }
         return flatRows.isEmpty ? "Nothing matches" : nil
     }
 
-    /// The footer is a count and nothing else: "27 nodes".
+    /// The footer is a count, plus how many of those rows still need porting: "27 nodes, 7 unported".
+    /// A person browsing a browser project should see at a glance that the short list is a porting
+    /// backlog rather than the end of what the app can do.
     var footerText: String {
         let count = items.count
-        return "\(count) \(count == 1 ? "node" : "nodes")"
+        let nodes = "\(count) \(count == 1 ? "node" : "nodes")"
+        let unported = items.count { $0.portability == .portable }
+        return unported == 0 ? nodes : "\(nodes), \(unported) to port"
     }
 }
 

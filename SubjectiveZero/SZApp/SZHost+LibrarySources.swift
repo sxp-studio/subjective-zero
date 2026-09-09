@@ -166,13 +166,15 @@ extension SZHost {
     }
 
     /// Forget a library. Nodes already on a canvas are copies, so nothing in any project changes; a
-    /// library that was fetched has its folder deleted, one that lives in a folder is left alone.
+    /// library that was fetched has its folder deleted, one that lives in a folder is left alone, and
+    /// any ports written for its nodes go with it.
     func removeLibrary(key: String) {
         guard let library = addedLibraries.first(where: { $0.key == key }) else { return }
         discardStagedUpdate(key: key)
         pendingLibraryUpdates[key] = nil
         addedLibraries.removeAll { $0.key == key }
         if library.kind == .link { try? FileManager.default.removeItem(at: fetchedLibraryURL(key: key)) }
+        Self.removeLibraryPorts(source: library.source)   // a port belongs to its library, and goes with it
         persistAppState()
         refreshLibraryItems()
         status = "Removed \(library.name)"

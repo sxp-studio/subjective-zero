@@ -88,6 +88,14 @@ Also live: `recordPrefs` - the sticky recording settings (resolution tier, frame
 ratio, normalized crop, sound source, and whether the settings sheet has auto-opened once);
 every field is
 optional and unknown raw values degrade to defaults at read, so any older file decodes.
+A node's ports, finally, are files rather than state: `ports/<library key>/<node id>/<Node.js|Node.swift>`
+holds a source written for a platform its library never shipped one for, so it survives that library's
+next update and the app's, and it goes when the library goes
+([NODE_LIBRARY.md](NODE_LIBRARY.md#where-a-port-lives)).
+Also live, the library rows ([NODE_LIBRARY.md](NODE_LIBRARY.md)): `libraries` - every library added
+beyond the built-in one, with where it came from and what its `library.json` said - plus
+`myLibraryPath` when My Library has been moved, and `libraryGrouping` / `libraryCollapsedGroups` /
+`libraryDetailHeight` for how the panel was left.
 `windowSize`/`theme` remain dormant placeholders.
 
 **Project lifecycle.** The launch chain is `SZ_PROJECT` env (dev override - never recorded in

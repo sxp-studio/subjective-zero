@@ -13,6 +13,9 @@ struct SZConversionState: Equatable {
     var copied: Set<SZNodeID>
     /// Nodes handed to the conversion run.
     var queued: Set<SZNodeID>
+    /// Nodes whose library says they can never run here, with the reason. Reported, never queued:
+    /// an agent asked to write a file that cannot exist would burn a turn and fail.
+    var unsupported: [SZNodeID: String] = [:]
     /// The run's task, once minted; nil when nothing needed a run.
     var taskID: UUID?
 }
@@ -97,9 +100,13 @@ extension SZHost {
         classifyRebuildsAfterLoad()
         refreshLibraryItems()   // the panel offers what the new platform can run
         // 4. Everything still missing or behind its contract goes to a conversion run.
+        // A node whose library declares this platform a wall is reported, not queued.
+        let walls = unsupportedNodes(for: target)
         let queued = Set((store.project?.graph.nodes ?? [])
-            .filter { $0.kind == .generated && !$0.hasCurrentBuild(for: target) }.map(\.id))
-        var state = SZConversionState(target: target, copied: copied, queued: queued, taskID: nil)
+            .filter { $0.kind == .generated && !$0.hasCurrentBuild(for: target) && walls[$0.id] == nil }
+            .map(\.id))
+        var state = SZConversionState(target: target, copied: copied, queued: queued,
+                                      unsupported: walls, taskID: nil)
         if !queued.isEmpty {
             let platform = target == .web ? "the browser" : "this Mac"
             state.taskID = mintRun(
@@ -117,10 +124,27 @@ extension SZHost {
     func conversionPlan(for target: SZProjectTarget) -> (copied: [SZNode], queued: [SZNode]) {
         var copied: [SZNode] = []
         var queued: [SZNode] = []
+        let walls = unsupportedNodes(for: target)
         for node in store.project?.graph.nodes ?? [] where node.kind == .generated && !node.hasCurrentBuild(for: target) {
+            guard walls[node.id] == nil else { continue }
             if libraryTwin(of: node, for: target) != nil { copied.append(node) } else { queued.append(node) }
         }
         return (copied, queued)
+    }
+
+    /// Placed nodes whose library node declares `target` a wall, each with the reason to show. Read
+    /// from the library's contract, not the project's copy: the wall is a fact about the node, and a
+    /// project carries only a copy of its source.
+    func unsupportedNodes(for target: SZProjectTarget) -> [SZNodeID: String] {
+        var walls: [SZNodeID: String] = [:]
+        for node in store.project?.graph.nodes ?? [] where !node.hasCurrentBuild(for: target) {
+            guard let ref = node.libraryRef,
+                  case .library(let source, let id) = ref,
+                  let entry = libraryEntries.first(where: { $0.source == source && $0.entry.id == id }),
+                  let reason = entry.portability(for: target).wall else { continue }
+            walls[node.id] = reason
+        }
+        return walls
     }
 
     /// The library's `target` source for a node placed from the library, and the built platform whose
@@ -164,5 +188,21 @@ extension SZHost {
     func stopConversion() {
         guard let taskID = conversion?.taskID else { return }
         if let run = activeRuns[taskID] { cancelRun(run) } else { withdrawTask(taskID) }
+    }
+}
+
+extension SZHost {
+    /// Placing a library node this project's platform has no source for: the other platform's copy
+    /// is already in the node's folder, so this is the same conversion a target switch runs, over
+    /// one node. Whatever it writes is kept as a port when the node next builds
+    /// (`keepLibraryPortIfNew`), so nobody has to do it again.
+    func startPortRun(_ id: SZNodeID, title: String, from source: SZProjectTarget) {
+        nodeAgentState[id] = SZNodeAgentState(phase: .reloading)
+        let platform = projectTarget == .web ? "the browser" : "this Mac"
+        _ = mintRun(
+            instruction: "Write \(title)'s \(projectTarget.sourceFileName) for \(platform), from the "
+                + "\(source.sourceFileName) already in its folder. Keep its contract and its ports as they are.",
+            title: "Port \(title) to \(platform)", nodes: [id], intent: .convert)
+        status = "Porting \(title) to \(platform)"
     }
 }
