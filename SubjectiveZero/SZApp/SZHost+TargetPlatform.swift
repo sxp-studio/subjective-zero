@@ -43,26 +43,47 @@ extension SZHost {
     func switchPreview(to target: SZProjectTarget) -> String {
         let plan = conversionPlan(for: target)
         let platform = target == .web ? "the browser" : "this Mac"
+        // Nodes their library says can never run there are neither converted nor copied, so they
+        // have to be named here: without this the footer promises an instant switch and the person
+        // finds out afterwards, from a node that never renders.
+        let walls = unsupportedNodes(for: target)
+        let stuck = (store.project?.graph.nodes ?? []).filter { walls[$0.id] != nil }.map(\.title)
+        let stuckNote = stuck.isEmpty ? ""
+            : " \(Self.list(stuck)) can't run \(target.placeName) at all, and stays as it is."
         if plan.queued.isEmpty && plan.copied.isEmpty {
-            return "Every node is built for \(platform). The switch is instant."
+            return stuck.isEmpty
+                ? "Every node is built for \(platform). The switch is instant."
+                : "Nothing to convert.\(stuckNote)"
         }
         var parts: [String] = []
         if !plan.queued.isEmpty {
-            parts.append("converts \(plan.queued.map(\.title).joined(separator: ", ")) with an agent")
+            parts.append("converts \(Self.list(plan.queued.map(\.title))) with an agent")
         }
         if !plan.copied.isEmpty {
-            parts.append("takes \(plan.copied.map(\.title).joined(separator: ", ")) from the library")
+            parts.append("takes \(Self.list(plan.copied.map(\.title))) from the library")
         }
-        return "Switching " + parts.joined(separator: " and ") + ". Follow the conversion in the chat."
+        return "Switching " + parts.joined(separator: " and ")
+            + ". Follow the conversion in the chat." + stuckNote
+    }
+
+    /// "A", "A and B", "A, B and C" — titles read as a sentence, not a comma run.
+    private static func list(_ titles: [String]) -> String {
+        guard titles.count > 1 else { return titles.first ?? "" }
+        return titles.dropLast().joined(separator: ", ") + " and " + titles[titles.count - 1]
     }
 
     /// nil when nothing is converting and nothing was: a switch to a fully built platform has no report.
     var conversionReport: SZConversionReport? {
         guard let conversion, let nodes = store.project?.graph.nodes,
-              !(conversion.copied.isEmpty && conversion.queued.isEmpty) else { return nil }
+              !(conversion.copied.isEmpty && conversion.queued.isEmpty && conversion.unsupported.isEmpty)
+        else { return nil }
         var rows: [SZConversionRow] = []
         for node in nodes {
-            if conversion.copied.contains(node.id) {
+            if let wall = conversion.unsupported[node.id] {
+                // Never queued, so it has no agent line of its own: the library's reason IS the line.
+                rows.append(SZConversionRow(id: node.id, title: node.title,
+                                            reason: wall, outcome: .unavailable))
+            } else if conversion.copied.contains(node.id) {
                 rows.append(SZConversionRow(id: node.id, title: node.title,
                                             reason: agentLine(for: node.id) ?? "from the library", outcome: .ready))
             } else if conversion.queued.contains(node.id) {

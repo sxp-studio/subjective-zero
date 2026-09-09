@@ -98,10 +98,11 @@ Library** takes a link to it and downloads the current copy. Bump `version` in `
 you want people's Check for Updates to offer the new one.
 
 **A worked example to read or fork:**
-[sxp-studio/subz-test-library](https://github.com/sxp-studio/subz-test-library) is a small real
+[sxp-studio/subz-example-library](https://github.com/sxp-studio/subz-example-library) is a small real
 library, laid out exactly as above. Add it by link to see the whole path end to end, or copy its
-shape for your own. It is a sample: the app does not ship it, and its nodes are simple ones lifted
-from the built-in library so the files are the interesting part rather than the shaders.
+shape for your own. The app does not ship it. Its `grainy-gradient` was written for it and carries
+both platforms' sources; the other two are simple ones lifted from the built-in library, because the
+files are the interesting part rather than the shaders.
 
 ### `library.json`
 

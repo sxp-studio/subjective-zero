@@ -63,15 +63,19 @@ extension SZHost {
 }
 
 extension SZHost {
-    /// A node placed from a library just built for a platform its library has no source for: keep
-    /// that file as the library's port, so the next project gets it without an agent.
+    /// A node a port run just built for a platform its library has no source for: keep that file as
+    /// the library's port, so the next project gets it without an agent.
     ///
-    /// Called on every successful reload, and does nothing on all but the first: once the port is
-    /// there, the library has a source for the platform and the condition below is false.
+    /// Only a node THIS host sent to a port run qualifies. Anything looser would take whatever a
+    /// node happens to hold on its next successful reload — a duplicate, a half-finished hand edit,
+    /// a stub someone wrote after cancelling the run — and make it the library's answer for every
+    /// future project, with no way to take it back for the built-in library.
     func keepLibraryPortIfNew(_ id: SZNodeID, in projectURL: URL) {
-        guard case .library(let source, let entryID)? = store.project?.graph.node(id: id)?.libraryRef,
+        guard portingNodes.contains(id),
+              case .library(let source, let entryID)? = store.project?.graph.node(id: id)?.libraryRef,
               let entry = libraryEntries.first(where: { $0.source == source && $0.entry.id == entryID }),
               !entry.builtTargets.contains(projectTarget) else { return }
+        portingNodes.remove(id)   // the run's one result, kept once
         let live = SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: id, target: projectTarget)
         guard let contents = try? String(contentsOf: live, encoding: .utf8), !contents.isEmpty else { return }
         do {

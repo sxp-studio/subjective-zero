@@ -30,16 +30,6 @@ struct SZHostLibraryTests {
         SZProjectIO.nodeSourceURL(projectURL: try #require(host.loadedProjectURL), nodeID: id, target: .native)
     }
 
-    /// Built-in folders with a source for `target` but none for the other platform.
-    private static func builtInCount(onlyFor target: SZProjectTarget) -> Int {
-        let fm = FileManager.default
-        let other: SZProjectTarget = target == .native ? .web : .native
-        let folders = (try? fm.contentsOfDirectory(at: SZHost.builtInLibraryURL, includingPropertiesForKeys: nil)) ?? []
-        return folders.filter {
-            fm.fileExists(atPath: $0.appending(path: target.sourceFileName).path)
-                && !fm.fileExists(atPath: $0.appending(path: other.sourceFileName).path)
-        }.count
-    }
 
     // MARK: - what a project is offered
 

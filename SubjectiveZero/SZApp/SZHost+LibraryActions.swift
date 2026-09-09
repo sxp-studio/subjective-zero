@@ -10,11 +10,26 @@ extension SZHost {
     /// A row dropped on the canvas, or Return in the panel with a click point remembered.
     func placeFromLibrary(_ ref: SZLibraryRef, at position: SZPoint) {
         libraryPlacementRequest = nil
+        // Porting needs an agent. The row's button is already inert without one, but Return and
+        // double-click reach here too, so the refusal lives on the one path all three share.
+        if needsAPort(ref), defaultProviderID == nil {
+            status = "\(libraryTitle(ref)) doesn't run \(projectTarget.placeName) yet, and no agent is set up to port it"
+            presentProviderSetup()
+            return
+        }
         do {
             try placeLibraryItem(ref, position: position, deferBuild: true)
         } catch {
             status = "Couldn't add \(libraryTitle(ref)): \(error.localizedDescription)"
         }
+    }
+
+    /// Whether placing this would have to write a source the library has none of for this platform.
+    private func needsAPort(_ ref: SZLibraryRef) -> Bool {
+        guard case .library(let source, let id) = ref,
+              let entry = libraryEntries.first(where: { $0.source == source && $0.entry.id == id })
+        else { return false }
+        return entry.portability(for: projectTarget) == .portable
     }
 
     /// Return or double-click in the panel: the remembered click point, else the visible canvas centre.

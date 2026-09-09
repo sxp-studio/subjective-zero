@@ -370,6 +370,9 @@ final class SZHost {
     /// Libraries the user added: folders on this Mac and ones fetched from a link. Persisted with
     /// the prefs; `libraryRoots` reads them in this order after the two built-in ones.
     internal(set) var addedLibraries: [SZAddedLibrary] = SZAppStateIO.load()?.libraries ?? []
+    /// Nodes a port run is writing this platform's source for. What makes the result of that run,
+    /// and only that, worth keeping as the library's port (SZHost+LibraryPorts.swift).
+    var portingNodes: Set<SZNodeID> = []
     /// How tall the Library panel's description strip is, as the user left it.
     internal(set) var libraryDetailHeight: Double = SZAppStateIO.load()?.libraryDetailHeight
         ?? Double(SZLibraryPanel.defaultDetailHeight)
@@ -1288,14 +1291,18 @@ final class SZHost {
             if let wall = contract.unsupportedReason(for: projectTarget) {
                 throw SZMCPError.message("\(contract.title) can't run \(projectTarget.placeName): \(wall)")
             }
-            guard let resolved = Self.librarySourceURL(folder: folder, source: source, id: id,
-                                                       target: placeTarget)
-                ?? SZProjectTarget.allCases.lazy.compactMap({ other -> URL? in
-                    guard let file = Self.librarySourceURL(folder: folder, source: source, id: id,
-                                                           target: other) else { return nil }
+            var resolved = Self.librarySourceURL(folder: folder, source: source, id: id,
+                                                 target: placeTarget)
+            if resolved == nil {
+                for other in SZProjectTarget.allCases {
+                    guard let file = Self.librarySourceURL(folder: folder, source: source,
+                                                           id: id, target: other) else { continue }
                     placeTarget = other
-                    return file
-                }).first else {
+                    resolved = file
+                    break
+                }
+            }
+            guard let resolved else {
                 throw SZMCPError.message("\(contract.title) has no source to copy")
             }
             sourceURL = resolved
@@ -1312,7 +1319,7 @@ final class SZHost {
             sourceURL = SZProjectIO.nodeSourceURL(projectURL: projectURL, nodeID: id, target: projectTarget)
             cardURL = SZProjectIO.cardSourceURL(projectURL: projectURL, nodeID: id)
             guard fm.fileExists(atPath: sourceURL.path) else {
-                throw SZMCPError.message("\(original.title) has no version \(projectTarget.placeName) yet")
+                throw SZMCPError.message("\(original.title) doesn't run \(projectTarget.placeName) yet")
             }
             contract = originalContract   // defaults kept: the copy starts where the original stands
             node = SZNode(kind: .generated, title: original.title, sfSymbol: original.sfSymbol,
@@ -1370,6 +1377,7 @@ final class SZHost {
         // Nothing to build: what landed is the other platform's source. Hand it to a conversion run,
         // which already knows how to translate one platform's node into another's.
         if placeTarget != projectTarget {
+            watchNodeSources(in: projectURL)   // the port run's write is what reloads it
             startPortRun(node.id, title: contract.title, from: placeTarget)
             return node.id
         }

@@ -308,8 +308,8 @@ public struct SZLibraryPanel: View {
                 .allowsHitTesting((hovered || highlighted) && addable)
                 .help(unported
                       ? (addable
-                         ? "No \(target.sourceFileName) yet. Placing it asks an agent to write one."
-                         : "No \(target.sourceFileName) yet, and no agent set up to write one.")
+                         ? "This node doesn't run \(target.placeName) yet. Adding it asks an agent to port it."
+                         : "This node doesn't run \(target.placeName) yet, and no agent is set up to port it.")
                       : "")
         }
         .opacity(unported ? 0.55 : 1)
@@ -425,8 +425,8 @@ public struct SZLibraryPanel: View {
         // First, because it is the one that decides whether the row can be used at all.
         if item.portability == .portable {
             out.append(canPort
-                       ? "No \(target.placeName) version yet. Adding it asks an agent to write one."
-                       : "No \(target.placeName) version yet, and no agent set up to write one.")
+                       ? "Doesn't run \(target.placeName) yet. Adding it asks an agent to port it."
+                       : "Doesn't run \(target.placeName) yet, and no agent is set up to port it.")
         }
         out += item.permissions.map(permissionWords)
         if item.hasCard { out.append("Ships a custom card") }

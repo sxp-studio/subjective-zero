@@ -961,7 +961,16 @@ extension SZHostBridge {
             throw SZMCPError.message("no library node \(library)")
         }
         let id = try host.placeLibraryItem(.library(source: found.source, id: library), position: position, origin: .agent)
-        return placedNodeResponse(id, extra: ["library": library])
+        // This library has no source for the open project's platform, so what landed is the other
+        // platform's copy and a run is translating it. Say so: the caller would otherwise read the
+        // ordinary reply as "built and ready" and start wiring a node that cannot run yet.
+        var extra: [String: Any] = ["library": library]
+        if host.portingNodes.contains(id) {
+            extra["porting"] = true
+            extra["note"] = "\(host.mutationTitle(id)) doesn't run \(host.projectTarget.placeName) yet. "
+                + "A run is writing that version now; it cannot render until that finishes."
+        }
+        return placedNodeResponse(id, extra: extra)
     }
 
     /// Copy a node already in the project, beside it unless placed: the Duplicate command's path.

@@ -181,7 +181,7 @@ struct SZLibraryPanelModel {
         return flatRows.isEmpty ? "Nothing matches" : nil
     }
 
-    /// The footer is a count, plus how many of those rows still need porting: "27 nodes, 7 unported".
+    /// The footer is a count, plus how many of those rows still need porting: "27 nodes, 7 to port".
     /// A person browsing a browser project should see at a glance that the short list is a porting
     /// backlog rather than the end of what the app can do.
     var footerText: String {

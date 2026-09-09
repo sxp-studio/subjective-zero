@@ -198,6 +198,7 @@ extension SZHost {
     /// (`keepLibraryPortIfNew`), so nobody has to do it again.
     func startPortRun(_ id: SZNodeID, title: String, from source: SZProjectTarget) {
         nodeAgentState[id] = SZNodeAgentState(phase: .reloading)
+        portingNodes.insert(id)   // what the run writes is the library's port, and nothing else is
         let platform = projectTarget == .web ? "the browser" : "this Mac"
         _ = mintRun(
             instruction: "Write \(title)'s \(projectTarget.sourceFileName) for \(platform), from the "
