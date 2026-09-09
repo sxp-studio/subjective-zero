@@ -334,10 +334,12 @@ A node folder has three files (four with a web version):
   copied along when the node is instantiated (`ui_add_library_node` / the palette); a contract that
   declares a `card` block lands with the card ON (it is the node's face — corner-pin's handles over
   the output, a controller's learn strips), a `Card.swift` without one waits in the context menu.
-  The index derives `card: true` from the file (served as "ships a card"). `corner-pin`, `midi.macos`
-  and `osc-input` ship one today: library nodes get a card only when the interaction has no row
-  equivalent. The two controller nodes share ONE card file byte-for-byte (`SZOscNodeTests` pins it) —
-  edit `midi.macos/Card.swift`, copy to `osc-input/`.
+  The index derives `card: true` from the file (served as "ships a card"). `corner-pin`, `grid-warp`,
+  `midi.macos` and `osc-input` ship one today: library nodes get a card only when the interaction has
+  no row equivalent. The two controller nodes share one card file byte-for-byte (`SZOscNodeTests`
+  pins it) — edit `midi.macos/Card.swift`, copy to `osc-input/`. A card writes numbers to its ports
+  and nothing else, so geometry a card owns is declared as ports: corner-pin's four `float2` corners,
+  grid-warp's sixteen mesh points.
 
 Then add **one curation entry** to `NodeLibrary/index.json`, keyed by folder `id`, carrying only the
 fields that aren't in the contract: `tags`, `purpose`, `useWhen`, `avoidWhen`, `reuse`, `platform`.

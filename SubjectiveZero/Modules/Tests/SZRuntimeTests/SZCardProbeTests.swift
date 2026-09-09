@@ -258,7 +258,9 @@ private var nodeLibraryRoot: URL {
 
 /// Every shipped `NodeLibrary/<id>/Card.swift` compiles, maps, instantiates, and renders — the CI
 /// stand-in for "instantiating this library node actually mounts its card" (card sources never
-/// pass through swift build). Fed a synthetic snapshot covering the shipped cards' ports.
+/// pass through swift build). Fed a synthetic snapshot covering the shipped cards' ports: a card
+/// whose ports are missing from it renders its empty path and this proves nothing, so a new card
+/// adds its ports below.
 @Test @MainActor func shippedLibraryCardsCompileAndMount() async throws {
     let folders = (try? FileManager.default.contentsOfDirectory(
         at: nodeLibraryRoot, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
@@ -285,7 +287,11 @@ private var nodeLibraryRoot: URL {
                    {"name":"radius","type":"float","default":0.6,"ui":{"kind":"slider","min":0,"max":1.5}},
                    {"name":"softness","type":"float","default":0.4,"ui":{"kind":"slider","min":0,"max":1}},
                    {"name":"mappings","type":"string","default":"[{\\"key\\":\\"ch1/cc7\\",\\"port\\":\\"knob\\",\\"min\\":0,\\"max\\":1,\\"label\\":\\"Knob\\"}]"},
-                   {"name":"port","type":"float","default":8000}],
+                   {"name":"port","type":"float","default":8000},
+                   {"name":"p00","type":"float2","default":[0,0]},{"name":"p01","type":"float2","default":[0.3333333333333333,0]},{"name":"p02","type":"float2","default":[0.6666666666666666,0]},{"name":"p03","type":"float2","default":[1,0]},
+                   {"name":"p10","type":"float2","default":[0,0.3333333333333333]},{"name":"p11","type":"float2","default":[0.3333333333333333,0.3333333333333333]},{"name":"p12","type":"float2","default":[0.6666666666666666,0.3333333333333333]},{"name":"p13","type":"float2","default":[1,0.3333333333333333]},
+                   {"name":"p20","type":"float2","default":[0,0.6666666666666666]},{"name":"p21","type":"float2","default":[0.3333333333333333,0.6666666666666666]},{"name":"p22","type":"float2","default":[0.6666666666666666,0.6666666666666666]},{"name":"p23","type":"float2","default":[1,0.6666666666666666]},
+                   {"name":"p30","type":"float2","default":[0,1]},{"name":"p31","type":"float2","default":[0.3333333333333333,1]},{"name":"p32","type":"float2","default":[0.6666666666666666,1]},{"name":"p33","type":"float2","default":[1,1]}],
          "outputs":[{"name":"output","type":"texture","display":true},{"name":"magnitudes","type":"floatArray"},
                     {"name":"lastEvent","type":"float2"},{"name":"lastKey","type":"string"},{"name":"knob","type":"float"}],
          "connectedInputs":["input"],

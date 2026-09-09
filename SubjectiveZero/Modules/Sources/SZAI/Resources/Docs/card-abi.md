@@ -73,6 +73,14 @@ contract's `ui` range, snaps to `step`, pushes the runtime live, writes the stor
 numeric ports (float, vectors, colors, bool) can be written from a card — an enum/string input stays on
 the plain rows (the user flips with right-click → "Hide Custom Card").
 
+**So geometry a card owns is declared as ports, one per value** — corner-pin's four `float2` corners,
+grid-warp's sixteen mesh points. There is no way to keep a card's state as JSON in a `string` port,
+and `floatArray` is connection-only with no by-value default, so it cannot hold it either. Ports are
+the better answer anyway: each one is wireable (drive a mesh point from OSC), persists like any
+slider's default, and is visible to the port audit. What this shape cannot express is a count that is
+not fixed when the node is written — "however many surfaces the user adds". A node needing that is
+the reason to extend this ABI, and nothing does yet.
+
 **Host verbs** (`call`) exist only for controller nodes — a contract with a `mappings` string input and
 a `lastKey` string output (MIDI Input, OSC Input): `learn_arm`, `learn_cancel`, `learn_commit`
 (`{"label": …}` optional — commits the learned control as a NEW output socket the user wires by hand),

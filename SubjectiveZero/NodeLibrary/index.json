@@ -9,9 +9,9 @@
         "spectrum",
         "analysis"
       ],
-      "purpose": "Reduces an FFT power spectrum into 10 normalized 0..1 frequency buckets (hz32…hz16k) with attack/decay smoothing.",
+      "purpose": "Reduces an FFT power spectrum into 10 normalized 0..1 frequency buckets (hz32\u2026hz16k) with attack/decay smoothing.",
       "platform": "any",
-      "useWhen": "You need '10 frequency buckets as 0.0–1.0' (or similar named band levels) from a spectrum. Feed the hz… outputs into your visualizer or any reactive node.",
+      "useWhen": "You need '10 frequency buckets as 0.0\u20131.0' (or similar named band levels) from a spectrum. Feed the hz\u2026 outputs into your visualizer or any reactive node.",
       "avoidWhen": "You need the full dense spectrum rather than a handful of bands (use audio-fft's magnitudes directly).",
       "reuse": "copy-as-is"
     },
@@ -24,10 +24,10 @@
         "dsp",
         "analysis"
       ],
-      "purpose": "FFT of a PCM sample window into a power spectrum (floatArray of 1024 magnitude bins). Pure DSP — no audio device.",
+      "purpose": "FFT of a PCM sample window into a power spectrum (floatArray of 1024 magnitude bins). Pure DSP \u2014 no audio device.",
       "platform": "any",
       "useWhen": "You have a PCM sample window (e.g. from microphone.macos) and need its frequency spectrum. Feed `magnitudes` into audio-bands.",
-      "avoidWhen": "You only need a few named band levels — pair this with audio-bands rather than computing the FFT inline.",
+      "avoidWhen": "You only need a few named band levels \u2014 pair this with audio-bands rather than computing the FFT inline.",
       "reuse": "copy-as-is"
     },
     {
@@ -41,8 +41,8 @@
       ],
       "purpose": "Finds musical hits in an FFT power spectrum by spectral flux: one-frame 1.0 pulses on kick/snare/hats/onset plus a continuous flux level.",
       "platform": "any",
-      "useWhen": "Something should POP on the beat. Feed audio-fft's magnitudes in, wire the pulses into impulse-envelope, and drive visual parameters with the envelope — events read as hits where band levels only wobble.",
-      "avoidWhen": "You want continuous loudness/spectrum motion (use audio-bands), or true tempo/BPM tracking — this fires on energy jumps, it does not track a beat grid.",
+      "useWhen": "Something should POP on the beat. Feed audio-fft's magnitudes in, wire the pulses into impulse-envelope, and drive visual parameters with the envelope \u2014 events read as hits where band levels only wobble.",
+      "avoidWhen": "You want continuous loudness/spectrum motion (use audio-bands), or true tempo/BPM tracking \u2014 this fires on energy jumps, it does not track a beat grid.",
       "reuse": "copy-as-is"
     },
     {
@@ -58,8 +58,8 @@
       ],
       "purpose": "Blends two textures with a selectable Photoshop-style mode (add/multiply/screen/overlay/soft light/hard light/difference), mixed by opacity.",
       "platform": "any",
-      "useWhen": "You need to composite/mix two texture layers. Takes TWO texture inputs — base and blend — plus a mode enum and an opacity slider. The go-to node for combining a generator (gradient/noise/checkerboard) over a camera or other source.",
-      "avoidWhen": "You only have one texture to process (use a single-input tone/color node like brightness), or you need alpha-aware over compositing with premultiplied coverage — this mixes RGB by a scalar opacity and preserves base alpha.",
+      "useWhen": "You need to composite/mix two texture layers. Takes TWO texture inputs \u2014 base and blend \u2014 plus a mode enum and an opacity slider. The go-to node for combining a generator (gradient/noise/checkerboard) over a camera or other source.",
+      "avoidWhen": "You only have one texture to process (use a single-input tone/color node like brightness), or you need alpha-aware over compositing with premultiplied coverage \u2014 this mixes RGB by a scalar opacity and preserves base alpha.",
       "reuse": "copy-as-is"
     },
     {
@@ -71,7 +71,7 @@
         "compute",
         "vfx"
       ],
-      "purpose": "Scale RGB by a gain (exposure) — the simplest tone adjustment.",
+      "purpose": "Scale RGB by a gain (exposure) \u2014 the simplest tone adjustment.",
       "platform": "any",
       "useWhen": "You need to brighten or darken an image by a linear gain, or a minimal reference for a single-pixel color op.",
       "avoidWhen": "You need nonlinear midtone control (use gamma) or contrast around a pivot (use contrast).",
@@ -92,6 +92,20 @@
       "reuse": "copy-as-is"
     },
     {
+      "id": "camera.web",
+      "tags": [
+        "source",
+        "camera",
+        "video",
+        "web"
+      ],
+      "purpose": "Provides the browser's camera feed as a texture.",
+      "platform": "web",
+      "useWhen": "You need live camera input as a texture source in a web project.",
+      "avoidWhen": "You need a still image, a non-camera video source, or a specific device by name.",
+      "reuse": "copy-as-is"
+    },
+    {
       "id": "checkerboard",
       "tags": [
         "generator",
@@ -103,7 +117,7 @@
       ],
       "purpose": "Generates a two-color checkerboard pattern as a texture source (no input).",
       "platform": "any",
-      "useWhen": "You need a tiled checkerboard — UV/alignment test pattern, transparency backdrop, or a starting point for any parity-tiled procedural generator. Tune cell density with scale and the two colors.",
+      "useWhen": "You need a tiled checkerboard \u2014 UV/alignment test pattern, transparency backdrop, or a starting point for any parity-tiled procedural generator. Tune cell density with scale and the two colors.",
       "avoidWhen": "You need an organic or irregular pattern (use noise), a smooth ramp (use gradient), or want to modify an existing texture (this ignores input).",
       "reuse": "copy-as-is"
     },
@@ -124,6 +138,20 @@
       "reuse": "copy-as-is"
     },
     {
+      "id": "contrast",
+      "tags": [
+        "color",
+        "tone",
+        "compute",
+        "vfx"
+      ],
+      "purpose": "Expand or compress RGB contrast around an adjustable pivot.",
+      "platform": "any",
+      "useWhen": "You need to boost or flatten contrast after brightness, with control over the fixed midpoint.",
+      "avoidWhen": "You want a nonlinear midtone curve (use gamma) or a per-channel color grade.",
+      "reuse": "copy-as-is"
+    },
+    {
       "id": "corner-pin",
       "tags": [
         "render",
@@ -138,20 +166,6 @@
       "platform": "any",
       "useWhen": "You need to fit the render onto a physical surface (projector keystone / corner pin), a perspective warp, or a reference for authoring a Card.swift with draggable handles over the output.",
       "avoidWhen": "You need a mesh warp with more than four control points, or a plain 2D transform (write a scale/translate node).",
-      "reuse": "copy-as-is"
-    },
-    {
-      "id": "contrast",
-      "tags": [
-        "color",
-        "tone",
-        "compute",
-        "vfx"
-      ],
-      "purpose": "Expand or compress RGB contrast around an adjustable pivot.",
-      "platform": "any",
-      "useWhen": "You need to boost or flatten contrast after brightness, with control over the fixed midpoint.",
-      "avoidWhen": "You want a nonlinear midtone curve (use gamma) or a per-channel color grade.",
       "reuse": "copy-as-is"
     },
     {
@@ -197,7 +211,7 @@
       ],
       "purpose": "Separable 9-tap Gaussian blur (two 1D render passes with a lazy intermediate texture).",
       "platform": "any",
-      "useWhen": "You want to soften an image, prep a bloom/glow, or reduce high-frequency detail; radius 0–20.",
+      "useWhen": "You want to soften an image, prep a bloom/glow, or reduce high-frequency detail; radius 0\u201320.",
       "avoidWhen": "You need a very heavy blur (chain instances instead) or an exact box/median filter.",
       "reuse": "reference-only"
     },
@@ -213,7 +227,7 @@
       ],
       "purpose": "Generate a two-color gradient (linear, radial, or angular) as a texture source.",
       "platform": "any",
-      "useWhen": "You need a smooth color ramp — background, mask, or the base layer of a composite. Pick type and two colors; no input.",
+      "useWhen": "You need a smooth color ramp \u2014 background, mask, or the base layer of a composite. Pick type and two colors; no input.",
       "avoidWhen": "You need a hard-edged pattern (use checkerboard) or organic noise (use noise), or want to modify an existing texture.",
       "reuse": "copy-as-is"
     },
@@ -234,6 +248,22 @@
       "reuse": "copy-as-is"
     },
     {
+      "id": "grid-warp",
+      "tags": [
+        "projection",
+        "mapping",
+        "warp",
+        "mesh",
+        "grid",
+        "surface",
+        "keystone"
+      ],
+      "purpose": "Warps the input through a 4x4 mesh of draggable control points, for projecting onto a curved or irregular surface.",
+      "useWhen": "The surface is not flat, or one quadrilateral is not enough. corner-pin is the four-corner case; this bends between sixteen points.",
+      "avoidWhen": "The surface is a flat rectangle - corner-pin is simpler and exact.",
+      "reuse": "copy-as-is"
+    },
+    {
       "id": "image-file",
       "tags": [
         "source",
@@ -244,7 +274,7 @@
       ],
       "purpose": "Load a still image file as a texture source, scaled to the viewport.",
       "platform": "any",
-      "useWhen": "You need a fixed image as input to an effect chain — a permission-free, camera-free source. Set the path and a fit mode.",
+      "useWhen": "You need a fixed image as input to an effect chain \u2014 a permission-free, camera-free source. Set the path and a fit mode.",
       "avoidWhen": "You need a moving image (use video-file) or a live camera feed (use camera.macos).",
       "reuse": "copy-as-is"
     },
@@ -257,7 +287,7 @@
         "animation",
         "audio"
       ],
-      "purpose": "Shapes a trigger pulse into an attack/decay envelope in seconds — the pop-on-the-beat curve between a hit detector and a visual parameter.",
+      "purpose": "Shapes a trigger pulse into an attack/decay envelope in seconds \u2014 the pop-on-the-beat curve between a hit detector and a visual parameter.",
       "platform": "any",
       "useWhen": "A pulse source (audio-onset, a MIDI pad, an OSC button) should punch a float input: wire the pulse into trigger and the value output into the parameter.",
       "avoidWhen": "You want continuous level-following rather than one-shot hits (use audio-bands), or looping motion (drive the parameter from ctx.time in the target node).",
@@ -289,7 +319,7 @@
       ],
       "purpose": "Hardware MIDI CC input as live float outputs; bindings live in a mappings JSON (port data) and each surfaces as its own pre-scaled output, with lastEvent [seq,value01] + lastKey as the learn signal.",
       "platform": "macos",
-      "useWhen": "The user wants a physical knob/fader to drive a parameter. Add this node, then use the binding_* learn tools to bind a controller to a target input — bindings become outputs + data edges, so the control path stays native and queryable.",
+      "useWhen": "The user wants a physical knob/fader to drive a parameter. Add this node, then use the binding_* learn tools to bind a controller to a target input \u2014 bindings become outputs + data edges, so the control path stays native and queryable.",
       "avoidWhen": "You need audio (use microphone.macos), note/pitch-bend events (this node is MIDI 1.0 channel-voice CC only), or a wifi/phone controller (use osc-input).",
       "reuse": "copy-as-is"
     },
@@ -309,7 +339,7 @@
       "purpose": "Generates animated procedural noise (white, value, fractal fBm, or voronoi) as a grayscale texture source.",
       "platform": "any",
       "useWhen": "You need procedural grayscale noise for masks, displacement, dissolves, or organic motion. Pick a type (white/value/fractal/voronoi), set scale for detail, and drive animation with speed (reads ctx.time); octaves controls fractal richness.",
-      "avoidWhen": "You need color output, a deterministic still pattern (use checkerboard), or precise SDF/geometry — this is stochastic grayscale only.",
+      "avoidWhen": "You need color output, a deterministic still pattern (use checkerboard), or precise SDF/geometry \u2014 this is stochastic grayscale only.",
       "reuse": "reference-only"
     },
     {
@@ -326,8 +356,8 @@
       ],
       "purpose": "Wifi controller: OSC over UDP (TouchOSC/Lemur/any OSC app) as live float outputs; bindings live in a mappings JSON keyed by OSC address and each surfaces as its own pre-scaled output, with lastEvent [seq,value01] + lastKey as the learn signal.",
       "platform": "macos",
-      "useWhen": "The user wants a phone/tablet or another program on the network to drive parameters. Add this node (default UDP port 8000, Bonjour `_osc._udp`), then use the binding_* learn tools — same flow as midi.macos.",
-      "avoidWhen": "You need a USB MIDI controller (use midi.macos), audio, or OSC OUTPUT — this node only receives.",
+      "useWhen": "The user wants a phone/tablet or another program on the network to drive parameters. Add this node (default UDP port 8000, Bonjour `_osc._udp`), then use the binding_* learn tools \u2014 same flow as midi.macos.",
+      "avoidWhen": "You need a USB MIDI controller (use midi.macos), audio, or OSC OUTPUT \u2014 this node only receives.",
       "reuse": "copy-as-is"
     },
     {
@@ -342,8 +372,8 @@
       ],
       "purpose": "Quantizes the image into square blocks by snapping each pixel to its block's top-left texel.",
       "platform": "any",
-      "useWhen": "You want a blocky mosaic / censor / retro-downsample look; block size 1–64 px.",
-      "avoidWhen": "You want smooth downscaling or antialiased blocks — this snaps to hard texels by design.",
+      "useWhen": "You want a blocky mosaic / censor / retro-downsample look; block size 1\u201364 px.",
+      "avoidWhen": "You want smooth downscaling or antialiased blocks \u2014 this snaps to hard texels by design.",
       "reuse": "copy-as-is"
     },
     {
@@ -373,7 +403,7 @@
       ],
       "purpose": "Captures what the Mac is playing (whole mix or one app) via ScreenCaptureKit as a 2048-sample mono PCM window, with a synthetic fallback when Screen Recording is not authorized.",
       "platform": "macos",
-      "useWhen": "Visuals should react to music playing on this Mac (a browser, a music app): the clean source for an audio pipeline — no room reverb or mic smear. Feed `samples` into audio-fft; pick one app on the source dropdown if the mix is noisy.",
+      "useWhen": "Visuals should react to music playing on this Mac (a browser, a music app): the clean source for an audio pipeline \u2014 no room reverb or mic smear. Feed `samples` into audio-fft; pick one app on the source dropdown if the mix is noisy.",
       "avoidWhen": "You need room/live audio through a physical input (use microphone.macos), or the app cannot be granted Screen Recording access.",
       "reuse": "copy-as-is"
     },
@@ -403,7 +433,7 @@
       ],
       "purpose": "Play a local video file as a live texture source, scaled to the viewport.",
       "platform": "any",
-      "useWhen": "You need a video clip as input to an effect chain — a permission-free alternative to the camera.",
+      "useWhen": "You need a video clip as input to an effect chain \u2014 a permission-free alternative to the camera.",
       "avoidWhen": "You need a still image (use image-file) or a live camera feed (use camera.macos).",
       "reuse": "reference-only"
     },
@@ -420,20 +450,6 @@
       "platform": "any",
       "useWhen": "You want classic edge darkening or a colored edge tint framing the subject.",
       "avoidWhen": "You need a centered spotlight/mask output rather than an edge blend, or a non-radial shape.",
-      "reuse": "copy-as-is"
-    },
-    {
-      "id": "camera.web",
-      "tags": [
-        "source",
-        "camera",
-        "video",
-        "web"
-      ],
-      "purpose": "Provides the browser's camera feed as a texture.",
-      "platform": "web",
-      "useWhen": "You need live camera input as a texture source in a web project.",
-      "avoidWhen": "You need a still image, a non-camera video source, or a specific device by name.",
       "reuse": "copy-as-is"
     }
   ]

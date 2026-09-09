@@ -1,0 +1,32 @@
+{
+  "title": "Grid Warp",
+  "sfSymbol": "grid",
+  "summary": "Bends the input onto a 4x4 grid of points you drag: the curved or irregular surface you project on.",
+  "inputs": [
+    { "name": "input", "type": "texture" },
+    { "name": "p00", "type": "float2", "default": { "type": "float2", "value": [0.0, 0.0] } },
+    { "name": "p01", "type": "float2", "default": { "type": "float2", "value": [0.3333333333333333, 0.0] } },
+    { "name": "p02", "type": "float2", "default": { "type": "float2", "value": [0.6666666666666666, 0.0] } },
+    { "name": "p03", "type": "float2", "default": { "type": "float2", "value": [1.0, 0.0] } },
+    { "name": "p10", "type": "float2", "default": { "type": "float2", "value": [0.0, 0.3333333333333333] } },
+    { "name": "p11", "type": "float2", "default": { "type": "float2", "value": [0.3333333333333333, 0.3333333333333333] } },
+    { "name": "p12", "type": "float2", "default": { "type": "float2", "value": [0.6666666666666666, 0.3333333333333333] } },
+    { "name": "p13", "type": "float2", "default": { "type": "float2", "value": [1.0, 0.3333333333333333] } },
+    { "name": "p20", "type": "float2", "default": { "type": "float2", "value": [0.0, 0.6666666666666666] } },
+    { "name": "p21", "type": "float2", "default": { "type": "float2", "value": [0.3333333333333333, 0.6666666666666666] } },
+    { "name": "p22", "type": "float2", "default": { "type": "float2", "value": [0.6666666666666666, 0.6666666666666666] } },
+    { "name": "p23", "type": "float2", "default": { "type": "float2", "value": [1.0, 0.6666666666666666] } },
+    { "name": "p30", "type": "float2", "default": { "type": "float2", "value": [0.0, 1.0] } },
+    { "name": "p31", "type": "float2", "default": { "type": "float2", "value": [0.3333333333333333, 1.0] } },
+    { "name": "p32", "type": "float2", "default": { "type": "float2", "value": [0.6666666666666666, 1.0] } },
+    { "name": "p33", "type": "float2", "default": { "type": "float2", "value": [1.0, 1.0] } }
+  ],
+  "outputs": [
+    { "name": "output", "type": "texture", "display": true }
+  ],
+  "card": {
+    "cols": 10, "rows": 8, "backdrop": "output",
+    "plumbing": ["p00", "p01", "p02", "p03", "p10", "p11", "p12", "p13",
+                 "p20", "p21", "p22", "p23", "p30", "p31", "p32", "p33"]
+  }
+}
