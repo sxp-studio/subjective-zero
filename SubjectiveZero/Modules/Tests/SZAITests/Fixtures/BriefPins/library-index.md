@@ -1,6 +1,8 @@
 <!-- brief pin; never edit by hand; re-record deliberately: SZ_RECORD_BRIEF_PINS=1 swift test --filter SZBriefPinTests -->
-The built-in node library, by category. Each line: what the node does, its typed I/O, and whether its
-source drops in unchanged (`copy-as-is`) or is only worth reading (`reference-only`).
+The node libraries this project can use, by category. Each line: what the node does, its typed I/O,
+and whether its source drops in unchanged (`copy-as-is`) or is only worth reading (`reference-only`).
+A line ending `library: <name>` came from a library beyond the built-in one, and two libraries may
+carry the same id, so pass `library` alongside the id when one does.
 
 A node is a reference because it does YOUR node's job. A similar name, or the same port shape, is not that.
 If nothing here does it, write the node yourself — that is the ordinary outcome, not a failed search.
