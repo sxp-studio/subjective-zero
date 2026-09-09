@@ -3,16 +3,80 @@
 // repository fetched from a link and pinned to one commit. Pure values; the host does the fetching.
 import Foundation
 
-/// A library's own `library.json`: what it calls itself, and which node ABI it was written against.
+/// A library's own `library.json`: what it calls itself, who made it, how it may be used, and which
+/// SubjectiveZero it was written against. Only `name` is required, because a folder of node folders is
+/// already a working library; everything else is what makes one safe to hand to somebody else.
 public struct SZLibraryManifest: Codable, Equatable, Sendable {
+    /// What the library is called wherever it is listed. Required.
     public var name: String
-    public var abi: Int?
+    /// One line on what the library is for.
+    public var description: String?
+    /// Who made it. A person or a project, not an id.
+    public var author: String?
+    /// How the nodes may be used, as an SPDX id ("MIT", "AGPL-3.0-only"). A node is code someone
+    /// copies into their own project, so a library with no license says nothing about whether they may.
+    public var license: String?
+    /// Where the library lives, for the person who wants to see the source or file an issue.
+    public var homepage: String?
+    /// The SubjectiveZero it was written and last tested against ("0.4.0"). Advisory: it is what a
+    /// person reads when a node misbehaves on a much later build.
+    public var madeWith: String?
+    /// The earliest SubjectiveZero that can run these nodes. Checked: an app older than this refuses
+    /// the library rather than letting every node fail to build one at a time.
     public var minAppVersion: String?
+    /// The node ABI the author wrote against, if they tracked it (RUNTIME.md numbers these). Shown,
+    /// never checked: the app has no ABI number of its own to compare with.
+    public var abi: Int?
 
-    public init(name: String, abi: Int? = nil, minAppVersion: String? = nil) {
+    public init(name: String, description: String? = nil, author: String? = nil, license: String? = nil,
+                homepage: String? = nil, madeWith: String? = nil, minAppVersion: String? = nil,
+                abi: Int? = nil) {
         self.name = name
-        self.abi = abi
+        self.description = description
+        self.author = author
+        self.license = license
+        self.homepage = homepage
+        self.madeWith = madeWith
         self.minAppVersion = minAppVersion
+        self.abi = abi
+    }
+}
+
+/// Comparing "0.4.0" with "0.10.2" the way people mean it: field by field, numerically, missing
+/// fields are zero. Anything unparseable sorts as 0, so a garbled version never blocks a library.
+public enum SZAppVersionOrder {
+    public static func fields(_ version: String) -> [Int] {
+        version.split(separator: "-").first.map(String.init)?
+            .split(separator: ".").map { Int($0.filter(\.isNumber)) ?? 0 } ?? [0]
+    }
+
+    /// True when `version` is at least `required`.
+    public static func atLeast(_ version: String, _ required: String) -> Bool {
+        let a = fields(version), b = fields(required)
+        for i in 0..<max(a.count, b.count) {
+            let l = i < a.count ? a[i] : 0, r = i < b.count ? b[i] : 0
+            if l != r { return l > r }
+        }
+        return true
+    }
+}
+
+public extension SZLibraryManifest {
+    /// Why this app cannot run the library, in a sentence for the person. nil when it can.
+    /// Only `minAppVersion` refuses: it is the one claim whose failure means nothing would work.
+    func refusal(appVersion: String) -> String? {
+        guard let required = minAppVersion, !required.isEmpty else { return nil }
+        // A build with no version of its own (a dev run) is not told it is too old.
+        guard appVersion != "dev", !SZAppVersionOrder.atLeast(appVersion, required) else { return nil }
+        return "\(name) needs SubjectiveZero \(required) or newer, and this is \(appVersion)."
+    }
+
+    /// What is missing before this library is fit to hand to someone else, for the Publish path.
+    var missingForSharing: [String] {
+        var missing: [String] = []
+        if (author ?? "").isEmpty { missing.append("an author") }
+        if (license ?? "").isEmpty { missing.append("a license") }
+        return missing
     }
 }
 
@@ -37,18 +101,33 @@ public struct SZAddedLibrary: Codable, Equatable, Sendable, Identifiable {
     public var revision: String?
     /// Short commit + subject of the revision, for the settings row.
     public var revisionNote: String?
+    /// What the library's own `library.json` said when it was added or last updated.
+    public var manifest: SZLibraryManifest?
 
     public var id: String { key }
     public var source: SZLibrarySourceID { SZLibrarySourceID(rawValue: key) }
 
     public init(key: String, name: String, kind: Kind, origin: String,
-                revision: String? = nil, revisionNote: String? = nil) {
+                revision: String? = nil, revisionNote: String? = nil,
+                manifest: SZLibraryManifest? = nil) {
         self.key = key
         self.name = name
         self.kind = kind
         self.origin = origin
         self.revision = revision
         self.revisionNote = revisionNote
+        self.manifest = manifest
+    }
+
+    /// "by Someone · MIT · made with 0.4.0" — the provenance line under a settings row, only the
+    /// parts the author actually filled in.
+    public var provenance: String? {
+        var parts: [String] = []
+        if let author = manifest?.author, !author.isEmpty { parts.append("by \(author)") }
+        if let license = manifest?.license, !license.isEmpty { parts.append(license) }
+        if let made = manifest?.madeWith, !made.isEmpty { parts.append("made with \(made)") }
+        if let abi = manifest?.abi { parts.append("node format v\(abi)") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 

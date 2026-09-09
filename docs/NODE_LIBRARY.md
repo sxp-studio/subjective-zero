@@ -57,6 +57,80 @@ optional `library` argument when two libraries carry the same id (built in wins 
 Sources (a texture out, none in), Effects (texture in and out), Audio (sample arrays either way),
 Control (anything else with outputs). Nothing is curated; `tags` are search terms.
 
+## Making a library of your own
+
+A library is **a folder with node folders in it**. Nothing else is required, and that is the whole
+format:
+
+```
+their-nodes/
+  library.json          the manifest: name, author, license, which app it was made with
+  index.json            the discovery entries agents read first (one per node, optional but wanted)
+  gaussian-blur/        one node folder, exactly as under NodeLibrary/
+    node-contract.json
+    Node.swift
+    Node.js             optional, for browser projects
+    Card.swift          optional, a custom card
+    CARD.md             optional, what it does and the prompt that made it
+  edge-detect/
+```
+
+The fastest way to start is to ask the Director for one: **"make me a library called Their Nodes,
+MIT, by me"**, then **"save the blur into it"**. That runs `ui_create_library` and
+`ui_save_to_library { library }`, which writes the manifest, the node folder and the index entry
+correctly the first time. Doing it by hand is the same three files.
+
+Put the folder under version control and it is shareable as-is: **Add Library** takes a link to it,
+and everyone who adds it gets the nodes pinned to the commit you published.
+
+### `library.json`
+
+Only `name` is required. Everything else is what makes a library safe to hand to someone else, so
+fill it in before you publish:
+
+```json
+{
+  "name": "Their Nodes",
+  "description": "Feedback and glitch effects for live visuals.",
+  "author": "Their Name",
+  "license": "MIT",
+  "homepage": "https://github.com/someone/their-nodes",
+  "madeWith": "0.4.0",
+  "minAppVersion": "0.4.0",
+  "abi": 9
+}
+```
+
+| field | what it is for |
+| --- | --- |
+| `name` | What the library is called in the panel, the chips and Settings. **Required.** |
+| `description` | One line on what the library is for. |
+| `author` | Who made it. A person or a project, not an id. |
+| `license` | An SPDX id (`MIT`, `AGPL-3.0-only`). A node is code somebody copies into their own project, so a library with no license says nothing about whether they may. |
+| `homepage` | Where to read the source or file an issue. |
+| `madeWith` | The SubjectiveZero this was written and last tested against. Advisory, and the first thing to read when a node misbehaves on a much later build. |
+| `minAppVersion` | The earliest SubjectiveZero that can run these nodes. **The one field that is enforced**: an older app refuses the library outright, rather than failing every node one at a time. |
+| `abi` | The node ABI you wrote against ([RUNTIME.md](RUNTIME.md)). Shown, never checked: the app has no ABI number of its own to compare with. |
+
+Publishing a library with no `author` or `license` still works, and says so: whoever receives it
+cannot tell who wrote it or whether they may use it.
+
+### For agents
+
+Four tools, in the order they are usually needed:
+
+- `ui_create_library { name, author?, license?, description?, folder? }` - a new empty library,
+  registered and visible in the panel immediately. Ask the user who to credit and under what
+  license; never invent either.
+- `ui_save_to_library { node, name?, description?, library? }` - put a built node in it. Without
+  `library` the node goes to **My Library**, which is the right answer for almost every save.
+- `ui_add_library { link | folder }` - add somebody else's. Its nodes are code that will run on this
+  Mac, so add **only** the library the user named or linked.
+- `ui_publish_library` - send My Library where the user set it to publish.
+
+A library fetched from a link **cannot be saved into**: the next update would overwrite whatever was
+written there. Save to My Library, or to a library the user created.
+
 ## Static and fast by design
 
 The library is a set of **plain files on disk** - no database, no indexer, no embeddings. Search is

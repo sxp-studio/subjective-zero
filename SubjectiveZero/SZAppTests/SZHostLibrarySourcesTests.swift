@@ -95,6 +95,92 @@ struct SZHostLibrarySourcesTests {
         #expect(try host.addLibraryFolder(at: folder).name == "bare-nodes")
     }
 
+    // MARK: - making one
+
+    @Test func creatingALibraryWritesAManifestAndRegistersIt() throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let host = try Self.host(in: dir)
+
+        let folder = dir.appending(path: "new-library")
+        let made = try host.createLibrary(name: "Their Nodes", author: "Someone", license: "MIT",
+                                          description: "Glitch effects", at: folder)
+
+        #expect(made.name == "Their Nodes")
+        #expect(made.kind == .folder)
+        #expect(host.addedLibraries.contains { $0.key == made.key })
+
+        // The manifest is on disk, readable, and carries what a stranger would need.
+        let manifest = try #require(SZHost.libraryManifest(at: folder))
+        #expect(manifest.name == "Their Nodes")
+        #expect(manifest.author == "Someone")
+        #expect(manifest.license == "MIT")
+        #expect(manifest.description == "Glitch effects")
+        #expect(manifest.madeWith == SZHost.appVersion)      // which app made it, recorded for us
+        #expect(manifest.missingForSharing.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: folder.appending(path: "index.json").path))
+    }
+
+    @Test func aNewLibraryNeedsANameAndAnEmptyPlaceToLive() throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let host = try Self.host(in: dir)
+
+        #expect(throws: (any Error).self) { try host.createLibrary(name: "   ") }
+        // Never write into a folder that already holds something.
+        let occupied = try Self.libraryFolder(in: dir, named: "occupied")
+        #expect(throws: (any Error).self) { try host.createLibrary(name: "Nope", at: occupied) }
+    }
+
+    @Test func savingCanNameALibraryButNotOneFetchedFromALink() throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let host = try Self.host(in: dir)
+        let made = try host.createLibrary(name: "Their Nodes", at: dir.appending(path: "new-library"))
+
+        // A library the user made is theirs to write into; My Library always is.
+        #expect(host.writableLibraries.map(\.source).contains(made.source))
+        #expect(host.writableLibraries.first?.source == .mine)
+        #expect(throws: Never.self) { try host.writableLibraryURL(made.source) }
+
+        // One fetched from a link is not: the next update would overwrite whatever we put there.
+        host.addedLibraries.append(SZAddedLibrary(key: "fetched", name: "Fetched", kind: .link,
+                                                  origin: "https://example.com/a/b"))
+        #expect(throws: (any Error).self) { try host.writableLibraryURL(SZLibrarySourceID(rawValue: "fetched")) }
+        #expect(!host.writableLibraries.contains { $0.source.rawValue == "fetched" })
+    }
+
+    // MARK: - what the manifest is allowed to refuse
+
+    @Test func aLibraryForANewerAppIsRefusedWithItsReason() throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let host = try Self.host(in: dir)
+        let folder = try Self.libraryFolder(in: dir, named: "future-nodes")
+        try SZHost.writeManifest(SZLibraryManifest(name: "Future Nodes", minAppVersion: "99.0.0"),
+                                 to: folder)
+
+        // Refused once, by name, instead of every node failing to build one at a time. (A dev build
+        // has no version to judge, so this only bites a real one.)
+        if SZHost.appVersion != "dev" {
+            #expect(throws: (any Error).self) { try host.addLibraryFolder(at: folder) }
+            #expect(host.addedLibraries.isEmpty)
+        }
+    }
+
+    @Test func aManifestTravelsWithTheLibraryIntoTheSettingsRow() throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let host = try Self.host(in: dir)
+        let folder = try Self.libraryFolder(in: dir, named: "their-nodes")
+        try SZHost.writeManifest(SZLibraryManifest(name: "Their Nodes", author: "Someone",
+                                                   license: "MIT", madeWith: "0.4.0"), to: folder)
+
+        let added = try host.addLibraryFolder(at: folder)
+        #expect(added.manifest?.author == "Someone")
+        #expect(added.provenance == "by Someone · MIT · made with 0.4.0")
+    }
+
     // MARK: - a library that is not there
 
     @Test func aLibraryWhoseFolderIsGoneIsSkippedNotDropped() throws {

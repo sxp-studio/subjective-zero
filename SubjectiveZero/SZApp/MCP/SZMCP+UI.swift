@@ -47,6 +47,15 @@ extension SZHostBridge {
                     "node": ["type": "string", "description": "node id (UUID)"],
                     "name": ["type": "string", "description": "the entry's name (default: the node's title)"],
                     "description": ["type": "string", "description": "one line on what it does (default: the node's summary)"],
+                    "library": ["type": "string", "description": "which library to save into, from ui_create_library (default: the user's own, My Library)"],
+                 ]),
+            tool("ui_create_library", "Make a new, empty library the user can save nodes into and publish later. Give it a name, and the author and license if the user says who they are and how their nodes may be used (a library with neither cannot honestly be shared). It appears in the Library panel straight away, and `ui_save_to_library { library }` puts nodes in it. Returns {library, id, folder}.",
+                 properties: [
+                    "name": ["type": "string", "description": "what the library is called"],
+                    "author": ["type": "string", "description": "who made it, a person or a project"],
+                    "license": ["type": "string", "description": "an SPDX id like MIT or AGPL-3.0-only"],
+                    "description": ["type": "string", "description": "one line on what it is for"],
+                    "folder": ["type": "string", "description": "where to put it (default: beside the other libraries)"],
                  ]),
             tool("ui_add_library", "Add a library of nodes so the user can place them: a link to a repository (https://github.com/someone/their-nodes, or the owner/repo shorthand), or the path to a folder on this Mac. Fetching one runs its author's code on this Mac later, so only do this when the user asked for that library by name or link. Returns {library, id, nodes}.",
                  properties: [
@@ -213,6 +222,7 @@ extension SZHostBridge {
         case "ui_duplicate_node":  return try uiDuplicateNode(arguments)
         case "ui_apply_to_copies": return try uiApplyToCopies(arguments)
         case "ui_save_to_library": return try uiSaveToLibrary(arguments)
+        case "ui_create_library":  return try uiCreateLibrary(arguments)
         case "ui_connect":         return try uiConnect(arguments)
         case "ui_disconnect":      return try uiDisconnect(arguments)
         case "ui_update_node":     return try uiUpdateNode(arguments)
@@ -1008,10 +1018,25 @@ extension SZHostBridge {
             let value = arguments.string(key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return value.isEmpty ? nil : value
         }
+        let into = given("library").map { SZLibrarySourceID(rawValue: $0) }
         let ref = try host.saveNodeToLibrary(node: id, name: given("name") ?? preview.name,
-                                             line: given("description") ?? preview.line, origin: .agent)
-        guard case .library(_, let entryID) = ref else { throw SZMCPError.message("save failed") }
-        return SZJSONRPC.encode(["library": SZLibrarySourceID.mine.displayName, "id": entryID, "updated": preview.updates])
+                                             line: given("description") ?? preview.line,
+                                             into: into, origin: .agent)
+        guard case .library(let source, let entryID) = ref else { throw SZMCPError.message("save failed") }
+        return SZJSONRPC.encode(["library": host.libraryName(source), "id": entryID, "updated": preview.updates])
+    }
+
+    /// Make a new, empty library (SZHost+LibrarySources).
+    func uiCreateLibrary(_ arguments: [String: Any]) throws -> String {
+        func given(_ key: String) -> String? {
+            let value = arguments.string(key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return value.isEmpty ? nil : value
+        }
+        guard let name = given("name") else { throw SZMCPError.message("ui_create_library needs `name`") }
+        let folder = given("folder").map { URL(filePath: ($0 as NSString).expandingTildeInPath) }
+        let library = try host.createLibrary(name: name, author: given("author"), license: given("license"),
+                                             description: given("description"), at: folder)
+        return SZJSONRPC.encode(["library": library.name, "id": library.key, "folder": library.origin])
     }
 
     /// Add a library from a link or a folder (SZHost+LibrarySources).

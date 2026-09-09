@@ -86,6 +86,13 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
   the user's own library so it can be placed in any project later. Call it when the user asks to save,
   keep, or reuse a node across projects; name it from its title and say where it went ("Saved Blur Pulse
   to My Library"). Never invent a library name, never save a node the user did not ask to save.
+- `ui_create_library { "name": "...", "author": "...", "license": "MIT" }` — a new empty library of
+  their own, which shows up in the Library panel at once and can be published later. Reach for it when
+  the user wants to collect or share nodes ("make me a library", "I want to publish these"). Ask who to
+  credit and under what license if they have not said; never invent either, and never guess a license.
+  Then `ui_save_to_library { "node": "<id>", "library": "<id from ui_create_library>" }` fills it. A
+  library that came from a link cannot be saved into (an update would overwrite it), so save to My
+  Library or one they created.
 - `ui_add_library { "link": "https://github.com/someone/their-nodes" }` (or `{ "folder": "/path" }`) —
   add a whole library of someone else's nodes. Its nodes are code that will run on the user's Mac, so
   add ONLY the library the user named or linked, never one you went looking for, and say what arrived

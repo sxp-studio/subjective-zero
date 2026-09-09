@@ -14,8 +14,10 @@ extension SZHost {
         var isDir: ObjCBool = false
         if fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue { return url }
         try fm.createDirectory(at: url, withIntermediateDirectories: true)
-        try JSONSerialization.data(withJSONObject: ["name": SZLibrarySourceID.mine.displayName], options: [.prettyPrinted])
-            .write(to: url.appending(path: "library.json"))
+        // A real manifest from the start, so publishing it later is a matter of filling in the author
+        // and the license rather than learning the file exists.
+        try Self.writeManifest(SZLibraryManifest(name: SZLibrarySourceID.mine.displayName,
+                                                 madeWith: Self.appVersion), to: url)
         try SZJSON.encoder().encode(SZLibraryCurationFile(nodes: [])).write(to: url.appending(path: "index.json"))
         Self.git(["init", "-q"], in: url)
         return url
@@ -25,7 +27,10 @@ extension SZHost {
     /// a taken name gets -2, -3): contract with file inputs cleared, every built source, card, CARD.md with
     /// the prompt. The node then records the entry as its origin.
     @discardableResult
+    /// `into` names a library the user can write to (one they created or added as a folder); without
+    /// one the node goes to My Library, which is the answer for almost every save.
     func saveNodeToLibrary(node id: SZNodeID, name: String, line: String,
+                           into target: SZLibrarySourceID? = nil,
                            origin: SZMutationOrigin = .user) throws -> SZLibraryRef {
         if let denial = fenceDenial(nodes: [id], origin: origin) { throw SZMCPError.message(denial) }
         guard let projectURL = loadedProjectURL else { throw SZMCPError.message("no project loaded") }
@@ -40,9 +45,10 @@ extension SZHost {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw SZMCPError.message("The node needs a name") }
 
-        let library = try ensureMyLibrary()
+        let destination = target ?? .mine
+        let library = try writableLibraryURL(destination)
         let entryID: String
-        if node.librarySource == .mine, let own = node.libraryID {
+        if node.librarySource == destination, let own = node.libraryID {
             entryID = own
         } else {
             let base = SZLibrarySlug.make(name)
@@ -95,14 +101,34 @@ extension SZHost {
         store.mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
             project.graph.nodes[i].libraryID = entryID
-            project.graph.nodes[i].librarySource = .mine
+            project.graph.nodes[i].librarySource = destination
             if let liveBytes { project.graph.nodes[i].copiedHash = Self.contentHash(liveBytes) }
         }
         if let project = store.project { try SZProjectIO.save(project, to: projectURL) }
         noteMutation("saved node to library", [name], origin: origin)
         refreshLibraryItems()
-        status = "Saved \(name) to \(SZLibrarySourceID.mine.displayName)"
-        return .library(source: .mine, id: entryID)
+        status = "Saved \(name) to \(libraryName(destination))"
+        return .library(source: destination, id: entryID)
+    }
+
+    /// The folder a save may write into. My Library is created on demand; an added folder library is
+    /// the user's own and may be written to; a library fetched from a link is not, because the next
+    /// update would overwrite whatever we put there.
+    func writableLibraryURL(_ source: SZLibrarySourceID) throws -> URL {
+        if source == .mine { return try ensureMyLibrary() }
+        guard let library = addedLibraries.first(where: { $0.key == source.rawValue }) else {
+            throw SZMCPError.message("There is no library called \(source.rawValue)")
+        }
+        guard library.kind == .folder else {
+            throw SZMCPError.message("\(library.name) came from a link, so it updates from there and can't be saved into. Save to My Library instead.")
+        }
+        return addedLibraryURL(library)
+    }
+
+    /// Libraries a save can name: My Library, plus every folder library the user added.
+    var writableLibraries: [(source: SZLibrarySourceID, name: String)] {
+        [(.mine, SZLibrarySourceID.mine.displayName)]
+            + addedLibraries.filter { $0.kind == .folder }.map { ($0.source, $0.name) }
     }
 
     /// What the Save to Library sheet opens with: the node's title and summary, whether the save would

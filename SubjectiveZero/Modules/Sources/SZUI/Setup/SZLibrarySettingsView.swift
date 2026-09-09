@@ -121,9 +121,12 @@ public struct SZLibrarySettingsView: View {
         let key = library.key
         let working = busy.contains(key)
         let gone = missing.contains(key)
+        // Who made it, under what license, and which app it was made with: what a person needs to
+        // decide whether to keep running someone else's code.
+        let detail = gone ? "This library isn't where it was" : nodes(addedCounts[key] ?? 0)
         return row(title: library.name,
-                   detail: gone ? "This library isn't where it was" : nodes(addedCounts[key] ?? 0),
-                   path: library.kind == .folder ? library.origin : library.origin,
+                   detail: [detail, library.provenance].compactMap { $0 }.joined(separator: " · "),
+                   path: library.origin,
                    note: notes[key] ?? library.revisionNote) {
             if library.kind == .folder {
                 Button("Show in Finder") { onReveal(library) }

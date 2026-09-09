@@ -35,6 +35,12 @@ extension SZHost {
         addedLibraries.first { $0.key == source.rawValue }?.name ?? source.displayName
     }
 
+    /// This build's version ("0.4.0"), or "dev" when it has none. What a new library records as the
+    /// SubjectiveZero it was made with, and what an added library's `minAppVersion` is checked against.
+    nonisolated static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
+
     // MARK: reading a library's own manifest
 
     /// A library's `library.json`. Missing or unreadable is not fatal: a plain folder of node folders
@@ -44,10 +50,53 @@ extension SZHost {
         return try? JSONDecoder().decode(SZLibraryManifest.self, from: data)
     }
 
+    /// Write a library's `library.json`, pretty-printed and key-sorted so a person can read the file
+    /// and a commit diff shows only what actually changed.
+    nonisolated static func writeManifest(_ manifest: SZLibraryManifest, to root: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try encoder.encode(manifest).write(to: root.appending(path: "library.json"))
+    }
+
     /// What makes a folder a library: at least one node folder in it. Checked before anything is
     /// remembered, so a mistyped path fails at the point the person can still fix it.
     nonisolated static func isLibraryFolder(_ root: URL) -> Bool {
         !libraryCatalog(root: root).isEmpty
+    }
+
+    // MARK: create
+
+    /// Make a new, empty library and add it: a folder with a `library.json` naming its author and
+    /// license, an empty index, and a repository so it can be published later. `folder` puts it where
+    /// the user wants; without one it goes beside the fetched libraries under Application Support.
+    @discardableResult
+    func createLibrary(name: String, author: String? = nil, license: String? = nil,
+                       description: String? = nil, at folder: URL? = nil) throws -> SZAddedLibrary {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw SZMCPError.message("A library needs a name") }
+        let key = SZLibraryKey.make(from: name, taken: takenLibraryKeys)
+        let root = folder ?? fetchedLibraryURL(key: key)
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: root.path, isDirectory: &isDir) {
+            guard isDir.boolValue else { throw SZMCPError.message("There is a file at \(root.path)") }
+            guard (try? fm.contentsOfDirectory(atPath: root.path))?.isEmpty != false else {
+                throw SZMCPError.message("That folder already has something in it")
+            }
+        }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let manifest = SZLibraryManifest(name: name, description: description, author: author,
+                                         license: license, madeWith: Self.appVersion)
+        try Self.writeManifest(manifest, to: root)
+        try SZJSON.encoder().encode(SZLibraryCurationFile(nodes: [])).write(to: root.appending(path: "index.json"))
+        SZHost.git(["init", "-q"], in: root)
+        SZHost.git(["add", "-A"], in: root)
+        SZHost.git(["commit", "-m", "Start \(name)"], in: root)
+
+        let library = SZAddedLibrary(key: key, name: name, kind: .folder, origin: root.path,
+                                     manifest: manifest)
+        register(library)
+        return library
     }
 
     // MARK: add
@@ -66,9 +115,11 @@ extension SZHost {
         guard Self.isLibraryFolder(url) else {
             throw SZMCPError.message("That folder has no nodes in it")
         }
-        let name = Self.libraryManifest(at: url)?.name ?? url.lastPathComponent
+        let manifest = Self.libraryManifest(at: url)
+        if let refusal = manifest?.refusal(appVersion: Self.appVersion) { throw SZMCPError.message(refusal) }
+        let name = manifest?.name ?? url.lastPathComponent
         let library = SZAddedLibrary(key: SZLibraryKey.make(from: name, taken: takenLibraryKeys),
-                                     name: name, kind: .folder, origin: url.path)
+                                     name: name, kind: .folder, origin: url.path, manifest: manifest)
         register(library)
         return library
     }
@@ -100,10 +151,17 @@ extension SZHost {
             try? fm.removeItem(at: folder)
             throw SZMCPError.message("There are no nodes in that library")
         }
-        let name = Self.libraryManifest(at: folder)?.name ?? link.shortName
+        let manifest = Self.libraryManifest(at: folder)
+        // Checked before it is remembered, and the clone is thrown away: an app too old for the
+        // library would fail every node one at a time instead of saying so once, here.
+        if let refusal = manifest?.refusal(appVersion: Self.appVersion) {
+            try? fm.removeItem(at: folder)
+            throw SZMCPError.message(refusal)
+        }
+        let name = manifest?.name ?? link.shortName
         let head = await Self.revision(in: folder)
         let library = SZAddedLibrary(key: key, name: name, kind: .link, origin: link.url,
-                                     revision: head?.sha, revisionNote: head?.note)
+                                     revision: head?.sha, revisionNote: head?.note, manifest: manifest)
         register(library)
         return library
     }
@@ -181,7 +239,10 @@ extension SZHost {
         guard checkout.ok else { throw SZMCPError.message("Couldn't update \(addedLibraries[index].name)") }
         addedLibraries[index].revision = update.revision
         addedLibraries[index].revisionNote = update.note
-        if let manifest = Self.libraryManifest(at: folder) { addedLibraries[index].name = manifest.name }
+        if let manifest = Self.libraryManifest(at: folder) {
+            addedLibraries[index].name = manifest.name
+            addedLibraries[index].manifest = manifest
+        }
         persistAppState()
         refreshLibraryItems()
         status = "Updated \(addedLibraries[index].name): \(update.summary)"
@@ -204,6 +265,12 @@ extension SZHost {
         guard push.ok else { throw SZMCPError.message(Self.reachFailure(push.output)) }
         let where_ = remote.output.trimmingCharacters(in: .whitespacesAndNewlines)
         status = "Published My Library"
+        // Not a refusal: it is published either way, but somebody receiving it cannot tell who wrote
+        // it or whether they may use it, and this is the moment that starts to matter.
+        let missing = (Self.libraryManifest(at: folder) ?? SZLibraryManifest(name: "")).missingForSharing
+        if !missing.isEmpty {
+            status = "Published My Library. It still has no \(missing.joined(separator: " and ")) in its library.json."
+        }
         return where_
     }
 

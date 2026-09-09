@@ -39,6 +39,8 @@ public struct SZLibraryPanel: View {
     @State private var detailHeightAtDragStart: CGFloat = 0
 
     private static let rowHeight: CGFloat = 26
+    /// Room at the list's trailing edge for the overlay scroller to sit in.
+    private static let scrollerGutter: CGFloat = 11
     /// Two lines of summary under the title, which is what most nodes need.
     public static let defaultDetailHeight: CGFloat = 58
     private static let detailRange: ClosedRange<CGFloat> = 34...260
@@ -71,8 +73,7 @@ public struct SZLibraryPanel: View {
             if let note = model.offPlatformNote { offPlatformNote(note) }
             if model.showsSourceChips { sourceChips }
             list
-            detailDivider
-            detail
+            detailSection
             footer
         }
         .padding(8)
@@ -179,6 +180,8 @@ public struct SZLibraryPanel: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 24)
                 } else {
+                    // The overlay scroller floats over the content; without this gutter it sits on
+                    // top of a row's Add button and clips the section counts.
                     LazyVStack(alignment: .leading, spacing: 1, pinnedViews: []) {
                         ForEach(model.sections) { section in
                             if let group = section.group {
@@ -191,6 +194,7 @@ public struct SZLibraryPanel: View {
                             }
                         }
                     }
+                    .padding(.trailing, Self.scrollerGutter)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -284,6 +288,22 @@ public struct SZLibraryPanel: View {
 
     // MARK: detail strip
 
+    /// The description and its grab strip on one darker ground, bled past the panel's padding to
+    /// both edges: a separate surface, not more list.
+    private var detailSection: some View {
+        VStack(spacing: 0) {
+            detailDivider
+            detail
+                .padding(.horizontal, 8)
+                .padding(.top, 6)
+        }
+        .background(Color.black.opacity(0.22))
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+        }
+        .padding(.horizontal, -8)
+    }
+
     /// The grab strip over the description: drag it up for more room, double click to put it back.
     private var detailDivider: some View {
         SZSidebarDivider(axis: .horizontal,
@@ -294,7 +314,6 @@ public struct SZLibraryPanel: View {
                          },
                          onDoubleClick: { detailHeight = Self.defaultDetailHeight })
             .frame(height: 7)
-            .overlay(Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1))
             .onChange(of: detailHeight) { _, new in onDetailHeightChanged(new) }
     }
 

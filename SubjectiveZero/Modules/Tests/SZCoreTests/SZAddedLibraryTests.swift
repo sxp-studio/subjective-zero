@@ -42,6 +42,47 @@ struct SZAddedLibraryTests {
                 == "their-nodes-3")
     }
 
+    @Test func versionsCompareByFieldNotByText() {
+        // The reason a text compare will not do: "0.10.0" is newer than "0.9.0" but sorts before it.
+        #expect(SZAppVersionOrder.atLeast("0.10.0", "0.9.0"))
+        #expect(!SZAppVersionOrder.atLeast("0.9.0", "0.10.0"))
+        #expect(SZAppVersionOrder.atLeast("0.4.0", "0.4.0"))
+        #expect(SZAppVersionOrder.atLeast("1.0", "0.9.9"))
+        #expect(SZAppVersionOrder.atLeast("0.4", "0.4.0"))          // missing fields are zero
+        #expect(SZAppVersionOrder.atLeast("0.5.0-beta.2", "0.5.0")) // a pre-release suffix is ignored
+        #expect(SZAppVersionOrder.atLeast("nonsense", "0.0.0"))     // unparseable never blocks anything
+    }
+
+    @Test func onlyMinAppVersionRefusesALibrary() {
+        let plain = SZLibraryManifest(name: "Their Nodes")
+        #expect(plain.refusal(appVersion: "0.4.0") == nil)
+
+        let future = SZLibraryManifest(name: "Their Nodes", minAppVersion: "0.9.0")
+        let refusal = try? #require(future.refusal(appVersion: "0.4.0"))
+        #expect(refusal?.contains("0.9.0") == true && refusal?.contains("0.4.0") == true)
+        #expect(future.refusal(appVersion: "0.9.0") == nil)
+        #expect(future.refusal(appVersion: "1.0.0") == nil)
+        // A dev build has no version to be judged against, so it is never told it is too old.
+        #expect(future.refusal(appVersion: "dev") == nil)
+        // madeWith and abi are advisory: neither ever refuses.
+        #expect(SZLibraryManifest(name: "N", madeWith: "9.9.9", abi: 99).refusal(appVersion: "0.4.0") == nil)
+    }
+
+    @Test func aLibraryIsNotFitToShareWithoutAnAuthorAndALicense() {
+        #expect(SZLibraryManifest(name: "N").missingForSharing == ["an author", "a license"])
+        #expect(SZLibraryManifest(name: "N", author: "Someone").missingForSharing == ["a license"])
+        #expect(SZLibraryManifest(name: "N", author: "", license: "").missingForSharing.count == 2)
+        #expect(SZLibraryManifest(name: "N", author: "Someone", license: "MIT").missingForSharing.isEmpty)
+    }
+
+    @Test func provenanceNamesOnlyWhatTheAuthorFilledIn() {
+        #expect(SZAddedLibrary(key: "k", name: "N", kind: .folder, origin: "/p").provenance == nil)
+        let full = SZAddedLibrary(key: "k", name: "N", kind: .folder, origin: "/p",
+                                  manifest: SZLibraryManifest(name: "N", author: "Someone",
+                                                              license: "MIT", madeWith: "0.4.0", abi: 9))
+        #expect(full.provenance == "by Someone · MIT · made with 0.4.0 · node format v9")
+    }
+
     @Test func anUpdateSaysOnlyWhatChanged() {
         #expect(SZLibraryUpdate(revision: "a", note: "", added: [], changed: [], removed: []).isEmpty)
         #expect(SZLibraryUpdate(revision: "a", note: "", added: [], changed: [], removed: []).summary
