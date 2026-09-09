@@ -10,6 +10,8 @@
 import SwiftUI
 
 struct SZCanvasContextMenuView: View {
+    /// What the thing under the pointer IS, read not clicked, so it stays out of the row count.
+    let note: String?
     let suggestions: [SZContextSuggestion]
     let actions: [SZContextAction]
     let freeTextPlaceholder: String
@@ -31,6 +33,17 @@ struct SZCanvasContextMenuView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
+            if let note {
+                Text(note)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 6)
+                    .padding(.bottom, 4)
+                menuDivider
+            }
             suggestionRows
             freeTextRow
             if !actions.isEmpty {

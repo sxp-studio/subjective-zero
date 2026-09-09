@@ -84,7 +84,7 @@ overlays: a binary split tree
 │ │ Effects   │ │  ●Camera ─▶ ●Grayscale   │  │  run strip    │ │
 │ │ Audio …   │ │            [HUD capsule] │  │  composer     │ │
 │ └───────────┘ └──────────────────────────┘  └───────────────┘ │
-└────────────────────────────────────────────────────────────┘
+└───────────────────────────────────────────────────────────────┘
     (default arrangement - every panel can move)
 ```
 

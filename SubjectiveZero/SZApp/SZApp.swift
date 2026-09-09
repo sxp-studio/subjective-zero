@@ -1050,6 +1050,7 @@ struct SZApp: App {
                               onDuplicateNode: { host.duplicateNode($0) },
                               onSaveNodeToLibrary: { host.saveToLibraryNode = $0 },
                               applyToCopiesCount: { host.applyToCopiesCount($0) },
+                              nodeProvenance: { host.nodeProvenance($0) },
                               onApplyToCopies: { host.applyToCopies($0) },
                               onVisibleCenterChanged: { host.canvasVisibleCenter = $0 })
         case .library:

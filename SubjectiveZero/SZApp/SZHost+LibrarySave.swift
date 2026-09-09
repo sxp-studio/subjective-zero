@@ -95,7 +95,10 @@ extension SZHost {
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
             project.graph.nodes[i].libraryID = entryID
             project.graph.nodes[i].librarySource = destination
-            if let liveBytes { project.graph.nodes[i].copiedHash = Self.contentHash(liveBytes) }
+            if let liveBytes {
+                project.graph.nodes[i].copiedHash = Self.contentHash(liveBytes)
+                project.graph.nodes[i].copiedTarget = projectTarget
+            }
         }
         if let project = store.project { try SZProjectIO.save(project, to: projectURL) }
         noteMutation("saved node to library", [name], origin: origin)
@@ -120,11 +123,11 @@ extension SZHost {
 
     /// What the Save to Library sheet opens with: the node's title and summary, whether the save would
     /// update an entry the node came from, and which parts differ from that entry (source, ports, card).
-    func saveToLibraryPreview(node id: SZNodeID) -> (name: String, line: String, updates: Bool, changes: [String]) {
+    func saveToLibraryPreview(node id: SZNodeID, into destination: SZLibrarySourceID = .mine) -> (name: String, line: String, updates: Bool, changes: [String]) {
         guard let node = store.project?.graph.node(id: id) else { return ("", "", false, []) }
         let name = node.title
         let line = node.contract?.summary ?? ""
-        guard node.librarySource == .mine, let own = node.libraryID,
+        guard node.librarySource == destination, let own = node.libraryID,
               let folder = libraryFolder(.library(source: .mine, id: own)), let projectURL = loadedProjectURL
         else { return (name, line, false, []) }
         let fm = FileManager.default

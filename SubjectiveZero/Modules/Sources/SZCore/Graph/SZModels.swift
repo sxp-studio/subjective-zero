@@ -319,6 +319,9 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// Hash of the source file as it was copied, from a library entry or another node. Against the live
     /// file it tells an untouched copy from an edited one.
     public var copiedHash: String?
+    /// Which platform's file `copiedHash` was taken from. Without it, switching target makes every
+    /// copy look edited: the live hash would be of the other platform's source.
+    public var copiedTarget: SZProjectTarget?
 
     /// What the card renders between header and rows (preview thumbnail / the node's custom card / nothing).
     /// `nil` = unset; the editor applies its legacy auto-preview fallback. Presentation-only: never affects
@@ -375,7 +378,8 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         libraryID: String? = nil,
         librarySource: SZLibrarySourceID? = nil,
         copiedFrom: SZNodeID? = nil,
-        copiedHash: String? = nil
+        copiedHash: String? = nil,
+        copiedTarget: SZProjectTarget? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -393,6 +397,7 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
         self.librarySource = librarySource
         self.copiedFrom = copiedFrom
         self.copiedHash = copiedHash
+        self.copiedTarget = copiedTarget
     }
 
     /// `sourceMismatch`, `unreadableInputs`, `builtTargets` and `activeTarget` are host state, not document

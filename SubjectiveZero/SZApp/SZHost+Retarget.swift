@@ -71,10 +71,16 @@ extension SZHost {
                 try? fm.removeItem(at: live)
                 try fm.copyItem(at: twin.file, to: live)
                 copied.insert(node.id)
-                // the twin implements what the source platform's build did: same stamp
+                // the twin implements what the source platform's build did: same stamp. The file
+                // just written IS the library's own, so the copy is untouched on this platform too.
+                let hash = (try? Data(contentsOf: live)).map(Self.contentHash)
                 store.mutate { project in
                     guard let i = project.graph.nodes.firstIndex(where: { $0.id == node.id }) else { return }
                     project.graph.nodes[i].buildStamps[target] = project.graph.nodes[i].buildStamps[twin.from]
+                    if let hash, project.graph.nodes[i].copiedHash != nil {
+                        project.graph.nodes[i].copiedHash = hash
+                        project.graph.nodes[i].copiedTarget = target
+                    }
                 }
             } catch {
                 print("[SZHost] library twin copy failed for \(node.title): \(error)")

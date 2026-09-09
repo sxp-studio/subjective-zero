@@ -297,6 +297,11 @@ extension [String: Any] {
     }
     func stringList(_ key: String) -> [String] { (self[key] as? [Any] ?? []).compactMap { $0 as? String } }
     func object(_ key: String) -> [String: Any]? { self[key] as? [String: Any] }
+    /// A string argument with the whitespace trimmed off; nil when it is absent or blank.
+    func trimmed(_ key: String) -> String? {
+        let value = string(key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : value
+    }
     /// A string the user reads on a card (title, summary). An agent occasionally hands these over
     /// HTML-escaped (`Swirl &amp; Trails`, seen 2026-09-06); the app never escapes, so decode the
     /// five XML entities once here. `prompt` stays verbatim, it is the agent's own text.

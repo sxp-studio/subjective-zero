@@ -1002,18 +1002,15 @@ extension SZHostBridge {
         ])
     }
 
-    /// Save a node into My Library (SZHost+LibrarySave); the fence is checked inside the host call.
+    /// Save a node into a library the user can write to, My Library by default (SZHost+LibrarySave);
+    /// the fence is checked inside the host call.
     private func uiSaveToLibrary(_ arguments: [String: Any]) throws -> String {
         guard let id = arguments.uuid("node") else { throw SZMCPError.message("ui_save_to_library needs `node` (UUID)") }
         guard host.store.project?.graph.node(id: id) != nil else { throw SZMCPError.message("no node \(id)") }
-        let preview = host.saveToLibraryPreview(node: id)
-        func given(_ key: String) -> String? {
-            let value = arguments.string(key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return value.isEmpty ? nil : value
-        }
-        let into = given("library").map { SZLibrarySourceID(rawValue: $0) }
-        let ref = try host.saveNodeToLibrary(node: id, name: given("name") ?? preview.name,
-                                             line: given("description") ?? preview.line,
+        let into = arguments.trimmed("library").map { SZLibrarySourceID(rawValue: $0) }
+        let preview = host.saveToLibraryPreview(node: id, into: into ?? .mine)
+        let ref = try host.saveNodeToLibrary(node: id, name: arguments.trimmed("name") ?? preview.name,
+                                             line: arguments.trimmed("description") ?? preview.line,
                                              into: into, origin: .agent)
         guard case .library(let source, let entryID) = ref else { throw SZMCPError.message("save failed") }
         return SZJSONRPC.encode(["library": host.libraryName(source), "id": entryID, "updated": preview.updates])
@@ -1021,27 +1018,19 @@ extension SZHostBridge {
 
     /// Make a new, empty library (SZHost+LibrarySources).
     func uiCreateLibrary(_ arguments: [String: Any]) throws -> String {
-        func given(_ key: String) -> String? {
-            let value = arguments.string(key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return value.isEmpty ? nil : value
-        }
-        guard let name = given("name") else { throw SZMCPError.message("ui_create_library needs `name`") }
-        let folder = given("folder").map { URL(filePath: ($0 as NSString).expandingTildeInPath) }
-        let library = try host.createLibrary(name: name, author: given("author"), license: given("license"),
-                                             description: given("description"), at: folder)
+        guard let name = arguments.trimmed("name") else { throw SZMCPError.message("ui_create_library needs `name`") }
+        let folder = arguments.trimmed("folder").map { URL(filePath: ($0 as NSString).expandingTildeInPath) }
+        let library = try host.createLibrary(name: name, author: arguments.trimmed("author"), license: arguments.trimmed("license"),
+                                             description: arguments.trimmed("description"), at: folder)
         return SZJSONRPC.encode(["library": library.name, "id": library.key, "folder": library.origin])
     }
 
     /// Add a library from a link or a folder (SZHost+LibrarySources).
     func uiAddLibrary(_ arguments: [String: Any]) async throws -> String {
-        func given(_ key: String) -> String? {
-            let value = arguments.string(key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return value.isEmpty ? nil : value
-        }
         let library: SZAddedLibrary
-        if let folder = given("folder") {
+        if let folder = arguments.trimmed("folder") {
             library = try host.addLibraryFolder(at: URL(filePath: (folder as NSString).expandingTildeInPath))
-        } else if let link = given("link") {
+        } else if let link = arguments.trimmed("link") {
             library = try await host.addLibraryLink(link)
         } else {
             throw SZMCPError.message("ui_add_library needs `link` or `folder`")

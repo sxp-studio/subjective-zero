@@ -50,6 +50,32 @@ extension SZHost {
         persistAppState()
     }
 
+    /// What a node is and where it came from, for the top of its right-click menu. One line, in the
+    /// order a person asks it: what it does, then whose it was, then whether it has drifted.
+    ///
+    /// A placed node otherwise shows a title and its ports and nothing else, which leaves no way to
+    /// tell a library copy from a node an agent wrote — the distinction the whole copies-not-links
+    /// design rests on.
+    func nodeProvenance(_ id: SZNodeID) -> String? {
+        guard let node = store.project?.graph.node(id: id) else { return nil }
+        var parts: [String] = []
+        if let summary = node.contract?.summary, !summary.isEmpty {
+            parts.append(summary.split(separator: ".").first.map { "\($0)." } ?? summary)
+        }
+        switch lineage(of: id)?.origin {
+        case .library(let ref):
+            if case .library(let source, let entry) = ref {
+                parts.append("From \(libraryName(source)): \(libraryTitle(source: source, id: entry))")
+            }
+        case .node(_, let title):
+            parts.append("Copy of \(title)")
+        case nil:
+            if node.kind == .generated, node.prompt?.isEmpty == false { parts.append("Written for this project") }
+        }
+        if lineage(of: id)?.changed == true { parts.append("changed since") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     /// A built node can be duplicated; a prompt node has nothing to copy yet.
     func canDuplicate(_ id: SZNodeID?) -> Bool {
         guard let id, let node = store.project?.graph.node(id: id) else { return false }

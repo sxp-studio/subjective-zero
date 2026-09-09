@@ -395,7 +395,7 @@ final class SZHost {
     /// The node the Save to Library sheet is open for; nil closes it. The preview is computed once here,
     /// not per render of the sheet.
     var saveToLibraryNode: SZNodeID? {
-        didSet { saveToLibraryPreview = saveToLibraryNode.map(saveToLibraryPreview(node:)) }
+        didSet { saveToLibraryPreview = saveToLibraryNode.map { saveToLibraryPreview(node: $0) } }
     }
     internal(set) var saveToLibraryPreview: (name: String, line: String, updates: Bool, changes: [String])?
 
@@ -1258,10 +1258,10 @@ final class SZHost {
     /// Copy a node into the graph as a new `.generated` node, from a library folder or a node already in
     /// the project: source into `nodes/<uuid>/`, contract into the store, `inputDefaults` applied, lineage
     /// recorded, then save and reload. Returns the new id.
-    @discardableResult
     /// `deferBuild` is for the doors a person drives: the card and its Reloading pill paint before
     /// the (blocking) compile starts, so the wait is visible instead of reading as a dead click. Tools
     /// leave it off — they answer for whether the node built, so they need the build to finish here.
+    @discardableResult
     func placeLibraryItem(_ ref: SZLibraryRef, position: SZPoint,
                           inputDefaults: [String: SZPortValue] = [:],
                           origin: SZMutationOrigin = .user,
@@ -1318,6 +1318,7 @@ final class SZHost {
         node.builtTargets = [projectTarget]
         let bytes = try Data(contentsOf: sourceURL)
         node.copiedHash = Self.contentHash(bytes)
+        node.copiedTarget = projectTarget
         let live = SZProjectIO.nodeFolderURL(projectURL: projectURL, nodeID: node.id)
         try fm.createDirectory(at: live, withIntermediateDirectories: true)
         try bytes.write(to: live.appending(path: nodeSourceFileName))
@@ -1337,6 +1338,7 @@ final class SZHost {
             if case .projectNode(let id) = ref, let i = project.graph.nodes.firstIndex(where: { $0.id == id }),
                project.graph.nodes[i].copiedHash == nil {
                 project.graph.nodes[i].copiedHash = node.copiedHash
+                project.graph.nodes[i].copiedTarget = node.copiedTarget
             }
         }
         noteNodeAdded(node.id, origin: origin)

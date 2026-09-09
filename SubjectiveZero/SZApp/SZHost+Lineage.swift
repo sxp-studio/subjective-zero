@@ -52,7 +52,9 @@ extension SZHost {
     }
 
     private func isInSync(_ node: SZNode) -> Bool {
-        guard let hash = node.copiedHash else { return false }
+        // The hash is of one platform's file, so it says nothing about another. A copy whose hash was
+        // taken elsewhere is not evidence of an edit; a target switch restamps it (SZHost+Retarget).
+        guard let hash = node.copiedHash, node.copiedTarget == projectTarget else { return false }
         return liveSourceHash(node.id) == hash
     }
 
@@ -109,12 +111,14 @@ extension SZHost {
                 project.graph.nodes[i].buildStamps[projectTarget] = sourceNode.buildStamps[projectTarget]
                 project.graph.nodes[i].builtTargets.insert(projectTarget)
                 project.graph.nodes[i].copiedHash = hash
+                project.graph.nodes[i].copiedTarget = projectTarget
             }
         }
         // the source is what its copies now hold: in sync with them from here
         store.mutate { project in
             guard let i = project.graph.nodes.firstIndex(where: { $0.id == source }) else { return }
             project.graph.nodes[i].copiedHash = hash
+            project.graph.nodes[i].copiedTarget = projectTarget
         }
         if let project = store.project { try SZProjectIO.save(project, to: projectURL) }
         for id in chosen {

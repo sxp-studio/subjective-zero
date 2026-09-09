@@ -105,6 +105,8 @@ public struct SZNodeEditorPanel: View {
     private let onDuplicateNode: (SZNodeID) -> Void
     private let onSaveNodeToLibrary: (SZNodeID) -> Void
     private let applyToCopiesCount: (SZNodeID) -> Int
+    /// One line saying what this node is and where it came from, for the top of its menu.
+    private let nodeProvenance: (SZNodeID) -> String?
     private let onApplyToCopies: (SZNodeID) -> Void
     /// A prompt node the user just created on the canvas (HUD "+", double-click, wire-drop spawn).
     /// Those adds write the store directly — there is no host funnel for an add — so this callback is
@@ -204,6 +206,7 @@ public struct SZNodeEditorPanel: View {
                 onDuplicateNode: @escaping (SZNodeID) -> Void = { _ in },
                 onSaveNodeToLibrary: @escaping (SZNodeID) -> Void = { _ in },
                 applyToCopiesCount: @escaping (SZNodeID) -> Int = { _ in 0 },
+                nodeProvenance: @escaping (SZNodeID) -> String? = { _ in nil },
                 onApplyToCopies: @escaping (SZNodeID) -> Void = { _ in },
                 onVisibleCenterChanged: ((SZPoint) -> Void)? = nil) {
         self.store = store
@@ -268,6 +271,7 @@ public struct SZNodeEditorPanel: View {
         self.onDuplicateNode = onDuplicateNode
         self.onSaveNodeToLibrary = onSaveNodeToLibrary
         self.applyToCopiesCount = applyToCopiesCount
+        self.nodeProvenance = nodeProvenance
         self.onApplyToCopies = onApplyToCopies
     }
 
@@ -783,11 +787,20 @@ public struct SZNodeEditorPanel: View {
         if !graph.nodes.contains(where: { $0.id == editing }) { editingNodeID = nil }
     }
 
+    /// What the thing under the pointer is, for the top of its menu. Only a node has one: a placed
+    /// node otherwise shows a title and its ports, and nothing about what it does or where it came
+    /// from. The canvas needs no such line.
+    private func contextMenuNote(for target: SZCanvasContextTarget) -> String? {
+        guard case .node(let id) = target else { return nil }
+        return nodeProvenance(id)
+    }
+
     @ViewBuilder
     private var contextMenuOverlay: some View {
         if let session = contextMenu {
             let origin = session.origin(menuSize: contextMenuSize, in: viewSize)
             SZCanvasContextMenuView(
+                note: contextMenuNote(for: session.target),
                 suggestions: session.suggestions,
                 actions: session.actions,
                 freeTextPlaceholder: freeTextPlaceholder(for: session.target),
