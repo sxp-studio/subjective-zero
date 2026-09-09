@@ -21,7 +21,9 @@ public struct SZLibrarySettingsView: View {
     private let onPublish: () async -> String
     private let onAdd: () -> Void
     private let onReveal: (SZAddedLibrary) -> Void
-    private let onCheckForUpdate: (String) async -> String
+    /// The sentence to show, and whether there is actually something to move to. Two values, because
+    /// a failed check has a sentence too and must not arm the Update button.
+    private let onCheckForUpdate: (String) async -> (note: String, hasUpdate: Bool)
     private let onApplyUpdate: (String) async -> String
     private let onRemove: (String) -> Void
 
@@ -42,7 +44,7 @@ public struct SZLibrarySettingsView: View {
                 onPublish: @escaping () async -> String = { "" },
                 onAdd: @escaping () -> Void = {},
                 onReveal: @escaping (SZAddedLibrary) -> Void = { _ in },
-                onCheckForUpdate: @escaping (String) async -> String = { _ in "" },
+                onCheckForUpdate: @escaping (String) async -> (note: String, hasUpdate: Bool) = { _ in ("", false) },
                 onApplyUpdate: @escaping (String) async -> String = { _ in "" },
                 onRemove: @escaping (String) -> Void = { _ in }) {
         self.builtInCount = builtInCount
@@ -140,11 +142,9 @@ public struct SZLibrarySettingsView: View {
             } else {
                 Button(working ? "Checking…" : "Check for Updates") {
                     run(key) {
-                        let note = await onCheckForUpdate(key)
-                        // The host says "up to date" when there is nothing to move to; anything
-                        // else names what would change, which is what Update then applies.
-                        if !note.lowercased().hasPrefix("up to date") { updatable.insert(key) }
-                        return note
+                        let result = await onCheckForUpdate(key)
+                        if result.hasUpdate { updatable.insert(key) }
+                        return result.note
                     }
                 }
                 .disabled(working || gone)

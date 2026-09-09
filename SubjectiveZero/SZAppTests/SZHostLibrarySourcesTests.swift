@@ -231,7 +231,9 @@ struct SZHostLibrarySourcesTests {
 
         // A folder on this Mac is whatever it is right now; saying "up to date" would be a lie.
         await #expect(throws: (any Error).self) { try await host.libraryUpdate(key: added.key) }
-        #expect(await host.checkForLibraryUpdate(key: added.key).contains("folder on this Mac"))
+        let checked = await host.checkForLibraryUpdate(key: added.key)
+        #expect(checked.note.contains("folder on this Mac"))
+        #expect(!checked.hasUpdate)     // a check that could not run must not arm the Update button
     }
 
     // MARK: - what a failure says

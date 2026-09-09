@@ -236,7 +236,13 @@ extension SZHost {
         }
         let folder = addedLibraryURL(addedLibraries[index])
         let checkout = await Self.run(["checkout", "--detach", update.revision], in: folder)
-        guard checkout.ok else { throw SZMCPError.message("Couldn't update \(addedLibraries[index].name)") }
+        guard checkout.ok else {
+            // Usually a file edited by hand in a fetched library: git refuses rather than clobber it.
+            let why = checkout.output.lowercased().contains("would be overwritten")
+                ? " Something in its folder was edited here, and updating would overwrite it."
+                : ""
+            throw SZMCPError.message("Couldn't update \(addedLibraries[index].name).\(why)")
+        }
         addedLibraries[index].revision = update.revision
         addedLibraries[index].revisionNote = update.note
         if let manifest = Self.libraryManifest(at: folder) {
@@ -258,6 +264,14 @@ extension SZHost {
         let remote = await Self.run(["remote", "get-url", "origin"], in: folder)
         guard remote.ok, !remote.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SZMCPError.message("My Library has nowhere to publish to yet. Put it on a host like GitHub and set that as its remote, then this sends your changes there.")
+        }
+        // Saves commit as they go, but a file edited by hand in the library folder (or a save whose
+        // commit could not run) would otherwise sit there and never leave. Publish means "send what is
+        // in the folder", so anything outstanding is committed first.
+        let pending = await Self.run(["status", "--porcelain"], in: folder)
+        if pending.ok, !pending.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await Self.run(["add", "-A"], in: folder)
+            await Self.run(["commit", "-q", "-m", "Update \(SZLibrarySourceID.mine.displayName)"], in: folder)
         }
         let branch = await Self.run(["rev-parse", "--abbrev-ref", "HEAD"], in: folder)
         let name = branch.output.trimmingCharacters(in: .whitespacesAndNewlines)

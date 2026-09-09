@@ -92,10 +92,8 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
 - `ui_add_library { "link": "https://github.com/someone/their-nodes" }` (or `{ "folder": "/path" }`) —
   add a whole library of someone else's nodes. Its nodes are code that will run on the user's Mac, so
   add ONLY the library the user named or linked, never one you went looking for, and say what arrived
-  ("Added Their Nodes, 12 nodes"). `ui_update_library { "library": "<id>" }` reports what a newer
-  version would change and moves nothing; add `"apply": true` only after telling the user what changes.
-  `ui_publish_library` sends My Library where the user set it to publish, and says plainly when they
-  have not set that up. Nodes already on the canvas are copies: updating a library never changes them.
+  ("Added Their Nodes, 12 nodes"). Updating a library to a newer version, and publishing their own,
+  are done by the user in Settings ▸ Library — point them there rather than offering to do it.
 - `ui_toggle_display { "node": "<id>", "port": "<texture output>" }` — point the viewport at the final
   output so the result is visible. Do this once, on the last node's display output, after its contract exists.
   The viewport is the user's live view — never toggle it just to LOOK at a node: `agent_view_frame

@@ -117,7 +117,7 @@ cannot tell who wrote it or whether they may use it.
 
 ### For agents
 
-Four tools, in the order they are usually needed:
+Three tools, in the order they are usually needed:
 
 - `ui_create_library { name, author?, license?, description?, folder? }` - a new empty library,
   registered and visible in the panel immediately. Ask the user who to credit and under what
@@ -126,7 +126,14 @@ Four tools, in the order they are usually needed:
   `library` the node goes to **My Library**, which is the right answer for almost every save.
 - `ui_add_library { link | folder }` - add somebody else's. Its nodes are code that will run on this
   Mac, so add **only** the library the user named or linked.
-- `ui_publish_library` - send My Library where the user set it to publish.
+
+Plus `agent_library_index` to find nodes and `ui_add_library_node` to place one, which is what an
+agent reaches for far more often than any of the above.
+
+**Updating a library and publishing your own are not agent tools.** Both are in Settings ▸ Library,
+because both are deliberate acts with consequences outside the project: one changes which nodes
+exist on this Mac, the other sends code somewhere public. An agent asked to do either should point
+at that screen.
 
 A library fetched from a link **cannot be saved into**: the next update would overwrite whatever was
 written there. Save to My Library, or to a library the user created.

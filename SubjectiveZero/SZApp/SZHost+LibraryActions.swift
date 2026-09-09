@@ -117,19 +117,20 @@ extension SZHost {
         }
     }
 
-    /// Settings ▸ Library ▸ Check for Updates: the sentence for the row, and the offer kept for Update.
-    func checkForLibraryUpdate(key: String) async -> String {
+    /// Settings ▸ Library ▸ Check for Updates: the sentence for the row, whether there is anything to
+    /// move to, and the offer kept for Update. A check that failed says so and arms nothing.
+    func checkForLibraryUpdate(key: String) async -> (note: String, hasUpdate: Bool) {
         do {
             let update = try await libraryUpdate(key: key)
             guard !update.isEmpty else {
                 pendingLibraryUpdates[key] = nil
-                return "Up to date"
+                return ("Up to date", false)
             }
             pendingLibraryUpdates[key] = update
-            return "\(update.summary). \(update.note)"
+            return ("\(update.summary). \(update.note)", true)
         } catch {
             pendingLibraryUpdates[key] = nil
-            return error.localizedDescription
+            return (error.localizedDescription, false)
         }
     }
 

@@ -61,8 +61,6 @@ extension SZHostBridge {
         case "agent_compile_node": return .text(try await agentCompileNode(arguments))
         case "agent_view_frame": return try await agentViewFrame(arguments)
         case "ui_add_library": return .text(try await uiAddLibrary(arguments))
-        case "ui_update_library": return .text(try await uiUpdateLibrary(arguments))
-        case "ui_publish_library": return .text(try await uiPublishLibrary())
         default: return nil
         }
     }
