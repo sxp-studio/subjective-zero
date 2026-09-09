@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The plugs fold's MOTION — the one place the show/hide-plugs action is timed. Geometry lives in
+// The plugs fold's motion — the one place the show/hide-plugs action is timed. Geometry lives in
 // SZNodeLayout (which stays SwiftUI-free), paint in SZNodeCardStyle; this is the curve every moving
 // part obeys: the card's frame and centre, the socket dots gliding to their folded stack, and the
 // wires that land on them. One duration for all of them, so nothing arrives ahead of the rows it

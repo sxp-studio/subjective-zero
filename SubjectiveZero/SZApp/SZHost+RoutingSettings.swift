@@ -196,7 +196,7 @@ extension SZHost {
         upsertRoutingProfile(profile)
     }
 
-    /// Retune a SET position's reasoning effort (nil = the provider's own selection decides).
+    /// Retune a set position's reasoning effort (nil = the provider's own selection decides).
     func setRoutingPositionEffort(profileNamed requested: String?, position: SZRoutingPosition, effort: String?) {
         guard var profile = routingEditedProfile(named: requested),
               !Self.routingStarterNames.contains(profile.name),
@@ -206,7 +206,7 @@ extension SZHost {
         upsertRoutingProfile(profile)
     }
 
-    /// Toggle a SET position's fast mode — the pane only offers this where the routed model
+    /// Toggle a set position's fast mode — the pane only offers this where the routed model
     /// honours it.
     func setRoutingPositionFastMode(profileNamed requested: String?, position: SZRoutingPosition, enabled: Bool) {
         guard var profile = routingEditedProfile(named: requested),
@@ -229,8 +229,8 @@ extension SZHost {
         return name
     }
 
-    /// The pane's toggle. ON restores the remembered profile (else the first, else a fresh
-    /// one); OFF remembers it. Both flips go through `setActiveRoutingProfile`'s mid-run refusal.
+    /// The pane's toggle. On restores the remembered profile (else the first, else a fresh
+    /// one); off remembers it. Both flips go through `setActiveRoutingProfile`'s mid-run refusal.
     func setRoutingEnabled(_ enabled: Bool) {
         if enabled {
             let remembered = routingLastProfileName

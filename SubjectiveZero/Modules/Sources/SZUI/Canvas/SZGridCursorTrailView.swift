@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A cursor-reactive layer over the dotted grid. Near the cursor the grid dots morph into Matrix-style
-// glyphs (katakana / digits / symbols) in the grid's own dim tone — no brightening, no accent — and as the
-// cursor moves on they dim and shrink back into dots along a short trail. Drawn in the SAME SCREEN space as
-// SZDotGridView (a sibling, not inside the camera transform), reading the same zoom/offset so its cells
-// land exactly on the base grid's dots. Purely decorative; the caller disables hit testing.
+// A cursor-reactive layer over the dotted grid: dots near the cursor morph into Matrix-style glyphs (katakana /
+// digits / symbols) in the grid's own dim tone — no brightening, no accent — then dim and shrink back into dots
+// along a short trail. Same screen space as SZDotGridView (a sibling, outside the camera transform), off the same
+// zoom/offset, so its cells land exactly on the base grid's dots. Decorative; the caller disables hit testing.
 //
-// Each cell's intensity is a single MAX over influence sources: the live cursor (full weight) and every
-// recent trail sample (weight fading with age). The max makes a cell ramp UP to its peak as the cursor
-// passes closest and then only ever shrink (decaying purely by time), instead of snapping back down when
-// it reaches the ring's edge. A lit cell paints the canvas background over its base dot so the dot reads as
-// BECOMING the glyph rather than dot + glyph stacked.
+// A cell's intensity is one max over the live cursor (full weight) and every recent trail sample (weight fading
+// with age): a cell ramps to its peak as the cursor passes closest and then only ever shrinks, decaying purely by
+// time, instead of snapping back down at the ring's edge. A lit cell paints the canvas background over its base
+// dot, so the dot reads as becoming the glyph rather than dot + glyph stacked.
 //
-// Performance: the base grid is untouched, and this overlay is idle-dormant. With no trail it's a plain
-// Canvas that redraws only on cursor movement (like the grid redraws on pan). Only while trail samples are
-// still fading is it wrapped in a `TimelineView(.animation)`; a still or off-canvas pointer drains the
-// trail within `fadeWindow` and the timeline dismounts, so it then costs nothing per frame.
+// Performance: the base grid is untouched and this overlay is idle-dormant. With no trail it is a plain Canvas
+// that redraws only on cursor movement; only while trail samples are still fading is it wrapped in a
+// `TimelineView(.animation)`. A still or off-canvas pointer drains the trail within `fadeWindow` and the timeline
+// dismounts, so it then costs nothing per frame.
 import SwiftUI
 
 struct SZGridCursorTrailView: View {
@@ -32,7 +30,7 @@ struct SZGridCursorTrailView: View {
     private struct DotKey: Hashable { let kx: Int; let ky: Int }
 
     @State private var trail: [Sample] = []
-    /// The last RECORDED sample position — the sample gate compares against this, not `trail.last`,
+    /// The last recorded sample position — the sample gate compares against this, not `trail.last`,
     /// because `trail` prunes itself to empty: gating on the pruned array meant any ≥1px jitter of a
     /// resting hand re-appended a sample and remounted the TimelineView for another full fade window,
     /// forever. This survives pruning, so a resting pointer's sub-`sampleGap` jitter appends nothing
@@ -98,7 +96,7 @@ struct SZGridCursorTrailView: View {
 
     // MARK: - Drawing
 
-    /// Draw the whole reactive field in one pass. Every cell's intensity is the MAX over: the live cursor
+    /// Draw the whole reactive field in one pass. Every cell's intensity is the max over: the live cursor
     /// (full weight) and each trail sample (weight fading with age). Overlapping influence collapses to one
     /// draw per cell, so a cell latches its peak as the cursor passes and then decays only with time.
     /// `now == nil` means "no clock" (resting state) — cursor only, no trail.
@@ -152,7 +150,7 @@ struct SZGridCursorTrailView: View {
                 .foregroundColor(.white))
             cache[ch] = resolved
         }
-        // Knock the base grid dot (a layer below) out from under the glyph so it reads as the dot BECOMING
+        // Knock the base grid dot (a layer below) out from under the glyph so it reads as the dot becoming
         // the character, not dot + character stacked. Paints the canvas background over the dot, ramping in
         // faster than the glyph so the two are never both visible.
         let knock = min(1.0, Double(t) * 1.6)

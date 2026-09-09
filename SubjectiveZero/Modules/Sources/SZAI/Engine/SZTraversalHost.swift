@@ -4,7 +4,7 @@
 import Foundation
 import SZCore
 
-/// One full agent turn as the engine orders it: the brief is ALREADY COMPOSED (rendered,
+/// One full agent turn as the engine orders it: the brief is already composed (rendered,
 /// with the conversation above it when the node declares `context`) — the host transports
 /// it to a provider session and reports process truth back. Content routing never rides a
 /// turn; that is what steps are for.
@@ -32,7 +32,7 @@ public struct SZTurnOrder: Sendable {
 
 extension SZAgentRunRequest {
     /// A resolved order as one request. `tools: []` attaches no MCP; nil takes `defaultTools`.
-    /// `packageDirectory` is optional so callers can hand it the host's LIVE project url without
+    /// `packageDirectory` is optional so callers can hand it the host's live project url without
     /// unwrapping: nil falls back to the working directory, which is the right answer for a turn
     /// spawned with no project loaded.
     public init(_ order: SZTurnOrder, prompt: String? = nil, workingDirectory: URL,
@@ -166,19 +166,19 @@ public protocol SZTraversalServing: AnyObject, Sendable {
     /// on. Read fresh like `render`. Only a turn declaring `context: conversation` receives it.
     func conversation() -> String?
     /// Run one full agent turn (session, tools, streaming — all host business). `opened`
-    /// fires as soon as the turn's transcript message exists, BEFORE the agent has said
+    /// fires as soon as the turn's transcript message exists, before the agent has said
     /// anything, carrying that message's id and the envelope the turn is running: a card can
     /// only offer its activity once it knows which message to read, and the model is decided
     /// at dispatch, so waiting for the report would hide both until the turn was already over.
     func runTurn(_ order: SZTurnOrder,
                  opened: @escaping @MainActor @Sendable (UUID, String?) -> Void) async -> SZTurnReport
-    /// Deliver one dispatch set and WAIT for it: send `orders` to the seat, report the
+    /// Deliver one dispatch set and wait for it: send `orders` to the seat, report the
     /// live tally as items land, and return the set's one summary. nil ⇔ cancelled (or no
     /// fleet behind this delivery — the engine records that as a defect).
     func deliver(orders: [SZWorkOrder], to seat: String,
                  progress: @escaping @MainActor @Sendable (SZAgentGraphRun.Tally) -> Void)
         async -> SZSettledSummary?
-    /// Serve one step ask (render its template against the SAME snapshot the evaluation is
+    /// Serve one step ask (render its template against the same snapshot the evaluation is
     /// pinned to — the delivery guarantees it — then route, complete, journal). `slot` is
     /// the asking node's declared ask slot (nil = the app default serves). Throwing
     /// `CancellationError` answers the ask as cancelled; other errors as failed.

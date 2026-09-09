@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Anonymous usage telemetry wiring — roadmap Task 3, following the SZHost+Chat.swift sibling
 // pattern. SZTelemetry (SZApp/Telemetry/) owns the events and the active-only heartbeat; this
-// file owns WHEN they fire: the app-path start (never the --verify-agent-providers path, which
+// file owns when they fire: the app-path start (never the --verify-agent-providers path, which
 // exits before SZApp.main()) and the provider-default hook. Context is read live per call —
 // projects and providers switch at runtime, so nothing is captured at launch.
 import Foundation
@@ -75,7 +75,7 @@ extension SZHost {
 
     /// The user's first ask of the session: a chat send (`scope` director/node/debug) or a Build
     /// (`scope` "build"). `rejected` = refused at the door (host/provider not ready) — the fate of
-    /// the FIRST attempt; a later success shows up as `turn_ended`. Agent-origin sends — the
+    /// the first attempt; a later success shows up as `turn_ended`. Agent-origin sends — the
     /// Director steering a node — are fleet traffic, not a user milestone.
     func trackPromptSentTelemetry(scope: String, providerID: String, rejected: Bool) {
         SZTelemetry.shared.trackMilestone("prompt_sent", detail: [

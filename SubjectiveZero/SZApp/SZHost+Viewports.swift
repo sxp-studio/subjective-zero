@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Viewport surfaces + the render-drive chokepoint. A viewport view reports attached / resized /
-// detached; the host attaches its layer to the runtime, feeds the driver registry, and pushes ONE
+// detached; the host attaches its layer to the runtime, feeds the driver registry, and pushes one
 // decision to the runtime — who drives (renderSize + synchronous present) and what paces the loop:
 //   a driving viewport   → its view's display link
 //   no viewport, thumbs  → the main window's display link, capped ~30 Hz

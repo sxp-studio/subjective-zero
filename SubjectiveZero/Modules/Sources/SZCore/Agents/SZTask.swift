@@ -1,12 +1,12 @@
-// A TASK is the scheduled unit of intent: what was asked, over which nodes, and where it got to.
+// A task is the scheduled unit of intent: what was asked, over which nodes, and where it got to.
 //
 // - The user's words schedule a task; the host admits it when the ledger can claim its work set;
-//   an admitted task runs as ONE agent-graph traversal and records one thread-leading run.
+//   an admitted task runs as one agent-graph traversal and records one thread-leading run.
 // - Tasks with disjoint work sets run at the same time. Overlapping ones queue behind the holder,
 //   FIFO — the ledger's reservation fairness is what orders them, not a scheduler here.
 // - `workSet` may be empty at schedule time ("make me a bloom") and grows as the task's own tooling
 //   creates nodes, through `noteRunCreatedWork`.
-// - The vocabulary, deliberately: a task is SCHEDULED, a run is EXECUTED and RECORDED. One admitted
+// - The vocabulary, deliberately: a task is scheduled, a run is executed and recorded. One admitted
 //   task ↔ one `SZAgentGraphRun` thread, linked by `thread` — that is the strip's deep link.
 import Foundation
 

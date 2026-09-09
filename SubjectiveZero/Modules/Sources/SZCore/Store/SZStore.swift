@@ -13,7 +13,7 @@ public final class SZStore {
 
     /// Chat transcripts keyed by `SZChatScope.key` (a node uuid, "director", or "debug"). Persisted
     /// per scope as .subz sidecars (SZChatTranscriptIO — the host flushes on message completion /
-    /// run end / save / quit and restores on project open; `.debug` stays ephemeral); NOT part of
+    /// run end / save / quit and restores on project open; `.debug` stays ephemeral); not part of
     /// project.json. Mutated through the SZStore+Chat ops; observed by the chat panel and the MCP
     /// surface. `internal(set)` so those same-module ops can write it.
     public internal(set) var chat: [String: [SZChatMessage]] = [:]

@@ -84,7 +84,7 @@ public enum SZRoutingInheritance {
     }
 }
 
-/// One slot's row — a pure view-model. Effort/fast props are resolved against the ROUTED
+/// One slot's row — a pure view-model. Effort/fast props are resolved against the routed
 /// model host-side; empty/false hides those controls.
 public struct SZRoutingPositionRow: Identifiable, Equatable, Sendable {
     public var position: SZRoutingPosition

@@ -2,10 +2,10 @@
 // The custom-card body region: the node's live-output thumbnail as a backdrop (when the contract
 // asks for one), the mounted card's SwiftUI content on top at `.ready`, a spinner while its dylib
 // compiles, a warning chip when the latest edit failed but the previous build still runs, and the
-// error chip + "Hide Custom Card" at `.failed`. The failed frame KEEPS its committed footprint — geometry
+// error chip + "Hide Custom Card" at `.failed`. The failed frame keeps its committed footprint — geometry
 // is graph truth; reverting is an explicit body commit through the provider.
 //
-// Card content arrives as the dylib's root view VALUE (AnyView), not an embedded NSView: it joins
+// Card content arrives as the dylib's root view value (AnyView), not an embedded NSView: it joins
 // this hierarchy as first-class SwiftUI content, so the camera's `.scaleEffect` re-renders it at
 // the effective composite scale every frame. The mount is an observable per-node box (the
 // `SZNodePreviewFrame` pattern): the host writes it, this leaf reads it, so a state/content/backdrop
@@ -27,7 +27,7 @@ public enum SZCardMountState: Equatable, Sendable {
 @MainActor
 public final class SZCardMount {
     public var state: SZCardMountState = .loading
-    /// The dylib's root view VALUE while `.ready`.
+    /// The dylib's root view value while `.ready`.
     public var content: AnyView?
     /// Where the live-output thumbnail sits under the card, in region points (nil = no backdrop).
     public var backdrop: CGRect?
@@ -61,7 +61,7 @@ struct SZCustomCardView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if let rect = mount?.backdrop {
-                // Square: overlay handles sit ON the image corners, and a rounded thumb would put
+                // Square: overlay handles sit on the image corners, and a rounded thumb would put
                 // them over the card background instead of pixels.
                 SZNodePreviewThumb(frame: backdropFrame, cornerRadius: 0)
                     .frame(width: rect.width, height: rect.height)

@@ -3,7 +3,7 @@
 // coding agent (and, once wired, the Director) reasons over to pick a reference node. Pure value types,
 // `Codable`, no Metal/macOS imports.
 //
-// Single source of truth: a node's identity + typed I/O are DERIVED from its `node-contract.json`; only the
+// Single source of truth: a node's identity + typed I/O are derived from its `node-contract.json`; only the
 // fields that can't be (`useWhen`/`avoidWhen`/`purpose`/`tags`/…) are hand-curated in `NodeLibrary/index.json`
 // and merged over the top. So `io` can never drift from the contract — the historic `resolution` bug (an
 // input restated in the index that the contract never declared) can't recur, because the restated copy is
@@ -53,7 +53,7 @@ public struct SZLibraryCurationFile: Codable, Sendable {
     }
 }
 
-/// One assembled Tier-1 record served by `agent_library_index`: a node's identity + typed I/O (DERIVED from
+/// One assembled Tier-1 record served by `agent_library_index`: a node's identity + typed I/O (derived from
 /// its `node-contract.json`) merged with its hand-curated discovery fields. The high-signal shape an agent
 /// reasons over to pick — or reject — a reference node.
 public struct SZLibraryIndexEntry: Codable, Equatable, Sendable {

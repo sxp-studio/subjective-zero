@@ -78,7 +78,7 @@ extension SZStore {
         mutateMessage(messageID, in: scope) { $0.transient = true }
     }
 
-    /// Replace ALL transcripts at once — the project-open restore path (the host feeds it
+    /// Replace all transcripts at once — the project-open restore path (the host feeds it
     /// `SZChatTranscriptIO.loadAll` filtered to live scopes). One @Observable fire.
     public func restoreChat(_ transcripts: [String: [SZChatMessage]]) {
         chat = transcripts

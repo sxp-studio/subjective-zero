@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The agent-graph model. Three node forms: step (compiled code), turn (a mustache brief;
-// ok/error), dispatch (fan out, WAIT, settle onward). Every delivery enters at the node
-// with the reserved id `door`, which must be a STEP — the agent's routing is code the
+// ok/error), dispatch (fan out, wait, settle onward). Every delivery enters at the node
+// with the reserved id `door`, which must be a step — the agent's routing is code the
 // author opens and edits; there is no kind anywhere. One message is one traversal: nothing
 // re-enters a graph.
 //
-// Lives in SZCore (SZUI draws graphs, may not import SZAI). `defects()` checks SHAPE only;
+// Lives in SZCore (SZUI draws graphs, may not import SZAI). `defects()` checks shape only;
 // checks needing pack context (step declarations, templates, seats) live in the loader.
 import Foundation
 
@@ -71,7 +71,7 @@ public struct SZAgentGraph: Sendable, Equatable {
     }
 
     public struct Turn: Codable, Sendable, Equatable {
-        /// The brief template's STEM — `prompts/<brief>.md.mustache`. The template IS the
+        /// The brief template's stem — `prompts/<brief>.md.mustache`. The template is the
         /// body — a turn has no code.
         public var brief: String
         public var session: Session
@@ -104,7 +104,7 @@ public struct SZAgentGraph: Sendable, Equatable {
             /// Continue the scope's existing session (spawning when none exists).
             case resume
         }
-        /// The starting context of a spawned turn — what the engine puts ABOVE the brief.
+        /// The starting context of a spawned turn — what the engine puts above the brief.
         /// A resumed session already holds its conversation, so `context` is a spawn-only
         /// declaration (shape-gated). Open for later values (an origin scope, a limit).
         public enum Context: String, Codable, Sendable {
@@ -124,11 +124,11 @@ public struct SZAgentGraph: Sendable, Equatable {
         public init(to: String) {
             self.to = to
         }
-        /// A dispatch WAITS: the orders go out, the traversal holds at this node while the
+        /// A dispatch waits: the orders go out, the traversal holds at this node while the
         /// set works, and when the last item lands (or the watchdog synthesizes the
         /// stragglers) the node produces `settled` and routes its one edge — or ends the
         /// traversal right here when nothing is wired, which is how "no retry" is spelled.
-        /// A settled edge that loops back MUST be leashed (`maxTraversals`): the leash IS
+        /// A settled edge that loops back must be leashed (`maxTraversals`): the leash is
         /// the retry budget, using the same bound every other loop already speaks.
         public static let outcomes: Set<String> = ["settled"]
     }
@@ -341,7 +341,7 @@ public enum SZAgentGraphDefect: Sendable, Equatable, CustomStringConvertible {
 }
 
 extension SZAgentGraph {
-    /// Shape defects, all of them. Outcomes of `step` nodes are NOT checked here — a step's
+    /// Shape defects, all of them. Outcomes of `step` nodes are not checked here — a step's
     /// outcome set is its compiled declaration's, attached at pack load; the loader repeats
     /// the outcome check with declarations in hand.
     public func defects() -> [SZAgentGraphDefect] {
@@ -443,7 +443,7 @@ extension SZAgentGraph {
         return defects
     }
 
-    /// Cycles in the subgraph of UNBOUNDED edges — a loop that nothing ever leashes. Each
+    /// Cycles in the subgraph of unbounded edges — a loop that nothing ever leashes. Each
     /// cycle is reported once, from its smallest node id.
     private func unboundedCycles() -> [[String]] {
         var adjacency: [String: [String]] = [:]

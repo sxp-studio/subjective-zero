@@ -23,7 +23,7 @@ public enum SZPopoutDockSession {
         }
     }
 
-    /// Every tile's rect for a container of `containerSize` — THE shared layout math for
+    /// Every tile's rect for a container of `containerSize` — the shared layout math for
     /// everything that reasons about the main window's tiles from outside the container view
     /// (dock hit-testing, tear-out/pop-out placement, dock-flight targets): same insets, same
     /// maximize override (the maximized panel owns the whole rect) as the container's renderer.
@@ -61,7 +61,7 @@ public enum SZPopoutDockSession {
     // MARK: - Screen ↔ container conversion
 
     /// A screen point (AppKit, bottom-left origin) → the container's top-left-origin space, given
-    /// the CONTENT view's screen frame and the titlebar safe-area height the container sits under.
+    /// the content view's screen frame and the titlebar safe-area height the container sits under.
     public static func containerPoint(fromScreen point: CGPoint, contentScreenFrame: CGRect,
                                       safeAreaTop: CGFloat) -> CGPoint {
         CGPoint(x: point.x - contentScreenFrame.minX,

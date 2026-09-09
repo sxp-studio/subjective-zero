@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Split / merge as pure structural graph transforms (docs/GRAPH_AND_NODES.md "split/merge as
-// graph transactions"). Methods on the value-type `SZGraph` itself — they ARE operations on a graph,
+// graph transactions"). Methods on the value-type `SZGraph` itself — they are operations on a graph,
 // alongside `node(id:)` — so there's no separate helper noun and no store/actor coupling. Non-mutating
 // (return a reconciled copy) so the store ops (`SZStore.splitNode`/`mergeNodes`) can commit them
 // atomically in one `mutate {…}`; the host wrappers add the disk re-save + runtime reload.
 //
-// These draft only the STRUCTURAL boundary — typed contracts + rewiring — so external type-compat is
-// preserved by construction. The pieces are prompt (dirty) nodes with NO prompt text here: the host
+// These draft only the structural boundary — typed contracts + rewiring — so external type-compat is
+// preserved by construction. The pieces are prompt (dirty) nodes with no prompt text here: the host
 // authors each piece's intent-carrying seed prompt from templates (SZAI) on re-save, and the coding
 // agents author the real title/contract/source at Run.
 import Foundation
@@ -16,7 +16,7 @@ extension SZGraph {
     // MARK: - Split (staged → committed)
     //
     // Two phases so the GUI can show the *original* with a "Splitting" pill while the Director implements
-    // the new stages, then swap in the finished cards (deferred-commit UX). `stageSplit` ADDS the
+    // the new stages, then swap in the finished cards (deferred-commit UX). `stageSplit` adds the
     // stage nodes (with internal wiring + drafted boundary contracts) but leaves the original fully wired
     // and rendering; `commitSplit` rewires the original's external edges to the stages, moves the render
     // endpoint, and removes the original. `split` composes both for the one-shot/structural path + tests.
@@ -93,10 +93,10 @@ extension SZGraph {
               let ordered = orderedChain(set) else { return nil }
         let members = ordered.compactMap { node(id: $0) }
 
-        // Reconcile the boundary. INPUTS: keep every constituent input that ISN'T fed by an INTERNAL
-        // edge — that preserves both externally-fed inputs AND unconnected control knobs (mirror,
+        // Reconcile the boundary. Inputs: keep every constituent input that is not fed by an internal
+        // edge — that preserves both externally-fed inputs and unconnected control knobs (mirror,
         // aspectFit, …), dropping only the internal-boundary inputs (e.g. grayscale's `input` fed by the
-        // camera). Full `SZPort` so the control's type/ui/default survive. OUTPUTS: ports feeding OUTSIDE
+        // camera). Full `SZPort` so the control's type/ui/default survive. Outputs: ports feeding outside
         // the set (+ the render endpoint if it sits on a member).
         var inputs: [SZPort] = [], outputs: [SZPort] = []
         var inSeen = Set<String>(), outSeen = Set<String>()

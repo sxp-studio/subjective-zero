@@ -2,10 +2,10 @@
 // Media files → source-node specs. The rules for "which library node reads this file, and where does its
 // card land" used to live inside the node editor's drop handler, reachable only by a human dragging onto
 // the canvas. They are lifted here so the drop path (SZNodeEditorPanel) and the MCP path
-// (`ui_add_source_node`) share ONE classifier and ONE placement rule rather than drifting apart —
+// (`ui_add_source_node`) share one classifier and one placement rule rather than drifting apart —
 // the same reuse discipline the rest of the `ui_*` surface follows.
 //
-// Pure: classification reads the file EXTENSION only (never disk), so a caller holding a path that may
+// Pure: classification reads the file extension only (never disk), so a caller holding a path that may
 // not exist must check existence itself. A dropped file always exists; an agent-supplied path may not.
 import Foundation
 import SZCore
@@ -21,7 +21,7 @@ public enum SZMediaSource {
     public static func libraryID(for url: URL) -> String? {
         guard let type = UTType(filenameExtension: url.pathExtension) else { return nil }
         if type.conforms(to: .image) { return "image-file" }
-        // Audio must be rejected BEFORE the movie test: `public.audio` conforms to `.audiovisualContent`,
+        // Audio must be rejected before the movie test: `public.audio` conforms to `.audiovisualContent`,
         // so an .mp3 would otherwise land on `video-file`, which has no video track to draw and would
         // take the viewport with it. `.audiovisualContent` still catches video containers that aren't
         // `public.movie`, which is why it can't simply be dropped.
@@ -31,7 +31,7 @@ public enum SZMediaSource {
     }
 
     /// Classify each url and place its card, staggering successive ones down-right from `origin`.
-    /// Non-media files are skipped, and skipping one does NOT leave a gap in the stagger — the offset
+    /// Non-media files are skipped, and skipping one does not leave a gap in the stagger — the offset
     /// counts nodes actually created, matching what a user sees when they drag a folder's worth of mixed
     /// files onto the canvas.
     public static func specs(for urls: [URL], origin: SZPoint)

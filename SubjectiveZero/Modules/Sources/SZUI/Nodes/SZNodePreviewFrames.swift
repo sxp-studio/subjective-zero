@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Live node-preview plumbing: per-node observable frame boxes + the thumb leaf view. The host
 // writes `SZNodePreviewFrame.surface` (~15 Hz, IOSurfaces published by the runtime's preview
-// stream); ONLY `SZPreviewLayerView` reads it, so Observation invalidates that leaf alone — the
+// stream); only `SZPreviewLayerView` reads it, so Observation invalidates that leaf alone — the
 // Equatable-gated card around it never re-renders on a frame tick. The surface goes straight to
 // `CALayer.contents`: a thumb frame is GPU-composited end to end, no CPU pixels anywhere.
 import CoreGraphics
@@ -20,7 +20,7 @@ public final class SZNodePreviewFrame {
 }
 
 /// The per-node registry of preview boxes, owned by the host and threaded (as an uncompared ref) down
-/// to the cards. Boxes are stable per node id — handing the SAME box to every render is what keeps the
+/// to the cards. Boxes are stable per node id — handing the same box to every render is what keeps the
 /// card views' `==` exclusion sound.
 @MainActor
 public final class SZNodePreviewFrames {
@@ -47,10 +47,10 @@ public final class SZNodePreviewFrames {
     }
 }
 
-/// The preview leaf — the ONE consumer of `frame.surface`. A layer-backed NSView whose CALayer
-/// `contents` IS the surface: a new frame is one GPU texture swap, composited by Core Animation at
+/// The preview leaf — the one consumer of `frame.surface`. A layer-backed NSView whose CALayer
+/// `contents` is the surface: a new frame is one GPU texture swap, composited by Core Animation at
 /// whatever scale the canvas zoom imposes. Routing the 15 Hz stream through a SwiftUI `Image`
-/// instead re-rasterized the thumb at SCREEN resolution on every frame — cost ∝ zoom², which read
+/// instead re-rasterized the thumb at screen resolution on every frame — cost ∝ zoom², which read
 /// as "lag when zoomed in". The view observes its box directly (withObservationTracking), so a
 /// frame tick never re-enters SwiftUI at all.
 struct SZNodePreviewThumb: NSViewRepresentable {
@@ -70,7 +70,7 @@ struct SZNodePreviewThumb: NSViewRepresentable {
 /// assignment on the main actor.
 final class SZPreviewLayerView: NSView {
     private var box: SZNodePreviewFrame?
-    /// Bumped on every rebind; a pending re-arm from a PREVIOUS binding sees a stale generation and
+    /// Bumped on every rebind; a pending re-arm from a previous binding sees a stale generation and
     /// dies instead of stacking a second live observation on the current box.
     private var generation = 0
 

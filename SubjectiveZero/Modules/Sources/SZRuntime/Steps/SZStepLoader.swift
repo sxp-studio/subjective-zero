@@ -1,24 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// dlopen-based loader for a compiled decision-step dylib — `SZLoader`'s small sibling, ABI v5.
-// Same mapping discipline as the node tier: copy the dylib to a unique `runtime-loads/` path
-// (so the canonical build artifact can be overwritten while the previous copy stays mapped),
-// `dlopen(RTLD_NOW|RTLD_LOCAL)`, dlsym, check the API version, and keep the OLD module live on
-// any failure (a red reload never costs the green module).
+// dlopen-based loader for a compiled decision-step dylib — `SZLoader`'s small sibling, ABI v5. Same mapping
+// discipline as the node tier: copy the dylib to a unique `runtime-loads/` path (so the canonical build
+// artifact can be overwritten while the previous copy stays mapped), `dlopen(RTLD_NOW|RTLD_LOCAL)`, dlsym,
+// check the API version, and keep the old module live on any failure (a red reload never costs the green
+// module).
 //
 // Two things the async ABI demands:
-// - `evaluate` is async: it parks on the module's completion callback, forwards Swift task
-//   cancellation as `SZStepCancel`, and serves the step's `askModel` calls through a per-
-//   evaluation runner that guarantees every accepted ask is answered exactly once.
-// - SWAP-WITH-DRAIN: a newly verified module takes over new evaluations immediately, while
-//   the old module keeps running its in-flight evaluations to completion; only when its
-//   count reaches zero is it retired for good. An evaluation never has its code unloaded
-//   from under it.
+// - `evaluate` is async: it parks on the module's completion callback, forwards Swift task cancellation as
+//   `SZStepCancel`, and serves the step's `askModel` calls through a per-evaluation runner that guarantees
+//   every accepted ask is answered exactly once.
+// - Swap with drain: a newly verified module takes over new evaluations immediately while the old one keeps
+//   running its in-flight evaluations to completion, retired for good only when that count reaches zero — an
+//   evaluation never has its code unloaded from under it.
 //
-// A retired module is NEVER dlclosed — by decision, not omission. Darwin pins images
-// containing Swift/ObjC metadata (dlclose would be a no-op unmap at best), and the drain's
-// last completion necessarily fires with dylib frames still on the stack, so a real unmap
-// there could never be sound. The handle is deliberately leaked (one small mapping per hot
-// reload); deleting the on-disk copy is what retirement actually does, and
+// A retired module is never dlclosed, by decision and not omission: Darwin pins images containing Swift/ObjC
+// metadata (dlclose would be a no-op unmap at best), and the drain's last completion necessarily fires with
+// dylib frames still on the stack, so a real unmap there could never be sound. The handle is deliberately
+// leaked (one small mapping per hot reload); retirement is really just deleting the on-disk copy, and
 // co-residency safety comes from the unique module name per build, not from unloading.
 import Foundation
 
@@ -101,14 +99,14 @@ final class SZStepModule: @unchecked Sendable {
         return retired && !closed
     }
 
-    /// Close OFF the caller's stack: the drain's last completion arrives on a frame that
+    /// Close off the caller's stack: the drain's last completion arrives on a frame that
     /// is still inside the dylib.
     private func scheduleClose() {
         Task.detached { [self] in close() }
     }
 
     private func close() {
-        // NO dlclose — see the header. The handle is leaked by design; the on-disk copy goes.
+        // No dlclose — see the header. The handle is leaked by design; the on-disk copy goes.
         _ = handle
         try? FileManager.default.removeItem(at: copy)
     }
@@ -139,7 +137,7 @@ public final class SZStepLoader: @unchecked Sendable {
         return count
     }
 
-    /// Map + verify `dylib`, then swap it in. The old module is RETIRED, not torn down: its
+    /// Map + verify `dylib`, then swap it in. The old module is retired, not torn down: its
     /// in-flight evaluations finish on the old code, and it closes when the last one settles.
     /// A throw leaves the live module untouched.
     public func load(dylib: URL, runtimeLoadsDir: URL) throws {
@@ -159,9 +157,9 @@ public final class SZStepLoader: @unchecked Sendable {
         let old = current
         current = module
         declaration = declared
-        // Prune modules that finished draining on EARLIER swaps, then append the outgoing
-        // one. The fresh appendee must not be pruned here — it only reads as draining
-        // AFTER `retire()` below — which is why the prune comes first.
+        // Prune modules that finished draining on earlier swaps, then append the outgoing one. The
+        // fresh appendee must not be pruned here — it only reads as draining after `retire()` below —
+        // which is why the prune comes first.
         draining.removeAll { !$0.isDraining }
         if let old { draining.append(old) }
         lock.unlock()
@@ -180,10 +178,6 @@ public final class SZStepLoader: @unchecked Sendable {
         }
     }
 
-    /// One asynchronous evaluation against the current module: hand the step its facts
-    /// snapshot, serve its `askModel` calls through `ask`, and settle when its completion
-    /// fires. Swift task cancellation propagates as `SZStepCancel` + cancellation of every
-    /// in-flight ask; the result is then `.cancelled`, never a defect.
     /// Read the current module and admit one evaluation, atomically enough: a module that
     /// retires between the read and the admit refuses `begin()`, and the swap that retired
     /// it has already published its successor — so retry against the new current.
@@ -197,6 +191,10 @@ public final class SZStepLoader: @unchecked Sendable {
         }
     }
 
+    /// One asynchronous evaluation against the current module: hand the step its facts
+    /// snapshot, serve its `askModel` calls through `ask`, and settle when its completion
+    /// fires. Swift task cancellation propagates as `SZStepCancel` + cancellation of every
+    /// in-flight ask; the result is then `.cancelled`, never a defect.
     public func evaluate(factsJSON: String, ask: @escaping SZStepAskRunner) async -> SZStepEvalResult {
         guard let module = beginCurrentModule() else { return .failed("no step is loaded") }
 
@@ -242,7 +240,7 @@ public final class SZStepLoader: @unchecked Sendable {
 // MARK: - Per-evaluation host state
 
 /// The indirection between the dylib's `hostContext` and live evaluation state: asks name a
-/// registry ID, so a stray ask after settle — an author's escaped context — is REJECTED
+/// registry ID, so a stray ask after settle — an author's escaped context — is rejected
 /// (lookup fails, `askFn` returns 0) instead of dereferencing freed memory.
 final class SZHostEvalRegistry: @unchecked Sendable {
     static let shared = SZHostEvalRegistry()

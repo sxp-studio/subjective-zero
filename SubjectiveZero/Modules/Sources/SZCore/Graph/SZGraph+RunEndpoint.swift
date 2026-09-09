@@ -8,13 +8,13 @@ extension SZGraph {
     /// The output to display for a run that implemented `workSet`, or nil when the run produced nothing
     /// worth showing.
     ///
-    /// A node qualifies only if it is a graph SINK — it feeds nothing. A node built upstream of an existing
+    /// A node qualifies only if it is a graph sink — it feeds nothing. A node built upstream of an existing
     /// composite (a blur spliced into a live chain) is the last node the run touched but not the graph's
     /// output; showing it would hide the very result it feeds. Among sinks, the newest wins, `nodes` being
     /// append-ordered. Prefers a `display`-marked texture output, else any texture output.
     ///
     /// Only `.generated` nodes qualify — a node is promoted to that kind when its source compiles. A drawn
-    /// node is given a texture contract BEFORE the run (`draftContractsFromFlow`), so a run whose agent
+    /// node is given a texture contract before the run (`draftContractsFromFlow`), so a run whose agent
     /// timed out leaves a `.prompt` node that declares an output it cannot render. Adopting it would trade
     /// whatever the user was watching for a black viewport.
     public func runRenderEndpoint(workSet: Set<SZNodeID>) -> SZPortRef? {

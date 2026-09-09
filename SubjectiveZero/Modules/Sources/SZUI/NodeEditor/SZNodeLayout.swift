@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Pure geometry for the node canvas — the vertical-stack node anatomy plus the
-// screen↔world transform. It is the SINGLE source of truth shared by the node views (which place
+// screen↔world transform. It is the single source of truth shared by the node views (which place
 // their sockets) and the connection layer (which draws edges between them), so edges always meet
 // sockets at any zoom. No SwiftUI here, so it is unit-tested headlessly (SZUITests).
 //
-// node.position is the card CENTER; all socket offsets are relative to that center. The card is a
+// node.position is the card center; all socket offsets are relative to that center. The card is a
 // vertical stack: header (title + flow sockets on the sides) → stacked input rows (data socket left) →
 // stacked output rows (data socket right). Width auto-sizes to the content (see `width(of:)`) —
 // everything downstream (sockets, edges, marquee, snap, MCP placement) reads `size(of:)`/
@@ -18,7 +18,7 @@ import SZCore
 public enum SZSocketSide: Sendable { case input, output }
 
 /// How much chrome a node card renders. `.full` is header + body + port rows; `.picture` drops the
-/// rows so the body IS the card (the plugs fold); `.tile` is the semantic-zoom tier — body only,
+/// rows so the body is the card (the plugs fold); `.tile` is the semantic-zoom tier — body only,
 /// no header, dots hidden and inert. See `SZNodeLayout.tier(of:zoomedOut:)`.
 public enum SZCardTier: Sendable { case full, picture, tile }
 
@@ -26,10 +26,10 @@ public enum SZNodeLayout {
     /// World-space pitch of the canvas dot grid — shared by the grid drawing (SZDotGridView) and
     /// every snapping site (drag, create, MCP ui_* placement) so "on grid" means one thing.
     public static let gridPitch: CGFloat = 24
-    // Card metrics are designed AROUND the grid: width(of:) and every height(of:) are exact multiples
+    // Card metrics are designed around the grid: width(of:) and every height(of:) are exact multiples
     // of gridPitch (width ≥ 9 cells; heights = 48 + 24·rows via 40 + 4 + 24·rows + 4), so a snapped
-    // card — anchor is the TOP-LEFT corner, see snappedCenter — lands all four edges on grid lines.
-    /// The BASE card width (9 cells): the minimum for generated cards and the fixed width of prompt
+    // card — anchor is the top-left corner, see snappedCenter — lands all four edges on grid lines.
+    /// The base card width (9 cells): the minimum for generated cards and the fixed width of prompt
     /// cards. Sizing a generated card must go through `width(of:)`/`size(of:)`.
     public static let width: CGFloat = 216
     public static let cornerRadius: CGFloat = 12
@@ -42,7 +42,7 @@ public enum SZNodeLayout {
     public static let promptHeight: CGFloat = 48
     public static let statusPillHeight: CGFloat = 18
     /// Height of a card's live-preview body region (between header and rows) — 6 grid cells. Must be
-    /// an EVEN cell count: `node.position` is the card CENTER, so toggling the region moves each edge
+    /// an even cell count: `node.position` is the card center, so toggling the region moves each edge
     /// by half of it — an even count keeps a snapped card's edges on grid lines through the toggle
     /// (an odd count would strand them mid-cell until the next drag re-snapped).
     public static let previewHeight: CGFloat = 144
@@ -53,8 +53,8 @@ public enum SZNodeLayout {
     public static func inputs(of node: SZNode) -> [SZPort] { node.contract?.inputs ?? [] }
     public static func outputs(of node: SZNode) -> [SZPort] { node.contract?.outputs ?? [] }
 
-    /// Whether an INPUT port is card-owned while `node` shows its custom card: the contract's
-    /// `card.plumbing` names it, so its row (control + socket) is not generated — the card IS its
+    /// Whether an input port is card-owned while `node` shows its custom card: the contract's
+    /// `card.plumbing` names it, so its row (control + socket) is not generated — the card is its
     /// control. Nothing is plumbing on a non-custom card (flip to rows and every port is back).
     public static func isPlumbing(_ node: SZNode, port: String) -> Bool {
         node.effectiveBodyMode == .custom && node.contract?.card?.plumbing?.contains(port) == true
@@ -66,7 +66,7 @@ public enum SZNodeLayout {
         node.effectiveBodyMode == .custom ? inputs(of: node).filter { !isPlumbing(node, port: $0.name) } : inputs(of: node)
     }
 
-    /// How much chrome a card shows right now. ONE resolve for the two ways to get there: distance
+    /// How much chrome a card shows right now. One resolve for the two ways to get there: distance
     /// (semantic zoom) and intent (the plugs fold). `.tile` wins — from orbit a folded card and an
     /// expanded one look the same. Render-only: `height(of:)` and `socketOffset(of:)` never call this,
     /// so card rects, sockets and edges stay identical at every zoom.
@@ -111,7 +111,7 @@ public enum SZNodeLayout {
         CGFloat(max(6, min(node.body?.custom?.cols ?? node.contract?.card?.cols ?? 9, 24)))
     }
 
-    /// Grid rows a mounted custom card's REGION (between header and rows) occupies: the committed
+    /// Grid rows a mounted custom card's region (between header and rows) occupies: the committed
     /// `custom.rows` (auto-size — which, for a backdrop card, follows the render aspect — or the
     /// user), else the contract's `card.rows` hint, else 8. Always clamped 2…24 (the auto-size
     /// loop's bounds, so geometry can't disagree with a commit). Nil when the node isn't
@@ -136,24 +136,24 @@ public enum SZNodeLayout {
         customRows(of: node).map { CGFloat($0) * gridPitch } ?? 0
     }
 
-    /// The body region's height, whichever mode fills it — the ONE term `height(of:)`, `rowCenterY`,
+    /// The body region's height, whichever mode fills it — the one term `height(of:)`, `rowCenterY`,
     /// and the custom socket placement share.
     public static func bodyInset(of node: SZNode, previewsEnabled: Bool) -> CGFloat {
         previewInset(of: node, previewsEnabled: previewsEnabled) + customInset(of: node)
     }
 
     /// The chrome around a custom card's backdrop thumb: `backdropMargin` on top and both sides
-    /// (room for a handle to sit ON the image edge without touching the card frame), and below the
+    /// (room for a handle to sit on the image edge without touching the card frame), and below the
     /// image everything that isn't picture — an 8pt gap, a 20pt footer band where an overlay card
     /// puts its own controls (a readout, a reset) instead of floating them over the pixels, and
     /// 6pt of breathing before the rows. `backdropChrome` = top margin + gap + footer + bottom.
     public static let backdropMargin: CGFloat = 8
     public static let backdropChrome: CGFloat = 8 + 8 + 20 + 6
 
-    /// Where the live-output thumbnail sits UNDER a custom card: aspect-fit `render` inside the
+    /// Where the live-output thumbnail sits under a custom card: aspect-fit `render` inside the
     /// region minus its chrome, centered horizontally and sitting on the top margin — the footer
     /// band sits at the region's bottom, so any slack reads as space above it. Nil when either size
-    /// is empty. The ONE function the card view (to draw the thumb) and the card snapshot (so the
+    /// is empty. The one function the card view (to draw the thumb) and the card snapshot (so the
     /// card maps handles onto it) share, so overlay controls and pixels can never disagree.
     public static func customBackdropRect(body: CGSize, render: CGSize) -> CGRect? {
         let (margin, chrome) = (backdropMargin, backdropChrome)
@@ -192,7 +192,7 @@ public enum SZNodeLayout {
     /// snaps by before the card exists.
     public static let promptCardSize = CGSize(width: width, height: promptHeight)
 
-    /// World-space card rect: `node.position` is the card CENTER, inset by half `size(of:)`. The ONE
+    /// World-space card rect: `node.position` is the card center, inset by half `size(of:)`. The one
     /// rect shared by hit-testing, marquee membership, occlusion, and bounds math.
     public static func cardRect(of node: SZNode, previewsEnabled: Bool) -> CGRect {
         let size = size(of: node, previewsEnabled: previewsEnabled)
@@ -205,15 +205,15 @@ public enum SZNodeLayout {
 
     // Text metrics mirroring the SZUI card styling (SZNodeCardStyle fonts + SZPortControl widget
     // widths). SZNodeLayout stays SwiftUI-free, so text is estimated from advances: labels/values are
-    // MONOSPACED (width is exact character arithmetic, padded a hair); the proportional title uses a
-    // conservative average. Estimates only ever round UP — a mismatch shows as slack, not truncation.
+    // monospaced (width is exact character arithmetic, padded a hair); the proportional title uses a
+    // conservative average. Estimates only ever round up — a mismatch shows as slack, not truncation.
     static let labelCharWidth: CGFloat = 6.7     // SF Mono 10 (row labels) — measured live; 6.1 truncated
     static let valueCharWidth: CGFloat = 5.5     // SF Mono 9 (chip/value text)
     static let titleCharWidth: CGFloat = 7.0     // SF Pro semibold 12, conservative per-char average
     static let rowHorizontalPadding: CGFloat = 24
     static let labelControlSpacing: CGFloat = 8
 
-    // Widget frames RENDERED by SZPortControl and BUDGETED by controlWidth — named once here (the
+    // Widget frames rendered by SZPortControl and budgeted by controlWidth — named once here (the
     // layout stays SwiftUI-free) so the paint and the estimate consume the same numbers and cannot
     // drift apart on a tweak.
     static let sliderTrackWidth: CGFloat = 80
@@ -233,7 +233,7 @@ public enum SZNodeLayout {
     /// when connecting.
     public static func width(of node: SZNode) -> CGFloat {
         guard node.kind == .generated else { return width }
-        // A custom card asks for a MINIMUM width in grid cells (the declared cols); the generated
+        // A custom card asks for a minimum width in grid cells (the declared cols); the generated
         // rows may still widen it.
         let cardCells: CGFloat = node.effectiveBodyMode == .custom ? declaredCardCells(of: node) : 0
         // Loops, not maps — this runs per socket per canvas evaluation (socketOffset), so it must not
@@ -253,7 +253,7 @@ public enum SZNodeLayout {
 
     static func inputRowWidth(_ port: SZPort, fieldWidth: CGFloat) -> CGFloat {
         // The row is HStack(spacing: 8) { label; Spacer; control } — SwiftUI puts the stack spacing
-        // on BOTH sides of the (even collapsed) Spacer, so the minimum gap is TWO spacings.
+        // on both sides of the (even collapsed) Spacer, so the minimum gap is two spacings.
         rowHorizontalPadding + CGFloat(port.name.count) * labelCharWidth
             + 2 * labelControlSpacing + controlWidth(port, fieldWidth: fieldWidth)
     }
@@ -261,7 +261,7 @@ public enum SZNodeLayout {
     /// Output rows: [preview + monitor icons +] port name, trailing-aligned. Bare text sits on the same
     /// 12pt line as the boxes and the slider value column; capsule ends optically read a hair inside their
     /// geometric edge (rounding), which is expected — don't chase it with insets. Texture outputs budget
-    /// TWO leading glyphs (preview toggle + display).
+    /// Two leading glyphs (preview toggle + display).
     static func outputRowWidth(_ port: SZPort) -> CGFloat {
         rowHorizontalPadding + (port.type == .texture ? 2 * (14 + 6) : 0)
             + CGFloat(port.name.count) * labelCharWidth
@@ -279,7 +279,7 @@ public enum SZNodeLayout {
             }
             return numericFieldsRowWidth(count: componentCount(port.type), fieldWidth: fieldWidth)
         case .string where port.ui?.kind == .filePicker:
-            // A filePicker is a CONTENT-sized chip (folder glyph + filename at the label font), not the
+            // A filePicker is a content-sized chip (folder glyph + filename at the label font), not the
             // fixed editable string well — so it isn't padded out to `stringFieldWidth`. Matches
             // SZPortControl.filePickerLabel (font + folder icon + 3pt HStack spacing).
             let shown = (port.def?.string).map { ($0 as NSString).lastPathComponent } ?? ""
@@ -291,7 +291,7 @@ public enum SZNodeLayout {
             return max(stringFieldWidth + 2 * fieldHorizontalPadding,
                        CGFloat((port.def?.string ?? "").count) * valueCharWidth + 2 * chipHorizontalPadding)
         case .enumeration:
-            // Chip sized by its longest STATIC option label (dynamic runtime lists — e.g. cameras —
+            // Chip sized by its longest static option label (dynamic runtime lists — e.g. cameras —
             // aren't in the contract; they may still truncate, which the chip's lineLimit handles).
             let longest = (port.options ?? []).map(\.label.count).max()
                 ?? port.def?.string?.count ?? 1
@@ -316,10 +316,10 @@ public enum SZNodeLayout {
         }
     }
 
-    // MARK: Numeric-field sizing — shared VERBATIM with SZPortControl, so the rendered wells and the
+    // MARK: Numeric-field sizing — shared verbatim with SZPortControl, so the rendered wells and the
     // card-width estimate cannot drift.
 
-    /// The ONE numeric-cell width used by every field/cell on a card, computed across ALL of its
+    /// The one numeric-cell width used by every field/cell on a card, computed across all of its
     /// numeric ports — so a float4 row's cells sit on the same column grid as the float2/float3 rows
     /// above it (per-row widths made mixed-arity cards read off-grid). Committing a longer number
     /// re-derives it, resizing every row (and the card) together.
@@ -374,7 +374,7 @@ public enum SZNodeLayout {
         CGFloat(count) * (fieldWidth + 2 * cellHorizontalPadding) + CGFloat(count - 1) * cellSpacing
     }
 
-    /// Character count of a component as the fields RENDER it — the very same FormatStyle
+    /// Character count of a component as the fields render it — the very same FormatStyle
     /// (`.number.precision(.fractionLength(0...3)).grouping(.never)`: 1234.5 → "1234.5", no thousands
     /// separator — data cells are monospaced numbers) so the estimate can never lag the render.
     /// Memoized behind a Mutex: this is the inner loop of width(of:),
@@ -392,13 +392,13 @@ public enum SZNodeLayout {
 
     private static let formattedLengthCache = Mutex<[Double: Int]>([:])
 
-    /// Socket position relative to the node's CENTER. Flow sockets ride the header sides; data sockets
+    /// Socket position relative to the node's center. Flow sockets ride the header sides; data sockets
     /// ride their port row's left (input) / right (output) edge. An unknown data port falls back to
     /// the flow position so a half-wired edge still renders somewhere sane.
     public static func socketOffset(of node: SZNode, side: SZSocketSide, kind: SZConnectionKind,
                                     port: String, previewsEnabled: Bool) -> CGPoint {
         let x = side == .input ? -width(of: node) / 2 : width(of: node) / 2
-        // A prompt node renders as a single field with flow sockets on its sides and shows NO per-port
+        // A prompt node renders as a single field with flow sockets on its sides and shows no per-port
         // rows — even when a contract is already attached (e.g. a camera prompt that declares its
         // permission). So every endpoint on a prompt card lands at the flow (side-center) position.
         guard node.kind == .generated else {
@@ -459,7 +459,7 @@ public enum SZNodeLayout {
     }
 
     /// The height a card loses when its plugs fold — always a whole number of grid cells, which is
-    /// what lets the toggle hold the card's TOP edge (move the centre by half of this) and keep all
+    /// what lets the toggle hold the card's top edge (move the centre by half of this) and keep all
     /// four edges on grid for any row count.
     public static func foldDelta(of node: SZNode, previewsEnabled: Bool) -> CGFloat {
         guard node.kind == .generated, canFoldPlugs(node, previewsEnabled: previewsEnabled) else { return 0 }
@@ -480,7 +480,7 @@ public enum SZNodeLayout {
                 y: (point.y / pitch).rounded() * pitch)
     }
 
-    /// The center that puts a card's TOP-LEFT corner on the nearest grid intersection. Edges are the
+    /// The center that puts a card's top-left corner on the nearest grid intersection. Edges are the
     /// snap anchor (not the center): with card dims all multiples of gridPitch, that lands all four
     /// edges on grid lines — center anchoring would need multiple-of-2·pitch dims to do the same.
     /// node.position stays the card center everywhere; only the snap target accounts for the size.

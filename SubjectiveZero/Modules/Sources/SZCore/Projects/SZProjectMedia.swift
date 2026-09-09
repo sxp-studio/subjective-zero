@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Media files that travel inside the `.subz`, and the one rule for reading a file port's value.
 //
-// A file port (a `string` input with `ui.kind == .filePicker`) holds the PORTABLE form: a path
+// A file port (a `string` input with `ui.kind == .filePicker`) holds the portable form: a path
 // relative to the project bundle, `media/<uuid>/<filename>`. The uuid dir preserves the exact
 // filename, so two nodes can hold same-named files without a collision — the shape
 // `attachments/<uuid>/<filename>` already uses for chat attachments.
 //
-// THE RULE: a file-port value that is not absolute resolves against the project bundle; an absolute
+// The rule: a file-port value that is not absolute resolves against the project bundle; an absolute
 // one is used as-is. That second branch is not a migration path — it is what lets a project written
 // before media moved in-bundle keep rendering, forever, with no fixup pass.
 //
@@ -40,7 +40,7 @@ public enum SZProjectMedia {
         return (number, url)
     }
 
-    /// THE RULE. An empty value stays empty (unset is not a path); an absolute one is returned as
+    /// The rule. An empty value stays empty (unset is not a path); an absolute one is returned as
     /// itself (tilde expanded — the render loop has no home directory); anything else joins the bundle.
     public static func resolve(_ value: String, in projectURL: URL) -> String {
         guard !value.isEmpty else { return value }
@@ -50,7 +50,7 @@ public enum SZProjectMedia {
 
     /// The bundle-relative form of a file that already lives inside `projectURL`, else nil. Lets a
     /// pick of a file the project already holds become a reference rather than a second copy.
-    /// Symlinks are resolved on BOTH sides before comparing: an open panel hands back the resolved
+    /// Symlinks are resolved on both sides before comparing: an open panel hands back the resolved
     /// path (`/private/var/…`) while a project opened through `/var/…` would otherwise look like a
     /// different place, and the file would be copied into the very bundle it already lives in.
     public static func relativePath(for url: URL, in projectURL: URL) -> String? {
@@ -95,7 +95,7 @@ public enum SZProjectMedia {
 }
 
 public extension SZGraph {
-    /// This graph with every file port's default resolved to an absolute path — what the RUNTIME
+    /// This graph with every file port's default resolved to an absolute path — what the runtime
     /// loads. A projection, like `SZGraph.renderable`: the model itself keeps the portable form, so
     /// only the code that opens files ever sees a machine path.
     func resolvingFilePaths(in projectURL: URL) -> SZGraph {

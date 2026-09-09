@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The pannable canvas CONTENT — everything that lives in world space (edge layer, node cards, socket
-// dots). Deliberately independent of the camera: the panel applies `.scaleEffect().offset()` OUTSIDE
-// this view and wraps it in `.equatable()`, so a camera tick (scroll pan / pinch zoom, 60–120 events/s)
-// skips this whole subtree — no ForEach re-emission, no attribute-graph re-validation, no card layout.
-// Profiled before the split: every scroll event re-validated every card/socket/edge attribute inside
-// `NSHostingView.layout()`, stalling the main thread for hundreds of ms and starving the Metal
-// viewport's main-thread draw.
+// The pannable canvas content — everything that lives in world space (edge layer, node cards, socket dots).
+// Deliberately independent of the camera: the panel applies `.scaleEffect().offset()` outside this view and wraps it
+// in `.equatable()`, so a camera tick (scroll pan / pinch zoom, 60–120 events/s) skips this whole subtree — no ForEach
+// re-emission, no attribute-graph re-validation, no card layout. Profiled before the split: every scroll event
+// re-validated every card/socket/edge attribute inside `NSHostingView.layout()`, stalling the main thread for hundreds
+// of ms and starving the Metal viewport's main-thread draw.
 //
-// Same rule for the two drag interactions, which DO change world content per tick:
-// - A node drag ghosts its cards here (`ghostedNodeIDs`, opacity 0 — the views must STAY in the tree
-//   or their live drag gesture would cancel) and the panel draws the moving ghosts + their incident
-//   edges in a small overlay. Content inputs change once at drag start/end, not per tick.
-// - A wire drag's preview is drawn by the panel's overlay; here only `hiddenConnectionID` /
-//   `connectedSockets` flip once at pickup.
+// The two drag interactions do change world content per tick, and follow the same rule:
+// - A node drag ghosts its cards here (`ghostedNodeIDs`, opacity 0 — the views must stay in the tree or their live
+//   drag gesture would cancel) while the panel overlays the moving ghosts and their incident edges. Content inputs
+//   change once at drag start/end, not per tick.
+// - A wire drag's preview is drawn by the panel's overlay; here only `hiddenConnectionID` / `connectedSockets` flip
+//   once at pickup.
 //
-// Gestures are ATTACHED here but their logic lives in the panel (closure props, excluded from `==`):
-// a skipped body keeps the last render's closures, which is safe because they only route into the
-// panel, whose @State reads are live — while everything this view RENDERS is compared in `==`, so any
-// visible change re-renders it with fresh closures.
+// Gestures are attached here, their logic in the panel (closure props, excluded from `==`): a skipped body keeps the
+// last render's closures, safe because they only route into the panel, whose @State reads are live — while everything
+// this view renders is compared in `==`, so any visible change re-renders it with fresh closures.
 import AppKit
 import SwiftUI
 import SZCore
@@ -113,7 +111,7 @@ struct SZNodeCanvasContentView: View, Equatable {
                               onSelect: { onSelectConnection($0) },
                               onDragChanged: { onEdgeDragChanged($0, $1) },
                               onDragEnded: { onEdgeDragEnded() })
-            // Card first, then ITS OWN sockets, per node — so a later card covers an earlier node's
+            // Card first, then its own sockets, per node — so a later card covers an earlier node's
             // dots instead of every dot painting above every card. The selected node jumps the stack
             // via its tier, dots riding along at the same z (declaration order keeps them on top of
             // their card), so the card being inspected is fully readable under overlap — and a dot
@@ -137,7 +135,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     // source for wiring.
     private func socketLayer(for node: SZNode) -> some View {
         // Folded, a dot shows only if it earns the space: a wire lands on it, the card is selected, or
-        // an in-flight wire could drop on it. Everything hidden goes INERT too — an invisible 22pt drag
+        // an in-flight wire could drop on it. Everything hidden goes inert too — an invisible 22pt drag
         // target over a picture would turn "drag the card" into a wire drag the user never saw (the
         // rule the zoomed-out tier already sets). Ghosting keeps hit-testing (opacity only): the live
         // drag gesture owning those sockets must not cancel mid-drag.
@@ -218,7 +216,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             // (the message-suggestion menu; Split/Merge live on as drafted @project messages).
     }
 
-    /// The ONE card constructor — used by this content layer (interactive) and the panel's drag-ghost
+    /// The one card constructor — used by this content layer (interactive) and the panel's drag-ghost
     /// overlay (passive visual copy), so a dragged card can never render differently from itself at
     /// rest. Gestures/menus are the caller's business; closures default to no-ops for passive copies.
     @ViewBuilder
@@ -353,7 +351,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             // for the same one: no agent rewriting this node's source makes an undecodable file decode.
             if !node.unreadableInputs.isEmpty || runtimeError != nil { return .error }
             // It has a build and still renders — but if its contract's ports moved, that build no longer honours
-            // them, so "Ready" would be a lie. Which pill depends on HOW it fails to honour them: code that
+            // them, so "Ready" would be a lie. Which pill depends on how it fails to honour them: code that
             // names ports the contract dropped reads nil every frame (a fault, red), while a contract that
             // declares ports the code hasn't written yet is merely unfinished (amber).
             switch node.rebuildReason {
@@ -371,20 +369,21 @@ struct SZNodeCanvasContentView: View, Equatable {
         case .coding: return .building
         case .queued, .planning: return .planning
         default:
-            // A prompt node in the run's captured WORK SET reads Coding while it waits for its agent to
-            // report; a prompt node NOT in the set during a run (e.g. one the user dropped on the canvas
+            // A prompt node in the run's captured work set reads Coding while it waits for its agent to
+            // report; a prompt node not in the set during a run (e.g. one the user dropped on the canvas
             // mid-run) isn't the fleet's work, so it stays Draft.
             return inFlight ? .building : .draft
         }
     }
 
-    /// A node is locked only while an agent owns it — `lockedNodes` is the host's LEDGER-backed
+    /// A node is locked only while an agent owns it — `lockedNodes` is the host's ledger-backed
     /// view (SZHost.lockedNodes: a chat turn's claim, or the run's claim on still-in-flight
     /// `.prompt` work; a promoted node unlocks the moment it flips to `.generated`, and a draft the
     /// user added mid-run was never claimed), and `ops` flags the originals of an in-flight
     /// split/merge. The affordance and the mutation fence read the same source, so what the UI dims
     /// and what the host refuses can't drift.
-    /// A locked node can't be edited/deleted/wired — but it CAN still be repositioned (drag-move
+    ///
+    /// A locked node can't be edited/deleted/wired — but it can still be repositioned (drag-move
     /// stays allowed), so the user can tidy the canvas mid-run without fighting the agents on the
     /// parts that matter (contracts/wiring/values).
     static func isLocked(_ id: SZNodeID, ops: [SZNodeID: String],
@@ -393,7 +392,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     }
 
     /// The shape both guards share: held by an agent, or an original of an in-flight split/merge. The
-    /// LOCK reads it over `lockedNodes` and the DELETE guard over the wider `deleteHeldNodes`, so
+    /// lock reads it over `lockedNodes` and the delete guard over the wider `deleteHeldNodes`, so
     /// neither has to pass one set through a parameter named for the other.
     static func isHeld(_ id: SZNodeID, ops: [SZNodeID: String], in held: Set<SZNodeID>) -> Bool {
         ops[id] != nil || held.contains(id)

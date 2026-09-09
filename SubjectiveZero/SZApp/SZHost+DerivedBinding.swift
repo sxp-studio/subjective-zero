@@ -2,7 +2,7 @@
 // The single commit path behind controller→parameter bindings: the `binding_*` MCP tools and a
 // controller card's `learn_commit` / `remove_binding` verbs both land here, so the rebind rule lives
 // in exactly one place. A binding is ordinary graph state — a mappings-table row, a derived output
-// on the source's contract, and a data edge to the target — committed as ONE store transaction,
+// on the source's contract, and a data edge to the target — committed as one store transaction,
 // live-pushed to the running frame, then persisted. Source-agnostic: the row's `key` is whatever
 // wire identity the controller node emits on `lastKey` (MIDI, OSC, …).
 import Foundation
@@ -18,12 +18,12 @@ extension SZHost {
     }
 
     /// Commit (or re-commit) a controller→parameter binding on a binding-source node. Replace-aware:
-    /// when one of `source`'s derived outputs already feeds `target`, its port NAME is reused, so
+    /// when one of `source`'s derived outputs already feeds `target`, its port name is reused, so
     /// the table row and contract output update in place — no suffixed duplicate names, no orphaned
     /// rows — and the whole rebind is still one transaction. The same controller may drive several
     /// targets (each keeps its own row/output); range defaults to the target's declared control range.
     ///
-    /// `target: nil` MINTS: the binding lands as a table row + a derived output socket and NO edge —
+    /// `target: nil` mints: the binding lands as a table row + a derived output socket and no edge —
     /// the user wires the new output by an ordinary canvas drag (learning grows the node's IO, wiring
     /// stays a graph gesture). Re-learning the same key replaces its row in place, so moving a control
     /// twice never mints a duplicate. Fenced like every other graph mutation (`origin`).
@@ -92,7 +92,7 @@ extension SZHost {
             bindingLearn?.cancel()
             bindingLearn = nil
         }
-        // Kind names the ACT, subjects name what it touched — like every other journal entry (the
+        // Kind names the act, subjects name what it touched — like every other journal entry (the
         // status `action` above is separate prose, for the UI's edit line).
         noteMutation(target == nil ? "learned control" : "bound control",
                      ["\(key) → \(target.map(mutationLabel) ?? "\(mutationTitle(source)).\(portName)")"],
@@ -197,7 +197,7 @@ extension SZHost {
     }
 
     /// `base`, or `base-2`, `base-3`, … — the first name no port on the contract already claims.
-    /// Reached only for NEW bindings; a rebind reuses the existing name (`derivedBindingPort`).
+    /// Reached only for new bindings; a rebind reuses the existing name (`derivedBindingPort`).
     private static func uniquePortName(_ base: String, in contract: SZNodeContract) -> String {
         let taken = Set((contract.outputs + contract.inputs).map(\.name))
         if !taken.contains(base) { return base }

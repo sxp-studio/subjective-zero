@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The agent tint palette: pack-declared color NAMES resolved to the app's semantic colors.
+// The agent tint palette: pack-declared color names resolved to the app's semantic colors.
 // "purple" and "orange" are the Director's flow-edge violet and the coding state's warm
 // orange — the same values the chat feed has always used — so a pack claiming them joins
 // the app's palette instead of approximating it. Unknown names degrade to nil, never a guess.

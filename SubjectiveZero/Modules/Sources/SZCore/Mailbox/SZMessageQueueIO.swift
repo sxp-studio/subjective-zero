@@ -5,19 +5,17 @@
 //   └─ .staging/
 //      └─ message-queue.json     // { "queue": { "formatVersion": 1, "envelopes": [ … ] } }
 //
-// Deliberately under `.staging/` — NOT the bundle root like transcripts. A queued message delivers
-// by RUNNING AN AGENT TURN, so a queue that traveled with the bundle (git, zip, Save As) would
-// auto-execute turns — token spend — the moment a copy opened elsewhere. `.staging` is stripped on
-// Save As and machine-local by convention; same-machine restart survival, the actual requirement,
-// comes free. Save As also keeps `.staging` out of the duplicate, so the copy starts queue-clean.
+// Under `.staging/`, not the bundle root like transcripts: a queued message delivers by running an
+// agent turn, so a queue that traveled with the bundle (git, zip, Save As) would auto-execute turns —
+// token spend — the moment a copy opened elsewhere. `.staging` is machine-local by convention and
+// stripped on Save As, so the copy starts queue-clean and same-machine restart survival comes free.
 //
-// Only what redelivery needs persists: `.queued` and `.delivering` `.chat` envelopes (a
-// `.delivering` reloads as `.queued` — at-least-once; the envelope's decoder enforces it).
-// `.steer` envelopes are run-scoped and runs never survive the process — a restored steer would
-// sit unconsumed forever or leak a dead run's steering into an unrelated next run, so they are
-// excluded on save AND dropped on load. Terminal envelopes and `.debug`-scope messages never
-// persist. Forgiving like SZChatTranscriptIO: missing or corrupt → empty queue, never a
-// project-open error.
+// Only what redelivery needs persists: `.queued` and `.delivering` `.chat` envelopes (a `.delivering`
+// reloads as `.queued` — at-least-once, enforced by the envelope's decoder). `.steer` envelopes are
+// run-scoped and runs never survive the process, so a restored steer would sit unconsumed forever or
+// leak a dead run's steering into an unrelated next run: excluded on save, dropped on load. Terminal
+// envelopes and `.debug`-scope messages never persist. Forgiving like SZChatTranscriptIO: missing or
+// corrupt → empty queue, never a project-open error.
 import Foundation
 
 public enum SZMessageQueueIO {
@@ -75,7 +73,7 @@ public enum SZMessageQueueIO {
         }
     }
 
-    /// Write the undelivered envelopes. Saving an empty set REMOVES the file (no husk).
+    /// Write the undelivered envelopes. Saving an empty set removes the file (no husk).
     public static func save(_ envelopes: [SZMessageEnvelope], projectURL: URL) throws {
         let keep = persistable(envelopes)
         let url = fileURL(projectURL: projectURL)

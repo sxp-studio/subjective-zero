@@ -4,7 +4,7 @@
 // so upstream sits left of downstream and the wire tangle straightens out. Pure and SwiftUI-free (built
 // on SZNodeLayout for card sizing), so it is unit-testable headlessly and callable from the host.
 //
-// node.position is the card CENTER (see SZNodeLayout), so
+// node.position is the card center (see SZNodeLayout), so
 // every returned point is a center; the result recenters on the original graph midpoint so a tidy keeps
 // the graph roughly where the user left it rather than teleporting it to the origin.
 import CoreGraphics
@@ -73,7 +73,7 @@ public enum SZGraphLayout {
             }
         }
 
-        // Shift the tidied graph back under the same camera. Prefer pinning the ANCHOR node (the render
+        // Shift the tidied graph back under the same camera. Prefer pinning the anchor node (the render
         // endpoint — what the user is looking at) to its old position: this keeps what you're viewing put
         // regardless of a far outlier (a bounding-box midpoint would get dragged tens of thousands of px by
         // one node fat-fingered to 99999,99999, stranding the layout off-screen). Fall back to the per-axis

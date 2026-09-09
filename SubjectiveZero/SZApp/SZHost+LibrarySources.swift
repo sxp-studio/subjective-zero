@@ -2,7 +2,7 @@
 // Libraries beyond the two the app ships with: making one, adding one from a folder or a link,
 // moving it to a newer version, and forgetting it.
 //
-// A library is a FOLDER of node folders. A link is somewhere to download a copy of one from, and
+// A library is a folder of node folders. A link is somewhere to download a copy of one from, and
 // that copy is read-only: the app never runs anybody's version control. Whoever maintains a library
 // does that in their own repository with their own tools. Nothing here runs on its own either:
 // every fetch is something a person asked for. The download itself is SZHost+LibraryArchive.

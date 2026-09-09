@@ -30,7 +30,7 @@ public enum SZProviderSetupSection: String, CaseIterable, Sendable {
 
 /// One provider's card — a pure view-model the host maps from its merged health truth.
 public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
-    /// What the card can DO — drives badge color and which remedy row shows. Distinct from the
+    /// What the card can do — drives badge color and which remedy row shows. Distinct from the
     /// host's health status: this is presentation vocabulary (e.g. probe-verified gets its own
     /// badge so "the CLI answered a real prompt" reads differently from "version+auth passed").
     public enum Readiness: Sendable {
@@ -55,14 +55,14 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
     /// The install command runs through npm and npm is not on this Mac: Install waits for Node.js.
     public var installNeedsNode: Bool
     /// The provider's model catalog (menu order). The card shows a Model picker when this has ≥2
-    /// entries — the only in-app way to change a FAILING provider's model, since a failing provider
+    /// entries — the only in-app way to change a failing provider's model, since a failing provider
     /// can't be made active and reach the composer's picker. Empty for a one-model or un-fetched
     /// provider → no picker.
     public var models: [SZProviderGenerationPickerModelItem]
     public var selectedModel: String    // resolved model id, checkmarked in the picker
     public var isTesting: Bool          // probe in flight → Test button spins
     public var isSelectable: Bool
-    public var isConfirmable: Bool      // Confirm gates on the SELECTED card's readiness
+    public var isConfirmable: Bool      // Confirm gates on the selected card's readiness
     /// Display name of the ready provider a failing card offers as the way out ("Use X Instead");
     /// nil = no ready alternative exists, the button hides.
     public var fallbackName: String?
@@ -99,7 +99,7 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
 public struct SZProviderSetupSheet: View {
     private let cards: [SZProviderSetupCard]
     private let selectedID: String?
-    /// The provider actually ACTIVE (runs, chat, routing's Default) — what the capsule marks.
+    /// The provider actually active (runs, chat, routing's Default) — what the capsule marks.
     /// Distinct from `selectedID`: a first-run selection is a radio Confirm has not committed.
     private let activeID: String?
     /// The Target Platform pane, built by the presenter. nil = no such section (previews/tests).
@@ -358,7 +358,7 @@ public struct SZProviderSetupSheet: View {
                     Text(card.displayName).font(.system(size: 13, weight: .semibold))
                     statusBadge(card)
                     // The provider the Routing pane's helper and "Default (…)" rows resolve
-                    // to — the ACTIVE truth, never the radio selection.
+                    // to — the active truth, never the radio selection.
                     if card.id == activeID {
                         SZSetupBadge(label: "Active", color: .accentColor)
                     }
@@ -408,9 +408,9 @@ public struct SZProviderSetupSheet: View {
         }
     }
 
-    /// The per-card model picker — the reachable model control for a FAILING provider, whose composer
+    /// The per-card model picker — the reachable model control for a failing provider, whose composer
     /// picker is gated behind being active. Shown only when the provider lists ≥2 models and only for
-    /// the SAME readiness set as the Test button (below): a model choice is meaningless where there's
+    /// the same readiness set as the Test button (below): a model choice is meaningless where there's
     /// nothing to install/log-into or nothing yet to test, and its help promises a Test that must
     /// actually be present. A one-model or un-fetched provider shows nothing.
     @ViewBuilder
@@ -476,7 +476,7 @@ public struct SZProviderSetupSheet: View {
     }
 
     /// Fix-in-place, not instructions: each unhealthy card carries its exact remedy — plus the
-    /// ways OUT of the nag: a failing card offers the first ready provider instead, and every
+    /// ways out of the nag: a failing card offers the first ready provider instead, and every
     /// not-ready card can be disabled (a provider the user doesn't subscribe to shouldn't nag).
     @ViewBuilder
     private func remedyRow(_ card: SZProviderSetupCard) -> some View {

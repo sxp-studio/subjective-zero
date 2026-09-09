@@ -24,7 +24,7 @@ public struct SZViewportPanel: NSViewRepresentable {
     }
 
     public func makeNSView(context: Context) -> SZViewportView {
-        // Prints once per panel lifetime (launch, close→reopen). A print WITHOUT a close/reopen means
+        // Prints once per panel lifetime (launch, close→reopen). A print without a close/reopen means
         // the panel lost its SwiftUI identity to a structural re-parent — the regression the flat
         // panel-layout container exists to prevent.
         print("[SZViewportPanel] makeNSView (creating viewport view)")

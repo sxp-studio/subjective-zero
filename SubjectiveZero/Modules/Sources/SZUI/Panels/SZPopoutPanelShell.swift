@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The popped-out panel window's content: the panel full-bleed under ONE slim glass strip — the
+// The popped-out panel window's content: the panel full-bleed under one slim glass strip — the
 // titlebar row itself, shared with the native traffic lights (name after the lights, dock-back
 // button trailing). No second header below it: a floating window's chrome budget is one strip,
 // matching the docked tiles' 26pt headers in weight. Window moving and drag-to-dock are native
@@ -8,7 +8,7 @@
 //
 // Deliberately its own view, not more modes on SZPanelChromeView: no maximize, no grid-space
 // drag, no tile clipping — a floating window is a window, its corners and resize behavior come
-// from AppKit. Auto-hide (View ▸ Auto-Hide Panel Headers) DOES apply, sharing the tile's reveal
+// from AppKit. Auto-hide (View ▸ Auto-Hide Panel Headers) does apply, sharing the tile's reveal
 // model: the strip slides away and the top band summons it; the traffic lights stay, as they do
 // over the main window's top-left tile.
 import SwiftUI
@@ -62,7 +62,7 @@ public struct SZPopoutPanelShell<Content: View>: View {
                 .offset(y: headerShown ? 0 : -SZPopoutPanelShellMetrics.headerHeight)
                 .allowsHitTesting(headerShown)
         }
-        .ignoresSafeArea()   // one coordinate space: the strip IS the titlebar row, content under it
+        .ignoresSafeArea()   // one coordinate space: the strip is the titlebar row, content under it
         .onContinuousHover(coordinateSpace: .local) { phase in
             guard state.autoHideHeader else { return }
             reveal.hover(phase, triggerBand: SZHeaderRevealModel.defaultTriggerBand,

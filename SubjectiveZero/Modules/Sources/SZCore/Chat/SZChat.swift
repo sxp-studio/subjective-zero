@@ -2,7 +2,7 @@
 // Chat transcript types. A conversation is scoped to either the Director or a single node's
 // coding agent (docs/UI.md, docs/AGENT_ORCHESTRATION.md). Transcripts live on SZStore (observed by
 // the chat panel and the MCP surface) and persist per scope as portable sidecars in the .subz bundle
-// — transcripts/<scope.key>.json via SZChatTranscriptIO — NOT in project.json. `.debug` transcripts
+// — transcripts/<scope.key>.json via SZChatTranscriptIO — not in project.json. `.debug` transcripts
 // stay ephemeral.
 //
 // Decoding is append-tolerant: every field with a memberwise default decodes via decodeIfPresent, so
@@ -12,7 +12,7 @@ import Foundation
 
 public enum SZChatRole: String, Codable, Sendable {
     case user, assistant
-    /// A message authored by the Director Agent and shown in ANOTHER agent's tab: the Director
+    /// A message authored by the Director Agent and shown in another agent's tab: the Director
     /// messaging a node's Coding Agent on reconcile, so a node tab reads as a multi-party thread
     /// (you / director / coding agent) instead of the Director's words being an invisible side-channel.
     case director
@@ -64,8 +64,8 @@ public enum SZChatScope: Hashable, Sendable {
 
 /// One line of the single chat feed: a message, and the conversation it came from.
 ///
-/// The feed is DERIVED from the per-scope transcripts, never a second copy of them — sessions and
-/// cold-start recaps are per scope and stay that way. What it shows is what an agent said to YOU:
+/// The feed is derived from the per-scope transcripts, never a second copy of them — sessions and
+/// cold-start recaps are per scope and stay that way. What it shows is what an agent said to you:
 /// the whole Director conversation, plus a node agent's own replies. What it leaves out is the
 /// fleet's implementation turns, which carry the run they belong to (`graphRunID`) and are read in
 /// that task's own drill-in.
@@ -101,10 +101,10 @@ public struct SZAgentSession: Codable, Equatable, Sendable {
 
 /// A file attached to a chat turn. The native layer owns the bytes: on send the source file is
 /// copied into the agent's staging dir (so a real CLI agent can Read it by absolute path — we never
-/// inline bytes into the message bus) AND into the project bundle at `bundlePath`
+/// inline bytes into the message bus) and into the project bundle at `bundlePath`
 /// (`attachments/<attachment-uuid>/<filename>`), the canonical copy that persists and travels with
 /// the project. `url` points at the canonical copy (the staging copy for `.debug`, whose transcript
-/// is ephemeral). `url` is deliberately NOT encoded — absolute machine paths don't belong in a
+/// is ephemeral). `url` is deliberately not encoded — absolute machine paths don't belong in a
 /// portable sidecar; on restore the host re-derives it from `bundlePath` against the project URL.
 public struct SZChatAttachment: Identifiable, Equatable, Sendable {
     public let id: UUID
@@ -157,7 +157,7 @@ extension SZChatAttachment: Codable {
     }
 }
 
-/// Token usage for one agent turn, as its CLI reported it. `inputTokens` is the TOTAL prompt side
+/// Token usage for one agent turn, as its CLI reported it. `inputTokens` is the total prompt side
 /// including cached traffic — each provider normalizes its CLI's reporting convention at the parse
 /// site (some report the cache separately, some as a subset). A CLI that reports no usage yields no
 /// value, not zeros. The share fields exist because the sidecar is a one-way door: once a turn is
@@ -216,7 +216,7 @@ public struct SZTurnGeneration: Codable, Equatable, Sendable {
 
 /// A finished build, as one line of the conversation: the strip's own lane, settled.
 ///
-/// A run is a state while it happens (the run strip owns that) and a RECEIPT once it is over —
+/// A run is a state while it happens (the run strip owns that) and a receipt once it is over —
 /// the same object at two moments, not two vocabularies. The strip's group vanishes when the run
 /// ends, so this is the transcript's only durable record that a build happened, and the message's
 /// `graphRunID` is what makes it a way back into the Agent Graph.
@@ -228,8 +228,8 @@ public struct SZChatReceipt: Equatable, Sendable {
     /// "built 2 of 3". The work, never a run id: with several builds finishing at once, a count
     /// alone made three different runs read as one sentence repeated.
     public var label: String
-    /// The ending, in the ONE badge vocabulary (`SZRunBadge.style(for:)`) — so a receipt, a strip
-    /// lane and a RUNS row all say the same word for the same fact. This is the run's ACCOUNTING
+    /// The ending, in the one badge vocabulary (`SZRunBadge.style(for:)`) — so a receipt, a strip
+    /// lane and a runs row all say the same word for the same fact. This is the run's accounting
     /// outcome, which a traversal's own conclusion need not match: a build whose traversal ended
     /// cleanly with a node unimplemented is `.failed` here, because that is what happened to the
     /// work.
@@ -247,7 +247,7 @@ public struct SZChatReceipt: Equatable, Sendable {
 
     // MARK: - What a finished build says
     //
-    // Pure, so the wording is testable without a host and a run. `work` is the ONE node's title
+    // Pure, so the wording is testable without a host and a run. `work` is the one node's title
     // when the run had exactly one — naming it is what stops three concurrent one-node builds from
     // finishing as the same sentence three times.
 
@@ -256,7 +256,7 @@ public struct SZChatReceipt: Equatable, Sendable {
     public static func forEnding(implemented: Int, failed: Int, work: String?,
                                  busy: [String] = []) -> SZChatReceipt {
         // Some of the work did not land: say the shortfall, and badge it as such even though the
-        // TRAVERSAL ended cleanly — the receipt reports on the work, not on the graph walk.
+        // traversal ended cleanly — the receipt reports on the work, not on the graph walk.
         if failed > 0 {
             return SZChatReceipt(label: shortfallLabel(implemented: implemented, failed: failed, work: work),
                                  conclusion: .failed(reason: "\(failed) unfinished"))
@@ -290,10 +290,10 @@ public struct SZChatReceipt: Equatable, Sendable {
                       conclusion: .failed(reason: reason), detail: reason)
     }
 
-    /// A run that fell short. The single-node case is NAMED for the same reason the healthy one is:
+    /// A run that fell short. The single-node case is named for the same reason the healthy one is:
     /// a dead CLI takes down whichever builds were in flight, and three of them all reading
-    /// "built 0 of 1" — with the same reason underneath — is the exact indistinguishability this
-    /// whole change exists to remove. Counts carry the rest, where no one name would be true.
+    /// "built 0 of 1" — with the same reason underneath — would be indistinguishable. Counts carry
+    /// the rest, where no one name would be true.
     private static func shortfallLabel(implemented: Int, failed: Int, work: String?) -> String {
         if implemented == 0, failed == 1, let work, !work.isEmpty { return "\(work) unfinished" }
         return "built \(implemented) of \(implemented + failed)"
@@ -301,14 +301,13 @@ public struct SZChatReceipt: Equatable, Sendable {
 
     // MARK: - Codable
     //
-    // HAND-WRITTEN, for the same reason `SZChatAttachment` and `SZTurnEvent` are. `conclusion` is
-    // an enum WITH ASSOCIATED VALUES on synthesized Codable, so an unrecognized case does not
-    // decode as nil — it THROWS ("Invalid number of keys found, expected one"), and
-    // `decodeIfPresent` does not absorb that. One throw unwinds the whole `messages` array →
-    // `SZChatTranscriptIO.load`'s `try?` → nil → the scope loads with NO history → the next flush
-    // writes that emptiness back over the sidecar. A conversation would be destroyed, silently, by
-    // something as ordinary as adding a case to `SZTraversalEnding` and then opening the project
-    // under an older build. So the receipt degrades and the MESSAGE always survives: an ending we
+    // Hand-written, for the same reason `SZChatAttachment` and `SZTurnEvent` are. `conclusion` is an
+    // enum with associated values, and synthesized Codable throws on an unrecognized case ("Invalid
+    // number of keys found, expected one") rather than decoding nil; `decodeIfPresent` does not absorb
+    // that. One throw unwinds the whole `messages` array → `SZChatTranscriptIO.load`'s `try?` → nil →
+    // the scope loads with no history → the next flush writes that emptiness back over the sidecar.
+    // Adding a case to `SZTraversalEnding` and opening the project under an older build would destroy
+    // a conversation silently. So the receipt degrades and the message always survives: an ending we
     // cannot read is reported as `.ended`, and the words in `text` are the durable fact regardless.
 
     private enum CodingKeys: String, CodingKey { case label, conclusion, detail }
@@ -378,17 +377,17 @@ public struct SZChatMessage: Identifiable, Equatable, Sendable {
     /// as thumbnails/chips under the message. Empty for turns with no attachments.
     public var attachments: [SZChatAttachment]
     /// A host-authored passing note (a send rejection like "(busy…)"), shown in the tab but excluded
-    /// from persistence AND the cold-start recap — it isn't conversation, and replaying it to a fresh
+    /// from persistence and the cold-start recap — it isn't conversation, and replaying it to a fresh
     /// agent session (or restoring it as history) would misrepresent what was said.
     public var transient: Bool
     /// The agent-graph run this turn belongs to (`SZAgentGraphRun.id`) — the transcript's jump into
-    /// the Agent Graph panel. Stamped on the run's own narrations; nil on everything else. NOT the
+    /// the Agent Graph panel. Stamped on the run's own narrations; nil on everything else. Not the
     /// Profiler's `SZTurnEvent.runID`: that is the trace identity, and the two are different ids.
     public var graphRunID: UUID?
     /// The envelope the turn ran (assistant turns) — nil while in flight and on records that
     /// predate receipts; shown beside the duration.
     public var generation: SZTurnGeneration?
-    /// Set when this turn IS a finished build rather than something someone said — rendered as a
+    /// Set when this turn is a finished build rather than something someone said — rendered as a
     /// settled lane instead of a speaker's turn. nil on every ordinary message.
     public var receipt: SZChatReceipt?
     /// The build this line belongs to, by its short name, and the graph step a Director turn ran
@@ -440,7 +439,7 @@ extension SZChatMessage: Codable {
         attachments = try c.decodeIfPresent([SZChatAttachment].self, forKey: .attachments) ?? []
         transient = try c.decodeIfPresent(Bool.self, forKey: .transient) ?? false
         graphRunID = try c.decodeIfPresent(UUID.self, forKey: .graphRunID)
-        // `try?` on both extras: a value of the wrong SHAPE entirely (a string where an object
+        // `try?` on both extras: a value of the wrong shape entirely (a string where an object
         // belongs) throws in `decodeIfPresent` before any tolerant decoder runs. The message
         // survives either way — its `text` still says what happened.
         generation = (try? c.decodeIfPresent(SZTurnGeneration.self, forKey: .generation)) ?? nil

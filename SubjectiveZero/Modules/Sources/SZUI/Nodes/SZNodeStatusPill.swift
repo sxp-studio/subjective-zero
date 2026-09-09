@@ -70,7 +70,7 @@ public enum SZNodeStatus: Sendable {
     }
 
     /// Whether this state means work is actively in flight on the node (→ blink the pill; an agent state
-    /// also locks the node — see the panel's `isLocked`, which a `.reloading` user edit does NOT trip).
+    /// also locks the node — see the panel's `isLocked`, which a `.reloading` user edit does not trip).
     var isWorking: Bool {
         switch self {
         case .planning, .building, .reloading, .splitting, .merging: true
@@ -96,7 +96,7 @@ struct SZGraphOpGlow: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay {
             if status.isStructuralOp {
-                // Pulse off the SAME shared clock as the status pill, so the glow's halo swells in
+                // Pulse off the same shared clock as the status pill, so the glow's halo swells in
                 // lockstep with the pill's blink (period SZPulse.period).
                 TimelineView(.animation) { ctx in
                     let p = SZPulse.phase(at: ctx.date)
@@ -124,7 +124,7 @@ extension View {
     }
 }
 
-/// The whole treatment for a port row the running build has no code for: one opacity over label AND
+/// The whole treatment for a port row the running build has no code for: one opacity over label and
 /// control. It has to reach the control, not just the label — a disabled macOS switch still paints its
 /// blue track, so a `.disabled` toggle alone reads exactly like a live one.
 ///
@@ -205,7 +205,7 @@ struct SZNodeBadges: View {
 }
 
 /// An inert-looking status pill made clickable: one click composes a repair request to the node's Coding Agent
-/// (it lands in the composer — host-drafted messages COMPOSE, they never auto-send). Used by `Outdated`, whose
+/// (it lands in the composer — host-drafted messages compose, they never auto-send). Used by `Outdated`, whose
 /// whole point is that the node has an obvious, one-step way out.
 struct SZNodeFixPill: View {
     let status: SZNodeStatus

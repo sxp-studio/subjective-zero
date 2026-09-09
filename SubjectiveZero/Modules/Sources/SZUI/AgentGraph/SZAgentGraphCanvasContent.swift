@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Agent Graph panel's WORLD SPACE — the subtree the camera transforms. Split out of
+// The Agent Graph panel's world space — the subtree the camera transforms. Split out of
 // `SZAgentGraphPanel`, which keeps the camera, the mode and the sidebar: nothing here reads
-// the camera except as a zoom NUMBER, so the seam was already there.
+// the camera except as a zoom number, so the seam was already there.
 import SwiftUI
 import SZCore
 
-/// The world-space subtree: wires under cards under sockets, BOTH modes drawn by the same
+/// The world-space subtree: wires under cards under sockets, both modes drawn by the same
 /// card / wire / socket renderers over the same layout metrics — the views differ only in
 /// where the frames come from (the plan's ranked layout vs the record's unrolled chain).
 struct SZAgentGraphCanvasContent: View {
@@ -15,13 +15,13 @@ struct SZAgentGraphCanvasContent: View {
     var stepOutcomes: [String: [String]] = [:]
     /// Opens a card's authored source; nil hides every source pill.
     var openSource: ((SZAgentGraphFace.Source) -> Void)? = nil
-    /// Whether FILE pills (step, brief) are offered — false when no host can open one.
+    /// Whether file pills (step, brief) are offered — false when no host can open one.
     /// Dispatch links are the panel's own navigation and stand regardless.
     var drawsFileSources: Bool = true
     /// The record whose trace the Run view unrolls; nil = the Plan view (no live state).
     let record: SZAgentGraphRun?
     /// The sub-agent traversals this record's dispatch sent — the item records sharing its
-    /// thread. Drawn as a band under the dispatch card so a run SHOWS its fleet working
+    /// thread. Drawn as a band under the dispatch card so a run shows its fleet working
     /// instead of only counting it. Empty in the Plan view and for a record that dispatched
     /// nothing.
     var items: [SZAgentGraphRun] = []
@@ -83,8 +83,8 @@ struct SZAgentGraphCanvasContent: View {
     }
 
     /// The same 12pt dots the artifact canvas puts on its cards — an input on the left, one
-    /// per outcome row on the right, so a node visibly has PORTS rather than just wires
-    /// arriving somewhere near it. Drawn last so they sit ABOVE the cards; decorative only.
+    /// per outcome row on the right, so a node visibly has ports rather than just wires
+    /// arriving somewhere near it. Drawn last so they sit above the cards; decorative only.
     @ViewBuilder
     private func socketLayer(face: SZAgentGraphFace, frame: CGRect,
                              fired: String? = nil, decided: Bool = false,
@@ -95,8 +95,8 @@ struct SZAgentGraphCanvasContent: View {
         ForEach(face.outcomes, id: \.self) { outcome in
             let point = SZAgentGraphLayout.outcomePoint(frame, outcome: outcome, in: face,
                                                         subheader: subheader)
-            // A dot follows its row: once a node has decided, the port it did NOT take
-            // recedes with its label rather than staying bright — and an UNWIRED port is
+            // A dot follows its row: once a node has decided, the port it did not take
+            // recedes with its label rather than staying bright — and an unwired port is
             // born dim, the visible spelling of "this answer ends the run here".
             let faded = (decided && fired != outcome) || face.unwired.contains(outcome)
             SZAgentGraphSocket(colour: SZAgentGraphStyle.colour(for: outcome, in: face.form),
@@ -140,7 +140,7 @@ struct SZAgentGraphCanvasContent: View {
         }
     }
 
-    /// The one `message` stub, into the door: what arrives is a MESSAGE — words — and the
+    /// The one `message` stub, into the door: what arrives is a message — words — and the
     /// door's code decides everything else.
     @ViewBuilder
     private func planEntryStub(placement: SZAgentGraphLayout.Placement) -> some View {
@@ -161,7 +161,7 @@ struct SZAgentGraphCanvasContent: View {
 
     // MARK: Run — the executed trace, loops unrolled, the future projected
 
-    /// One card per trace ENTRY, in traversal order, left to right. A node visited twice is
+    /// One card per trace entry, in traversal order, left to right. A node visited twice is
     /// two cards, each with its own outcome — the whole reason the trace exists. Wires and
     /// sockets are the plan's own renderers over chain frames; wires take the colour of the
     /// outcome that actually moved the traversal forward.
@@ -171,11 +171,11 @@ struct SZAgentGraphCanvasContent: View {
             let frames = SZAgentGraphLayout.runFrames(for: record, graph: graph,
                                                       stepOutcomes: stepOutcomes,
                                                       opened: openActivity)
-            // The forecast hangs off the last card's CENTRE, and an open band grows a card
+            // The forecast hangs off the last card's centre, and an open band grows a card
             // downward — measured against the open frame the whole projection slid with it.
             let closedFrames = SZAgentGraphLayout.runFrames(for: record, graph: graph,
                                                             stepOutcomes: stepOutcomes)
-            // POSITIONS, not ordinals, index the frames: ordinals are the producer's naming
+            // Positions, not ordinals, index the frames: ordinals are the producer's naming
             // and nothing here may assume they are 1…n — the panel renders what it was
             // handed rather than crashing on a slipped invariant.
             ZStack(alignment: .topLeading) {
@@ -214,14 +214,14 @@ struct SZAgentGraphCanvasContent: View {
                 }
                 if let last = record.trace.last, let lastFrame = closedFrames.last {
                     let lastFace = SZAgentGraphLayout.runFace(for: last, in: graph, stepOutcomes: stepOutcomes)
-                    // The record's CONCLUSION picks the terminal — every ending is
+                    // The record's conclusion picks the terminal — every ending is
                     // classified, and each classification gets its honest capsule. Still
                     // traversing = the future.
                     switch record.conclusion {
                     case .none:
                         futureLayer(from: last, frame: lastFrame, face: lastFace,
                                     subheader: hasSubheader(last, record))
-                    // Every ending, in ONE call: the capsule the RUNS list gives the same
+                    // Every ending, in one call: the capsule the RUNS list gives the same
                     // record, word and colour together. The ending's own port goes with it,
                     // because a clean-looking exit off an error port is a failure and only
                     // the trace can say so — the row reads it the same way.
@@ -239,7 +239,7 @@ struct SZAgentGraphCanvasContent: View {
     }
 
     /// The sub-agent band: one lane per dispatched item, under the dispatch card that sent
-    /// them. The lanes say WHO is working and WHERE they are — the node each is on right
+    /// them. The lanes say who is working and where they are — the node each is on right
     /// now — because a tally alone ("3/4") cannot show a fleet actually running.
     @ViewBuilder
     private func callBand(under frame: CGRect) -> some View {
@@ -267,7 +267,7 @@ struct SZAgentGraphCanvasContent: View {
     }
 
     /// The stat line a Run card carries: wall time, ticking while the visit runs, frozen
-    /// once it settles. nil on a form that spends nothing — the SAME condition the layout
+    /// once it settles. nil on a form that spends nothing — the same condition the layout
     /// sizes the footer by.
     private func stats(for entry: SZAgentGraphRun.Entry,
                        face: SZAgentGraphFace) -> SZAgentGraphCardStats? {
@@ -276,7 +276,7 @@ struct SZAgentGraphCanvasContent: View {
                                      generation: entry.generation)
     }
 
-    /// "The traversal entered here" — the `complete` capsule's mirror image. NEUTRAL: it was
+    /// "The traversal entered here" — the `complete` capsule's mirror image. Neutral: it was
     /// green while endings were blue, and green now means an ending that succeeded. A start
     /// capsule is a label on a wire, not a verdict, and every run has one however it went.
     @ViewBuilder
@@ -295,7 +295,7 @@ struct SZAgentGraphCanvasContent: View {
     }
 
     /// "What's coming up next": the plan's forward continuation from the live node,
-    /// projected as a faded, dash-wired subgraph after the chain. It is the SAME ranked
+    /// projected as a faded, dash-wired subgraph after the chain. It is the same ranked
     /// layout the plan uses, re-rooted at the live node and aligned onto its card — a
     /// forecast drawn in the plan's own hand, visibly not yet real. Forward edges only.
     @ViewBuilder
@@ -389,7 +389,7 @@ struct SZAgentGraphCanvasContent: View {
         return .init(frames: frames, bounds: frames.values.reduce(.null) { $0.union($1) })
     }
 
-    /// The FROM node's form, so a wire colours like the socket it leaves.
+    /// The from node's form, so a wire colours like the socket it leaves.
     private func fromForm(of edge: SZAgentGraph.Edge,
                           in graph: SZAgentGraph) -> SZAgentGraphFace.Form? {
         graph.node(edge.from).map { SZAgentGraphLayout.face(of: $0, in: graph).form }
@@ -421,8 +421,8 @@ struct SZAgentGraphSocket: View {
     }
 }
 
-/// ONE dispatched sub-agent, as a lane under the dispatch that sent it: which item it is
-/// working, the node it is on RIGHT NOW, its running clock, and a pulsing `live` badge —
+/// One dispatched sub-agent, as a lane under the dispatch that sent it: which item it is
+/// working, the node it is on right now, its running clock, and a pulsing `live` badge —
 /// swapped for its conclusion badge and a frozen clock once it settles, so the band visibly
 /// drains from working to done as the fleet lands.
 ///

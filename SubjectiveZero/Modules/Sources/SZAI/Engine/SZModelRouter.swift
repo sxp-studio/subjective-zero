@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The routing seam every model request passes through: a caller describes WHAT it is asking
+// The routing seam every model request passes through: a caller describes what it is asking
 // for (`SZModelCall` — the call's class and where in the agent graph it originates) and the
-// router answers WITH WHAT (`SZModelChoice` — provider, model, effort, fast mode). Step and
+// router answers with what serves it (`SZModelChoice` — provider, model, effort, fast mode). Step and
 // engine code never name a model; naming lives entirely behind this protocol, which is what
 // keeps the seam vendor-neutral. v1 ships the identity router (one choice for every call —
 // the session's provider); the profile router is the policy conformer, wired in at host
@@ -55,7 +55,7 @@ public struct SZModelChoice: Sendable {
     }
 }
 
-/// The seam itself. Conformers are POLICY, chosen at host construction; callers hold this
+/// The seam itself. Conformers are the policy, chosen at host construction; callers hold this
 /// protocol and never a concrete router.
 public protocol SZModelRouting: Sendable {
     func resolve(_ call: SZModelCall) -> SZModelChoice

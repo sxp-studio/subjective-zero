@@ -24,7 +24,7 @@ extension SZHost {
     }()
 
     /// The profile new deliveries resolve against, honouring the launch pin: a stale
-    /// persisted name degrades to off, an unknown ENV name throws. `env` is for tests only.
+    /// persisted name degrades to off, an unknown env name throws. `env` is for tests only.
     func activeRoutingProfile(env: String? = SZHost.modelRoutingEnv) throws -> SZRoutingProfile? {
         switch env {
         case "0": return nil
@@ -127,7 +127,7 @@ extension SZHost {
         return true
     }
 
-    /// Create-or-replace by name. Editing the ACTIVE profile is allowed (new deliveries
+    /// Create-or-replace by name. Editing the active profile is allowed (new deliveries
     /// resolve the edit; live runs keep their captured table).
     func upsertRoutingProfile(_ profile: SZRoutingProfile) {
         if let index = routingProfiles.firstIndex(where: { $0.name == profile.name }) {

@@ -5,29 +5,29 @@
 // that provider. Distinct from claude/codex/grok/pi in the combination, all verified on opencode
 // 1.18.4 (2026-07-21):
 //
-//  1. DYNAMIC MODEL CATALOG (pi-style). opencode is a multi-provider harness — the served models
-//     depend on which backends the USER authed, so no static manifest can know them. The catalog is
+//  1. Dynamic model catalog (pi-style). opencode is a multi-provider harness — the served models
+//     depend on which backends the user authed, so no static manifest can know them. The catalog is
 //     enumerated from the CLI (`opencode models --verbose`, token-free), cached by the host, and
 //     re-fetched on health transitions — see `refreshModelCatalog`. Model ids are qualified
 //     `provider/model` argv tokens (e.g. "openai/gpt-5.6-terra"), the form `-m` accepts.
 //
-//  2. PER-MODEL REASONING EFFORTS FROM METADATA. Each model's verbose JSON carries
-//     `capabilities.reasoning` and a `variants` map whose KEYS are exactly the `--variant` tokens the
+//  2. Per-model reasoning efforts from metadata. Each model's verbose JSON carries
+//     `capabilities.reasoning` and a `variants` map whose keys are exactly the `--variant` tokens the
 //     model accepts (openai reasoning models: none/low/medium/high/xhigh/max) — pi's `thinkingLevelMap`
 //     equivalent. Unlike grok's inert flag, these map straight onto OpenAI's real `reasoningEffort`
 //     API param, so they are honest to declare; `launch()` emits `--variant <token>`. "none" is dropped
 //     from the menu (no subz provider models a no-thinking token — pi's rule).
 //
-//  3. MCP VIA AN INLINE ENV CONFIG. opencode has no per-invocation MCP flag. It CAN read a cwd
+//  3. MCP via an inline env config. opencode has no per-invocation MCP flag. It can read a cwd
 //     `opencode.json`, but a session's project (and thus which config chain supplies its MCP servers)
-//     resolves to the nearest GIT root — so a cwd-staged file inside a git worktree is intermittently
+//     resolves to the nearest git root — so a cwd-staged file inside a git worktree is intermittently
 //     dropped and `nc` never dialed (caught via a host-side connection trace: zero agent-bus accepts).
 //     Instead `launch()` passes the config inline via `OPENCODE_CONFIG_CONTENT` (a `mcp.subz` local
 //     stdio server = `nc` bridging to the host's TCP listener) — directory-independent, so every
 //     instance opencode spins up carries it (verified 4/4 from inside a git worktree, where the file
 //     path failed). The MCP tool names then arrive namespaced `subz_*` (see the launch() rewrite).
 //
-// Sessions are codex-style: opencode mints its own `ses_…` id, so we DON'T preallocate — `parse()`
+// Sessions are codex-style: opencode mints its own `ses_…` id, so we don't preallocate — `parse()`
 // reads it back off any `--format json` event (every event carries `sessionID`). A chat turn continues
 // with `-s <ses_…>` (not `-c`, which means "last session" and is ambiguous across the host's per-scope
 // working dirs). A failed turn exits nonzero AND emits a top-level `{"type":"error",…}` event
@@ -86,9 +86,9 @@ public struct SZOpenCodeProvider: SZProvider {
 
     // MARK: - Dynamic catalog
 
-    /// A persisted snapshot seeds the MODELS only — its default is dropped, not re-trusted: it may
+    /// A persisted snapshot seeds the models only — its default is dropped, not re-trusted: it may
     /// be the retired heuristic's guess (pre-fix builds persisted one; for the reporter, the
-    /// API-key-only `gpt-5.3-codex-spark`, which would re-break every run until a refetch SUCCEEDS —
+    /// API-key-only `gpt-5.3-codex-spark`, which would re-break every run until a refetch succeeds —
     /// the launch refresh is best-effort) or a configured pick the user has since changed outside
     /// the app. Dropping it costs nothing: launch omits `-m`, so opencode still runs the user's
     /// configured model itself, and the launch-time refetch re-derives the true default for the
@@ -125,10 +125,10 @@ public struct SZOpenCodeProvider: SZProvider {
         return snapshot
     }
 
-    /// The model the user EXPLICITLY configured — read from opencode's merged config via `opencode
+    /// The model the user explicitly configured — read from opencode's merged config via `opencode
     /// debug config` (token-free JSON). Verified opencode 1.18.4: the top-level `model` key is present
-    /// ONLY when the user set one — an authed install with no `model` configured (13 openai models
-    /// served) emitted NO `model` key, so this never surfaces opencode's own auto-selected default and
+    /// only when the user set one — an authed install with no `model` configured (13 openai models
+    /// served) emitted no `model` key, so this never surfaces opencode's own auto-selected default and
     /// can't smuggle an opencode auto-pick in as a user choice. Best-effort: a nonzero exit, timeout,
     /// or missing key returns nil, so the snapshot carries no default. The output is scanned
     /// string-state-aware (same extractor as the catalog) so a leading banner/log line can't defeat
@@ -151,7 +151,7 @@ public struct SZOpenCodeProvider: SZProvider {
     /// manifest locator) extracts them
     /// string-state-aware (robust to the pretty formatting). Only `status == "active"` models are
     /// kept. The default is the user's `configuredDefaultModel` when opencode currently serves it
-    /// (their explicit choice) — otherwise NONE: launch omits `-m` and opencode's own selection
+    /// (their explicit choice) — otherwise none: launch omits `-m` and opencode's own selection
     /// carries the run. Two generations of host-side guessing both broke on facts only opencode's
     /// backends know: "first model overall" defaulted a zen-only user onto a quota-exhausted freebie
     /// (2026-07-23), and its replacement "first non-zen model" defaulted a ChatGPT-OAuth user onto
@@ -247,7 +247,7 @@ public struct SZOpenCodeProvider: SZProvider {
     // (the Director + parallel coding agents) share it safely — opencode's own file locking serialises
     // writes, and refreshed OAuth tokens land back in the user's real store, exactly as when the user
     // runs opencode themselves (verified: 4 concurrent turns on the shared store all attach + succeed).
-    // An earlier attempt to isolate `XDG_DATA_HOME` per scope was REMOVED: it forced copying `auth.json`
+    // An earlier attempt to isolate `XDG_DATA_HOME` per scope was removed: it forced copying `auth.json`
     // into throwaway dirs, which diverges single-use rotating refresh tokens and can log the user out of
     // their own opencode. The concurrency failure it was meant to fix was actually the cwd-config
     // discovery bug, now fixed by injecting the MCP config via OPENCODE_CONFIG_CONTENT (see launch()).
@@ -265,7 +265,7 @@ public struct SZOpenCodeProvider: SZProvider {
         // host-side default guesses broke on account facts only opencode's backends know).
         let model = request.model ?? defaultModel
         if !model.isEmpty { args += ["-m", model] }
-        // The effort token IS opencode's `--variant` key (mapped 1:1 in the catalog); resolvedGeneration-
+        // The effort token is opencode's `--variant` key (mapped 1:1 in the catalog); resolvedGeneration-
         // Settings has already clamped it to this model's menu, so it's always one opencode accepts.
         if let effort = request.reasoningEffort, !effort.isEmpty {
             args += ["--variant", effort]
@@ -273,7 +273,7 @@ public struct SZOpenCodeProvider: SZProvider {
         if let resume = request.resumeSessionID {
             args += ["-s", resume]   // continue the existing conversation (chat turn)
         }
-        // MCP TOOL NAMESPACE. opencode prefixes every tool from an MCP server with the server's name
+        // opencode prefixes every tool from an MCP server with the server's name
         // (`subz`), so the bridge's `agent_*`/`ui_*` tools arrive as `subz_agent_*`/`subz_ui_*`. The
         // agent briefings name them bare (written CLI-agnostic). A literal-minded model won't cross
         // that gap: observed on opencode 1.18.4 + GPT-5.6 Terra, both the Director and coding agent
@@ -293,12 +293,8 @@ public struct SZOpenCodeProvider: SZProvider {
             "SWIFT_MODULE_CACHE_PATH": request.cacheDirectory.appending(path: "swift-module-cache").path,
             "CLANG_MODULE_CACHE_PATH": request.cacheDirectory.appending(path: "clang-module-cache").path,
         ]
-        // MCP bridge config rides an ENV var, not a cwd file: opencode resolves a session's project to
-        // the nearest GIT root and runs the turn on a git-root-rooted instance whose config chain does
-        // NOT include a cwd-staged `opencode.json` — so the `nc` server was intermittently never dialed
-        // (verified via host-side trace: zero connections on the agent bus). `OPENCODE_CONFIG_CONTENT`
-        // is inline + directory-independent, so every instance opencode spins up carries the server
-        // (verified: 4/4 attach from inside a git worktree, where the cwd-file path failed).
+        // The MCP bridge config rides an env var, never a cwd `opencode.json` — see item 3 in the file
+        // header for why a cwd-staged file is intermittently dropped.
         if let port = request.mcpServerPort {
             extraEnv["OPENCODE_CONFIG_CONTENT"] = Self.mcpConfigJSON(port: port)
         }
@@ -380,9 +376,9 @@ enum SZOpenCodeCatalogError: Error, CustomStringConvertible {
 /// call can appear as it runs and again on completion; `text` (part.text, the answer) held as the
 /// candidate reply — a superseded one becomes narration (`.thinking`), matching claude/codex/pi's
 /// reply/trace split — and flushed once in `finish()`; `step_finish` (part.tokens + part.cost) → usage.
-/// A turn has ONE step_finish per step (a tool round is its own step), so usage is SUMMED across the
+/// A turn has one step_finish per step (a tool round is its own step), so usage is SUMMED across the
 /// turn and emitted once. opencode's numbers are Anthropic-style (like pi): `total = input + cache +
-/// output + reasoning`, where `input` EXCLUDES the cached share — so `inputTokens` adds the cache back
+/// output + reasoning`, where `input` excludes the cached share — so `inputTokens` adds the cache back
 /// (SZTokenUsage's `inputTokens` is the whole prompt side, `cachedInputTokens` its cached subset), and
 /// `outputTokens` reports output+reasoning with reasoning as its share (reasoning is disjoint from
 /// output). Tool names arrive namespaced `subz_*` (opencode prefixes MCP tools), stripped to the bare

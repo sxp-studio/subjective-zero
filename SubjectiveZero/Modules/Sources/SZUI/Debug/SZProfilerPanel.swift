@@ -13,7 +13,7 @@ import SZCore
 
 /// The chat transcript's jump-to-Profiler action: set by the app when the Profiler surface
 /// exists (DEBUG builds), nil otherwise — the transcript's link renders only when set. An
-/// Environment value on purpose: chat rows are VALUE-ONLY for their Equatable render skip, and
+/// Environment value on purpose: chat rows are value-only for their Equatable render skip, and
 /// environment reads don't participate in `==`.
 public struct SZRevealInProfilerKey: EnvironmentKey {
     public static let defaultValue: (@Sendable @MainActor (UUID) -> Void)? = nil
@@ -27,19 +27,19 @@ extension EnvironmentValues {
 }
 
 /// Prompt inspection from the debug UI: opens the turn's rendered prompt (what the CLI was
-/// ACTUALLY sent) in the default text editor via a temp file. Set only while tracing holds
+/// actually sent) in the default text editor via a temp file. Set only while tracing holds
 /// prompts; same environment-value rationale as above.
 public struct SZViewTurnPromptKey: EnvironmentKey {
     public static let defaultValue: (@Sendable @MainActor (UUID) -> Void)? = nil
 }
 
-/// Which turn ids the host currently HOLDS a prompt for (the in-memory ring is session-scoped) —
+/// Which turn ids the host currently holds a prompt for (the in-memory ring is session-scoped) —
 /// the view-prompt button renders only for these, so it can never click into nothing.
 public struct SZHeldPromptTurnIDsKey: EnvironmentKey {
     public static let defaultValue: Set<UUID> = []
 }
 
-/// Token inspection: opens the turn's ACTUAL in/out text (the rendered prompt + the streamed
+/// Token inspection: opens the turn's actual in/out text (the rendered prompt + the streamed
 /// output) in the app's "Tokens" window. Same environment-value rationale as above.
 public struct SZViewTurnTokensKey: EnvironmentKey {
     public static let defaultValue: (@Sendable @MainActor (UUID) -> Void)? = nil
@@ -60,8 +60,8 @@ extension EnvironmentValues {
     }
 }
 
-/// The Profiler's color system: one MAJOR color per agent type (Director violet, coding agents
-/// orange — the app's semantic palette), and two task-type TINTS of it — `local` for harness
+/// The Profiler's color system: one major color per agent type (Director violet, coding agents
+/// orange — the app's semantic palette), and two task-type tints of it — `local` for harness
 /// work the app itself performs (tool handling, compile, promote), `server` for the model
 /// working (reasoning/streaming — the dim sibling, same hue). One place, so the timeline lanes
 /// and the detail-row bars can never drift apart.
@@ -116,7 +116,7 @@ public struct SZProfilerPanel: View {
             if records.isEmpty, chatTurns.isEmpty {
                 emptyState
             } else {
-                // ONE chronological list — a run and a direct chat turn are both just sessions;
+                // One chronological list — a run and a direct chat turn are both just sessions;
                 // the subtitle (Director + N nodes vs. the agent's name) tells them apart.
                 let all = (records + chatTurns).sorted { $0.startedAt > $1.startedAt }
                 let selected = all.first { $0.id == selectedRunID } ?? all[0]
@@ -181,7 +181,7 @@ public struct SZProfilerPanel: View {
 /// A run row in the app's idiom — accent rail + subtle fill for the selection (never the
 /// system highlight), an unread dot in the user's action blue for a run recorded since the
 /// user last looked, and a live relative age so "which one is latest" answers itself.
-/// Its own view so hover state stays LOCAL — a panel-level hover id re-folds every session's
+/// Its own view so hover state stays local — a panel-level hover id re-folds every session's
 /// records on each row crossing.
 private struct SZSessionRow: View {
     let record: SZTurnBreakdown.RunRecord
@@ -197,14 +197,14 @@ private struct SZSessionRow: View {
                     .fill(selected ? SZChatPanel.directorColor.opacity(0.8) : .clear)
                     .frame(width: 2)
                 VStack(alignment: .leading, spacing: 2) {
-                    // WHEN (relative, ticking) and how long — the two facts that pick a row.
+                    // When (relative, ticking) and how long — the two facts that pick a row.
                     TimelineView(.periodic(from: .now, by: 10)) { context in
                         Text("\(relativeAge(now: context.date))  ·  "
                              + SZTurnBreakdown.format(record.wallDuration))
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(selected ? .primary : .secondary)
                     }
-                    // WHO/WHAT and cost: agents touched + total tokens, nothing else.
+                    // Who/what and cost: agents touched + total tokens, nothing else.
                     Text(subtitle)
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
@@ -230,7 +230,7 @@ private struct SZSessionRow: View {
         .help(record.startedAt.formatted(date: .abbreviated, time: .standard))
     }
 
-    /// Age of the run's COMPLETION (when the record was generated) — seconds first, coarser as
+    /// Age of the run's completion (when the record was generated) — seconds first, coarser as
     /// it ages.
     private func relativeAge(now: Date) -> String {
         let age = max(0, now.timeIntervalSince(record.startedAt.addingTimeInterval(record.wallDuration)))
@@ -258,14 +258,14 @@ private struct SZSessionRow: View {
 /// One run's detail: header + stat strip, the block timeline, then per-turn phase rows.
 struct SZRunDetailView: View {
     let record: SZTurnBreakdown.RunRecord
-    /// The event under the cursor, ANYWHERE (a timeline block or a detail row) — both surfaces
+    /// The event under the cursor, anywhere (a timeline block or a detail row) — both surfaces
     /// highlight it, so the block↔row correspondence is unmistakable.
     @State private var hoveredEventKey: String?
-    /// The clicked row's key — STICKY, unlike hover: expanding a lane grows the pinned timeline
+    /// The clicked row's key — sticky, unlike hover: expanding a lane grows the pinned timeline
     /// and shifts the sections under a stationary cursor, so hover alone would jump to whatever
     /// row slid underneath. Cleared by clicking the same row again or switching records.
     @State private var selectedEventKey: String?
-    /// Which turns' phase sub-lanes are open — lifted here so clicking a detail ROW can expand
+    /// Which turns' phase sub-lanes are open — lifted here so clicking a detail row can expand
     /// its turn's lane (the row's block must be visible to be highlighted).
     @State private var expandedTurns: Set<Int> = []
 
@@ -274,7 +274,7 @@ struct SZRunDetailView: View {
             header
             statStrip
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
-            // The timeline stays PINNED (own bounded scroll if many lanes) while the turn
+            // The timeline stays pinned (own bounded scroll if many lanes) while the turn
             // sections scroll independently below — hovering a deep row must light a block you
             // can actually see, not one scrolled off the top.
             ScrollView(.vertical, showsIndicators: false) {
@@ -285,7 +285,7 @@ struct SZRunDetailView: View {
             .frame(maxHeight: 280)
             .fixedSize(horizontal: false, vertical: true)
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
-            // The turn sections: NESTED single-axis scrolls, not one two-axis ScrollView — a
+            // The turn sections: nested single-axis scrolls, not one two-axis ScrollView — a
             // two-axis ScrollView misregisters macOS hover tracking areas (rows highlighted ~3
             // rows off the cursor). Single-line rows, fixed column widths, overflow rides the
             // inner horizontal scroll.
@@ -346,7 +346,7 @@ struct SZRunDetailView: View {
                 stat("calls", calls)
             }
             Spacer()
-            // Lives HERE, not in the title row: the auto-hide panel header floats over the top
+            // Lives here, not in the title row: the auto-hide panel header floats over the top
             // ~26pt on hover and would swallow the click.
             Button {
                 NSPasteboard.general.clearContents()
@@ -374,7 +374,7 @@ struct SZRunDetailView: View {
 
 /// The run as lanes of blocks on one shared axis (the Safari-timelines idea, much simplified):
 /// the run's full span on top, then one lane per agent turn — Director violet, coding agents
-/// orange. Clicking a lane's LABEL (whole row, not a 6pt chevron) expands it into the turn's
+/// orange. Clicking a lane's label (whole row, not a 6pt chevron) expands it into the turn's
 /// phase blocks over a dim extent underlay. Hovering any block writes its numbers into the
 /// readout line below the lanes (instant — no tooltip delay), and a trackpad pinch zooms the
 /// time axis (labels stay pinned; the track area scrolls horizontally).
@@ -411,10 +411,10 @@ private struct SZRunTimelineView: View {
         /// The underlying event's cross-view key (nil for whole-turn/run lanes) — hovering the
         /// matching detail row highlights this block and vice versa.
         var eventKey: String?
-        /// Vertical shrink per nesting level, so a child block (reload) sits visibly INSIDE its
+        /// Vertical shrink per nesting level, so a child block (reload) sits visibly inside its
         /// parent (promote) instead of covering it edge-to-edge.
         var inset: CGFloat = 0
-        /// STABLE, content-derived identity. A per-build `UUID()` here caused a hover loop:
+        /// Stable, content-derived identity. A per-build `UUID()` here caused a hover loop:
         /// hover mutates state → body recomputes → every block gets a fresh id → the "old"
         /// block's hover-exit fires → state mutates → … (the beachball).
         var id: String { "\(offset)|\(fraction)|\(readout)" }
@@ -473,7 +473,7 @@ private struct SZRunTimelineView: View {
                     .frame(width: Self.labelWidth)
                     ScrollView(.horizontal, showsIndicators: zoom > 1.01) {
                         VStack(alignment: .leading, spacing: 2) {
-                            axisRow(trackWidth: trackWidth)   // zooms + scrolls WITH the tracks
+                            axisRow(trackWidth: trackWidth)   // zooms + scrolls with the tracks
                             ForEach(Array(lanes.enumerated()), id: \.offset) { _, lane in
                                 trackCell(lane, trackWidth: trackWidth)
                             }
@@ -508,7 +508,7 @@ private struct SZRunTimelineView: View {
     private func labelCell(_ lane: Lane) -> some View {
         Group {
             if let index = lane.expandIndex {
-                // The WHOLE label row is the disclosure target — not a 6pt chevron.
+                // The whole label row is the disclosure target — not a 6pt chevron.
                 Button {
                     withAnimation(.easeInOut(duration: 0.12)) {
                         if expandedTurns.contains(index) { expandedTurns.remove(index) }
@@ -540,7 +540,7 @@ private struct SZRunTimelineView: View {
         .frame(height: Self.laneHeight)
     }
 
-    /// The time ruler: ticks at a "nice" interval chosen so labels stay readable at the CURRENT
+    /// The time ruler: ticks at a "nice" interval chosen so labels stay readable at the current
     /// zoom — zooming in reveals finer ticks, which is when an axis matters most.
     private func axisRow(trackWidth: CGFloat) -> some View {
         let span = max(record.wallDuration, 0.001)
@@ -551,7 +551,7 @@ private struct SZRunTimelineView: View {
                 let x = trackWidth * CGFloat(tick / span)
                 let label = tick == 0 ? "0" : SZTurnBreakdown.format(tick)
                 // ~4.9pt/glyph at 8pt monospaced — enough to know when a label would clip at
-                // the right edge and must sit LEFT of its tick instead.
+                // the right edge and must sit left of its tick instead.
                 let estimatedWidth = CGFloat(label.count) * 4.9
                 Rectangle().fill(Color.white.opacity(0.18))
                     .frame(width: 1, height: 4)
@@ -587,7 +587,7 @@ private struct SZRunTimelineView: View {
             }
         }
         .contentShape(Rectangle())
-        // ONE hover computation per lane, from the cursor's x — per-block `.onHover` on offset
+        // One hover computation per lane, from the cursor's x — per-block `.onHover` on offset
         // views misregistered regions (a cursor at the lane's left highlighted the rightmost
         // block). Math can't be wrong: topmost block containing x wins (draw order).
         .onContinuousHover(coordinateSpace: .local) { phase in
@@ -612,7 +612,7 @@ private struct SZRunTimelineView: View {
     private func blockView(_ block: Block, color: Color, trackWidth: CGFloat, height: CGFloat) -> some View {
         let offset = min(max(block.offset, 0), 1)
         let fraction = min(max(block.fraction, 0), 1 - offset)
-        // Lit by direct hover OR by hovering its detail row (the shared event key).
+        // Lit by direct hover or by hovering its detail row (the shared event key).
         let hovered = hoveredBlockID == block.id
             || (block.eventKey != nil
                 && (block.eventKey == hoveredEventKey || block.eventKey == selectedEventKey))
@@ -638,7 +638,7 @@ private struct SZRunTimelineView: View {
                      tint: tint, eventKey: eventKey)
     }
 
-    /// The turn's measured phases as blocks (instants get a sliver), PLUS the model's actual
+    /// The turn's measured phases as blocks (instants get a sliver), plus the model's actual
     /// segments: every gap between measured spans is the model/server working — rendered as its
     /// own dim block, hoverable like everything else, not one big lump and not empty space.
     private func phaseBlocks(of turn: SZTurnBreakdown.RunTurn, laneColor: Color) -> [Block] {
@@ -670,7 +670,7 @@ private struct SZRunTimelineView: View {
 // MARK: - Per-turn detail rows
 
 /// One turn's phase list — the Safari-details idiom: name, duration, and a positioned mini bar
-/// on the turn's own axis. Columns are FIXED widths shared by every section, so the whole detail
+/// on the turn's own axis. Columns are fixed widths shared by every section, so the whole detail
 /// area reads as one table; rows are single-line, overflow rides the shared horizontal scroll.
 private struct SZTurnDetailSection: View {
     let turn: SZTurnBreakdown.RunTurn
@@ -723,7 +723,7 @@ private struct SZTurnDetailSection: View {
                     .help("View the prompt this turn sent to its CLI (opens a temp file)")
                 }
             }
-            // The model's time appears as its SEGMENTS between the measured phases (matching the
+            // The model's time appears as its segments between the measured phases (matching the
             // timeline lanes), not one aggregate block; only the CLI's own report stays a footer.
             let phases = (turn.events.filter { !Self.isDerived($0) }
                           + SZTurnBreakdown.modelSegments(of: turn))
@@ -759,11 +759,11 @@ private struct SZTurnDetailSection: View {
     private func row(_ event: SZTurnEvent) -> some View {
         let depth = SZTurnBreakdown.depth(of: event, in: turn.events)
         let key = SZTurnBreakdown.eventKey(event)
-        // Lit by direct hover OR by hovering its timeline block (the shared event key).
+        // Lit by direct hover or by hovering its timeline block (the shared event key).
         let hovered = hoveredEventKey == key || selectedEventKey == key
         let hoverFill: Double = hovered ? 0.06 : 0
         return HStack(spacing: Self.rowSpacing) {
-            // WHEN each phase began, relative to the turn — the rows read as a trace log.
+            // When each phase began, relative to the turn — the rows read as a trace log.
             Text(offsetLabel(for: event))
                 .foregroundStyle(.quaternary)
                 .frame(width: 54, alignment: .trailing)
@@ -782,17 +782,17 @@ private struct SZTurnDetailSection: View {
                     color: barColor(for: event),
                     showsTrack: false)   // dozens of gray tracks read as clutter; bars float
             }
-            // A thinking row IS tokens moving — its icon opens the turn's ACTUAL tokens (the
-            // prompt in, the streamed output out). Rides AFTER the bar so the fixed columns
+            // A thinking row is tokens moving — its icon opens the turn's actual tokens (the
+            // prompt in, the streamed output out). Rides after the bar so the fixed columns
             // stay aligned across sections.
             if event.stage == SZTurnStage.modelTime, let usage = turn.usage,
                let turnID = turn.turnID, let viewTurnTokens {
                 SZTokenDetailButton(usage: usage, turnID: turnID, action: viewTurnTokens)
             }
         }
-        .font(.system(size: 10, design: .monospaced))   // ONE size — mixed sizes read as misalignment
+        .font(.system(size: 10, design: .monospaced))   // One size — mixed sizes read as misalignment
         .foregroundStyle(.secondary)
-        // NO .textSelection here: selectable text swallows single clicks before the row's tap
+        // No .textSelection here: selectable text swallows single clicks before the row's tap
         // gesture (expansion "sometimes not working" = clicks that landed on text). Copying
         // lives in Copy Summary.
         .padding(.leading, Self.indent)
@@ -800,7 +800,7 @@ private struct SZTurnDetailSection: View {
         .background(RoundedRectangle(cornerRadius: 4)
             .fill(Color(white: 1).opacity(hoverFill)))
         .contentShape(Rectangle())
-        // onContinuousHover, NOT .onHover: plain onHover's tracking areas misregister inside
+        // onContinuousHover, not .onHover: plain onHover's tracking areas misregister inside
         // scroll views (rows lit ~3 below the cursor); continuous hover tracks correctly — it's
         // what the timeline lanes use.
         .onContinuousHover { phase in
@@ -816,7 +816,7 @@ private struct SZTurnDetailSection: View {
                 if hoveredEventKey == key { hoveredEventKey = nil }
             }
         }
-        // Click → sticky-select THIS row (layout may shift under the cursor as the lane opens;
+        // Click → sticky-select this row (layout may shift under the cursor as the lane opens;
         // hover would jump to whatever slid underneath) and open the turn's phase sub-lane.
         .onTapGesture {
             selectedEventKey = selectedEventKey == key ? nil : key
@@ -825,8 +825,8 @@ private struct SZTurnDetailSection: View {
         .help(SZTurnBreakdown.rowTitle(for: event, in: turn.events, depth: depth))   // full text when the name column truncates
     }
 
-    /// Big numbers lead the eye; noise recedes — for EVERY stage. A 13s think is the bottleneck
-    /// and must read as loud as any other 13s; only its LABEL is the dim aside.
+    /// Big numbers lead the eye; noise recedes — for every stage. A 13s think is the bottleneck
+    /// and must read as loud as any other 13s; only its label is the dim aside.
     private func durationEmphasis(for event: SZTurnEvent) -> AnyShapeStyle {
         guard let duration = event.duration else { return AnyShapeStyle(.quaternary) }
         if duration >= 1 { return AnyShapeStyle(.primary) }
@@ -841,7 +841,7 @@ private struct SZTurnDetailSection: View {
         Text(SZTurnBreakdown.rowTitle(for: event, in: turn.events, depth: depth))
     }
 
-    /// "+14.2s" on the record's clock: a RUN's rows share the run's zero (so every section
+    /// "+14.2s" on the record's clock: a run's rows share the run's zero (so every section
     /// correlates with the timeline axis — a subagent's first output reads "+22s", not "0");
     /// a standalone chat turn is its own zero. "−74ms" = the pre-start queue wait.
     private func offsetLabel(for event: SZTurnEvent) -> String {
@@ -865,7 +865,7 @@ private struct SZTurnDetailSection: View {
 }
 
 /// The thinking row's token affordance: a tiny in/out icon (hover = the quick numbers), and a
-/// click opens the turn's ACTUAL tokens — the rendered prompt in, the streamed thinking + reply
+/// click opens the turn's actual tokens — the rendered prompt in, the streamed thinking + reply
 /// out — in the app's "Tokens" window (`szViewTurnTokens`, host-built so it can read the prompt
 /// ring and the transcript). Selectable, paste-anywhere, guaranteed visible.
 private struct SZTokenDetailButton: View {

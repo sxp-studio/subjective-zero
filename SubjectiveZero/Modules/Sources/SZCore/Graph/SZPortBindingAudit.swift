@@ -17,10 +17,10 @@ public enum SZPortBindingAudit {
         public init(errors: [String], warnings: [String]) { self.errors = errors; self.warnings = warnings }
     }
 
-    /// Which runtime WIRE an accessor uses. `SZNodeKit` gives a node three per direction — the scalar
+    /// Which runtime wire an accessor uses. `SZNodeKit` gives a node three per direction — the scalar
     /// value channel, the texture channel and the string channel — and every numeric accessor shares one
     /// of them (`inputFloat` is `inputFloats(port)?.first`, `inputBool` reads the same floats, and
-    /// `inputFloatArray` differs only in how much it reads). So the accessor names the port's CHANNEL,
+    /// `inputFloatArray` differs only in how much it reads). So the accessor names the port's channel,
     /// never its exact type: a `bool` read with `inputFloat` is fine, a `texture` read with it is not.
     private enum Channel: String {
         case value, texture, string
@@ -74,15 +74,15 @@ public enum SZPortBindingAudit {
     private static let inputAccessors = (accessorChannels[.input] ?? []).flatMap { $0.1 }
     private static let outputAccessors = (accessorChannels[.output] ?? []).flatMap { $0.1 }
 
-    /// Types that run on their OWN clock — they keep going when `update()` stops being called, so a graph
+    /// Types that run on their own clock — they keep going when `update()` stops being called, so a graph
     /// that looks paused would still be playing audio or holding the mic. Constructing one without
     /// implementing `setPaused` is the "#knobs" bug's cousin: the control (Pause) is dead. A `ctx`
-    /// accessor can't catch this, because the leak is in what the node OWNS, not what it reads.
+    /// accessor can't catch this, because the leak is in what the node owns, not what it reads.
     private static let liveResourceTypes = ["AVPlayer", "AVCaptureSession", "AVAudioEngine", "SCStream"]
 
     /// `sourceFile` names the file in messages: `Node.swift`, or `Node.js` in a web project.
     public static func audit(contract: SZNodeContract, source: String, sourceFile: String = "Node.swift") -> Result {
-        // Scan CODE only, not comments: an agent leaving a breadcrumb like `// TODO: ctx.inputFloat("x")`
+        // Scan code only, not comments: an agent leaving a breadcrumb like `// TODO: ctx.inputFloat("x")`
         // for an undeclared port must not hard-block an otherwise-correct node.
         let scan = strippingComments(source)
         let referencedInputs  = portNames(in: scan, accessors: inputAccessors)
@@ -97,8 +97,8 @@ public enum SZPortBindingAudit {
         for name in referencedOutputs.subtracting(declaredOutputs).sorted() {
             errors.append("\(sourceFile) writes output port \"\(name)\" but node-contract.json declares no such output.")
         }
-        // A port on the WRONG CHANNEL is the same fault one level down, and the name check above waves it
-        // straight through: the port IS declared, so nothing is missing — the code just reads a different
+        // A port on the wrong channel is the same fault one level down, and the name check above waves it
+        // straight through: the port is declared, so nothing is missing — the code just reads a different
         // wire than the one the port is carried on, gets nil every frame, and falls back to its hardcoded
         // default while the card still reads Ready. Unambiguous, so it blocks like the undeclared case.
         errors += channelErrors(contract: contract, scan: scan, sourceFile: sourceFile)
@@ -130,10 +130,10 @@ public enum SZPortBindingAudit {
 
     /// What a promote would put live, plus the audit of `source` against it. The gate every promote passes:
     /// an authored (staged) contract merges into the node (`mergingAuthored(_:intoNode:)`); without one the
-    /// LIVE contract is the truth the source must agree with — so a source-only re-stage can never skip the
+    /// live contract is the truth the source must agree with — so a source-only re-stage can never skip the
     /// port audit.
     public struct PromoteAudit: Equatable, Sendable {
-        /// The contract the promote must WRITE: the authored one folded into the node. nil when the agent
+        /// The contract the promote must write: the authored one folded into the node. nil when the agent
         /// staged none — the node's live contract (and its identity) then stand untouched.
         public var contract: SZNodeContract?
         public var result: Result
@@ -141,7 +141,7 @@ public enum SZPortBindingAudit {
         public var mergeConflicts: [String]
     }
 
-    /// The merge runs HERE and only here, so what the gate audits is what the promote lands.
+    /// The merge runs here and only here, so what the gate audits is what the promote lands.
     public static func auditForPromote(source: String, authored: SZNodeContract?, node: SZNode,
                                        sourceFile: String = "Node.swift") -> PromoteAudit {
         var conflicts: [String] = []
@@ -158,7 +158,7 @@ public enum SZPortBindingAudit {
     }
 
     /// Blank out `/* … */` and `// …` comments so the scan sees code only. A heuristic: a `//` or `/*`
-    /// *inside* a string literal could over-strip, but that only risks a MISSED reference (a lost warning
+    /// *inside* a string literal could over-strip, but that only risks a missed reference (a lost warning
     /// or an undetected mismatch) — never a false hard error, which is the failure mode we must avoid.
     private static func strippingComments(_ source: String) -> String {
         var s = source

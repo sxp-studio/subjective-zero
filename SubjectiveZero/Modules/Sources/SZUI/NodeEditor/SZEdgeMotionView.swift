@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The MOVING half of an edge (the data comet, the flow dashes): CAShapeLayers whose `lineDashPhase`
+// The moving half of an edge (the data comet, the flow dashes): CAShapeLayers whose `lineDashPhase`
 // is driven by a repeating Core Animation, so the motion runs entirely on the render server — zero
 // main-thread frames. A per-edge `TimelineView(.animation)` would re-enter SwiftUI on every display
 // frame for every animated edge and re-rasterize the stroked layers at canvas scale (cost ∝ zoom²).
@@ -27,7 +27,7 @@ struct SZEdgeMotionView: NSViewRepresentable {
 
     func updateNSView(_ view: SZEdgeMotionBackingView, context: Context) {
         // Endpoints normally move per drag tick, where a tween would just be lag — so the layer
-        // snaps. They move ONE step at a time only under a SwiftUI animation (the plugs fold
+        // snaps. They move one step at a time only under a SwiftUI animation (the plugs fold
         // restacking a card's dots), and there the layer glides on the same curve and duration as
         // the wire it rides, which SZConnectionShape interpolates.
         view.apply(from: from, to: to, strokes: strokes, period: period, animated: animated, zoom: zoom,
@@ -89,7 +89,7 @@ final class SZEdgeMotionBackingView: NSView {
             let (c1, c2) = SZCubic.controls(from, to)
             path.addCurve(to: to, control1: c1, control2: c2)
             for shape in shapeLayers {
-                // Where the layer is RIGHT NOW (mid-glide if one is running), so an interrupted
+                // Where the layer is right now (mid-glide if one is running), so an interrupted
                 // fold carries on from what's on screen rather than snapping back to start.
                 let departing = shape.presentation()?.path ?? shape.path
                 shape.path = path
@@ -116,7 +116,7 @@ final class SZEdgeMotionBackingView: NSView {
         }
 
         // Crispness under the canvas scale transform: a shape layer rasterizes at contentsScale and
-        // is THEN scaled by the ancestor — bump the raster resolution with the zoom (clamped).
+        // is then scaled by the ancestor — bump the raster resolution with the zoom (clamped).
         let scale = (window?.backingScaleFactor ?? 2) * min(max(zoom, 1), 3)
         if appliedScale != scale {
             appliedScale = scale

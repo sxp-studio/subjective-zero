@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The welcome / home surface — a full-window split launcher (NOT a sheet, so it never contends with
+// The welcome / home surface — a full-window split launcher (not a sheet, so it never contends with
 // the provider sheet, Open/Save panels, or a TCC permission prompt on the same window). It is the
-// LAUNCH view: shown before any project loads, so a cold launch never touches the camera/mic until
+// launch view: shown before any project loads, so a cold launch never touches the camera/mic until
 // the user actually opens a project.
 //
 //   • Left half — the node editor's signature dotted grid + cursor-trail effect (reused verbatim, at
@@ -35,7 +35,7 @@ enum SZWelcomeStyle {
     static let text        = Color(white: 0.925)
     static let btnFill     = Color(white: 0.10)
     static let btnHover    = Color(white: 0.135)
-    // The primary action reads as primary via a SOLID warm ember fill + an ember border (not a
+    // The primary action reads as primary via a solid warm ember fill + an ember border (not a
     // translucent tint), with the same white label/icon as every other button — one text color throughout.
     static let primaryFill      = Color(red: 0.290, green: 0.190, blue: 0.120)  // solid ember-over-dark
     static let primaryFillHover = Color(red: 0.350, green: 0.235, blue: 0.150)
@@ -113,7 +113,7 @@ public struct SZWelcomeOverlay: View {
         self.onClose = onClose
     }
 
-    /// Live pointer position over the LEFT panel, in its local space (= the grid Canvas's space, both
+    /// Live pointer position over the left panel, in its local space (= the grid Canvas's space, both
     /// fill the panel at zoom 1 / offset 0), driving the cursor-trail glyphs.
     @State private var cursor: CGPoint?
 
@@ -328,7 +328,7 @@ private struct SZCyclingTagline: View {
 
 /// The launcher's pill button. `primary` = solid ember fill + ember border (Star on GitHub, New
 /// Project); otherwise a dark bordered pill. All share the same white label/icon. Full-width in its
-/// row; hover BRIGHTENS both variants.
+/// row; hover brightens both variants.
 private struct SZWelcomeButton: View {
     let title: String
     let icon: Image
@@ -353,7 +353,7 @@ private struct SZWelcomeButton: View {
                 RoundedRectangle(cornerRadius: 8).fill(background)
                     // The attention pulse: an ember tint that breathes behind the label. Driven by a
                     // TimelineView — the overlay is present whenever `attention` (never inserted/removed
-                    // at runtime, so it can't animate itself into place), it just PAUSES and fades to
+                    // at runtime, so it can't animate itself into place), it just pauses and fades to
                     // nothing under the cursor. (A conditional `if !hover` overlay used to "fly in".)
                     .overlay {
                         if attention && !reduceMotion {

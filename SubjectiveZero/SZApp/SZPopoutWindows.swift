@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Pop-out panel windows — the AppKit half of "window out" / "dock back". Host-managed raw NSWindows
-// (NOT a SwiftUI WindowGroup: scene restoration would re-open stale pop-outs on its own schedule,
+// Pop-out panel windows — the AppKit half of "window out" / "dock back". Host-managed raw NSWindows,
+// not a SwiftUI WindowGroup: scene restoration would re-open stale pop-outs on its own schedule,
 // openWindow gives no initial-frame control, and the host — which owns "main window closed → close
-// children" and "docked → close window" — lives outside any scene). One controller per popped-out
-// panel, keyed by SZPanelID; the manager dictionary is the retain root (`isReleasedWhenClosed =
-// false`).
+// children" and "docked → close window" — lives outside any scene. One controller per popped-out
+// panel, keyed by SZPanelID; the manager dictionary is the retain root (`isReleasedWhenClosed = false`).
 //
-// Lifecycle policy (docs/UI.md): pop-outs are CHILDREN of the main window's lifetime. Main window
-// closes → all pop-outs close first, so the main window is genuinely the last window and the app
-// quits exactly as before (`applicationShouldTerminateAfterLastWindowClosed`). Hooked on
-// willCloseNotification, NOT windowShouldClose — the untitled-save guard runs there and may CANCEL,
-// and a cancelled close must not have destroyed the pop-outs. A pop-out's own ✕/⌘W docks the panel
-// back into the layout (least destructive; "gone" is reserved for explicit closes — the View menu
-// or ui_close_panel — which drop the panel entirely). While the welcome surface is up the pop-outs
-// order out; they return (or first restore from app-state) when a project takes over.
+// Lifecycle policy (docs/UI.md): pop-outs are children of the main window's lifetime. Main window
+// closes → all pop-outs close first, so the main window is genuinely the last window and the app quits
+// exactly as before (`applicationShouldTerminateAfterLastWindowClosed`). Hooked on willCloseNotification,
+// not windowShouldClose — the untitled-save guard runs there and may cancel, and a cancelled close must
+// not have destroyed the pop-outs. A pop-out's own ✕/⌘W docks the panel back into the layout (least
+// destructive); "gone" is reserved for explicit closes — the View menu or ui_close_panel — which drop
+// the panel entirely. While the welcome surface is up the pop-outs order out; they return (or first
+// restore from app-state) when a project takes over.
 import AppKit
 import SwiftUI
 import SZCore
@@ -21,7 +20,7 @@ import SZUI
 
 @MainActor
 final class SZPopoutWindowManager {
-    /// Wired by SZHost.start(). The chrome configurator can flip `setWorkspaceActive` BEFORE that
+    /// Wired by SZHost.start(). The chrome configurator can flip `setWorkspaceActive` before that
     /// (its DispatchQueue hop races startup), so a set re-delivers the current activation — the
     /// relaunch restore must not be lost to that race.
     weak var host: SZHost? {
@@ -38,7 +37,7 @@ final class SZPopoutWindowManager {
     private var workspaceActive = false
 
     /// Why a window is being closed programmatically — windowWillClose consults it to decide
-    /// whether this close means "dock the panel back" (a USER close: traffic-light ✕ / ⌘W) or is
+    /// whether this close means "dock the panel back" (a user close: traffic-light ✕ / ⌘W) or is
     /// our own teardown (dock commit, panel closed for real, main window closing).
     enum CloseReason {
         case docked, panelClosed, mainWindowClosed
@@ -53,7 +52,7 @@ final class SZPopoutWindowManager {
             let center = NotificationCenter.default
             mainWindowObservers = [
                 center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-                    // willClose = the close IS proceeding (a cancelled save prompt never gets here).
+                    // willClose = the close is proceeding (a cancelled save prompt never gets here).
                     // Synchronous: the children die before the main window finishes closing, so the
                     // app's last-window quit fires exactly as in the single-window days.
                     MainActor.assumeIsolated { self?.closeAll(reason: .mainWindowClosed) }
@@ -81,7 +80,7 @@ final class SZPopoutWindowManager {
     /// Whether `id`'s window can actually show pixels right now. A window that can't — hidden
     /// behind the welcome surface (ordered out), miniaturized, or fully occluded by other windows —
     /// must not count as a visible viewport: its display link auto-suspends, so if it held render
-    /// drivership the timeline would stop and every VISIBLE viewport would freeze on the held
+    /// drivership the timeline would stop and every visible viewport would freeze on the held
     /// frame. The controller re-syncs the driver on every occlusion/miniaturize/fullscreen edge.
     func windowIsDisplayable(_ id: SZPanelID) -> Bool {
         guard let window = controllers[id]?.window else { return false }
@@ -95,9 +94,9 @@ final class SZPopoutWindowManager {
         controllers[id]?.window.styleMask.contains(.fullScreen) ?? false
     }
 
-    /// Whether `id`'s window is mid dock-flight — its windowDidMove events are OUR animation, not
+    /// Whether `id`'s window is mid dock-flight — its windowDidMove events are our animation, not
     /// a user drag (NSEvent.pressedMouseButtons is global, so "button down" alone can't tell a
-    /// flight apart from the user simultaneously grabbing ANOTHER window).
+    /// flight apart from the user simultaneously grabbing another window).
     func isDockAnimating(_ id: SZPanelID) -> Bool {
         dockAnimatingIDs.contains(id)
     }
@@ -116,7 +115,7 @@ final class SZPopoutWindowManager {
         if workspaceActive { controller.window.makeKeyAndOrderFront(nil) }
     }
 
-    /// Close `id`'s window for `reason`. The reason is stamped on the controller FIRST so its
+    /// Close `id`'s window for `reason`. The reason is stamped on the controller first so its
     /// windowWillClose doesn't misread the programmatic close as a user dock-back.
     func closePopout(id: SZPanelID, reason: CloseReason) {
         guard let controller = controllers.removeValue(forKey: id) else { return }
@@ -134,7 +133,7 @@ final class SZPopoutWindowManager {
     }
 
     /// Re-apply the positional titles (window title bar + the shell's strip) — called by the
-    /// host whenever the live panel set changes, since "Viewport 2" names a POSITION, not an
+    /// host whenever the live panel set changes, since "Viewport 2" names a position, not an
     /// identity (closing a sibling can renumber a window).
     func refreshTitles(_ title: (SZPanelID) -> String) {
         for (id, controller) in controllers { controller.updateTitle(title(id)) }
@@ -159,10 +158,10 @@ final class SZPopoutWindowManager {
 
     // MARK: - Drag-to-dock
 
-    /// The live user-drag watcher + the id it is watching. NATIVE window drags (titlebar /
+    /// The live user-drag watcher + the id it is watching. Native window drags (titlebar /
     /// movable-background) have no end-of-drag API, so the drag is reconstructed: windowDidMove
     /// with the left button down (and not our own dock flight, and not a live resize) marks a
-    /// user drag, and this poll then tracks the cursor at ~30ms until release. The MOVED WINDOW's
+    /// user drag, and this poll then tracks the cursor at ~30ms until release. The moved window's
     /// id is the ground truth for which drag is live — a report for a different id supersedes the
     /// running watcher (release+regrab between polls must not dock the stale window).
     private var dragWatcher: Task<Void, Never>?
@@ -225,7 +224,7 @@ final class SZPopoutWindowManager {
     }
 
     /// The dock-back button / menu / MCP path: animate home to the remembered (or default) spot,
-    /// then insert. The tile rect is only knowable AFTER the layout mutation, so this animates to
+    /// then insert. The tile rect is only knowable after the layout mutation, so this animates to
     /// the restore preview when it can, else docks without ceremony.
     func dockToRememberedSpot(id: SZPanelID) {
         guard let host else { return }
@@ -243,7 +242,7 @@ final class SZPopoutWindowManager {
     // MARK: - Internals
 
     /// The main-window state the pure session math needs, nil when the main window can't take a
-    /// dock right now (closed, miniaturized, on another Space — a drag on THIS Space must not
+    /// dock right now (closed, miniaturized, on another Space — a drag on this Space must not
     /// commit a dock against tiles the user can't see — or welcome up).
     private func mainContentGeometry() -> (screenFrame: CGRect, safeAreaTop: CGFloat, size: CGSize)? {
         guard workspaceActive, let window = mainWindow, window.isVisible, !window.isMiniaturized,
@@ -289,7 +288,7 @@ final class SZPopoutWindowManager {
     }
 
     /// Where a remembered-spot dock will land, best effort: the restore position's preview rect
-    /// against the CURRENT layout (mirrors SZPanelLayoutState.insertPanel's neighbor/zone logic
+    /// against the current layout (mirrors SZPanelLayoutState.insertPanel's neighbor/zone logic
     /// closely enough for an animation target; the model does the authoritative insert after).
     private func rememberedDockScreenRect(for id: SZPanelID) -> NSRect? {
         guard let host, let geometry = mainContentGeometry() else { return nil }
@@ -331,14 +330,14 @@ final class SZPopoutWindowManager {
     }
 }
 
-/// One pop-out window + its delegate: dock-back on a USER close, frame persistence on move/resize
+/// One pop-out window + its delegate: dock-back on a user close, frame persistence on move/resize
 /// end, driver re-sync on every visibility edge. Holds the window strongly (`isReleasedWhenClosed
 /// = false`; the manager's dictionary is the retain root for the controller).
 @MainActor
 final class SZPopoutWindowController: NSObject, NSWindowDelegate {
     let id: SZPanelID
     let window: NSWindow
-    /// Stamped by the manager BEFORE a programmatic close; nil means the close came from the user
+    /// Stamped by the manager before a programmatic close; nil means the close came from the user
     /// (traffic-light ✕ / ⌘W) and should dock the panel back.
     var teardownReason: SZPopoutWindowManager.CloseReason?
 
@@ -357,7 +356,7 @@ final class SZPopoutWindowController: NSObject, NSWindowDelegate {
         self.shellState = SZPopoutWindowShellState(title: title, autoHideHeader: host.autoHidePanelHeaders)
 
         // The main window's chrome language: transparent titlebar over full-bleed content, the
-        // shell's glass strip SHARING the titlebar row (name + dock-back beside the traffic
+        // shell's glass strip sharing the titlebar row (name + dock-back beside the traffic
         // lights — one slim strip, matching a docked tile's header in weight). System rounded
         // corners, native resizing, and real fullscreen (the projector case: green-button the
         // pop-out on the big display and it takes the top rung of the drivership ladder). The
@@ -415,7 +414,7 @@ final class SZPopoutWindowController: NSObject, NSWindowDelegate {
     nonisolated func windowWillClose(_ notification: Notification) {
         MainActor.assumeIsolated {
             // Programmatic teardown (dock commit / panel closed / main window closing): the
-            // manager already did the bookkeeping. A USER close is a dock-back gesture.
+            // manager already did the bookkeeping. A user close is a dock-back gesture.
             guard teardownReason == nil else { return }
             manager?.noteUserClose(of: id)
             host?.dockPanel(id)
@@ -424,8 +423,8 @@ final class SZPopoutWindowController: NSObject, NSWindowDelegate {
 
     nonisolated func windowDidMove(_ notification: Notification) {
         MainActor.assumeIsolated {
-            // A USER drag = left button down AND not our own dock flight (pressedMouseButtons is
-            // global — during the flight the user may be pressing anywhere) AND not a live resize
+            // A user drag = left button down and not our own dock flight (pressedMouseButtons is
+            // global — during the flight the user may be pressing anywhere) and not a live resize
             // (dragging the left/bottom resize edge moves the origin too, and a resize must never
             // read as drag-to-dock). Everything else just keeps the persisted frame honest.
             guard let manager else { return }

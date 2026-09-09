@@ -5,7 +5,7 @@
 // both, so this adapter is where a pack's `steps/<name>/Step.swift` becomes a compiled, keyed
 // module: scheduled into Application Support build dirs on first use, evaluated through the
 // runtime's keyed table (which awaits in-flight compiles), and reused across the run — the
-// host holds ONE `SZStepRuntime` for its lifetime, so a fresh adapter's re-schedule coalesces
+// host holds one `SZStepRuntime` for its lifetime, so a fresh adapter's re-schedule coalesces
 // into the runtime's latest-source-wins compile rather than a cold table.
 import Foundation
 import SZAI
@@ -79,7 +79,7 @@ final class SZHostStepRunning: SZStepRunning, SZStepProviding {
     /// (byte-for-byte — the loader stays dumb and so does this for effect-less steps); an
     /// answer that requested effects arrives as the `{"effects": […], "outcome": "…"}`
     /// envelope, which no bare outcome can be mistaken for (outcomes are names, not JSON
-    /// objects — and the decode demands BOTH keys).
+    /// objects — and the decode demands both keys).
     static func report(payload: String) -> SZStepReport {
         struct Envelope: Decodable {
             var outcome: String

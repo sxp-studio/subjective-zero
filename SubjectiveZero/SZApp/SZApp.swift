@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SZApp — the app bundle and host (docs/ARCHITECTURE.md). Standard SwiftUI App lifecycle.
 //
-// The host (SZHost) owns the SZRuntime, loads the sample project from disk, and injects the runtime's
+// The host (SZHost) owns the SZRuntime, loads the launch project from disk, and injects the runtime's
 // device + per-frame render closure into SZUI's dumb SZViewportPanel — so the window shows the graph's
 // live render, with GPU ownership living entirely in SZRuntime, not the view.
 //
 // The window is a freely rearrangeable panel layout: `SZPanelLayoutContainerView` renders the host's
 // `panelLayout` split tree, and each panel (viewport / node editor / chat) wears a name-header drag
 // handle, resizes on custom dividers, and closes/reopens without losing its spot. The default
-// arrangement is viewport over editor, chat right. Chat's presence
-// in the tree IS `chatVisible` (toggled by the editor HUD's message icon). The chat scopes to the
-// editor's selected node (hoisted `selectedNodeID`), or the Director when nothing is selected.
+// arrangement is viewport over editor, chat right. Chat's presence in the tree is `chatVisible`
+// (toggled by the editor HUD's message icon).
 import Foundation
 import AppKit
 import Sparkle
@@ -26,7 +25,7 @@ import SZUI
 @MainActor
 final class SZAppDelegate: NSObject, NSApplicationDelegate {
     weak var host: SZHost?
-    /// A `.subz` handed to us by Finder at COLD launch, before the host has finished starting.
+    /// A `.subz` handed to us by Finder at cold launch, before the host has finished starting.
     /// Buffered here; `start` consumes it if it arrived early, and `appDidFinishStarting` drains it
     /// if it arrived mid-startup. Once the app is fully started, opens route immediately.
     private var pendingOpenProjectURL: URL?
@@ -35,7 +34,7 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     /// be silently refused, and racing the initial load is undefined.
     private var didFinishStarting = false
 
-    // Pop-out panel windows close synchronously in the MAIN window's willClose (SZPopoutWindows),
+    // Pop-out panel windows close synchronously in the main window's willClose (SZPopoutWindows),
     // so the main window is genuinely the last one and this fires exactly as in the single-window
     // days. (Pre-existing quirk, out of scope: the DEBUG "Tokens" window also counts as a window
     // and keeps the app alive if it's open when the main window closes.)
@@ -64,14 +63,14 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Called after `host.start()` completes: mark started and open any `.subz` that Finder handed us
-    /// DURING startup (arrived too late for `start`'s `openingIfLaunchedWithFile`).
+    /// during startup (arrived too late for `start`'s `openingIfLaunchedWithFile`).
     func appDidFinishStarting() {
         didFinishStarting = true
         if let url = takePendingOpenURL() { host?.openProject(at: url) }
         renameFileMenuToProject()
     }
 
-    /// Retitle the native "File" menu to "Project" — the app's document IS a project (New Project /
+    /// Retitle the native "File" menu to "Project" — the app's document is a project (New Project /
     /// Open Recent projects / .subz), and the HUD gear mirrors this label. SwiftUI has no API to rename
     /// the standard File menu, so we retitle the NSMenuItem + its submenu directly. Deferred to the next
     /// runloop turn because SwiftUI populates `NSApp.mainMenu` just after this launch hook fires.
@@ -101,7 +100,7 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Quit gate: rescue an untitled project before its temp files are cleaned up (saved projects
-    /// autosave, so they quit silently). Offered DURING a run too — Save As no longer needs the
+    /// autosave, so they quit silently). Offered during a run too — Save As no longer needs the
     /// graph quiet, and quitting mid-run was the one way to lose an untitled project outright.
     /// Skipped for `debug_quit` (`quitSkipsUntitledRescue`): a drive has no human to answer the
     /// prompt, and parking terminate on it wedges the automated session.
@@ -132,7 +131,7 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     /// its own window delegate.
     private var windowCloseGuard: SZWindowCloseGuard?
 
-    /// Intercept the window's close button / ⌘W so the untitled-save prompt runs BEFORE the window
+    /// Intercept the window's close button / ⌘W so the untitled-save prompt runs before the window
     /// disappears (single-window app: closing the window terminates via
     /// `applicationShouldTerminateAfterLastWindowClosed`, and prompting after the window is gone
     /// stranded the app window-less). Self-healing: (re)installs whenever our guard isn't the
@@ -186,9 +185,9 @@ final class SZWindowCloseGuard: NSObject, NSWindowDelegate {
 // slim strip above the tiles where the traffic lights live — the titlebar's safe area, kept on
 // purpose as the native window-drag zone (tiles flush to the window top would put the panel-drag
 // headers where users grab to move the window). SwiftUI has no direct handle on these NSWindow
-// knobs, hence the zero-size representable fishing the window out of the hierarchy. NOTE:
-// deliberately NOT `isMovableByWindowBackground` — that made every panel HEADER a window-move
-// region (the window drag pre-empted the SwiftUI drag gesture and broke panel drag & drop). Extra
+// knobs, hence the zero-size representable fishing the window out of the hierarchy. Deliberately
+// not `isMovableByWindowBackground` — that made every panel header a window-move region (the
+// window drag pre-empted the SwiftUI drag gesture and broke panel drag & drop). Extra
 // window dragging also lives in the container's backdrop (any gap/margin).
 private struct SZWindowChromeConfigurator: NSViewRepresentable {
     let host: SZHost
@@ -227,7 +226,7 @@ private struct SZWindowChromeConfigurator: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.backgroundColor = NSColor(white: 0.04, alpha: 1)
             appDelegate.installWindowCloseGuard(on: window, host: host)
-            // The pop-out manager learns the MAIN window here (this configurator only ever lives
+            // The pop-out manager learns the main window here (this configurator only ever lives
             // in it) — the close-children observer and dock-drag hit-testing hang off it. The
             // welcome edge doubles as the pop-outs' hide/show + relaunch-restore signal.
             host.popoutManager.mainWindow = window
@@ -280,7 +279,7 @@ private struct SZWindowTitleOverlay: View {
 struct SZApp: App {
     @NSApplicationDelegateAdaptor(SZAppDelegate.self) private var appDelegate
     @State private var host = SZHost()
-    @State private var selectedNodeID: SZNodeID?      // canvas selection (edit/move/wire) — NOT chat scope
+    @State private var selectedNodeID: SZNodeID?      // canvas selection (edit/move/wire) — not chat scope
     /// A Routing card's View Graph ask: land the Agent Graph panel on this agent's plan.
     /// Consumed by the panel, the same handshake as the host's run-focus request.
     @State private var agentGraphPlanFocus: String?
@@ -307,14 +306,14 @@ struct SZApp: App {
         WindowGroup {
             Group {
                 if host.welcomePresented {
-                    // The launch/home surface — shown INSTEAD of the workspace (not over it), so a cold
+                    // The launch/home surface — shown instead of the workspace (not over it), so a cold
                     // launch opens no project until the user picks one (nothing touches the camera).
                     welcomeView
                 } else if host.runtime != nil {
                     SZPanelLayoutContainerView(
                         layout: host.panelLayout,
                         // Hidden titlebar: the container lays out below the titlebar's safe area, so
-                        // the traffic lights live in a slim strip ABOVE the tiles — which is also the
+                        // the traffic lights live in a slim strip above the tiles — which is also the
                         // native window-drag zone, deliberately kept (tiles flush to the window top
                         // would put the panel-drag headers where users grab to move the window). No
                         // windowControlsZone: nothing overlaps the tiles, titles stay hard-left.
@@ -464,7 +463,7 @@ struct SZApp: App {
             }
             // File — the document lifecycle (roadmap Task 1). Replacing .newItem also drops
             // "New Window" — intended (single-window app). Persistence is automatic, so only an
-            // UNTITLED project gets a ⌘S item, and it opens the Save As panel. New / Open / Open
+            // untitled project gets a ⌘S item, and it opens the Save As panel. New / Open / Open
             // Recent sit out a run or in-flight chat; Save As does not, because it never swaps the
             // project (the methods are guarded too — MCP can race a click).
             CommandGroup(replacing: .newItem) {
@@ -474,7 +473,7 @@ struct SZApp: App {
                 Button("Open…") { host.openProjectViaPanel() }
                     .keyboardShortcut("o", modifiers: .command)
                     .disabled(host.isBusyForProjectSwitch)
-                // The busy disable sits on the ITEMS: .disabled on the Menu itself doesn't render
+                // The busy disable sits on the items: .disabled on the Menu itself doesn't render
                 // on macOS (verified live 2026-07-04 — siblings grayed, the submenu didn't).
                 Menu("Open Recent") {
                     ForEach(host.existingRecentProjectPaths, id: \.self) { path in
@@ -488,7 +487,7 @@ struct SZApp: App {
                         .disabled(host.recentProjectPaths.isEmpty || host.isBusyForProjectSwitch)
                 }
                 Divider()
-                // No Save item for a PLACED project: it is written as it changes, so an item saying
+                // No Save item for a placed project: it is written as it changes, so an item saying
                 // "Save" would imply dirty state that doesn't exist. An untitled one has nowhere to
                 // save yet, and ⌘S is the reflex for exactly that, so it keeps the shortcut and opens
                 // the same panel Save As does.
@@ -573,7 +572,7 @@ struct SZApp: App {
                     .keyboardShortcut("d", modifiers: [.command])
                     .disabled(!host.canDuplicate(selectedNodeID))
                 Divider()
-                // Stopping ONE build is done from its lane in the chat strip; this is the
+                // Stopping one build is done from its lane in the chat strip; this is the
                 // everything-at-once escape hatch, reachable with the panel closed.
                 Button("Stop All Builds") { host.cancelRun() }
                     .keyboardShortcut(".", modifiers: [.command])
@@ -632,9 +631,9 @@ struct SZApp: App {
         #endif
     }
 
-    /// View-menu checkmark ↔ the panel's visibility: a tile in the layout tree OR a popped-out
+    /// View-menu checkmark ↔ the panel's visibility: a tile in the layout tree or a popped-out
     /// window both count as "shown" (toggling off a popped-out panel closes its window; toggling
-    /// a popped-out panel "on" is showPanel's dock-back). The menu enumerates KINDS and binds to
+    /// a popped-out panel "on" is showPanel's dock-back). The menu enumerates kinds and binds to
     /// each kind's primary instance — clones have no menu entry (their affordances are the header
     /// buttons). Closing the last panel is refused by the model, so the checkmark snaps back.
     private func panelVisibilityBinding(_ kind: SZPanelKind) -> Binding<Bool> {
@@ -682,10 +681,10 @@ struct SZApp: App {
     }
 
     /// The AI Settings Routing pane, wired to the host mapping (SZHost+RoutingSettings).
-    /// No presentation state: the selected row IS the active profile, so the host's
+    /// No presentation state: the selected row is the active profile, so the host's
     /// `activeRoutingProfileName` is the whole story — the gearMenu pattern, typed.
     private var routingSettingsView: SZRoutingSettingsView {
-        // A launch pin owns the session: the pane renders the PINNED profile, locked, not
+        // A launch pin owns the session: the pane renders the pinned profile, locked, not
         // whatever app-state happens to persist underneath it.
         let selection = host.routingEnvPinnedProfileName ?? host.activeRoutingProfileName
         return SZRoutingSettingsView(
@@ -716,7 +715,7 @@ struct SZApp: App {
                 host.setRoutingPositionFastMode(profileNamed: selection, position: $0, enabled: $1)
             },
             onShowAgentGraph: { agentID in
-                // Dismiss via the host path, NOT the sheet binding — its set-false is a Skip
+                // Dismiss via the host path, not the sheet binding — its set-false is a Skip
                 // (skipProviderSetup), and a navigation must not read as one.
                 host.dismissProviderSetupForNavigation()
                 agentGraphPlanFocus = agentID
@@ -923,13 +922,12 @@ struct SZApp: App {
         return { openWindow(value: host.turnTokenReport(for: $0)) }
     }
 
-    /// One case per panel; the initializers are the pre-refactor ones, moved verbatim out of the old
-    /// SplitView tree (min sizes now live in SZPanelLayoutGeometry, not `.frame` constraints).
+    /// One case per panel (min sizes live in SZPanelLayoutGeometry, not `.frame` constraints).
     /// Addressed by SZPanelID: the viewport case wires the instance's surface events (attach /
     /// resize / detach — SZHost+Viewports.swift); the single-instance panels only care about the kind. Note a
     /// pop-out/dock intentionally recreates the panel's view in its new window (one expected
     /// "[SZViewportPanel] makeNSView" print per transition — render state lives in the runtime);
-    /// WITHIN a window, layout edits still never recreate it (the container's stable ForEach ids).
+    /// Within a window, layout edits still never recreate it (the container's stable ForEach ids).
     /// Rolling-take edge: every viewport wears it (panelContent also feeds pop-out windows), so a
     /// recording is visible wherever the picture is. A cropped take also outlines the recorded
     /// region on the picture itself, and the framing editor opens on the one viewport the host
@@ -986,8 +984,8 @@ struct SZApp: App {
                               chatShown: host.chatVisible,
                               agentsWorking: host.isRunning || !host.chatInFlight.isEmpty,
                               // "There's unimplemented work you should kick off" — pending nodes, no
-                              // run, AND the Director isn't already mid-decompose-turn on it (that
-                              // turn IS the kick-off, so the beacon would misread as "needs you").
+                              // run, and the Director isn't already mid-decompose-turn on it (that
+                              // turn is the kick-off, so the beacon would misread as "needs you").
                               pendingWorkHint: host.pendingWorkAvailable
                                   && !host.chatInFlight.contains(SZChatScope.directorKey),
                               pendingNodeCount: host.pendingNodeCount,
@@ -1107,7 +1105,7 @@ struct SZApp: App {
                 .environment(\.szViewTurnTokens, viewTurnTokensAction)
         case .agentGraph:
             // How you read what the agents actually did: the pack library's plans and the
-            // RUNS records, all plain values + closures (SZUI never sees SZAI).
+            // runs records, all plain values + closures (SZUI never sees SZAI).
             SZAgentGraphPanel(planAgents: host.agentGraphPlanAgents(),
                               runs: host.agentGraphRuns,
                               resolveGraph: { [weak host] in host?.agentGraphResolve($0) },

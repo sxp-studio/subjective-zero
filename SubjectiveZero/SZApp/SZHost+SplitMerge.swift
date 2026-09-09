@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Split / merge graph operations — the `ui_split_node` / `ui_merge_nodes` entry points and the
-// editor's Split / Merge Selected, plus their deferred-commit machinery. A split/merge STAGES the new
+// editor's Split / Merge Selected, plus their deferred-commit machinery. A split/merge stages the new
 // pieces (hidden, wired, drafted contracts + seed prompts carrying the original source) while the
 // originals keep rendering with a transient pill, dispatches the Director to implement them via a run,
-// then COMMITS the structural swap once they're built — or rolls back if a piece failed.
+// then commits the structural swap once they're built — or rolls back if a piece failed.
 //
-// Transcript policy: nodes REMOVED by these ops (the original on commitSplit, the constituents on
+// Transcript policy: nodes removed by these ops (the original on commitSplit, the constituents on
 // commitMerge, the staged pieces on rollback, and the run:false structural variants) get the same
 // chat purge as a delete (`purgeChatArtifacts`) — ids are never reused, so a kept transcript would
 // be unreachable in the UI, and the Director transcript already narrates the operation.
@@ -17,23 +17,23 @@ extension SZHost {
     // MARK: - Split / merge
 
     /// Split a node into `pieces` (≥2) data-connected stages (the `ui_split_node` entry point + the
-    /// editor's Split). Deferred-commit UX when `run`: STAGE the hidden stage nodes (internal wiring +
+    /// editor's Split). Deferred-commit UX when `run`: stage the hidden stage nodes (internal wiring +
     /// drafted boundary contracts + seed prompts carrying the original's source) while the original keeps
-    /// rendering with a "Splitting" pill, dispatch the Director to implement them, then COMMIT — rewire
+    /// rendering with a "Splitting" pill, dispatch the Director to implement them, then commit — rewire
     /// the original's external edges to the stages, move the render endpoint, remove the original, reveal
     /// the finished cards. With `run:false` it applies the full structural split immediately (drafts
     /// visible) for the Director/tests. `instruction` is the user's steer for this split, woven into every
     /// stage's seed prompt. Returns the new piece ids, or nil if rejected.
     @discardableResult
     func splitNode(id: SZNodeID, pieces: Int = 2, run: Bool = true, instruction: String? = nil) -> [SZNodeID]? {
-        // A staged op is drained by ONE run; a second would share the `hiddenPieces` bag and be rolled back
+        // A staged op is drained by one run; a second would share the `hiddenPieces` bag and be rolled back
         // with the first. Refuse rather than corrupt (the caller surfaces the reason).
         guard !(run && hasStagedGraphOp) else { return nil }
         // The fence: never split a node another activity holds (mid-chat, another op's original).
         if let denial = fenceDenial(nodes: [id], origin: .agent) { status = denial; return nil }
         guard let original = store.project?.graph.node(id: id) else { return nil }
         let title = original.title
-        // The node's PURPOSE, not its seed prompt: prefer the contract summary (terse, stable) so
+        // The node's purpose, not its seed prompt: prefer the contract summary (terse, stable) so
         // splitting a freshly-seeded node doesn't nest one seed prompt inside another.
         let intent = original.contract?.summary ?? original.prompt ?? original.title
         let source = nodeSource(id)   // the real code to divide — captured before the structural edit
@@ -43,7 +43,7 @@ extension SZHost {
         guard let staged, let firstPiece = staged.pieceIDs.first else { return nil }
         store.mutate { $0.graph = staged.graph }
         let pieceIDs = staged.pieceIDs
-        // The op is journaled ONCE, where it is decided. Its deferred settle (commit/rollback) runs on
+        // The op is journaled once, where it is decided. Its deferred settle (commit/rollback) runs on
         // the run's tail with no caller identity — it is this entry's consequence, not a new decision.
         noteMutation("split node", ["\(title) → \(pieceIDs.count) stages"], origin: .agent)
         seedSplitPrompts(pieceIDs, original: title, intent: intent, source: source, instruction: instruction)
@@ -62,8 +62,8 @@ extension SZHost {
         noteRunCreatedWork(Set(pieceIDs))
 
         if run {
-            // START a run, or JOIN the one already in flight. Staging begins no run of its own, so a
-            // Director splitting mid-turn does NOT nest a run — the run it is already inside drains this op.
+            // Start a run, or join the one already in flight. Staging begins no run of its own, so a
+            // Director splitting mid-turn does not nest a run — the run it is already inside drains this op.
             guard startOrJoinRun(rollbackReason: "split of \(title) cancelled") else { return nil }
         } else {
             purgeChatArtifacts(for: [id])   // the structural split removed the original immediately
@@ -91,9 +91,9 @@ extension SZHost {
     }
 
     /// Merge an adjacent, data-connected linear chain into one node (the `ui_merge_nodes` entry point +
-    /// the editor's Merge Selected). Deferred-commit UX when `run`: STAGE the hidden merged node (drafted
+    /// the editor's Merge Selected). Deferred-commit UX when `run`: stage the hidden merged node (drafted
     /// boundary contract + a seed prompt carrying every constituent's source) while the originals keep
-    /// rendering with a "Merging" pill, dispatch the Director, then COMMIT — rewire externals to the
+    /// rendering with a "Merging" pill, dispatch the Director, then commit — rewire externals to the
     /// merged node, drop internal edges, move the endpoint, remove the constituents, reveal the result.
     /// With `run:false` it applies the full structural merge immediately. `instruction` is the user's steer
     /// for this merge, woven into the merged node's seed prompt. Returns the merged id, or nil.
@@ -101,7 +101,7 @@ extension SZHost {
     func mergeNodes(ids: [SZNodeID], run: Bool = true, instruction: String? = nil) -> SZNodeID? {
         guard !(run && hasStagedGraphOp) else { return nil }   // one staged op at a time — see `splitNode`
         if let denial = fenceDenial(nodes: ids, origin: .agent) { status = denial; return nil }
-        // Capture each constituent's purpose + real source BEFORE the edit, so the agent fuses real code.
+        // Capture each constituent's purpose + real source before the edit, so the agent fuses real code.
         let constituents = ids.compactMap { store.project?.graph.node(id: $0) }
             .map { (title: $0.title, intent: $0.contract?.summary ?? $0.prompt ?? $0.title, source: nodeSource($0.id)) }
 
@@ -155,18 +155,18 @@ extension SZHost {
         persistGraphEditAndReload(action: "merge complete")
     }
 
-    /// Ensure a run exists to implement the op we just staged. If the CALLER is already a run (the
-    /// Director restructuring inside its own turn) we JOIN it — its tail drains our op — rather than
+    /// Ensure a run exists to implement the op we just staged. If the caller is already a run (the
+    /// Director restructuring inside its own turn) we join it — its tail drains our op — rather than
     /// starting a nested run. Off-run we start one.
     ///
     /// `startRun` early-returns when the provider isn't ready or the MCP port/project is missing. That would
     /// strand the op: staged pieces nobody implements, a "Splitting" pill that never clears, and — because
-    /// `graphOpStatus` drives `activeScopeLocked` — a node chat composer locked forever with no recovery.
+    /// `graphOpStatus` locks the card (`SZNodeCanvasContentView.isLocked`) — a node locked for good.
     /// Roll back instead. Returns false when the op was rolled back and the caller should report failure.
     private func startOrJoinRun(rollbackReason: String) -> Bool {
-        // Join the CALLER's run — the Director restructuring inside its own turn — whose tail
+        // Join the caller's run — the Director restructuring inside its own turn — whose tail
         // drains `pendingGraphOp`. Another run being live says nothing about ours, and the run
-        // that JOINS is the one that owns the op: without this the ownership flag stays with
+        // that joins is the one that owns the op: without this the ownership flag stays with
         // whichever run happened to be admitted while the op was staged.
         if let caller = activeRun(for: SZToolCaller.claim) {
             caller.ownsGraphOp = true
@@ -179,7 +179,7 @@ extension SZHost {
     }
 
     /// Settle the staged split/merge at the end of the run that was implementing it — the counterpart of
-    /// staging, called from `startRun`'s task tail on success, throw AND cancel. `commitSplit`/`commitMerge`
+    /// staging, called from `startRun`'s task tail on success, throw and cancel. `commitSplit`/`commitMerge`
     /// each guard on every piece having reached `.generated`, so an unbuilt or cancelled op rolls back to the
     /// exact pre-split graph. Nothing else drains this: a graph op outlives neither its run nor a project switch.
     func drainPendingGraphOp() {
@@ -195,7 +195,7 @@ extension SZHost {
     }
 
     /// Undo an in-flight split/merge (Cancel, or a piece that failed to build): remove the staged pieces
-    /// (+ their edges) and clear the flags. Staging only ADDED nodes — the originals were never modified
+    /// (+ their edges) and clear the flags. Staging only added nodes — the originals were never modified
     /// — so dropping the pieces restores the pre-op graph exactly, with the originals still wired/rendering.
     private func rollbackGraphOp(reason: String) {
         let pieces = hiddenPieces
@@ -203,9 +203,8 @@ extension SZHost {
         // start (op still staged) — clear it either way, or the next split is refused by a ghost.
         pendingGraphOp = nil
         releaseGraphOpSlot()   // idempotent (the drain may have released already)
-        // Clear the op flags even on this early-out: `graphOpStatus` now drives `activeScopeLocked`,
-        // so a stale entry (pieces emptied out-of-band) would permanently lock that node's composer
-        // with no Stop and no recovery.
+        // Clear the op flags even on this early-out: `graphOpStatus` locks the card, so a stale entry
+        // (pieces emptied out-of-band) would lock that node for good, with no Stop and no recovery.
         guard !pieces.isEmpty else { status = reason; graphOpStatus = [:]; return }
         store.mutate { project in
             project.graph.nodes.removeAll { pieces.contains($0.id) }
@@ -213,7 +212,7 @@ extension SZHost {
         }
         graphOpStatus = [:]
         hiddenPieces = []
-        // Only the op's OWN pieces — `dispatchPrompts` is host-wide and node-keyed, so clearing it
+        // Only the op's own pieces — `dispatchPrompts` is host-wide and node-keyed, so clearing it
         // wholesale discarded the brief-vs-prompt evidence of every other live run's nodes.
         for piece in pieces { dispatchPrompts[piece] = nil }
         purgeChatArtifacts(for: pieces)   // the staged pieces' coding-agent transcripts are orphans now
@@ -234,9 +233,9 @@ extension SZHost {
         }
     }
 
-    /// Render one of the coding pack's SEED briefs (`split-stage` / `merge`) — stage-time
+    /// Render one of the coding pack's seed briefs (`split-stage` / `merge`) — stage-time
     /// authoring written into the piece's prompt, through the same renderer + pack templates
-    /// every other brief uses (the pack is the ONE home for agent prose; the equivalence gate
+    /// every other brief uses (the pack is the one home for agent prose; the equivalence gate
     /// pins these bytes). A missing root or a render refusal skips the seed with a status
     /// line — the piece then carries its drafted contract and no prompt, never invented prose.
     private func renderSeed(template: String, graphOp: SZBriefExtras.GraphOp) -> String? {

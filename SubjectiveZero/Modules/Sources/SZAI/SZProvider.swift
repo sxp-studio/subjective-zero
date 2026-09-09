@@ -9,7 +9,7 @@
 // output in `parse()`; `run()` is a shared default below and the health tiers live in
 // SZProviderHealth.swift.
 //
-// CLI-ONLY: every provider is a subprocess wrapper around its CLI via SZProcess. No HTTP APIs,
+// Every provider is a subprocess wrapper around its CLI via SZProcess: no HTTP APIs,
 // no API keys. See docs/AI_PROVIDERS.md (the "static capability manifest" = these static values).
 import Foundation
 import SZCore
@@ -47,7 +47,7 @@ public struct SZAgentRunRequest: Sendable {
     public var reasoningEffort: String?
     public var fastMode: Bool
     public var timeout: TimeInterval?
-    /// Max SILENCE (seconds without output) before the turn is killed; every output chunk resets the
+    /// Max silence (seconds without output) before the turn is killed; every output chunk resets the
     /// clock. nil = no silence bound. Rides alongside `timeout`, which stays the wall-clock hard cap —
     /// a CLI that is still streaming is alive, but one can also wedge (or loop) while emitting forever.
     public var inactivityTimeout: TimeInterval?
@@ -177,14 +177,14 @@ public final class SZNullStreamConsumer: SZAgentStreamConsumer {
     public func consume(_ line: String) -> [SZAgentStreamEvent] { [] }
 }
 
-/// One model a provider can launch with: the exact token argv passes (PINNED version ids, not
+/// One model a provider can launch with: the exact token argv passes (pinned version ids, not
 /// floating aliases — a version-labeled menu entry must never silently re-point) plus the human
 /// label the picker shows. Where the CLI vends its own catalog (grok, pi, opencode, codex), the
 /// list is fetched from it at runtime; where it can't (claude, muse), new models ship via app
 /// updates, the Sparkle story.
 ///
 /// The three capability fields are nil when the model shares its provider's surface, and set only
-/// where the CLI was OBSERVED to diverge — never where we merely suspect it, since an unmeasured
+/// where the CLI was observed to diverge — never where we merely suspect it, since an unmeasured
 /// override is a fabricated fact. Each has an `SZProvider.…(for:)` reader that resolves the override
 /// against the provider's fallback. What any given model advertises, and the evidence for it, belongs
 /// next to that model in Providers/ — not here.
@@ -238,7 +238,7 @@ public protocol SZProvider: Sendable {
     var models: [SZProviderModel] { get }
     var defaultModel: String { get }
     var defaultReasoningEffort: String { get }   // opaque token; "" if there is no provider-level fallback
-    /// Effort tokens this CLI maps to a flag, in menu order — the PROVIDER-LEVEL fallback for models
+    /// Effort tokens this CLI maps to a flag, in menu order — the provider-level fallback for models
     /// that don't override it. `[]` = no fallback menu: either the CLI has no effort concept, or the
     /// provider deliberately declares efforts per enumerated model only — for a model without its own
     /// menu the UI hides the dimension and argv never emits one. Read
@@ -329,34 +329,32 @@ public extension SZProvider {
     }
 
     /// Whether fast mode can be turned on for one model at all — ask this, not `supportsFastMode`,
-    /// before showing a toggle or emitting a flag. A CLI can accept the fast-mode argv for every
+    /// before showing a toggle or emitting a flag: a CLI can accept the fast-mode argv for every
     /// model it serves and enable it for only some.
-    ///
-    /// This answers *can it be enabled*, never *was the turn served fast*. The latter is an account
+    /// It answers *can it be enabled*, never *was the turn served fast*. The latter is an account
     /// entitlement the CLI reports per turn, so no model list can know it — don't encode it here.
     func supportsFastMode(for modelID: String) -> Bool {
         model(id: modelID)?.supportsFastMode ?? supportsFastMode
     }
 
-    /// Clamp a stored (possibly stale) selection down to what this provider can actually run,
-    /// returning concrete values ready for an `SZAgentRunRequest`:
+    /// Clamp a stored (possibly stale) selection down to what this provider can run, returning
+    /// concrete values ready for an `SZAgentRunRequest`:
     ///
     /// - unknown model → `defaultModel`
     /// - effort off the selected model's menu → that model's default (or the menu's first token, if
     ///   even the default isn't on it); nil when the CLI has no effort concept
     /// - fastMode → off unless the selected model honours it
     ///
-    /// Every capability is read against the SELECTED model, so the same stored setting can be legal
-    /// under one model and clamped under another. Clamping never rewrites the stored row: a setting
-    /// this model rejects survives, and takes effect again once a model that accepts it is picked.
-    ///
-    /// This is the ONE clamp point. Every consumer — runs, Director turns, chats, telemetry — reads
-    /// its output, which is why `launch()` may trust `request.fastMode` without rechecking the model.
+    /// Every capability is read against the selected model, so one stored setting can be legal under
+    /// one model and clamped under another. Clamping never rewrites the stored row: a setting this
+    /// model rejects survives and takes effect again once a model that accepts it is picked. This is
+    /// the one clamp point — every consumer (runs, Director turns, chats, telemetry) reads its
+    /// output, which is why `launch()` may trust `request.fastMode` without rechecking the model.
     func resolvedGenerationSettings(from stored: SZProviderGenerationSettings?) -> SZProviderGenerationSettings {
         let modelIDs = models.map(\.id)
         let model = stored?.model.flatMap { modelIDs.contains($0) ? $0 : nil } ?? defaultModel
-        // An EMPTY model list (a runtime catalog before its first fetch) resolves no effort either:
-        // the provider-level menu is a fallback for a stale id AMONG known models, not a claim
+        // An empty model list (a runtime catalog before its first fetch) resolves no effort either:
+        // the provider-level menu is a fallback for a stale id among known models, not a claim
         // about a CLI-default model we know nothing about — argv must not carry an effort flag
         // for a model that was never enumerated.
         let efforts = models.isEmpty ? [] : supportedReasoningEfforts(for: model)

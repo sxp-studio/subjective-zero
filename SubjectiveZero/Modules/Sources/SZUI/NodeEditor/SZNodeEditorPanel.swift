@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The node-editor panel — the human-facing canvas. It observes the injected @Observable SZStore
 // and renders the live graph: node cards (positioned at node.position, the card center) over the
-// connection layer, inside a pannable/zoomable canvas, with a HUD bar (Run · chat · ＋node · delete)
-// along the bottom (provider selection lives in the chat composer's generation picker).
+// connection layer, inside a pannable/zoomable canvas, with a HUD bar along the bottom.
 // Bottom pane of the app's VSplitView; the chat panel docks beside the combo.
 //
 // Navigation: trackpad pinch / ⌘+scroll zoom pivoted on the cursor (clamped),
 // two-finger-scroll / mouse-wheel pan (suppressed while a prompt field is focused). Node drag commits
 // through store.moveNode; tap selects; the ＋ button adds a prompt node; editing a prompt commits via
-// the injected onCommitPrompt → SZHost.updateNodeContent (fenced — NOT store.updateNode directly, see
-// SZHost+Fence); Run calls the host (injected onRun).
+// the injected onCommitPrompt → SZHost.updateNodeContent (fenced, not store.updateNode directly, see
+// SZHost+Fence); the Build button calls the host (injected onBuild).
 import AppKit
 import SwiftUI
 import SZCore
@@ -44,7 +43,7 @@ public struct SZNodeEditorPanel: View {
     private let lockedNodes: Set<SZNodeID>  // ledger-held nodes (host-owned) — the lock affordance's source
     private let deleteHeldNodes: Set<SZNodeID>  // nodes the user can't delete (host-owned) — superset of the above
     private let hiddenPieces: Set<SZNodeID>          // staged split/merge pieces hidden until commit
-    private let chatShown: Bool                   // for the HUD icon state; chat/tab state is owned by SZApp
+    private let chatShown: Bool                   // for the HUD icon state; chat visibility is owned by SZApp
     private let agentsWorking: Bool               // any run/turn in flight → the closed-panel chat-toggle dot
     private let pendingWorkHint: Bool             // pending nodes worth kicking off → the Build button pulses
     private let pendingNodeCount: Int             // pending prompt nodes → the Build button's count badge
@@ -81,13 +80,13 @@ public struct SZNodeEditorPanel: View {
     private let onOpenRecordSettings: () -> Void     // first press → the settings sheet
     private let onSetInputDefault: (SZNodeID, String, SZPortValue, Bool) -> Void  // node input control → host
     private let onToggleDisplay: (SZNodeID, String) -> Void   // texture output monitor icon → ui_toggle_display
-    /// Inline prompt commit → the host's fenced content-update funnel. NOT `store.updateNode` directly:
+    /// Inline prompt commit → the host's fenced content-update funnel, not `store.updateNode` directly:
     /// the fence must refuse a commit onto a node another activity claimed mid-edit.
     private let onCommitPrompt: (SZNodeID, String) -> Void
     /// Live prompt keystrokes → the host's pending-edit holder (not a persist); flushed on the next run.
     private let onLivePrompt: (SZNodeID, String) -> Void
     private let optionsFor: (SZNodeID, String) -> [SZEnumOption]   // effective enum options (dynamic ?? static)
-    // The right-click message-suggestion menu (run-UX paradigm): the HOST derives the drafted
+    // The right-click message-suggestion menu (run-UX paradigm): the host derives the drafted
     // messages for a target; picking one (or free text) routes back for composer injection.
     private let contextSuggestionsFor: (SZCanvasContextTarget) -> [SZContextSuggestion]
     private let onPickContextSuggestion: (SZContextSuggestion) -> Void
@@ -112,7 +111,7 @@ public struct SZNodeEditorPanel: View {
     /// Those adds write the store directly — there is no host funnel for an add — so this callback is
     /// where the host learns who added a node.
     private let onNodeAdded: (SZNodeID) -> Void
-    // The HUD gear menu's CONTENT (Project/View/Graph commands, AI Providers…, community links). Built
+    // The HUD gear menu's content (Project/View/Graph commands, AI Providers…, community links). Built
     // by the host (SZApp) where `host` + the app-bundle Discord asset are in scope, injected as an
     // erased view — the panel just renders it inside a HUD-styled Menu. Empty by default (previews/tests).
     private let gearMenu: AnyView
@@ -275,14 +274,14 @@ public struct SZNodeEditorPanel: View {
         self.onApplyToCopies = onApplyToCopies
     }
 
-    /// The semantic-zoom tier, derived once from the panel-local camera — the ONE definition shared
+    /// The semantic-zoom tier, derived once from the panel-local camera — the one definition shared
     /// by the resting canvas content and the drag-ghost overlay, so a card can never render full at
     /// rest but tile mid-drag (or vice versa).
     private var zoomedOut: Bool { camera.zoom < SZNodeLayout.lodZoomThreshold }
 
     /// Debounce-publish the visible-node set (the host's preview-culling input). 120ms absorbs
     /// pinch/scroll bursts; the set-compare in `publishVisibleNodes` keeps idle camera drift from
-    /// ever reaching the host. Node DRAGS are deliberately unhooked: a card dragged off-screen
+    /// ever reaching the host. Node drags are deliberately unhooked: a card dragged off-screen
     /// stays watched until the next camera/graph event — brief, harmless staleness.
     private func scheduleVisiblePublish() {
         guard onVisibleNodesChanged != nil else { return }
@@ -329,7 +328,7 @@ public struct SZNodeEditorPanel: View {
             // HUD in a narrow window covers the map rather than losing its gear behind it.
             .overlay(alignment: .bottomTrailing) { miniMapOverlay }
             .overlay(alignment: .bottom) { hudBar.padding(.bottom, 16) }
-            // Declared AFTER the HUD → the menu always draws above it (and everything else).
+            // Declared after the HUD → the menu always draws above it (and everything else).
             .overlay(alignment: .topLeading) { contextMenuOverlay }
             // A deleted target (agent promote/merge mid-run) closes the menu rather than leaving
             // rows pointing at a ghost. Node add/remove also moves the visible set.
@@ -364,7 +363,7 @@ public struct SZNodeEditorPanel: View {
                         .allowsHitTesting(false)   // decorative overlay; idle-dormant (see the view's header)
                 }
                 if let graph {
-                    // World-space layers under ONE camera transform. The content is camera-independent
+                    // World-space layers under one camera transform. The content is camera-independent
                     // and `.equatable()` (see SZNodeCanvasContentView) — pan/zoom ticks only move this
                     // transform; drag/wire ticks only update the lightweight overlay layers above it.
                     ZStack(alignment: .topLeading) {
@@ -394,7 +393,7 @@ public struct SZNodeEditorPanel: View {
             .background(SZFileDropCatcher(onDrop: handleFileDrop, onTargeted: { dropTargeted = $0 },
                                           onDropLibrary: handleLibraryDrop))
             // Trackpad/mouse scroll → pan (⌘+scroll → zoom). Also a monitor behind a background
-            // view framed to this space: its frame is what claims a scroll for THIS canvas.
+            // view framed to this space: its frame is what claims a scroll for this canvas.
             .monitorCanvasScrollWheel { handleScroll($0) }
             .overlay {
                 if dropTargeted {
@@ -403,8 +402,8 @@ public struct SZNodeEditorPanel: View {
                         .allowsHitTesting(false)
                 }
             }
-            // Decoration + pinch pivot only — deliberately NOT an input router: hover is not
-            // delivered while a button is held and needs pointer MOTION to resume, so anything
+            // Decoration + pinch pivot only — deliberately not an input router: hover is not
+            // delivered while a button is held and needs pointer motion to resume, so anything
             // gated on it (scroll pan, once) dies silently until the mouse is moved.
             .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
                 switch phase {
@@ -487,9 +486,9 @@ public struct SZNodeEditorPanel: View {
 
     // A floating glass control bar. The conversation group leads — the Build button (whole-graph run,
     // shown only when there's pending work or a run is in flight) sits next to the chat toggle, then a
-    // divider fences them off from the canvas tools (add · delete): [Build][chat] | [＋][trash]. Stop is
-    // offered here AND in the composer, so a run can be halted from either place. While agents work with
-    // the panel CLOSED, the chat toggle carries a small working dot so the canvas is never signal-blind.
+    // divider fences them off from the canvas tools (add · delete): [Build][chat] | [＋][trash]. While
+    // agents work with the panel closed, the chat toggle carries a small working dot so the canvas is
+    // never signal-blind.
     private var hudBar: some View {
         HStack(spacing: 8) {
             buildButton
@@ -526,13 +525,13 @@ public struct SZNodeEditorPanel: View {
         .animation(.spring(response: 0.34, dampingFraction: 0.72), value: showBuildSegment)
     }
 
-    /// Build shows whenever there is work left to kick off OR something is building — it must not
+    /// Build shows whenever there is work left to kick off or something is building — it must not
     /// vanish mid-run, or the button that dispatched the work looks like it turned into the Stop.
     /// `pendingWorkHint` carries work the node count cannot see (arrows never wired), so the control
     /// is there wherever a press would start a run.
     private var showBuildSegment: Bool { pendingNodeCount > 0 || pendingWorkHint || isRunning }
 
-    /// The graph's run control, and the only one the HUD owns. Stopping is NOT here: builds are
+    /// The graph's run control, and the only one the HUD owns. Stopping is not here: builds are
     /// concurrent, so a stop has to name which one, and the place that can name one is the chat
     /// strip, where each build has its own lane and its own ■.
     @ViewBuilder
@@ -565,8 +564,8 @@ public struct SZNodeEditorPanel: View {
     }
 
     /// The chat toggle's small status dot — agents working while the panel is closed. Pulses via a
-    /// repeatForever OPACITY animation: CA-animatable, so it runs on the render server —
-    /// a `TimelineView(.animation)` here invalidated SwiftUI on EVERY display frame, forever
+    /// repeatForever opacity animation: CA-animatable, so it runs on the render server —
+    /// a `TimelineView(.animation)` here invalidated SwiftUI on every display frame, forever
     /// (measured as a standing main-thread layout flush whose cost scaled with canvas zoom).
     private func chatToggleDot(_ color: Color) -> some View {
         SZPulsingOpacity(range: 0.4...0.95, halfPeriod: 0.79) {
@@ -617,7 +616,7 @@ public struct SZNodeEditorPanel: View {
             onDeleteConnection(id)   // through the host: persists + reloads (a real delete)
             selectedConnectionID = nil
         } else if !selectedNodeIDs.isEmpty {
-            // Through the host, as ONE batch: node removal + chat-artifact purge + a single
+            // Through the host, as one batch: node removal + chat-artifact purge + a single
             // persist/reload for the whole selection.
             // Mixed selection: delete what is free and leave the held ones. Nothing free: send the
             // selection anyway so the host's fence refuses it and writes the reason to the status line,
@@ -650,12 +649,12 @@ public struct SZNodeEditorPanel: View {
         return selectedNodeIDs.contains { !isDeleteHeld($0) }
     }
 
-    /// Whether a node card is drawn selected (the primary single selection OR a member of the multi-set).
+    /// Whether a node card is drawn selected (the primary single selection or a member of the multi-set).
     private func isSelected(_ id: SZNodeID) -> Bool { selectedNodeID == id || multiSelection.contains(id) }
 
     /// Render tiers of the selected nodes (missing = 0): the primary (chat/edit target) selection
     /// rides above the multi-selection, which rides above the rest — so the card being inspected is
-    /// readable even when several selected cards overlap. Shared verbatim by the canvas zIndex AND
+    /// readable even when several selected cards overlap. Shared verbatim by the canvas zIndex and
     /// the model's occlusion / hit-testing (isOccluded, topmostNode), so what you see is what you
     /// can hit.
     private var raisedTiers: [SZNodeID: Int] {
@@ -696,7 +695,7 @@ public struct SZNodeEditorPanel: View {
     // MARK: - Context menu (right-click = "what can I say here")
 
     /// Every window mouse-down routes through here (see SZCanvasRightClickCatcher). Returning true
-    /// swallows the event. Ordering matters: an open menu handles the click FIRST (row clicks pass
+    /// swallows the event. Ordering matters: an open menu handles the click first (row clicks pass
     /// through to SwiftUI; anything else dismisses — a left click still lands where it fell,
     /// standard custom-popover behavior), then a fresh secondary click on the canvas opens a menu.
     private func handleCanvasMouseDown(_ point: CGPoint, isSecondary: Bool, inCanvas: Bool) -> Bool {
@@ -722,7 +721,7 @@ public struct SZNodeEditorPanel: View {
                                               previewsEnabled: livePreviews)
     }
 
-    /// Open the menu at a canvas point: hit-test, update the selection FIRST (an unselected node
+    /// Open the menu at a canvas point: hit-test, update the selection first (an unselected node
     /// gets selected; a click on a multi-selection member keeps the set), then snapshot the host's
     /// suggestions for the target.
     private func openContextMenu(at point: CGPoint) {
@@ -741,7 +740,7 @@ public struct SZNodeEditorPanel: View {
         presentContextMenu(target: target, anchor: point)
     }
 
-    /// The card's "⋯" button — open THIS node's menu, anchored at the card's top-right (world →
+    /// The card's "⋯" button — open this node's menu, anchored at the card's top-right (world →
     /// screen), so the ⋯ is a discoverable entry to the same actions as right-click.
     private func openNodeMenu(_ id: SZNodeID) {
         guard let node = project?.graph.node(id: id) else { return }
@@ -910,8 +909,8 @@ public struct SZNodeEditorPanel: View {
 
     // MARK: - Marquee (rubber-band multi-select)
 
-    /// Drag on empty canvas → rubber-band select. The rect is tracked in PANEL space (so it draws under
-    /// the cursor at any zoom), but membership is tested in WORLD space — `worldPoint` divides out the
+    /// Drag on empty canvas → rubber-band select. The rect is tracked in panel space (so it draws under
+    /// the cursor at any zoom), but membership is tested in world space — `worldPoint` divides out the
     /// zoom + pan, so the same nodes are caught whether you're zoomed in or out.
     private var marqueeGesture: some Gesture {
         DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.space))
@@ -930,7 +929,7 @@ public struct SZNodeEditorPanel: View {
         let a = camera.worldPoint(screen: marquee.start)
         let b = camera.worldPoint(screen: marquee.current)
         let world = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
-        // Select a node if the marquee touches its CARD (SZNodeLayout.cardRect), not just its
+        // Select a node if the marquee touches its card (SZNodeLayout.cardRect), not just its
         // center — standard "rubber-band intersects = select".
         multiSelection = Set(nodes.filter { node in
             guard !hiddenPieces.contains(node.id) else { return false }
@@ -956,7 +955,7 @@ public struct SZNodeEditorPanel: View {
 
     /// The camera-independent world content, `.equatable()` so camera ticks (and drag/wire ticks,
     /// whose per-frame state lives in the overlay layers) skip the whole subtree. Everything the
-    /// content RENDERS is passed as a compared value prop; everything it can DO is a closure routed
+    /// content renders is passed as a compared value prop; everything it can do is a closure routed
     /// back into the panel's live handlers below.
     private func canvasContent(_ graph: SZGraph) -> some View {
         SZNodeCanvasContentView(
@@ -1021,7 +1020,7 @@ public struct SZNodeEditorPanel: View {
 
     /// The moving copies of an in-flight node drag: the dragged cards (at their live, snapped
     /// positions), their sockets, and every edge touching them. The originals stay ghosted (invisible,
-    /// gesture alive) in the content layer, so per drag tick ONLY this small overlay re-renders — and
+    /// gesture alive) in the content layer, so per drag tick only this small overlay re-renders — and
     /// the card views' position-excluding `==` means even here only `.position()` layout moves.
     /// Hit-testing is off: the ghost is a pure visual; events keep flowing to the original's gesture.
     @ViewBuilder
@@ -1062,9 +1061,9 @@ public struct SZNodeEditorPanel: View {
         }
     }
 
-    /// A dragged node's visual stand-in — built by the SAME shared constructor the content layer uses
+    /// A dragged node's visual stand-in — built by the same shared constructor the content layer uses
     /// (SZNodeCanvasContentView.card), so a mid-drag card can't render differently from itself at rest;
-    /// its `==` ignores position, so per tick this only MOVES, its body untouched. Interaction closures
+    /// its `==` ignores position, so per tick this only moves, its body untouched. Interaction closures
     /// stay no-op defaults (the overlay doesn't hit-test) except `optionsFor`, which is render-affecting
     /// (enum chip labels).
     @ViewBuilder
@@ -1085,7 +1084,7 @@ public struct SZNodeEditorPanel: View {
             connectedInputs: connectedInputs,
             previewsEnabled: livePreviews,
             tier: SZNodeLayout.tier(of: node, zoomedOut: zoomedOut, previewsEnabled: livePreviews),
-            // The SAME stable box as the resting card — a dragged card keeps its live thumb (and
+            // The same stable box as the resting card — a dragged card keeps its live thumb (and
             // its mounted custom card).
             previewFrame: previewFrames?.frame(for: node.id),
             cardProvider: cardProvider,
@@ -1101,7 +1100,7 @@ public struct SZNodeEditorPanel: View {
         }
     }
 
-    /// Edge stroke weights divide by zoom to hold constant on-screen width — but feeding the LIVE zoom
+    /// Edge stroke weights divide by zoom to hold constant on-screen width — but feeding the live zoom
     /// to the content view would re-diff the whole subtree on every pinch tick. Quantizing to quarter
     /// powers of two (≤ ~9% width error mid-step) re-diffs a handful of times across a full pinch.
     private static func quantizedStrokeZoom(_ zoom: CGFloat) -> CGFloat {
@@ -1140,7 +1139,7 @@ public struct SZNodeEditorPanel: View {
         }
     }
 
-    /// When a connection is selected, light up the two socket dots it joins — drawn ABOVE the content so
+    /// When a connection is selected, light up the two socket dots it joins — drawn above the content so
     /// the glow sits on top of the normal dots. Colour follows the edge kind (violet flow, cyan data).
     @ViewBuilder
     private func selectedConnectionHighlight(_ graph: SZGraph) -> some View {
@@ -1167,12 +1166,12 @@ public struct SZNodeEditorPanel: View {
 
     private func wirePreview(_ wire: SZWireDragSession) -> some View {
         // The bezier's control points assume `from` exits an output (rightward) and `to` enters an
-        // input (leftward) — so when the fixed anchor is an INPUT socket, the free end is the `from`.
+        // input (leftward) — so when the fixed anchor is an input socket, the free end is the `from`.
         let free = wire.target?.point ?? wire.current
         let (from, to) = wire.source.side == .input ? (free, wire.source.point) : (wire.source.point, free)
         let kind = wire.source.kind
         let z = max(camera.zoom, 0.1)
-        // Dash = intent: a FLOW preview is violet + dashed; a data preview is a solid blue wire, its
+        // Dash = intent: a flow preview is violet + dashed; a data preview is a solid blue wire, its
         // in-flight cue being opacity + cursor-follow.
         let isFlow = kind == .flow
         let color: Color = isFlow ? SZEdgeStyle.intentViolet : .blue
@@ -1184,8 +1183,8 @@ public struct SZNodeEditorPanel: View {
             .allowsHitTesting(false)
     }
 
-    /// The graph as the CONTENT layer draws it: staged split/merge pieces (+ their edges) hidden until
-    /// the op commits. Drag movement is deliberately NOT applied — dragged cards are ghosted in place
+    /// The graph as the content layer draws it: staged split/merge pieces (+ their edges) hidden until
+    /// the op commits. Drag movement is deliberately not applied — dragged cards are ghosted in place
     /// (gesture kept alive) and `dragOverlay` draws the moving copies, so a drag tick never re-diffs
     /// the content subtree.
     private func contentGraph(_ graph: SZGraph) -> SZGraph {
@@ -1197,7 +1196,7 @@ public struct SZNodeEditorPanel: View {
         return copy
     }
 
-    /// The graph as the user SEES it mid-interaction: `contentGraph` plus the in-flight drag delta.
+    /// The graph as the user sees it mid-interaction: `contentGraph` plus the in-flight drag delta.
     /// Backs the drag overlay's ghost positions and every wire-gesture computation (snap targets track
     /// live card positions; hidden split/merge pieces can never become targets).
     private func displayGraph(_ graph: SZGraph) -> SZGraph {
@@ -1213,7 +1212,7 @@ public struct SZNodeEditorPanel: View {
         return copy
     }
 
-    /// The drag translation as applied: raw, or (when snapping) adjusted so the PRIMARY node's card
+    /// The drag translation as applied: raw, or (when snapping) adjusted so the primary node's card
     /// edges land on the grid (top-left anchor — card dims are pitch multiples, so all edges align).
     /// Group members share the one delta, preserving their relative offsets — and because both the
     /// live preview and the commit go through here, the card never jumps on drop.
@@ -1258,7 +1257,7 @@ public struct SZNodeEditorPanel: View {
         }
     }
 
-    /// A prompt-card center honoring the snap pref — the ONE placement rule shared by every creation
+    /// A prompt-card center honoring the snap pref — the one placement rule shared by every creation
     /// site (HUD/double-click add, file drop, wire-drop spawn).
     private func snappedPromptCenter(_ center: CGPoint) -> CGPoint {
         snapToGrid ? SZNodeLayout.snappedCenter(center, size: SZNodeLayout.promptCardSize) : center
@@ -1268,7 +1267,7 @@ public struct SZNodeEditorPanel: View {
 
     /// Handle files dropped on the canvas (`screen` is the drop point in "szcanvas" space, matching the
     /// double-tap gesture). Converts the point to graph space, then defers classification + staggering to
-    /// `SZMediaSource` — the same rules `ui_add_source_node` applies. Returns whether ANY media file was
+    /// `SZMediaSource` — the same rules `ui_add_source_node` applies. Returns whether any media file was
     /// handled: false leaves the drag un-consumed (so a stray .txt just bounces back).
     private func handleFileDrop(_ urls: [URL], at screen: CGPoint) -> Bool {
         noteUserTouch()
@@ -1295,7 +1294,7 @@ public struct SZNodeEditorPanel: View {
     private func nodeDragChanged(_ id: SZNodeID, translation: CGSize, location: CGPoint) {
         // Moving is allowed even while locked (run/chat) — only edits/wiring/values are blocked.
         if drag?.primary != id {
-            // Grabbing a node that's part of a multi-selection drags the WHOLE group by the same
+            // Grabbing a node that's part of a multi-selection drags the whole group by the same
             // delta; grabbing any other node drags just it and collapses the selection to it.
             let groupDrag = multiSelection.contains(id) && multiSelection.count > 1
             let ids = groupDrag ? multiSelection : [id]
@@ -1337,7 +1336,7 @@ public struct SZNodeEditorPanel: View {
         guard !isLocked(source.nodeID) else { return }   // can't wire a locked (in-progress) node
         let world = camera.worldPoint(screen: location)
         if wire?.grabbed.id != source.id {
-            // A refused grab (locked far end) returns BEFORE feedAutoPan — no trail/band flicker.
+            // A refused grab (locked far end) returns before feedAutoPan — no trail/band flicker.
             guard let session = SZWireDragSession.begin(from: source, atWorld: world, screen: location,
                                                         in: graph, previewsEnabled: livePreviews,
                                                         isLocked: isLocked) else { return }
@@ -1350,7 +1349,7 @@ public struct SZNodeEditorPanel: View {
         feedAutoPan(cursor: location)
     }
 
-    /// Grab anywhere ALONG an edge (data or flow) to pick it up — the session picks the detachable
+    /// Grab anywhere along an edge (data or flow) to pick it up — the session picks the detachable
     /// end. Graph re-derived per event (see `socketDragChanged`).
     private func edgeDragChanged(_ connection: SZConnection, at screen: CGPoint) {
         guard let raw = project?.graph else { return }
@@ -1380,7 +1379,7 @@ public struct SZNodeEditorPanel: View {
     /// re-route / disconnect / connect through the host (persists + reloads; a connect swaps out an
     /// occupied data input). A spawn creates its node directly on the store (like
     /// `addPromptNode(atScreen:)`); the joining edge then follows each kind's own rule: flow is
-    /// authoring-only intent (store-direct, no host round-trip), while a spawned DATA edge goes
+    /// authoring-only intent (store-direct, no host round-trip), while a spawned data edge goes
     /// through `onConnect` like every other data edge, so the new node + edge persist immediately
     /// (the runtime ignores prompt-node data edges, and the reload compiles nothing).
     private func endWireDrag() {
@@ -1463,7 +1462,7 @@ public struct SZNodeEditorPanel: View {
         camera.pan(by: delta)
         drag?.panAccum.width += delta.width
         drag?.panAccum.height += delta.height
-        // The loose wire end tracks the (possibly stationary) cursor's NEW world point, and target
+        // The loose wire end tracks the (possibly stationary) cursor's new world point, and target
         // snapping re-runs against sockets scrolling under it. Same display graph the gestures see,
         // so hidden split/merge pieces can't become snap targets mid-pan.
         if let w = wire, let graph = project?.graph {
@@ -1482,7 +1481,7 @@ public struct SZNodeEditorPanel: View {
             .onEnded { _ in pinchAnchor = nil }
     }
 
-    /// Only reached for scrolls that landed ON this canvas — the catcher hit-tests the event, so
+    /// Only reached for scrolls that landed on this canvas — the catcher hit-tests the event, so
     /// there is no hover state to consult here. `editingNodeID` is the one remaining reason to pass
     /// a scroll up: a prompt field being edited scrolls its own text instead of the canvas.
     private func handleScroll(_ data: SZScrollWheelData) {
@@ -1551,7 +1550,7 @@ public struct SZNodeEditorPanel: View {
 /// The HUD's whole-graph run button: filled-accent **Build** with a pending-node count badge. A
 /// gentle white ring pulses while work is pending.
 ///
-/// It never FLIPS to Stop. Runs are scoped to their work set now, so "something is building" says
+/// It never flips to Stop. Runs are scoped to their work set now, so "something is building" says
 /// nothing about whether you may build something else — and a button that turned into Stop meant a
 /// draft added mid-run had no control that would queue it. With nothing left to kick off it stays
 /// in place and goes quiet; stopping a build is done from that build's lane in the chat strip.
@@ -1580,7 +1579,7 @@ private struct SZHudBuildButton: View {
             .background(Capsule().fill(hasWork ? Color.accentColor : Color.white.opacity(0.07))
                 .brightness(hover && hasWork ? 0.06 : 0))
             .overlay {
-                // Render-server pulse (see chatToggleDot): the TimelineView this replaces was THE
+                // Render-server pulse (see chatToggleDot): the TimelineView this replaces was the
                 // standing per-frame SwiftUI invalidation — any project with pending work paid a
                 // full-window layout flush every display frame while the editor sat idle.
                 if pulse {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Pop-out panel intents — the host half of "window out" / "dock back" (the AppKit half is
-// SZPopoutWindows.swift). A popped-out panel is REMOVED from the layout tree (removePanel records
+// SZPopoutWindows.swift). A popped-out panel is removed from the layout tree (removePanel records
 // its restore position = the dock-back target) and tracked in `poppedOutPanels`, persisted through
 // the one app-state writer so pop-outs restore on relaunch like the rest of the workspace
 // arrangement. Every visibility change re-syncs the viewport driver registry (one driver, the rest
@@ -11,7 +11,7 @@ import SZCore
 import SZUI
 
 extension SZHost {
-    /// The kinds that offer the pop-out affordance — the ONE viewport-specific gate in the whole
+    /// The kinds that offer the pop-out affordance — the one viewport-specific gate in the whole
     /// mechanism (everything else is generic over panels).
     static let popoutAllowedKinds: Set<SZPanelKind> = [.viewport]
 
@@ -70,7 +70,7 @@ extension SZHost {
         return true
     }
 
-    /// A tile's header dragged OUT of the main window and released (the container's tear-out):
+    /// A tile's header dragged out of the main window and released (the container's tear-out):
     /// pop it out right where the drag let go — the window materializes under the cursor, its
     /// strip (the drag handle) on the release point, keeping the tile's size.
     func tearOutPanel(_ id: SZPanelID) {
@@ -90,14 +90,14 @@ extension SZHost {
         dock(id) { panelLayout.insertPanel(id) }
     }
 
-    /// Dock a popped-out panel at an EXPLICIT spot (the drag-to-dock commit): the drop zone
+    /// Dock a popped-out panel at an explicit spot (the drag-to-dock commit): the drop zone
     /// overrides the remembered position.
     func dockPanel(_ id: SZPanelID, onto target: SZPanelID, zone: SZPanelDropZone) {
         dock(id) {
             panelLayout.insertPanel(id, onto: target, zone: zone)
             // The target can vanish between candidate and commit (an MCP close racing the dock
-            // flight): the explicit insert no-ops then, and a panel that is in NEITHER the tree
-            // NOR a window would simply cease to exist — fall back to the remembered spot.
+            // flight): the explicit insert no-ops then, and a panel that is in neither the tree
+            // nor a window would simply cease to exist — fall back to the remembered spot.
             if !panelLayout.contains(id) { panelLayout.insertPanel(id) }
         }
     }
@@ -114,7 +114,7 @@ extension SZHost {
         syncViewportDriver()
     }
 
-    /// Close a popped-out panel for REAL (View-menu toggle off / `ui_close_panel`): window gone,
+    /// Close a popped-out panel for real (View-menu toggle off / `ui_close_panel`): window gone,
     /// record gone — the panel is reopenable via showPanel, like any closed tile.
     func closePoppedOutPanel(_ id: SZPanelID) {
         guard poppedOutPanels[id] != nil else { return }

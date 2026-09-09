@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Live node previews — the host half. Owns the Graph ▸ Live Previews pref, the
-// per-node preview toggle op (the card's photo icon + `ui_set_node_body`), and the WATCH SET the
+// per-node preview toggle op (the card's photo icon + `ui_set_node_body`), and the watch set the
 // renderer's preview stream captures: effective-preview nodes ∩ the editor's visible set, capped.
 // Event-driven end to end — graph edits arrive via Observation on the store, camera moves via the
 // panel's visible-set callback, frames via the backend's publish callback. Either renderer publishes
@@ -14,7 +14,7 @@ import SZRuntime
 import SZUI
 
 extension SZHost {
-    /// Thumb budget — bounds capture bandwidth; applies to VISIBLE nodes once the editor reports.
+    /// Thumb budget — bounds capture bandwidth; applies to visible nodes once the editor reports.
     nonisolated static let previewMaxThumbs = 24
     /// Long-edge pixels of a thumb target — 2x a ~160pt preview region, crisp on Retina.
     nonisolated static let previewMaxDimension = 320
@@ -28,7 +28,7 @@ extension SZHost {
         persistAppState()
     }
 
-    /// THE apply path for a card body — shared by the photo toggle and `ui_set_node_body`, so both
+    /// The apply path for a card body — shared by the photo toggle and `ui_set_node_body`, so both
     /// ride one choreography: store write → drop the node's stale thumb (a retargeted preview must
     /// never keep showing the old port's frame) → persist → watch-set refresh.
     @discardableResult
@@ -39,9 +39,9 @@ extension SZHost {
         }
         let previous = store.project?.graph.node(id: id)?.body
         guard store.setNodeBody(id: id, body: body) else { return false }
-        // What the card SHOWS is a decision; its GEOMETRY is not. Auto-size settles and the backdrop's
+        // What the card shows is a decision; its geometry is not. Auto-size settles and the backdrop's
         // aspect follow re-apply `.custom` with fresh rows all session long (SZCardHostController), so
-        // journaling every row commit would fill the Director's delta with "USER set card body".
+        // journaling every row commit would fill the Director's delta with "user set card body".
         if body?.mode != previous?.mode || body?.previewPort != previous?.previewPort {
             noteMutation("set card body", ["\(mutationTitle(id)): \(body?.mode.rawValue ?? "auto")"], origin: origin)
         }
@@ -67,7 +67,7 @@ extension SZHost {
     }
 
     /// Fold or unfold a card's port rows — the chevron pill and the context menu's Hide/Show Plugs.
-    /// The card keeps its TOP edge: the collapse always removes a whole number of grid cells, so
+    /// The card keeps its top edge: the collapse always removes a whole number of grid cells, so
     /// moving the centre by half of that leaves all four edges on grid for any row count. The move
     /// lands before the body write, so the pair persists once.
     @discardableResult
@@ -77,7 +77,7 @@ extension SZHost {
         let folding = SZNodeLayout.showsPlugs(of: node, previewsEnabled: livePreviews)
         let shift = SZNodeLayout.foldDelta(of: node, previewsEnabled: livePreviews) / 2
         if shift != 0 {
-            // Folding shrinks the card, so the CENTRE rises by half the loss to leave the top edge put.
+            // Folding shrinks the card, so the centre rises by half the loss to leave the top edge put.
             _ = store.moveNode(id: id, to: SZPoint(x: node.position.x,
                                                    y: node.position.y + (folding ? -shift : shift)))
         }
@@ -94,7 +94,7 @@ extension SZHost {
         refreshPreviewStream()
     }
 
-    /// Project-switch teardown — the ONE unwatch home (clearPerProjectState calls it): cancel any
+    /// Project-switch teardown — the one unwatch home (clearPerProjectState calls it): cancel any
     /// pending refresh, forget the old project's visible-set report (the panel re-reports for the
     /// new graph), and unwatch everything. A late in-flight publish is dropped by
     /// `applyPreviewFrames`' re-validation; this just stops encoding for a dead graph.
@@ -107,7 +107,7 @@ extension SZHost {
         applyRenderDrive()
     }
 
-    /// Recompute the watched set NOW and push it to the renderer iff it changed. Cheap (one graph
+    /// Recompute the watched set now and push it to the renderer iff it changed. Cheap (one graph
     /// scan + ordered-key compare), so every mutation chokepoint just calls it. The watch set is also
     /// the thumbs' demand on the render loop (each push re-applies the render drive), and it empties
     /// when the main window — the node editor's only home — can't show pixels.
@@ -178,7 +178,7 @@ extension SZHost {
         }
     }
 
-    /// Write published surfaces into the cards' frame boxes — re-validating each against the LIVE
+    /// Write published surfaces into the cards' frame boxes — re-validating each against the live
     /// graph first: a publish races project switches, deletes, and retargets (the pass was encoded
     /// against an older world), and a stale write would resurrect pruned boxes.
     private func applyPreviewFrames(_ frames: [SZNodePreviewSurface]) {

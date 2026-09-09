@@ -14,38 +14,33 @@ public struct SZClaudeProvider: SZProvider {
 
     public let id = Self.providerID
     public let displayName = "Claude Code"
-    /// Pinned version ids, not the CLI's floating aliases — "Opus 5" in the menu must mean Opus 5
-    /// (a version-labeled alias would lie the day the alias re-points). `claude --help` names
-    /// exactly that hazard: `--model` takes "an alias for the latest model (e.g. 'fable', 'opus',
-    /// or 'sonnet') or a model's full name". We pass the full name. New models arrive with app
-    /// updates (Sparkle); the older generations stay listed so a run can be pinned to the one it
-    /// was tuned against.
+    /// Pinned version ids, not the CLI's floating aliases: "Opus 5" in the menu must mean Opus 5,
+    /// and a version-labeled alias would lie the day it re-points. `claude --help` names the hazard
+    /// — `--model` takes "an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a
+    /// model's full name" — so we pass the full name. New models arrive with app updates (Sparkle);
+    /// older generations stay listed so a run can be pinned to the one it was tuned against.
     ///
-    /// Grouped in the order that same help text prints its aliases — fable, opus, sonnet — newest
-    /// first within each family, haiku last. Every id is live-verified (`claude -p --model <id>`),
-    /// never inferred: an id the backend won't serve fails the run, not the build, so no in-process
-    /// test can catch it. Seven verified against claude 2.1.220, Fable 5.1 (needs >= 2.1.255)
-    /// against 2.1.259 on 2026-09-03; all complete a turn at `max`, so none overrides the
-    /// provider's effort list or its `high` default.
+    /// Ordered as that help text prints its aliases — fable, opus, sonnet, newest first within a
+    /// family, haiku last. Every id is live-verified (`claude -p --model <id>`), never inferred: an
+    /// id the backend won't serve fails the run, not the build, so no in-process test can catch it.
+    /// Seven verified on claude 2.1.220; Fable 5.1 (needs >= 2.1.255) on 2.1.259, 2026-09-03. All
+    /// complete a turn at `max`, so none overrides the provider's effort list or its `high` default.
     ///
-    /// Fast mode is the one place they diverge, and the CLI's own `result.fast_mode_state` is the
-    /// gate: it reads `on` only for Opus 5 and Opus 4.8 (re-read `on` for Opus 5 and `off` for
-    /// Fable 5.1 on 2.1.259, 2026-09-03). Requesting it proves nothing by itself —
-    /// the CLI swallows any `--settings` key without so much as a warning — and on Opus 4.7 an
-    /// offered toggle would be worse than inert: there the CLI reports `on` and the API then rejects
-    /// the turn outright ("400 'claude-opus-4-7' does not support the `speed` parameter"), so the
-    /// switch would BREAK runs rather than fail to speed them up. Every model the CLI won't truly
-    /// enable declares it, and the picker stops offering the switch at all.
+    /// Fast mode is their one divergence, gated on the CLI's own `result.fast_mode_state`: `on` only
+    /// for Opus 5 and Opus 4.8 (re-read `on` for Opus 5, `off` for Fable 5.1 on 2.1.259, 2026-09-03).
+    /// Requesting it proves nothing — the CLI swallows any `--settings` key without a warning — and
+    /// on Opus 4.7 an offered toggle would be worse than inert: the CLI reports `on`, then the API
+    /// rejects the turn ("400 'claude-opus-4-7' does not support the `speed` parameter"), breaking
+    /// runs rather than failing to speed them up. Every model the CLI won't truly enable declares
+    /// it, and the picker stops offering the switch.
     ///
-    /// Whether an enabled turn is then actually SERVED fast is a separate, per-account question, and
-    /// nothing here can answer it: the result event reports it per turn as `usage.speed`. Read that
-    /// only together with `fast_mode_state` — on its own it reads `standard` on every turn, fast mode
-    /// requested or not. It reads `standard` on this org, whose fast-mode spend is disabled, so
-    /// requested, enabled, and served are three different things and the stream consumer says which.
+    /// Enabled is not served fast: that is per-account, reported per turn as `usage.speed`, and
+    /// readable only together with `fast_mode_state` — alone it reads `standard` on every turn,
+    /// requested or not. It reads `standard` on this org, whose fast-mode spend is disabled. So
+    /// requested, enabled and served are three things, and the stream consumer says which.
     ///
-    /// Opus 5 is the default, not Fable 5. Fable is the frontier model and prices like one; Opus 5
-    /// is the balanced everyday one, and a Director run wants the latter. Same call codex makes with
-    /// Sol and Terra.
+    /// Opus 5 is the default, not Fable 5: Fable is the frontier model and prices like one, Opus 5
+    /// is the balanced everyday one a Director run wants. Same call codex makes with Sol and Terra.
     public let models = [
         SZProviderModel(id: "claude-fable-5-1", displayName: "Fable 5.1", supportsFastMode: false),
         SZProviderModel(id: "claude-fable-5", displayName: "Fable 5", supportsFastMode: false),
@@ -60,12 +55,12 @@ public struct SZClaudeProvider: SZProvider {
     /// `--effort` levels, recorded from claude 2.1.206's own complaint on an unknown value ("Valid
     /// values: low, medium, high, xhigh, max"), matching what 2.1.220's `--help` prints, and
     /// re-confirmed by a `max` turn on each of the eight models: the list is provider-wide, not
-    /// per-model. Note the CLI only WARNS and falls back to its own default —
-    /// it does not exit — so an effort token that drifts off this list degrades silently. That is
+    /// per-model. Note the CLI only warns and falls back to its own default rather than exiting,
+    /// so an effort token that drifts off this list degrades silently. That is
     /// what `resolvedGenerationSettings` clamping is for.
     public let defaultReasoningEffort = "high"
     public let supportedReasoningEfforts = ["low", "medium", "high", "xhigh", "max"]
-    public let supportsFastMode = true   // the CLI HAS the flag; per-model reality is on the models
+    public let supportsFastMode = true   // the CLI has the flag; per-model reality is on the models
     public let healthArgs = ["claude", "--version"]
     public let authStatusArgs = ["claude", "auth", "status"]   // JSON {"loggedIn": …}; exit 1 = logged out
     /// Recorded from claude 2.1.200: a logged-out `claude -p` exits 1 with "Not logged in ·
@@ -75,9 +70,9 @@ public struct SZClaudeProvider: SZProvider {
     public let loginCommand = "claude auth login"
     public let usesPreallocatedSessionID = true   // we mint the UUID and pass --session-id
 
-    /// The `--allowedTools` value. Claude is the ONLY provider that gates per-tool: in non-interactive
-    /// `-p` mode a tool NOT on this list is denied and the model can't prompt, so it silently reports it
-    /// can't. The MCP set is therefore NOT owned here — it MIRRORS the app's single source of truth
+    /// The `--allowedTools` value. Claude is the only provider that gates per-tool: in non-interactive
+    /// `-p` mode a tool off this list is denied and the model can't prompt, so it silently reports it
+    /// can't. The MCP set is therefore not owned here — it mirrors the app's single source of truth
     /// (`SZHostBridge.agentCallableToolNames`, the tools the `.agent` bus actually serves), plumbed in
     /// via `request.allowedMCPTools`. So a new MCP tool is reachable by construction and there is no
     /// second list to drift (that gap is exactly what once hid `agent_view_frame` from the agent).
@@ -96,7 +91,7 @@ public struct SZClaudeProvider: SZProvider {
         }
         args += ["--setting-sources", ""]
         // Fast mode rides an inline --settings blob (composes with the empty
-        // --setting-sources above, which only silences FILE sources).
+        // --setting-sources above, which only silences file sources).
         if request.fastMode { args += ["--settings", #"{"fastMode":true}"#] }
         args += [
             "--add-dir", request.packageDirectory.path,
@@ -154,8 +149,8 @@ public struct SZClaudeProvider: SZProvider {
 /// held back (the last text block / the `result` event) and emitted once as `.reply` at the end, so it
 /// never echoes into the trace.
 ///
-/// `thinking` content blocks arrive with EMPTY text in headless mode — verified 2.1.207 on Fable 5
-/// AND Opus 4.8, in the aggregate `assistant` event and equally in `--include-partial-messages`
+/// `thinking` content blocks arrive with empty text in headless mode — verified 2.1.207 on Fable 5
+/// and Opus 4.8, in the aggregate `assistant` event and equally in `--include-partial-messages`
 /// `thinking_delta` stream events (only the signature ships). So claude's `.thinking` is narration
 /// only; a non-empty `thinking` block would be surfaced below, but none has been observed.
 final class SZClaudeStreamConsumer: SZAgentStreamConsumer {
@@ -190,17 +185,17 @@ final class SZClaudeStreamConsumer: SZAgentStreamConsumer {
         case "result":
             var events: [SZAgentStreamEvent] = []
             // Enabled and served are different things, and the CLI reports both on this event:
-            // `fast_mode_state` is whether it turned fast mode ON, `usage.speed` is what the API
-            // actually SERVED. A turn can be downgraded by the account's entitlement or by fast
+            // `fast_mode_state` is whether it turned fast mode on, `usage.speed` is what the API
+            // actually served. A turn can be downgraded by the account's entitlement or by fast
             // mode's own rate limit, and without this line the bolt would keep claiming fast on a
             // turn that never was. Both halves are load-bearing: `usage.speed` alone reads
-            // "standard" on EVERY turn, fast mode requested or not.
+            // "standard" on every turn, fast mode requested or not.
             if obj["fast_mode_state"] as? String == "on",
                let speed = (obj["usage"] as? [String: Any])?["speed"] as? String, speed != "fast" {
                 events.append(.thinking("fast mode requested — served \(speed)"))
             }
             // The turn's usage rides the result event (recorded from 2.1.207). Anthropic reports the
-            // cache traffic SEPARATELY from input_tokens, so the total prompt side is their sum and
+            // cache traffic separately from input_tokens, so the total prompt side is their sum and
             // the cached share is read + creation (the pricing distinction between the two is
             // already carried by total_cost_usd).
             if let usage = obj["usage"] as? [String: Any],

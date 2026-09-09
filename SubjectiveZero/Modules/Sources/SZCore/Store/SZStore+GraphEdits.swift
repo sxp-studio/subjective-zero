@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Named graph-edit operations on SZStore — the single shared mutation path for BOTH the SwiftUI node
+// Named graph-edit operations on SZStore — the single shared mutation path for both the SwiftUI node
 // editor (SZUI) and the host's `ui_*` MCP handlers (SZApp). They live here in SZCore because SZUI
 // cannot import SZApp, so SZCore is the only home both reach (ARCHITECTURE.md "try SZStore first" —
 // no seam protocol is earned for pure state edits). These mutate the loaded project directly;
@@ -24,7 +24,7 @@ extension SZStore {
     }
 
     /// Append a prompt (pre-gen) node at `position`. Returns its id, or nil if no project is loaded.
-    /// A `seed` additionally mints a one-port contract — node + contract in ONE mutation, never a
+    /// A `seed` additionally mints a one-port contract — node + contract in one mutation, never a
     /// contract-less intermediate state. The seeded contract is the declaration the coding agent
     /// later implements against; `draftContractsFromFlow` never rewrites it (though it still
     /// realizes flow arrows into the node's unwired texture inputs).
@@ -54,19 +54,18 @@ extension SZStore {
         case noProject
     }
 
-    /// Connect an output port to an input port. Type-compatibility is the caller's call (the editor
-    /// checks before connecting), but cardinality is enforced here: a data input holds at most ONE
-    /// incoming connection, so wiring an occupied input swaps the old edge out. Repeating an existing
-    /// connection — same data from→to, or a flow edge between the same node pair with the same pins
-    /// (`SZConnection.pinnedPort`) — is idempotent and returns the existing id. And the graph must stay a DAG: a DATA edge that would close a cycle is
-    /// refused, judged against the graph as if the occupied input's edge were already swapped out, so
-    /// a replace that breaks the old cycle path is never a false positive. Flow is never checked.
+    /// Connect an output port to an input port. Type compatibility is the caller's call (the editor checks
+    /// before connecting); cardinality is enforced here — a data input holds at most one incoming connection,
+    /// so wiring an occupied input swaps the old edge out. Repeating an existing connection — same data
+    /// from→to, or a flow edge between the same node pair with the same pins (`SZConnection.pinnedPort`) — is
+    /// idempotent and returns the existing id. And the graph must stay a DAG: a data edge that would close a
+    /// cycle is refused, judged as if the occupied input's edge were already swapped out, so a replace that
+    /// breaks the old cycle path is never a false positive. Flow is never checked.
     ///
-    /// Flow is a transient *drawing-intent* annotation ("A should feed B"), not a persistent
-    /// companion layer. So creating a DATA edge RESOLVES (removes) the matching flow intent edge between
-    /// the same node pair — the green intent arrow becomes a solid blue wire, exactly like resolving a
-    /// comment. (Inverse of the old `ensureFlow`-on-connect.) An intent the caller never wires stays
-    /// visible as an unresolved arrow.
+    /// Flow is a transient *drawing-intent* annotation ("A should feed B"), not a persistent companion layer,
+    /// so creating a data edge resolves (removes) the matching flow intent edge between the same node pair —
+    /// the green intent arrow becomes a solid blue wire, exactly like resolving a comment. (Inverse of the old
+    /// `ensureFlow`-on-connect.) An intent the caller never wires stays visible as an unresolved arrow.
     @discardableResult
     public func tryConnect(from: SZPortRef, to: SZPortRef, kind: SZConnectionKind) -> SZConnectResult {
         guard let graph = project?.graph else { return .noProject }
@@ -133,7 +132,7 @@ extension SZStore {
         /// This edit turned a clean built node dirty (its intent moved off the build stamp).
         public var raisedRebuild: Bool
 
-        /// Public so a caller outside SZCore can report an outcome it settled WITHOUT reaching the store —
+        /// Public so a caller outside SZCore can report an outcome it settled without reaching the store —
         /// the host's `updateNodeContent` funnel answers `found: false` for a missing node and
         /// `found: true, raisedRebuild: false` for a no-op edit it short-circuits (a blur with no
         /// keystrokes), so neither costs a persist. A fence refusal is not this shape: the funnel returns
@@ -146,13 +145,13 @@ extension SZStore {
 
     /// Update a node's presentation / identity in place (nil = leave that field unchanged).
     ///
-    /// Deliberately CANNOT touch the port surface — that goes through `editPorts`, the one editorial path for a
+    /// Deliberately cannot touch the port surface — that goes through `editPorts`, the one editorial path for a
     /// node's typed I/O. A whole-contract `PUT` here is what silently dropped a node's controls: a caller that
     /// re-sent the contract while omitting ports deleted them.
     ///
-    /// A `prompt` change DOES invalidate a build, though: the code still renders, but it implements what the
+    /// A `prompt` change does invalidate a build, though: the code still renders, but it implements what the
     /// prompt used to say. Nothing is raised here — `SZNode.rebuildReason` derives `.intentChanged` from the
-    /// build stamp — but `raisedRebuild` reports whether THIS edit made the node dirty, so a run can pick it up.
+    /// build stamp — but `raisedRebuild` reports whether this edit made the node dirty, so a run can pick it up.
     @discardableResult
     public func updateNode(
         id: SZNodeID,
@@ -176,9 +175,9 @@ extension SZStore {
             }
 
             // `summary` and `permissions` live inside the contract, so a node that has none yet needs one
-            // synthesized — otherwise declaring a node's permissions BEFORE its ports (a natural order: "this
-            // needs the microphone", then its I/O) would silently drop them. Same failure this whole change
-            // exists to remove, one level down. `editPorts` synthesizes on the same terms.
+            // synthesized — otherwise declaring a node's permissions before its ports (a natural order: "this
+            // needs the microphone", then its I/O) would silently drop them. `editPorts` synthesizes on the
+            // same terms.
             let node = project.graph.nodes[i]
             if node.contract == nil, summary != nil || permissions != nil {
                 project.graph.nodes[i].contract = SZNodeContract(
@@ -236,7 +235,7 @@ extension SZStore {
     /// One input whose stored value a port edit moved: rebound into a control that changed under it, cleared
     /// where it could no longer stand, or seeded onto a port that held none.
     ///
-    /// Reported because the contract is only where a value PERSISTS: the runtime holds the live override the
+    /// Reported because the contract is only where a value persists: the runtime holds the live override the
     /// node actually reads, and a reload deliberately keeps that override (a slider drag must survive a
     /// structural edit). So a value this edit moved reaches the render only if the host pushes it.
     public struct SZPortValueChange: Equatable, Sendable {
@@ -280,7 +279,7 @@ extension SZStore {
             project.graph.nodes[i].contract = contract
 
             // A surface change invalidates a build — derived by `SZNode.rebuildReason` from the surface moving
-            // off the build stamp, so undoing the edit heals it. `kind` is NOT touched: the node keeps
+            // off the build stamp, so undoing the edit heals it. `kind` is not touched: the node keeps
             // rendering its existing source until the fleet regenerates it (flipping it to `.prompt` would
             // drop it from `SZGraph.renderable` and black it out). Whether the code is merely *behind* the
             // contract or *contradicts* it (naming ports that no longer exist) takes reading the source,
@@ -307,14 +306,14 @@ extension SZStore {
         return result
     }
 
-    /// Commit one entry of a node's derived-binding table, as ONE transaction: update the table input's
+    /// Commit one entry of a node's derived-binding table, as one transaction: update the table input's
     /// default, upsert the output the entry declares, and (optionally) wire that output to a target
     /// input — one revision, one persistable state.
     ///
-    /// For nodes whose output set is DERIVED from an input's data (a binding/mapping table): the node's
+    /// For nodes whose output set is derived from an input's data (a binding/mapping table): the node's
     /// code reads the table and emits on whatever ports it names, so the surface change carries no new
-    /// code obligation and deliberately does NOT raise `needsRebuild`. `editPorts` remains the editorial
-    /// path — a human/agent reshaping a node's declared I/O — where a build IS invalidated. Wiring
+    /// code obligation and deliberately does not raise `needsRebuild`. `editPorts` remains the editorial
+    /// path — a human/agent reshaping a node's declared I/O — where a build is invalidated. Wiring
     /// follows `connect`'s cardinality rule (a data input holds one incoming edge; occupying swaps).
     ///
     /// Returns false (no mutation applied) if the node, its contract, or a string-typed `tableInput`
@@ -467,7 +466,7 @@ extension SZStore {
 
     /// Whether a data edge touching `editedNode` survives that node's new port surface.
     ///
-    /// Judged from the EDITED end only. The far end may legitimately have no contract yet — a prompt node the
+    /// Judged from the edited end only. The far end may legitimately have no contract yet — a prompt node the
     /// user wired ahead of its declaration — and this edit says nothing about it, so an unresolvable far type
     /// is not grounds to drop wiring the user drew. Mirrors the editor's `canConnect` type rule, which lives in
     /// SZUI and so cannot be called from here.

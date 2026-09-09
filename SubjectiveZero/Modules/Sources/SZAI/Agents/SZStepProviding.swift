@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The seam step-attached validation goes through. A code step has NO sidecar spec — its
+// The seam step-attached validation goes through. A code step has no sidecar spec — its
 // outcomes come from the compiled step's exported declaration, and compiling/loading a step
 // is the runtime's business, which SZAI may not import (siblings don't depend on each other).
-// So the pack loader asks THROUGH this protocol: the host wires the runtime behind it, tests
+// So the pack loader asks through this protocol: the host wires the runtime behind it, tests
 // wire stubs, and a nil provider makes the loader report step-attached checks as skipped —
 // never as silently passed.
 import Foundation

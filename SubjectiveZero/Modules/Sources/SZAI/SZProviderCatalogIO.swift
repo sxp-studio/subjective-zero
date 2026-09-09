@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Load/save the dynamic provider model catalogs (`SZProviderModelCatalog`, keyed by provider id)
 // as `provider-catalogs.json` in Application Support — the last-known truth a runtime-enumerated
-// provider (pi) serves offline, next relaunch, until a fresh fetch lands. Sibling of SZCore's
+// provider serves offline, next relaunch, until a fresh fetch lands. Sibling of SZCore's
 // SZAppStateIO (same directory, same pretty-printed JSON, same forgiving load: a missing or
 // corrupt file is "no catalogs yet", never a startup error). Lives in SZAI, not SZCore, because
 // the catalog is a provider-seam type; per-machine like app-state, never part of a `.subz` project.

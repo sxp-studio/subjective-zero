@@ -4,7 +4,7 @@
 // a coding agent, a message to a node a run holds — becomes an envelope in a per-recipient FIFO
 // with an explicit delivery state, instead of a rejection or a lossy single-slot dict.
 //
-// Intents describe DELIVERY SEMANTICS, never who the agent is (docs/AGENT_ORCHESTRATION.md):
+// Intents describe delivery semantics, never who the agent is (docs/AGENT_ORCHESTRATION.md):
 // `.chat` is delivered by the host's pump as a real turn on the recipient scope once its resources
 // free; `.steer` is never pumped — it waits for its consumer (the run's reconcile drain) to fold it
 // into the recipient's next prompt. A `.control` intent is deliberately reserved, unbuilt.
@@ -15,7 +15,7 @@
 // recipient's transcript (what blocks the delivery); `.steer` acks edge to the registered consumer
 // token (what folds them), and a consumer awaiting its own steer is legal.
 //
-// Terminal envelopes LEAVE the FIFO on transition (a `.failed` head must never stall a scope) and
+// Terminal envelopes leave the FIFO on transition (a `.failed` head must never stall a scope) and
 // move to a bounded in-memory tombstone list so status polling can still answer; after a restart a
 // terminal message's status is honestly `unknown`.
 import Foundation
@@ -56,7 +56,7 @@ public struct SZMessageEnvelope: Identifiable, Sendable {
     /// `markProcessed`. Unused today; tombstone-only (never persisted).
     public var response: String?
     public let enqueuedAt: Date
-    /// When a turn first STARTED for this envelope. `state` cannot say after a crash (it downgrades
+    /// When a turn first started for this envelope. `state` cannot say after a crash (it downgrades
     /// to `.queued` for redelivery), and transcript order lies: a message typed while an earlier
     /// one streamed sits before that one's reply, so it looks answered.
     public var deliveryStartedAt: Date?
@@ -178,7 +178,7 @@ public final class SZMessageQueue {
         }
     }
 
-    /// The next DELIVERY for a recipient: its queued `.chat` head plus every consecutive queued
+    /// The next delivery for a recipient: its queued `.chat` head plus every consecutive queued
     /// `.chat` sibling from the same sender. Three clarifications typed in a row are one turn that
     /// answers all three, not three turns each blind to the next — the `.steer` lane has folded
     /// this way from the start. The run stops at the first envelope from a different sender (their
@@ -243,7 +243,7 @@ public final class SZMessageQueue {
         onChange?()
     }
 
-    /// Remove every envelope (live AND tombstoned) for a recipient — the scope was cleared or its
+    /// Remove every envelope (live and tombstoned) for a recipient — the scope was cleared or its
     /// node deleted. Removal is a terminal event: parked ack waiters resume throwing `.removed`.
     public func removeAll(for recipientKey: String) {
         let removedIDs = Set(envelopes.filter { $0.recipient == recipientKey }.map(\.id))
@@ -256,7 +256,7 @@ public final class SZMessageQueue {
     }
 
     /// The project moved: re-point every undelivered envelope's attachments at the new bundle.
-    /// Silent (no `onChange`) — nothing about the QUEUE changed, only where its files live, and the
+    /// Silent (no `onChange`) — nothing about the queue changed, only where its files live, and the
     /// relocation flushes on its own.
     public func rebaseAttachments(to projectURL: URL) {
         for i in envelopes.indices where !envelopes[i].message.attachments.isEmpty {
@@ -267,7 +267,7 @@ public final class SZMessageQueue {
     }
 
     /// Full in-memory reset (project switch/close). Never writes anything itself — the caller
-    /// decides whether disk is touched (clearPerProjectState deliberately must NOT flush).
+    /// decides whether disk is touched (clearPerProjectState deliberately must not flush).
     public func reset() {
         let ids = Set(envelopes.map(\.id))
         envelopes.removeAll()
@@ -285,7 +285,7 @@ public final class SZMessageQueue {
     /// — inspect `failureReason` via `envelope(for:)`). The wait registers an edge in `ledger`'s
     /// wait graph so it deadlock-checks against resource waits: `.chat` → the recipient
     /// transcript's holders/reservers, `.steer` → whoever holds `.run` at registration — the run
-    /// IS the steer consumer, read straight from the ledger so there is no mirror state to drift
+    /// is the steer consumer, read straight from the ledger so there is no mirror state to drift
     /// (self-edge legal; no run parked = edge-less, only the deadline ends it early).
     /// Throws `.wouldDeadlock` at registration, `.deadlineExceeded` when the optional deadline
     /// passes, `.removed` if the envelope is removed, `CancellationError` on task cancellation.
@@ -296,7 +296,7 @@ public final class SZMessageQueue {
         if envelope.state == .processed || envelope.state == .failed { return envelope.state }
         try Task.checkCancellation()
 
-        // Join the shared wait graph BEFORE parking — a cycle must fail the wait, not hang it.
+        // Join the shared wait graph before parking — a cycle must fail the wait, not hang it.
         var registration: SZWaitRegistration?
         let ackLabel = "ack on message \(id.uuidString.prefix(8)) to \(envelope.recipient)"
         switch envelope.intent {

@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// THE way to measure anything in this codebase: wrap it in a debug fence.
+// The way to measure anything in this codebase: wrap it in a debug fence.
 //
 //     SZTrace.span(SZTurnStage.compileCheck) { compile(...) }       // a timed phase
 //     let fence = SZTrace.begin("my.stage"); ...; fence.end()       // when begin/end straddle scopes
 //     SZTrace.instant(SZTurnStage.toolCall, detail: name)           // a moment worth marking
 //
-// Fences work from ANY module on ANY thread and attribute automatically: the turn owner binds
+// Fences work from any module on any thread and attribute automatically: the turn owner binds
 // `SZTrace.$context` (a task-local) around the work, and Swift's structured concurrency carries it
 // through every plain `await` and into unstructured `Task {}` children (inherited at creation).
 // A `span {}` also pushes itself as the ambient parent, so nested fences form a tree
 // (`SZTurnEvent.parentID`) — the bridge's mcp.tool span parents the compile/promote fences inside
 // the handler with zero plumbing.
 //
-// Attribution rules (drop-by-design — an event is DROPPED, never misfiled):
+// Attribution rules (drop-by-design — an event is dropped, never misfiled):
 //   - tracing disabled (`isEnabled`, SZ_TRACE=1/0 override, else DEBUG on / release off) → no-op;
 //   - no ambient context (off-turn work: cold project loads, file-watcher reloads, probes) → no-op;
 //   - `Task.detached` and GCD callbacks (readabilityHandler, network handlers, terminationHandler)
-//     carry NO task-locals — never `begin` a fence there. A fence BEGUN in task code may `end()`
+//     carry no task-locals — never `begin` a fence there. A fence begun in task code may `end()`
 //     anywhere: it captured its context at begin.
 //
 // Events land keyed by the context's turnID; the turn owner collects them at turn end with
-// `take(turnID:)` (explicit key — turn finalization runs in a `defer` OUTSIDE the binding) and
+// `take(turnID:)` (explicit key — turn finalization runs in a `defer` outside the binding) and
 // folds them onto the turn's message. See SZTurnBreakdown for the event/stage model.
 import Foundation
 import Synchronization
@@ -45,7 +45,7 @@ public struct SZTraceContext: Sendable, Equatable {
 /// The instrumentation facade — static so a fence is a one-liner anywhere. State lives in a
 /// shared `SZTraceRecorder`; tests instantiate their own.
 public enum SZTrace {
-    /// THE gate: `SZ_TRACE=1/0` overrides; default on in DEBUG builds, off in release. Evaluated
+    /// The gate: `SZ_TRACE=1/0` overrides; default on in DEBUG builds, off in release. Evaluated
     /// once — call sites compile in every build and no-op here, so enabling in prod later is a
     /// launch-env (or default flip) away.
     public static let isEnabled: Bool = enabled(env: ProcessInfo.processInfo.environment)
@@ -79,7 +79,7 @@ public enum SZTrace {
                       turnID: context.turnID)
     }
 
-    /// Open a fence. Captures start AND context now, so `end()` attributes correctly from
+    /// Open a fence. Captures start and context now, so `end()` attributes correctly from
     /// anywhere — another task, a defer, after an actor hop. Prefer `span {}` where the
     /// measured work is a single scope.
     public static func begin(_ stage: String, detail: String? = nil) -> SZTraceFence {
@@ -100,7 +100,7 @@ public enum SZTrace {
         return try $currentParent.withValue(id) { try body() }
     }
 
-    /// Span whose close is derived from the body's RESULT — e.g. the bridge stamping a tool
+    /// Span whose close is derived from the body's result — e.g. the bridge stamping a tool
     /// result's size onto its span. A thrown body records with the begin-time detail alone.
     @discardableResult
     public static func span<T>(_ stage: String, detail: String? = nil,
@@ -175,7 +175,7 @@ public struct SZTraceFence: Sendable {
     struct State: Sendable {
         var stage: String
         var start: Date
-        /// DURATIONS come from the monotonic clock (the codebase's SZActivityClock idiom) — an
+        /// Durations come from the monotonic clock (the codebase's SZActivityClock idiom) — an
         /// NTP step or manual clock change mid-span must not corrupt a measurement. `start`
         /// stays a Date: it's persisted and ordered across turns.
         var monotonicStart: ContinuousClock.Instant
@@ -221,7 +221,7 @@ public final class SZTraceRecorder: Sendable {
     private struct Storage {
         var turns: [UUID: [SZTurnEvent]] = [:]
         /// Tombstones: recently finalized turn ids. A tool call already queued when its turn's
-        /// listener died (CLI killed on timeout/cancel) can record AFTER take() — without this
+        /// listener died (CLI killed on timeout/cancel) can record after take() — without this
         /// it would re-create the entry, never taken again, growing the map forever.
         var closedRing: [UUID] = []
         var closedSet: Set<UUID> = []

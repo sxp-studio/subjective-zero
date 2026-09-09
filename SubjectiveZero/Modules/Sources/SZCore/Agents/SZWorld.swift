@@ -5,7 +5,7 @@
 import Foundation
 
 public struct SZWorld: Sendable {
-    /// The REAL typed project document; nil = no project open.
+    /// The typed project document; nil = no project open.
     public var graph: SZGraph?
     /// Agent-reported status per node — `{{blockers}}`, and the `{{blocker}}` derivation
     /// for the delivery's own node.

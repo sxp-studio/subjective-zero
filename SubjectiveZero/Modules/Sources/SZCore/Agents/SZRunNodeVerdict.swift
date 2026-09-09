@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The run-end verdict for one work-set node — the pure decision the host's accounting applies.
 //
-// - Success is keyed on EVIDENCE: a promote that happened during the run + the node's derived state now.
+// - Success is keyed on evidence: a promote that happened during the run + the node's derived state now.
 //   A stale flag or a phase an agent forgot to update can no longer turn a green build into "0 implemented".
 // - "Built, then moved": a promote followed by a prompt/contract edit is an implemented node that needs another
 //   pass — narrated as such, never a failure.
-// - An AGENT that reported a real problem (`.error` / `.needsInput`) always wins, even over a clean build:
-//   it is the only party that can judge its own work ("it compiles, but it renders black"). Bad news the HOST
+// - An agent that reported a real problem (`.error` / `.needsInput`) always wins, even over a clean build:
+//   it is the only party that can judge its own work ("it compiles, but it renders black"). Bad news the host
 //   wrote on its behalf — a provider that died, a spent turn budget — says nothing about what was built, so a
 //   node that promoted clean stays implemented.
-// - Only a node with NO promote and NO explanation gets the generic "never compiled" line.
+// - Only a node with no promote and no explanation gets the generic "never compiled" line.
 import Foundation
 
 public enum SZRunNodeVerdict: Equatable, Sendable {
@@ -37,9 +37,9 @@ public enum SZRunNodeVerdict: Equatable, Sendable {
         }
     }
 
-    /// - node: the work-set node as it stands NOW (`needsImplementation` / `rebuildReason` are derived).
-    /// - promoted: `promoteStagedNode` ran for the node during THIS dispatch.
-    /// - state: the node's agent state now — its phase and WHO wrote it.
+    /// - node: the work-set node as it stands now (`needsImplementation` / `rebuildReason` are derived).
+    /// - promoted: `promoteStagedNode` ran for the node during this dispatch.
+    /// - state: the node's agent state now — its phase and who wrote it.
     /// - runtimeFault: what the node reports at render, when the caller judges this run made that build.
     public static func classify(node: SZNode, promoted: Bool,
                                 state: SZNodeAgentState?, runtimeFault: String? = nil) -> SZRunNodeVerdict {

@@ -18,7 +18,7 @@ struct SZPromptNodeView: View, Equatable {
     var autoFocus: Bool = false      // freshly added (＋ / double-click) → open editing + grab the field
     let onCommit: (String) -> Void
     let onEditingChanged: (Bool) -> Void
-    /// Reports the live field text per keystroke WITHOUT persisting — the host holds it and flushes it
+    /// Reports the live field text per keystroke without persisting — the host holds it and flushes it
     /// on the next run, so a Build hit before this field blurs still runs against the typed text. Blur is
     /// the only other commit path, and once a run locks the node the blur is dropped (`shouldCommitOnBlur`).
     let onLiveEdit: (String) -> Void
@@ -39,7 +39,7 @@ struct SZPromptNodeView: View, Equatable {
 
     /// Whether a blur should write the field's text back.
     ///
-    /// `.disabled(locked && !editing)` below stops a lock EJECTING you from a live field, so the blur it
+    /// `.disabled(locked && !editing)` below stops a lock ejecting you from a live field, so the blur it
     /// used to induce no longer fires. This decides the remaining case: you were typing, the lock is still
     /// held, and you deliberately click away. The edit is dropped (and the field reverted — see the blur
     /// handler) rather than committed, because a write behind the fence is the one thing that must never
@@ -48,8 +48,9 @@ struct SZPromptNodeView: View, Equatable {
     static func shouldCommitOnBlur(locked: Bool) -> Bool { !locked }
 
     /// Whether a keystroke should be reported live to the host's pending-edit holder. Only during an
-    /// ACTIVE, unlocked edit: this gate excludes the programmatic `text =` writes (the tap-to-seed and the
-    /// locked-blur revert both fire while not focused) and never reports behind the fence on a locked node.
+    /// active, unlocked edit: this gate excludes the programmatic `text =` writes (the tap-to-seed and
+    /// the locked-blur revert both fire while not focused) and never reports behind the fence on a
+    /// locked node.
     static func shouldReportLiveEdit(editing: Bool, focused: Bool, locked: Bool) -> Bool {
         editing && focused && !locked
     }
@@ -79,10 +80,10 @@ struct SZPromptNodeView: View, Equatable {
     }
 
     var body: some View {
-        // The live TextField exists only WHILE EDITING. An idle prompt card renders plain Text: an
+        // The live TextField exists only while editing. An idle prompt card renders plain Text: an
         // AppKit-backed NSTextField per card made every canvas pan/zoom/drag tick re-run AppKit layout
         // for all of them — profiled at 400–700ms main-thread stalls on a 30-node graph, starving the
-        // Metal viewport. Tap the text (as before — clicking the text used to focus the field) to edit.
+        // Metal viewport. Tap the text to edit.
         Group {
             if editing {
                 TextField("Describe a visual behavior…", text: $text, axis: .vertical)
@@ -103,8 +104,8 @@ struct SZPromptNodeView: View, Equatable {
         }
             .font(.system(size: 13))
             .foregroundStyle(.white.opacity(locked ? 0.6 : 0.92))
-            // Can't START editing a node an agent is implementing — but a lock landing on a field you
-            // are ALREADY INSIDE must not disable it. `.disabled` on a focused TextField resigns first
+            // Can't start editing a node an agent is implementing — but a lock landing on a field you
+            // are already inside must not disable it. `.disabled` on a focused TextField resigns first
             // responder, which fires the blur below, which used to commit your half-typed text onto the
             // very node that just got claimed (reproduced live: the act of locking wrote the edit).
             // Keeping the field live means the lock costs you nothing when it lifts before you click
@@ -136,14 +137,14 @@ struct SZPromptNodeView: View, Equatable {
                 onEditingChanged(isFocused)
                 if !isFocused {
                     // Commit on blur, then fall back to static Text — see `shouldCommitOnBlur`. When the
-                    // commit is DROPPED, revert `text` too: the idle branch renders `text`, not
+                    // commit is dropped, revert `text` too: the idle branch renders `text`, not
                     // `node.prompt`, and `.onChange(of: node.prompt)` can't correct it (the store never
                     // changed) — so without this the card would sit there displaying an edit that was
                     // never saved, indefinitely, which is a worse lie than losing the keystrokes.
                     if Self.shouldCommitOnBlur(locked: locked) {
                         onCommit(text)
                     } else {
-                        // The edit is dropped behind the fence — revert the field AND report the reverted
+                        // The edit is dropped behind the fence — revert the field and report the reverted
                         // value, so the host's pending edit can't outlive the drop and get resurrected by a
                         // later run's flush (the report is gated out of the keystroke path by `!focused`).
                         text = node.prompt ?? ""

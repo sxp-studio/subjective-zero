@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Grok CLI provider. Subprocess wrapper around `grok -p …` (no API key). Distinct from claude and
-// codex in: MCP attaches through a config FILE staged into the working directory by `prepare()`
-// (the CLI has no per-invocation MCP flag — `--mcp-config` is rejected, verified grok 0.2.93), and
-// the `--output-format streaming-json` stream carries token-level `thought`/`text` chunks with NO
-// tool-call events, so tool activity is invisible in the trace (the CLI's richer ACP mode,
-// `grok agent stdio`, is a persistent process and doesn't fit the one-shot spawn seam — future work).
-// Sessions are claude-style: the host mints `--session-id`, a chat turn continues with `--resume`
-// (continuity live-verified on 0.2.93: a resumed turn recalled the prior turn's content).
+// codex in: MCP attaches through a config file `prepare()` stages into the working directory (no
+// per-invocation MCP flag — `--mcp-config` is rejected, verified grok 0.2.93), and `--output-format
+// streaming-json` carries token-level `thought`/`text` chunks with no tool-call events, so tool
+// activity is invisible in the trace (the richer ACP mode, `grok agent stdio`, is a persistent
+// process and doesn't fit the one-shot spawn seam — future work). Sessions are claude-style: the
+// host mints `--session-id`, a chat turn continues with `--resume` (live-verified on 0.2.93: a
+// resumed turn recalled the prior turn's content).
 // - resume of an unknown id: exit 1, 404 on stderr, empty stdout (grok 0.2.93).
 //
-// DYNAMIC MODEL CATALOG (pi-style, see SZPiProvider). grok's served ids are unversioned backend
-// aliases the CLI enumerates via `grok models` — they re-point and disappear underneath a pinned
-// manifest (observed 2026-07-16: the previously recorded "grok-composer-2.5-fast"/"grok-build"
-// were gone and every `-m` run failed "unknown model id"; the same CLI build now vends only
-// "grok-4.5"). So nothing is pinned: the catalog is fetched from the CLI, cached by the host, and
-// `launch()` omits `-m` entirely while no catalog is known — the CLI then runs its own default,
-// which is by construction an id the backend currently serves.
+// Dynamic model catalog (pi-style, see SZPiProvider): grok's served ids are unversioned backend
+// aliases the CLI lists via `grok models`, and they re-point or vanish underneath a pinned manifest
+// (2026-07-16: the recorded "grok-composer-2.5-fast"/"grok-build" were gone, every `-m` run failed
+// "unknown model id", and the same CLI build vended only "grok-4.5"). So nothing is pinned: the
+// catalog is fetched from the CLI, cached by the host, and `launch()` omits `-m` while no catalog is
+// known — the CLI's own default is by construction an id the backend currently serves.
 import Foundation
 import Synchronization
 
@@ -33,9 +32,9 @@ public struct SZGrokProvider: SZProvider {
     /// falls through to "", and `launch()` omits `-m` (the CLI's own default carries the run).
     public var models: [SZProviderModel] { catalog.snapshot.withLock { $0?.models ?? [] } }
     public var defaultModel: String { catalog.snapshot.withLock { $0?.defaultModelID ?? "" } }
-    /// grok 0.2.93 HAS a `--reasoning-effort` flag but does not act on it for either served model,
+    /// grok 0.2.93 has a `--reasoning-effort` flag but does not act on it for either served model,
     /// so no effort menu is declared and `launch()` never emits the flag. Evidence (2026-07-12):
-    /// the flag silently accepts ANY value (even an invalid token — exit 0, no warning), so
+    /// the flag silently accepts any value (even an invalid token — exit 0, no warning), so
     /// acceptance proves nothing; and two measured comparisons (`none` vs `high`, then `minimal` vs
     /// `xhigh` on a harder prompt, both models) showed no meaningful change in thought volume
     /// (27→26 / 24→24 chunks; 102→151 / 410→431 chars) with `none` not even suppressing thinking.
@@ -49,7 +48,7 @@ public struct SZGrokProvider: SZProvider {
     /// marker path, not the exit code, is what classifies a logged-out install.
     public let authStatusArgs = ["grok", "models"]
     /// Recorded from grok 0.2.93. "You are not authenticated" is `grok models`' logged-out output;
-    /// the other two are the device-auth banner a logged-out `grok -p` prints — it does NOT fail:
+    /// the other two are the device-auth banner a logged-out `grok -p` prints — it does not fail:
     /// it polls for an interactive browser login until killed, which is why the probe classifies
     /// markers ahead of its timeout.
     public let authFailureMarkers = [
@@ -109,12 +108,12 @@ public struct SZGrokProvider: SZProvider {
     ///     Available models:
     ///       * grok-4.5 (default)
     ///
-    /// with `- <id>` bullets on non-default entries when several are served (recorded 0.2.93,
-    /// 2026-07-12 two-model catalog). Ids are the lines' first token under "Available models:"
-    /// (leading `*`/`-` bullet stripped, trailing "(default)" annotation ignored). The default
-    /// comes from the "Default model:" line, with the "(default)"-annotated entry as fallback.
-    /// No effort/fast overrides are derived — this CLI has no acting effort or fast surface
-    /// (see supportedReasoningEfforts).
+    /// plus `- <id>` bullets on non-default entries when several are served (recorded 0.2.93,
+    /// 2026-07-12 two-model catalog). An id is a line's first token under "Available models:"
+    /// (leading `*`/`-` stripped, trailing "(default)" ignored); the default comes from the
+    /// "Default model:" line, falling back to the "(default)"-annotated entry. No effort/fast
+    /// overrides are derived — this CLI has no acting effort or fast surface (see
+    /// supportedReasoningEfforts).
     static func catalogSnapshot(fromModelsOutput output: String) -> SZProviderModelCatalog? {
         var models: [SZProviderModel] = []
         var defaultID: String?
@@ -238,12 +237,13 @@ enum SZGrokCatalogError: Error, CustomStringConvertible {
 
 /// Parses grok's streaming-json: token-level `{"type":"thought"|"text","data":…}` chunks and a final
 /// `end` event (no per-line messages, no tool events, no usage — verified 0.2.93, so grok turns carry
-/// no `.usage`). Usage was also hunted OUTSIDE the stream (0.2.93): the session dir
-/// (~/.grok/sessions/<url-encoded-cwd>/<session-id>/) records only a CUMULATIVE context gauge
+/// no `.usage`). Usage was also hunted outside the stream (0.2.93): the session dir
+/// (~/.grok/sessions/<url-encoded-cwd>/<session-id>/) records only a cumulative context gauge
 /// (`_meta.totalTokens` on updates.jsonl events, `contextTokensUsed` in signals.json) — no per-turn
-/// input/output split exists anywhere, so there is nothing honest to map into SZTokenUsage. Chunks are accumulated — emitting per token would spam the trace — and flushed at
-/// type transitions: a completed thought block becomes one `.thinking` when text starts, and text
-/// superseded by a NEW thought block was narration, not the answer (matching claude/codex's
+/// input/output split exists anywhere, so there is nothing honest to map into SZTokenUsage.
+/// Chunks are accumulated — emitting per token would spam the trace — and flushed at type
+/// transitions: a completed thought block becomes one `.thinking` when text starts, and text
+/// superseded by a new thought block was narration, not the answer (matching claude/codex's
 /// reply/trace split). The reply flushes in `finish()`, the one point that knows the stream is over.
 final class SZGrokStreamConsumer: SZAgentStreamConsumer {
     private var pendingThought = ""
@@ -290,7 +290,7 @@ final class SZGrokStreamConsumer: SZAgentStreamConsumer {
         return thought.isEmpty ? [] : [.thinking(thought)]
     }
 
-    /// grok emits RAW control characters inside JSON string values (verified 0.2.93 — a strict
+    /// grok emits raw control characters inside JSON string values (verified 0.2.93 — a strict
     /// parser throws "invalid control character"). Within one JSONL line a raw control char can
     /// only sit inside a string literal (JSON structure uses none), so escaping them linewise is
     /// safe and makes the line parseable.

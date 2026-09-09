@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Provider health + the Agent Providers setup sheet — the host-side intents behind roadmap
 // Task 2, following the SZHost+Chat.swift sibling pattern. The SZAI tiers (SZProviderHealth /
-// SZProviderProbe) are the checks; this file owns WHEN they run (launch pass, sheet poll loop,
+// SZProviderProbe) are the checks; this file owns when they run (launch pass, sheet poll loop,
 // first-run auto-probe, per-card Test), how cheap and probe verdicts merge into one displayed
 // status, and the remedies that need AppKit (the Terminal login launcher).
 import AppKit
@@ -22,7 +22,7 @@ extension SZHost {
         seedProviderModelCatalogs()
         // A restored active provider that is user-disabled (possible only via a hand-edited
         // app-state.json — the mutator moves the active elsewhere first) clamps to the first
-        // enabled one, BEFORE anything runs on it.
+        // enabled one, before anything runs on it.
         if disabledProviderIDs.contains(activeProviderID),
            let fallback = enabledProviders.first {
             setActiveProvider(fallback.id)
@@ -49,7 +49,7 @@ extension SZHost {
     /// The first-run sheet, from whichever moment comes first: launch (welcome bypassed) or the exit
     /// from welcome into a live project. Silent unless it's genuinely first-run, and at most once per
     /// launch — a Skip for Now must not be undone by a Help ▸ Welcome round-trip. While welcome is up
-    /// this returns WITHOUT consuming the once-per-launch flag, leaving the retry for switchProject.
+    /// this returns without consuming the once-per-launch flag, leaving the retry for switchProject.
     /// The New Project sheet holds it back the same way (Create clears its flag before the project opens).
     func autoPresentProviderSetupIfNeeded() {
         guard defaultProviderID == nil, !providerSetupAutoPresented, !welcomePresented,
@@ -91,7 +91,7 @@ extension SZHost {
     /// retires the first-run auto-present), and dismiss. Only a `ready` card confirms — the sheet
     /// disables the button otherwise; this guard is the model-side belt.
     func confirmDefaultProvider() {
-        // The nil→set transition of the persisted default IS "first-run setup completed" —
+        // The nil→set transition of the persisted default is "first-run setup completed" —
         // captured before setActiveProvider fires the (separate) agent_provider_default event.
         let wasFirstRun = defaultProviderID == nil
         guard let id = selectedSetupProviderID,
@@ -106,7 +106,7 @@ extension SZHost {
     }
 
     /// Select a card. First-run this is a radio (Confirm commits); on a settled install the
-    /// sheet is a settings pane, so picking a READY card switches the active provider right
+    /// sheet is a settings pane, so picking a ready card switches the active provider right
     /// there — the only GUI path since the composer pill retired. A not-ready card just
     /// selects, showing its remedies.
     func selectSetupProvider(_ id: String) {
@@ -132,7 +132,7 @@ extension SZHost {
     /// provider stays enabled (still visible here, still recoverable) — disabling is a separate,
     /// deliberate act.
     func adoptFallbackProvider(insteadOf id: String) {
-        // The nil→set transition IS "first-run setup completed", whichever button drove it —
+        // The nil→set transition is "first-run setup completed", whichever button drove it —
         // same funnel capture as confirmDefaultProvider.
         let wasFirstRun = defaultProviderID == nil
         guard let fallback = fallbackProvider(insteadOf: id),
@@ -146,7 +146,7 @@ extension SZHost {
     }
 
     /// The card's Disable/Enable. Disable never strands work: the last enabled provider refuses,
-    /// and disabling the ACTIVE provider first moves active to the fallback — which itself
+    /// and disabling the active provider first moves active to the fallback — which itself
     /// refuses while agents are busy (`setActiveProvider`'s guard), so a live run is never cut
     /// over or left on a disabled provider. Enable drops the stale verdicts so the card shows
     /// "Checking…" and then fresh truth from the next pass.
@@ -187,7 +187,7 @@ extension SZHost {
         return true
     }
 
-    /// Default-selection heuristic over the ENABLED providers (a disabled card is never the
+    /// Default-selection heuristic over the enabled providers (a disabled card is never the
     /// radio): keep a valid current selection → the active provider if ready → the first ready
     /// provider → the first enabled provider.
     private func defaultSetupSelection() -> String? {
@@ -219,7 +219,7 @@ extension SZHost {
             return collected
         }
         for report in reports {
-            // A cheap-status TRANSITION drops the sticky probe verdict — the world changed
+            // A cheap-status transition drops the sticky probe verdict — the world changed
             // (install landed, login landed/expired), so the deeper truth must be re-earned.
             // This is also what re-arms the first-run auto-probe, bounding token spend by
             // user-visible state changes, never by the poll timer.
@@ -277,7 +277,7 @@ extension SZHost {
         }
     }
 
-    /// A provider with NO cheap auth-status command (empty `authStatusArgs`) has no tier-2
+    /// A provider with no cheap auth-status command (empty `authStatusArgs`) has no tier-2
     /// transition to drop a held logged-out probe verdict: its cheap tier reads the same
     /// "installed" before and after a login, so once a probe records authNeeded, no amount of
     /// logging in could ever turn the card green — the verdict would stick until a manual Test.
@@ -315,13 +315,13 @@ extension SZHost {
     /// the first-run auto-probe above). Disabled providers refuse — their card hides Test, this
     /// guard covers any other route in.
     /// The setup sheet's per-card model pick: apply the choice, then immediately re-verify it right
-    /// here. `setModel` drops the previous model's probe verdict, so without this a FAILING card would
+    /// here. `setModel` drops the previous model's probe verdict, so without this a failing card would
     /// snap to an optimistic cheap-`Ready` (green, Confirmable, the "try another model" hint gone)
-    /// before the NEW model is known to work — a user could pick an equally-broken model and Confirm
+    /// before the new model is known to work — a user could pick an equally-broken model and Confirm
     /// green. Re-probing on the pick keeps the card honest (Testing… → the real verdict). Bounded by
     /// the explicit pick (one probe, same token cost as the Test button) and only when the provider is
     /// otherwise runnable — a needs-login / needs-install card can't be probed and isn't. The
-    /// composer's picker and `ui_set_provider` deliberately do NOT auto-probe (not a setup context).
+    /// composer's picker and `ui_set_provider` deliberately do not auto-probe (not a setup context).
     func pickSetupModel(_ model: String, for providerID: String) {
         let changed = model != resolvedGenerationSettings(for: providerID).model
         guard setModel(model, for: providerID), changed else { return }
@@ -333,7 +333,7 @@ extension SZHost {
               !disabledProviderIDs.contains(id),
               !probingProviders.contains(id) else { return }
         probingProviders.insert(id)
-        // Probe the user's RESOLVED selection, so Test verifies the model a real run will use — not
+        // Probe the user's resolved selection, so Test verifies the model a real run will use — not
         // the provider default (the very mismatch that let a quota-limited default read as "Failing").
         // An empty resolved model (a runtime-catalog provider before its first fetch) → nil, so argv
         // carries no model and the CLI's own default runs, exactly as a bare probe did.
@@ -357,7 +357,7 @@ extension SZHost {
         return providerProbes[id] ?? cheap
     }
 
-    /// Pre-flight for NEW work (a run, a first-turn chat). Unknown health — no pass finished
+    /// Pre-flight for new work (a run, a first-turn chat). Unknown health — no pass finished
     /// yet — stays permissive: a fluke must never block what worked yesterday; the CLI's own
     /// failure still surfaces downstream. A user-disabled provider is never ready — that's a
     /// choice, not a fluke.
@@ -381,12 +381,12 @@ extension SZHost {
         presentProviderSetup()
     }
 
-    /// Classify a FAILED turn after the fact — the mid-turn counterpart of the pre-flights,
-    /// which only cover a turn's START: a CLI that dies mid-turn comes back as
+    /// Classify a failed turn after the fact — the mid-turn counterpart of the pre-flights,
+    /// which only cover a turn's start: a CLI that dies mid-turn comes back as
     /// a bare non-zero exit with no message, not a thrown error. Re-runs the cheap health tiers
     /// and, when the turn's provider is no longer ready, opens the Agent Providers sheet and
     /// returns the actionable line for the caller's transcript. A signal death on a
-    /// still-healthy provider gets honest copy but NO sheet — pointing a one-off kill at setup
+    /// still-healthy provider gets honest copy but no sheet — pointing a one-off kill at setup
     /// would be wrong advice. nil = ordinary agent failure; the caller keeps its own copy.
     /// The guards live here so every `deliver` caller applies the same rules: a user stop is a
     /// choice, not a death, and a timeout already has dedicated copy.

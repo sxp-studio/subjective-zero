@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// HOST-owned prompt prose (Resources/Prompts/) — what is left after the packs became the one
-// home for AGENT prose: today exactly the ask-repair wrapper, which belongs to the query
+// Host-owned prompt prose (Resources/Prompts/) — what is left after the packs became the one
+// home for agent prose: today exactly the ask-repair wrapper, which belongs to the query
 // service, not to any agent. Rendered with the flat-`{{token}}` SZPromptTemplate.
 import Foundation
 import SZCore
@@ -34,7 +34,7 @@ public enum SZGraphPrompts {
     /// The user's steer for this graph op, or "" when they gave none. `SZPromptTemplate` is a flat
     /// token replacer with no conditional sections, so the empty case has to collapse to nothing here —
     /// the template puts `{{instruction}}` alone on a line, and "" leaves a clean paragraph break.
-    /// Framed as HOW to perform the op, so an agent can't mistake it for the node's own intent.
+    /// Framed as how to perform the op, so an agent can't mistake it for the node's own intent.
     /// Internal (not private): the brief renderer assembles the same value.
     static func steerBlock(_ instruction: String?, verb: String) -> String {
         let steer = instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -46,10 +46,10 @@ public enum SZGraphPrompts {
 }
 
 /// Shared renderer for a node's typed boundary in agent prompts — each port's type, ui/default, and the
-/// EXACT live-read call in `update()`. ONE renderer used by the coding brief (node-compile, via the
-/// brief renderer) AND the split/merge seed prompts, so every agent both PRESERVES the typed contract and READS its scalar inputs
-/// (never hardcodes them → no dead controls). The promote merge holds the live boundary's types; this
-/// makes the agent's SOURCE honor it.
+/// exact live-read call in `update()`. One renderer for the coding brief (node-compile, via the brief
+/// renderer) and the split/merge seed prompts, so every agent preserves the typed contract and reads its
+/// scalar inputs live rather than hardcoding them, which would leave dead controls. The promote merge
+/// holds the live boundary's types; this is what makes the generated source honor them.
 enum SZBoundaryPrompt {
     /// Describe a contract's whole declared boundary (inputs + outputs + permissions).
     static func render(_ contract: SZNodeContract) -> String {
@@ -122,7 +122,7 @@ enum SZBoundaryPrompt {
     }
 }
 
-/// The Director Agent's prompt VALUE BUILDERS — graph projections and per-turn context lines.
+/// The Director Agent's prompt value builders — graph projections and per-turn context lines.
 /// The brief renderer (`SZBriefRenderer`) assembles run-turn briefs from these; the host renders
 /// the chat framings below directly when it spawns a Director chat turn.
 public enum SZDirectorPrompt {
@@ -208,7 +208,7 @@ public enum SZDirectorPrompt {
         var folded: [(mutation: SZGraphMutation, repeats: Int)] = []
         for m in mutations {
             if let last = folded.last, last.mutation.coalescingKey == m.coalescingKey {
-                folded[folded.count - 1] = (m, last.repeats + 1)   // keep the LATEST state
+                folded[folded.count - 1] = (m, last.repeats + 1)   // keep the latest state
             } else {
                 folded.append((m, 1))
             }
@@ -246,7 +246,7 @@ public enum SZDirectorPrompt {
         let familySizes = Dictionary(graph.nodes.map { (graph.lineageFamily(of: $0.id), 1) }, uniquingKeysWith: +)
         let nodes = graph.nodes.map { n -> String in
             let io = contractIO(n.contract, fallback: "no contract yet")
-            // A blank prompt node is rendered EXPLICITLY, not as an absent clause: the Director must be
+            // A blank prompt node is rendered explicitly, not as an absent clause: the Director must be
             // able to tell "the user left this undecided" from "this node never carries a prompt", so it
             // leaves the node alone (or asks) instead of manufacturing intent from the surrounding layout.
             let prompt: String

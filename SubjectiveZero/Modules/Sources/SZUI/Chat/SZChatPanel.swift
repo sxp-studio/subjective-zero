@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The chat panel — a directed console into an agent, docked right of the viewport/editor combo.
-// This is NOT a messaging UI: a chat turn drives a node's
+// This is not a messaging UI: a chat turn drives a node's
 // coding agent to edit + recompile that node, so the panel reads like a lab log addressed to one
 // instrument. Signature: a scope header that names the node (SF Symbol + title), and a transcript of
 // left-railed turns with a monospaced role eyebrow — no bubbles, no avatars.
@@ -18,7 +18,7 @@ import UniformTypeIdentifiers
 public struct SZChatPanel: View {
     private let store: SZStore
     private let scope: SZChatScope                 // the composer's recipient — the Director
-    private let feed: [SZChatFeedItem]             // THE conversation: every agent's words to you
+    private let feed: [SZChatFeedItem]             // the one conversation: every agent's words to you
     private let project: SZProject?
     private let streaming: Bool                    // any turn is in flight → the composer's Stop slot
     private let streamingIDs: Set<UUID>            // the messages actually being written right now
@@ -28,7 +28,7 @@ public struct SZChatPanel: View {
     private let agentAccents: SZChatAgentAccents   // pack-declared speaker symbols/tints; empty = the built-in palette
     private let workingScopes: Set<String>         // scopes with a streaming turn → the typing dots
     private let runThreadIDs: [UUID]               // every live thread, oldest first → the run strip
-    private let agentGraphRuns: [SZAgentGraphRun]  // the RUNS records → the run strip's fleet lanes
+    private let agentGraphRuns: [SZAgentGraphRun]  // the run records → the run strip's fleet lanes
     private let stepTitle: (String, String) -> String?   // (agent id, graph node id) → the step's declared title
     private let scheduledTasks: [SZScheduledRow]   // work queued and not yet started → the strip
     private let onCancelScheduledTask: ((UUID) -> Void)?   // a scheduled row's ✕
@@ -62,7 +62,7 @@ public struct SZChatPanel: View {
     @State private var attachHover = false
     /// The run strip's jump into the Agent Graph panel; nil where the surface isn't wired (previews).
     @Environment(\.szRevealInAgentGraph) private var revealInAgentGraph
-    // One conversation, one draft. (It was per-scope while tabs existed; nothing switches now.)
+    // One conversation, one draft.
     @State private var composerDraft = SZComposerDraft()
     @State private var composerHeight: CGFloat = 22     // grows 1…6 lines, driven by the AppKit input
     @State private var pendingAttachments: [URL] = []   // staged-on-send: source URLs picked/dropped/pasted
@@ -97,7 +97,7 @@ public struct SZChatPanel: View {
     static let directorColor = SZEdgeStyle.intentViolet                 // Director = its own flow-edge violet; internal: same
     private static let debugColor = Color(red: 0.70, green: 0.62, blue: 0.85)       // the debug chat agent — a muted "this is a tool" lilac
 
-    /// The speakers' identities as the PACKS declare them (symbol + tint per agent graph),
+    /// The speakers' identities as the packs declare them (symbol + tint per agent graph),
     /// host-injected; the constants above are the fallbacks for packs declaring none.
     public struct SZChatAgentAccents: Equatable, Sendable {
         public var directorColor: Color?
@@ -116,7 +116,7 @@ public struct SZChatPanel: View {
         }
     }
     /// The panel's own ground. Named because the transcript's bottom fade has to dissolve into
-    /// EXACTLY this colour, and a fade to a near-miss reads as a smudge.
+    /// exactly this colour, and a fade to a near-miss reads as a smudge.
     static let panelFill = Color(white: 0.12)
 
     public init(store: SZStore, scope: SZChatScope = .director, feed: [SZChatFeedItem], project: SZProject?,
@@ -193,14 +193,14 @@ public struct SZChatPanel: View {
             composer
         }
         .background(Self.panelFill)
-        // Measured as the strip's BUDGET, not the height: a raw CGFloat would write state, and so
+        // Measured as the strip's budget, not the height: a raw CGFloat would write state, and so
         // re-evaluate this body and its lazy rows, on every pixel of a resize drag.
         .onGeometryChange(for: Int.self, of: { SZStripPlan.budget(panelHeight: $0.size.height) }) {
             stripBudget = $0
         }
         // The strip arriving or leaving is the biggest height change, and it has no row to count.
         .onChange(of: isRunning || !scheduledTasks.isEmpty) { stripLayoutNonce &+= 1 }
-        // Drop a file ANYWHERE on this panel → attach it to the active transcript (AppKit catcher behind
+        // Drop a file anywhere on this panel → attach it to the active transcript (AppKit catcher behind
         // the content; SwiftUI's .dropDestination on a parent only caught the transcript).
         .background(SZFileDropCatcher(onDrop: { urls, _ in appendAttachments(urls); return true },
                                       onTargeted: { dropTargeted = $0 }))
@@ -250,7 +250,7 @@ public struct SZChatPanel: View {
 
     /// A transient accent tint on the composer outline to catch the eye when you land here (a
     /// beacon click / suggestion): bright on, then fades back to normal — no persistent chrome.
-    /// The reset is deferred one run-loop tick: setting 1 then animating to 0 in the SAME turn is
+    /// The reset is deferred one run-loop tick: setting 1 then animating to 0 in the same turn is
     /// coalesced by SwiftUI (the bright state never paints — it animates 0→0), so the "on" must
     /// commit first, then the fade runs on the next tick.
     private func flashComposerAttention() {
@@ -277,7 +277,7 @@ public struct SZChatPanel: View {
                 Label("AI Settings", systemImage: "slider.horizontal.3")
             }
             Divider()
-            // Clear = a FULL reset (transcript + the agent's session — the host side documents
+            // Clear = a full reset (transcript + the agent's session — the host side documents
             // why they go together). Disabled while a turn streams or there is nothing to clear.
             Button(role: .destructive) { onClearTranscript(scope) } label: {
                 Label("Clear Transcript & Reset Agent", systemImage: "trash")
@@ -301,7 +301,7 @@ public struct SZChatPanel: View {
         .help("Conversation actions")
     }
 
-    /// Placeholders render OUTSIDE the ScrollView so they can centre. A feed that already has messages
+    /// Placeholders render outside the ScrollView so they can centre. A feed that already has messages
     /// keeps showing them while the next project opens.
     @ViewBuilder
     private func transcript(_ items: [SZChatFeedItem]) -> some View {
@@ -335,16 +335,16 @@ public struct SZChatPanel: View {
                 }
                 .padding(14)
             }
-            // The first message CREATES this view, and `onChange` skips the value a view is born with,
+            // The first message creates this view, and `onChange` skips the value a view is born with,
             // so pin once here or a long first message sits cut off.
             .onAppear { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             .onChange(of: items.last?.id) { scrollToBottom(proxy) }
-            // Streaming growth: compare the cheap count (not the whole string) and pin WITHOUT
+            // Streaming growth: compare the cheap count (not the whole string) and pin without
             // animation — at flush cadence a hard bottom-pin reads as ticker tape, steadier than
             // an interruptible 0.15s animation restarted per flush. The animated scroll stays for
             // new-message transitions only (above).
             .onChange(of: items.last?.message.text.count) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
-            // The strip resized THIS viewport from below, and without a pin the last message slides
+            // The strip resized this viewport from below, and without a pin the last message slides
             // out of view. Only for a reader already at the bottom: the flag still holds its
             // pre-resize value here, since the geometry callback fires after layout.
             .onChange(of: stripLayoutNonce) {
@@ -363,8 +363,8 @@ public struct SZChatPanel: View {
                 withAnimation(.easeOut(duration: 0.15)) { transcriptHasMoreBelow = hasMore }
             }
             // Scrolled up, the last inch dissolves into the panel instead of being guillotined by
-            // the viewport's edge. AT THE BOTTOM THERE IS NO FADE — the final message is the thing
-            // you came to read, and fading it would be the same defect wearing a gradient.
+            // the viewport's edge. No fade at the bottom: the final message is the thing you came
+            // to read, and fading it would be the same defect wearing a gradient.
             .overlay(alignment: .bottom) {
                 LinearGradient(colors: [Self.panelFill.opacity(0), Self.panelFill],
                                startPoint: .top, endPoint: .bottom)
@@ -424,7 +424,7 @@ public struct SZChatPanel: View {
     }
 
     /// One transcript row, packaged into value-only props for an `.equatable()` skip (the
-    /// `SZNodeCanvasContentView` idiom): a streaming flush changes only the growing LAST row's
+    /// `SZNodeCanvasContentView` idiom): a streaming flush changes only the growing last row's
     /// `message`, so every older row fails fast on `==` and never re-runs its body — including its
     /// markdown parse. A graph edit changes `liveNodeIDs`, correctly re-rendering all rows' mention
     /// tombstones.
@@ -432,7 +432,7 @@ public struct SZChatPanel: View {
     private func turn(for message: SZChatMessage, isLast: Bool, liveNodeIDs: Set<SZNodeID>,
                       from origin: SZChatScope, build: SZAgentGraphRun? = nil) -> some View {
         if let receipt = message.receipt {
-            // A finished build is not a speaker: no rail, no DIRECTOR AGENT header, no markdown
+            // A finished build is not a speaker: no rail, no agent header, no markdown
             // body. It is the strip's lane, settled here at the moment it finished.
             SZChatReceiptRow(
                 receipt: receipt,
@@ -455,10 +455,10 @@ public struct SZChatPanel: View {
         // One feed, several speakers: a line from a node's own conversation is labelled with that
         // node, so "who said this" is carried by the message, not by where you were looking.
         let originNode = origin.nodeID.flatMap { id in project?.graph.node(id: id) }
-        // The Director's identity reads the same everywhere: its own replies in the Director tab AND
-        // the messages it posts into a node's tab → one accent + symbol, so the violet "director agent" never
-        // gets mistaken for the orange "coding agent" whose tab it's speaking in.
-        let isDebugReply = isDebug && !isUser   // the debug chat agent's reply (its own tab)
+        // The Director's identity reads the same everywhere: its own replies, and the messages it
+        // posts on a node's behalf → one accent + symbol, so the violet "director agent" never gets
+        // mistaken for the orange "coding agent" it is speaking for.
+        let isDebugReply = isDebug && !isUser   // the debug chat agent's reply (its own scope)
         let isDirector = !isDebugReply
             && (message.role == .director || (message.role == .assistant && originNode == nil))
         // A Director turn inside a build names its step ("Decompose", "Reconcile"), so stacked
@@ -476,10 +476,10 @@ public struct SZChatPanel: View {
             message: message,
             // Dots = this turn is still in flight (works for codex's preamble-then-tools order, not
             // just "text empty"): the in-flight assistant turn is always the last message.
-            // THIS row, not "something somewhere": with several scopes feeding one transcript,
+            // This row, not "something somewhere": with several scopes feeding one transcript,
             // "the last row is in flight" left finished turns wearing the dots.
             working: streamingIDs.contains(message.id),
-            // Queued rides in as a VALUE (not the closure) so the row's `.equatable()` skip keeps
+            // Queued rides in as a value (not the closure) so the row's `.equatable()` skip keeps
             // working: the chip flips exactly when the prop flips.
             queued: isUser && isQueued(message.id),
             showTurnBreakdown: showTurnBreakdown,
@@ -492,7 +492,7 @@ public struct SZChatPanel: View {
                    : (isDirector ? directorLabel
                       : (originNode.map { "\($0.title) · coding agent" } ?? "coding agent"))),
             // Symbol next to the label (accessibility — not color-only): the Director's own
-            // pack glyph (matching its tab), the node's own sfSymbol for its Coding Agent,
+            // pack glyph, the node's own sfSymbol for its Coding Agent,
             // a person for the user.
             symbol: isUser ? "person.fill"
                 : (isDebugReply ? (agentAccents.debugSymbol ?? "ladybug.fill")
@@ -525,7 +525,7 @@ public struct SZChatPanel: View {
             .opacity(attentionTint * 0.9))
         // The autocomplete floats just above the card (Slack-style, anchored to the composer — not
         // the caret): measured, then offset so its bottom sits 6pt above the card's top (an
-        // alignment-guide shift rendered ON the card in practice — measured offset is exact).
+        // alignment-guide shift rendered on the card in practice — measured offset is exact).
         .overlay(alignment: .topLeading) {
             if mentionListVisible {
                 SZMentionAutocompleteView(
@@ -566,7 +566,7 @@ public struct SZChatPanel: View {
                 .padding(.horizontal, 2)
             }
         }
-        // AppKit-backed so a dropped/pasted FILE attaches instead of inserting its path/name as text.
+        // AppKit-backed so a dropped/pasted file attaches instead of inserting its path/name as text.
         SZComposerTextView(draft: $composerDraft, height: $composerHeight,
                            placeholder: "Message \(scopeName)…",
                            onSubmit: send, onAttach: { appendAttachments($0) },
@@ -585,8 +585,8 @@ public struct SZChatPanel: View {
             .trackingHover($attachHover)
             .help("Attach files")
             composerMenu
-            // The recipient line appears ONLY when a leading @mention reroutes the draft OFF this tab
-            // (typing in a tab addresses that tab's agent — showing that is just noise).
+            // The recipient line appears only when a leading @mention reroutes the draft off this
+            // conversation (a plain message goes to its own agent — showing that is just noise).
             if let rerouted = reroutedRecipientLabel {
                 HStack(spacing: 3) {
                     Image(systemName: "arrow.right")
@@ -597,8 +597,8 @@ public struct SZChatPanel: View {
                 .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 8)
-            // The Stop rides NEXT TO send while a run / this scope's turn is in flight — the input
-            // stays live (a send queues), but stopping is always one click, on every tab.
+            // The Stop rides next to send while a run / this scope's turn is in flight — the input
+            // stays live (a send queues), but stopping is always one click.
             if let stop = activeStop {
                 stopButton(stop.action, help: stop.help)
             }
@@ -627,7 +627,7 @@ public struct SZChatPanel: View {
         }
     }
 
-    /// The current stoppable action + its tooltip: THIS conversation's streaming turn, and nothing
+    /// The current stoppable action + its tooltip: this conversation's streaming turn, and nothing
     /// wider. A build is stopped from its own lane in the strip right above — one build, one ■ —
     /// because a composer button cannot say which of several builds it means.
     private var activeStop: (action: () -> Void, help: String)? {
@@ -696,8 +696,8 @@ public struct SZChatPanel: View {
         .help(help)
     }
 
-    /// The recipient label ONLY when a leading @mention reroutes the draft OFF the current tab —
-    /// nil when the message would go to this tab's own agent (showing that is redundant noise).
+    /// The recipient label only when a leading @mention reroutes the draft off the current
+    /// conversation — nil when it would go to that conversation's own agent (redundant noise).
     private var reroutedRecipientLabel: String? {
         let recipient = SZChatRouting.resolveRecipient(message: composerDraft.canonicalText)
         guard recipient != scope else { return nil }
@@ -739,11 +739,11 @@ public struct SZChatPanel: View {
 
 /// A finished build, in the conversation.
 ///
-/// The run strip is a run's presence — it appears the moment a build starts, on every tab, and it
+/// The run strip is a run's presence — it appears the moment a build starts, and it
 /// is gone the moment the build ends. This is the other half: the same lane, settled into the
 /// transcript at the point in time where it finished, so scrolling back through history still
-/// shows what was built and when. Deliberately NOT a turn — the host is not the Director, and for
-/// a long time it wore its violet anyway.
+/// shows what was built and when. Deliberately not a turn: the host is not the Director, so it must
+/// not wear the Director's violet.
 ///
 /// Reuses `SZLanePill` verbatim rather than resembling it: one badge vocabulary, one set of
 /// metrics, one hover, and the same tap into the Agent Graph the live lane already had.
@@ -753,7 +753,7 @@ private struct SZChatReceiptRow: View, Equatable {
     /// The run rollup, when Debug ▸ Show Turn Breakdown is on — it lands on this message.
     let breakdown: [SZTurnEvent]?
     let turnID: UUID
-    /// The run to open, as a VALUE — `SZTurnBreakdownView`'s `profilerTarget` idiom. The row reads
+    /// The run to open, as a value — `SZTurnBreakdownView`'s `profilerTarget` idiom. The row reads
     /// the action out of the environment itself rather than storing a closure, because a stored
     /// closure has a fresh identity every render and would defeat the `.equatable()` skip that
     /// `SZChatTurnRow`'s type comment exists to protect: receipts accumulate one per build, and at
@@ -771,7 +771,7 @@ private struct SZChatReceiptRow: View, Equatable {
     }
 
     /// Hand-written because `@Environment` is not synthesizable — and correct on purpose: what the
-    /// row RENDERS is these values, while the reveal action is ambient and stable for the
+    /// row renders is these values, while the reveal action is ambient and stable for the
     /// panel's lifetime. Comparing only the values is what makes the skip real.
     nonisolated static func == (a: SZChatReceiptRow, b: SZChatReceiptRow) -> Bool {
         a.receipt == b.receipt && a.seconds == b.seconds && a.breakdown == b.breakdown
@@ -790,7 +790,7 @@ private struct SZChatReceiptRow: View, Equatable {
     var body: some View {
         // Hung off the turn above it on a drawn elbow — the same connector the strip uses for a
         // coding agent under its Director, because it is the same relationship: this build came
-        // out of that turn. The indent is what the connector BUYS. A child lane is indented
+        // out of that turn. The indent is what the connector buys. A child lane is indented
         // everywhere else in the app; here the elbow is what explains why — which is exactly what
         // a bare pill, aligned to the message column and hanging off nothing, could not.
         HStack(alignment: .top, spacing: 0) {
@@ -798,7 +798,7 @@ private struct SZChatReceiptRow: View, Equatable {
                             height: SZLaneMetrics.pillHeight, stemRise: Self.stemRise)
             receiptStack
         }
-        // Pulled up out of the transcript's 16pt rhythm. A receipt is a CODA — to the turn that
+        // Pulled up out of the transcript's 16pt rhythm. A receipt is a coda — to the turn that
         // preceded it, or to the receipts it lands beside when several builds finish together —
         // and at a full 16pt above a 21pt pill it read as adrift rather than as belonging.
         .padding(.top, -Self.pullUp)
@@ -816,7 +816,7 @@ private struct SZChatReceiptRow: View, Equatable {
                        tint: .secondary, isLive: false,
                        clock: SZTurnBreakdown.format(seconds),
                        help: contextDetail, onOpen: onOpen) {
-                // A clean ending wears NO chip. "built Scrolling Gradient" has already said it went
+                // A clean ending wears no chip. "built Scrolling Gradient" has already said it went
                 // well, and a saturated `end` badge on every build in the history is the loudest
                 // thing in a row with nothing to report. Keeping the badge for the endings that are
                 // not the expected one is what makes a `failed` or a `stopped` findable when you
@@ -825,8 +825,8 @@ private struct SZChatReceiptRow: View, Equatable {
                     SZRunBadge.forConclusion(receipt.conclusion)
                 }
             }
-            // The one thing the pill cannot say: why a build died. Everything a NODE can explain
-            // for itself already arrived as its own turn. Hung under the pill's TEXT, not its
+            // The one thing the pill cannot say: why a build died. Everything a node can explain
+            // for itself already arrived as its own turn. Hung under the pill's text, not its
             // edge — it belongs to the label, the way a turn's reply belongs to its header.
             if let context, !context.isEmpty {
                 Text(context)
@@ -853,9 +853,9 @@ private struct SZChatReceiptRow: View, Equatable {
     }
 }
 
-/// One transcript turn, `.equatable()`-gated by the panel. VALUE-ONLY stored props — adding a
+/// One transcript turn, `.equatable()`-gated by the panel. Value-only stored props — adding a
 /// closure or reference prop here silently breaks the `==` skip (every row would re-render per
-/// streaming flush again), so anything the row can DO stays on the panel and anything it RENDERS
+/// streaming flush again), so anything the row can do stays on the panel and anything it renders
 /// arrives as a compared value. Row identity is the message id (ForEach), so `SZThinkingView`'s
 /// `@State expanded` survives streaming re-renders of the growing row.
 private struct SZChatTurnRow: View, Equatable {
@@ -924,12 +924,12 @@ private struct SZChatTurnRow: View, Equatable {
                     HStack(spacing: 7) {   // dots + live elapsed timer while the turn runs
                         SZTypingIndicator()
                         SZElapsedLabel(since: message.timestamp)
-                        // No inline stop here — the composer's send slot IS the action slot
+                        // No inline stop here — the composer's send slot is the action slot
                         // (send / stop-turn / stop-run); a second stop that wanders is worse.
                     }
                 } else if let duration = message.duration, message.role == .assistant {
                     // Final time + the turn's receipt + tokens, kept below the reply. The receipt
-                    // names what ACTUALLY ran (model, else provider; "· fast" when it was); hover
+                    // names what actually ran (model, else provider; "· fast" when it was); hover
                     // carries the full envelope + the routing rule that picked it. Not every CLI
                     // reports usage, so the tokens are absent rather than zero. A turn without a
                     // receipt renders exactly as before receipts existed.
@@ -969,9 +969,9 @@ private struct SZChatTurnRow: View, Equatable {
     }
 
     /// Render an agent reply as **inline** Markdown — bold / italic / inline `code` / links — preserving
-    /// line breaks. User text stays literal (the user typed it) apart from mention TOKENS, which
+    /// line breaks. User text stays literal (the user typed it) apart from mention tokens, which
     /// render styled (see `mentionStyledText`). Block-level Markdown (fenced ```code``` blocks,
-    /// bullet/numbered lists, headers) is NOT laid out — SwiftUI `Text` can't; that's a separate
+    /// bullet/numbered lists, headers) is not laid out — SwiftUI `Text` can't; that's a separate
     /// follow-up. Falls back to plain text if the source doesn't parse.
     private func markdownText(_ raw: String) -> Text {
         if isUser { return mentionStyledText(raw) }
@@ -980,7 +980,7 @@ private struct SZChatTurnRow: View, Equatable {
                 failurePolicy: .returnPartiallyParsedIfPossible))
         else { return Text(raw) }
         // Inline `code` runs carry only `.code` presentation intent, no explicit font — SwiftUI renders
-        // them monospaced but the body 12.5pt makes them read visibly LARGER than the surrounding prose,
+        // them monospaced but the body 12.5pt makes them read visibly larger than the surrounding prose,
         // since SF Mono's x-height/stroke run heavier than SF Pro at the same point size. Pin code runs a
         // notch down (~0.88×, the usual inline-code ratio) so they sit level with the 12.5pt body text.
         for run in attributed.runs where run.inlinePresentationIntent?.contains(.code) == true {
@@ -1051,7 +1051,7 @@ struct SZElapsedLabel: View {
     }
 }
 
-/// Clock-style elapsed time for the LIVE ticking timer: zero-padded `mm:ss` (`00:07`, `01:23`),
+/// Clock-style elapsed time for the live ticking timer: zero-padded `mm:ss` (`00:07`, `01:23`),
 /// growing to `h:mm:ss` past an hour — stable-width, stopwatch feel.
 private func szFormatDuration(_ interval: TimeInterval) -> String {
     let total = max(0, Int(interval.rounded()))
@@ -1061,7 +1061,7 @@ private func szFormatDuration(_ interval: TimeInterval) -> String {
         : String(format: "%02d:%02d", m, s)
 }
 
-/// Compact duration for PROSE (the final "Worked for …" label): `12s` under a minute, else `1m 5s` —
+/// Compact duration for prose (the final "Worked for …" label): `12s` under a minute, else `1m 5s` —
 /// reads as English in a sentence, where the clock format ("00:03") looks like a bolted-on readout.
 private func szFormatDurationCompact(_ interval: TimeInterval) -> String {
     let s = max(0, Int(interval.rounded()))
@@ -1179,7 +1179,7 @@ private struct SZAttachmentChipView: View {
     }
 }
 
-/// Loads a small DOWNSAMPLED thumbnail off the file at `url` (cached in @State), filling a square frame.
+/// Loads a small downsampled thumbnail off the file at `url` (cached in @State), filling a square frame.
 /// Downsampling via ImageIO avoids decoding a full-resolution attachment (e.g. a multi-MB camera frame)
 /// into a 64pt box — cheaper decode + far less memory than `NSImage(contentsOf:)`.
 private struct SZAttachmentThumbnail: View {

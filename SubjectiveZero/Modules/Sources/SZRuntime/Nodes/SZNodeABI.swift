@@ -1,21 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The frozen node ABI (host-owned, stable across all nodes — RUNTIME.md, BUILD_SPEC.md).
 //
-// The cross-`dlopen` contract is **C-ABI** (sidesteps Swift cross-module ABI fragility). The ergonomic
-// `SZNode` protocol + typed contexts are *compiled into each node* from the host-owned
-// `SZNodeKit.source` injected alongside the author's `Node.swift`. A node dylib exports
-// four stable C symbols; the host dlsym's those and populates the raw context struct below.
+// The cross-`dlopen` contract is **C-ABI**, sidestepping Swift cross-module ABI fragility. The ergonomic
+// `SZNode` protocol + typed contexts are *compiled into each node* from the host-owned `SZNodeKit.source`,
+// injected alongside the author's `Node.swift`. A node dylib exports the stable C symbols below; the host
+// dlsym's those and fills the raw context struct below.
 //
-// The context carries **declared input/output texture bindings**: the runtime doesn't hand the node one
-// output texture, it hands a *resolver* (an opaque per-frame bindings object + two C function pointers)
-// so the node fetches `inputTexture("input")` / `outputTexture("output")` by the port names in its
-// contract. Texture handles cross as opaque pointers (recovered via `Unmanaged`). A third resolver fn
-// is the scalar-input channel: it resolves a port name to its float value(s) (an unconnected input's
-// default, live-overridable from the host) so a node reads e.g. `ctx.inputFloat("speed")` at runtime.
-// Output channels mirror the input ones: floats (v5) and strings (v8) a node emits flow downstream.
-// A fourth write channel carries no value: `reportError` (v9) tells the host why the node produced
-// nothing this frame.
-// `persistentTexture` is still not in the ABI (earned, not scheduled).
+// The context carries **declared input/output texture bindings**: not one output texture but a *resolver* (an
+// opaque per-frame bindings object + two C function pointers), so the node fetches `inputTexture("input")` /
+// `outputTexture("output")` by the port names in its contract; texture handles cross as opaque pointers,
+// recovered via `Unmanaged`. A third resolver fn is the scalar-input channel, resolving a port name to its
+// float value(s) — an unconnected input's default, live-overridable from the host — behind a runtime
+// `ctx.inputFloat("speed")`. Output channels mirror the input ones: floats (v5) and strings (v8) a node emits
+// flow downstream. A fourth write channel carries no value: `reportError` (v9) tells the host why the node
+// produced nothing this frame.
 import Foundation
 
 /// Resolves a port name to an opaque texture pointer against a per-frame bindings object. Implemented
@@ -28,19 +26,19 @@ typealias SZTextureResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePo
 typealias SZValueResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutablePointer<Float>?, Int32) -> Int32
 
 /// Resolves a port name to its string value (an `enum`/`string` input's default, live-overridable from
-/// the host): writes up to `capacity` UTF-8 bytes into `out`, returns the value's FULL byte length (0 if
+/// the host): writes up to `capacity` UTF-8 bytes into `out`, returns the value's full byte length (0 if
 /// the port has no value). Returning the full length lets the node grow its buffer + retry on truncation.
 /// Host-side, called node-side. `(resolverContext, portName, out, capacity) -> fullLength`.
 typealias SZStringResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutablePointer<CChar>?, Int32) -> Int32
 
 /// Emits a port's scalar output value(s): the node hands the runtime up to `count` floats from `in` for a
-/// named declared NON-texture output port, which the runtime then routes across a `.data` edge into a
+/// named declared non-texture output port, which the runtime then routes across a `.data` edge into a
 /// downstream node's input. The write-side mirror of `SZValueResolver`. Host-side, called node-side.
 /// `(resolverContext, portName, in, count) -> Void`.
 typealias SZOutputValueResolver = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32) -> Void
 
-/// Pins an object until this frame's command buffer has EXECUTED on the GPU (v6). OWNERSHIP TRANSFER —
-/// unlike the borrow-only resolvers above, the node side passes a +1-RETAINED pointer
+/// Pins an object until this frame's command buffer has executed on the GPU (v6). Ownership transfer —
+/// unlike the borrow-only resolvers above, the node side passes a +1-retained pointer
 /// (`Unmanaged.passRetained`); the host takes ownership (`takeRetainedValue`) into the frame's hold
 /// list and releases after GPU completion. Host-side, called node-side. `(resolverContext, object)`.
 typealias SZFrameHoldFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
@@ -105,8 +103,8 @@ struct SZRuntimeContextRaw {
     var outputTextureFn: SZTextureResolver?
     var inputValueFn: SZValueResolver?               // v3: scalar input values (appended → layout-compatible)
     var inputStringFn: SZStringResolver?             // v4: string/enum input values (appended → layout-compatible)
-    var outputValueFn: SZOutputValueResolver?        // v5: scalar OUTPUT values (appended → layout-compatible)
+    var outputValueFn: SZOutputValueResolver?        // v5: scalar output values (appended → layout-compatible)
     var frameHoldFn: SZFrameHoldFn?                  // v6: frame-lifetime hold (appended → layout-compatible)
-    var outputStringFn: SZOutputStringResolver?      // v8: string OUTPUT values (appended → layout-compatible)
+    var outputStringFn: SZOutputStringResolver?      // v8: string output values (appended → layout-compatible)
     var reportErrorFn: SZReportErrorFn?              // v9: node→host fault reason (appended → layout-compatible)
 }

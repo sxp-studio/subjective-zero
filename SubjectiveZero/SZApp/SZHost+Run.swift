@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The build lane: minting a run (the Build press, `ui_run`, the door's `requestBuild`
-// effect), admitting it when its claims free, and driving it as ONE delivery — the
+// effect), admitting it when its claims free, and driving it as one delivery — the
 // director's engine traversal, with the fleet served through the dispatch supervisor.
 // There is no orchestrator layer: the engine runs the graph, this file is transport.
 import Foundation
@@ -34,10 +34,10 @@ extension SZHost {
         let turnResources = Self.turnResources(for: scope)
         var selfClaim: SZClaimToken?
         if let claim {
-            // A cancelled run's zombie dispatch presents its RELEASED token while someone else (a
+            // A cancelled run's zombie dispatch presents its released token while someone else (a
             // pump delivery, a new run) may already own the scope — streaming would interleave two
             // turns in one transcript and clobber its in-flight marker. Bow out; the caller
-            // treats it like any cancelled turn. A holder mismatch WITHOUT cancellation is a real
+            // treats it like any cancelled turn. A holder mismatch without cancellation is a real
             // claim-model divergence and stays a debug tripwire.
             guard ledger.holder(of: .transcript(scope)) == claim else {
                 assert(Task.isCancelled,
@@ -68,7 +68,7 @@ extension SZHost {
         // would otherwise arrive with the turn's report, when the turn is already over.
         onOpen?(assistantID, generation.label)
         inFlightAssistantIDs[scope.key] = assistantID   // also flips chatInFlight (derived)
-        // A turn a RUN dispatched belongs to that run: the stamp is what the chat feed reads to
+        // A turn a run dispatched belongs to that run: the stamp is what the chat feed reads to
         // tell the fleet's implementation work from a conversation, and what its task's drill-in
         // collects by. A turn the user started carries none.
         if let run = activeRun(for: claim) {
@@ -80,7 +80,7 @@ extension SZHost {
                                    step: buildStep(thread: run.thread), assistantID, in: scope)
             }
         }
-        // The run identity is CAPTURED here: finalize re-checks it against the live runs, so a
+        // The run identity is captured here: finalize re-checks it against the live runs, so a
         // zombie turn settling after cancel-and-restart can't log itself into the new run.
         let turnRunID = activeRun(for: claim)?.traceID
         let started = Date()
@@ -88,7 +88,7 @@ extension SZHost {
         defer {
             if let selfClaim { ledger.releaseAll(of: selfClaim) }
             // Ownership-checked: if a later turn overwrote this scope's marker (a race this guard
-            // is the last line of defense against), leave THEIRS in place — nilling it would let a
+            // is the last line of defense against), leave theirs in place — nilling it would let a
             // flush persist their half-streamed reply.
             if inFlightAssistantIDs[scope.key] == assistantID { inFlightAssistantIDs[scope.key] = nil }
             let wall = (ContinuousClock.now - startedMono).szSeconds
@@ -97,7 +97,7 @@ extension SZHost {
             store.setChatGeneration(generation, assistantID, in: scope)
             // Breakdown lands before the flush below so it persists with the turn. Run-owned turns
             // (dispatched under the run's claim) also log themselves for the run-complete rollup.
-            // (Runs OUTSIDE the context binding below — finalizeTurn keys by explicit turnID.)
+            // (Runs outside the context binding below — finalizeTurn keys by explicit turnID.)
             finalizeTurn(assistantID: assistantID, scope: scope, started: started,
                          ended: started.addingTimeInterval(wall), runID: turnRunID,
                          // Provider-led, so a cross-provider run's breakdown reads correctly.
@@ -114,9 +114,9 @@ extension SZHost {
             ? SZTraceContext(turnID: assistantID, scopeKey: scope.key, runID: turnRunID)
             : nil
         recordTurnPrompt(request.prompt, for: assistantID)
-        // And the turn's OWN agent listener: a raw TCP connection carries no caller identity, so
-        // the per-turn port IS the identity — it carries the turn's trace context (parallel coding
-        // agents' node-less tool calls attribute exactly) AND the turn's claim token (the mutation
+        // And the turn's own agent listener: a raw TCP connection carries no caller identity, so
+        // the per-turn port is the identity — it carries the turn's trace context (parallel coding
+        // agents' node-less tool calls attribute exactly) and the turn's claim token (the mutation
         // fence lets a turn edit the node it holds, and only a carried token proves whose turn is
         // calling). Falls back to the shared agent bus (heuristic attribution, no fence identity)
         // if no port is free; torn down with the turn.
@@ -133,9 +133,9 @@ extension SZHost {
         var result = try await SZTrace.$context.withValue(traceContext) { [request] in
             try await streamAgentTurn(provider: provider, request: request, into: scope, message: assistantID)
         }
-        // A spent budget is OUR outcome — no provider ever words it — so the turn carries the
+        // A spent budget is our outcome — no provider ever words it — so the turn carries the
         // sentence from here. Everything downstream reads `outcome.message`: the transcript line,
-        // the graph's turn report (RUNS record reason, run narration) and a node's failure pill.
+        // the graph's turn report (runs record reason, run narration) and a node's failure pill.
         if let timeout = result.process.timeout {
             result.outcome.message = Self.timeoutDetail(timeout, request: request)
         }
@@ -160,9 +160,8 @@ extension SZHost {
         return (result, assistantID)
     }
 
-    /// Run one coding agent's turn during a run and stream it into that node's Coding Agent tab.
-    /// Opens the node's tab (without stealing the active tab — a run watches the Director tab),
-    /// marks the turn in flight, then streams the agent's activity+reply via `streamAgentTurn`.
+    /// Run one coding agent's turn during a run and stream it into that node's lane of the feed:
+    /// mark the turn in flight, then stream the agent's activity+reply via `streamAgentTurn`.
     @MainActor
     func streamCodingAgent(
         node: SZNodeID, request: SZAgentRunRequest, provider: any SZProvider,
@@ -171,7 +170,7 @@ extension SZHost {
     ) async throws -> (result: SZAgentRunResult, turnID: UUID) {
         let scope = SZChatScope.node(node)
         // Debug test affordance: force this node to fail its first dispatch once — report `needsInput`
-        // and throw WITHOUT running an agent — so the reconcile loop fires live & repeatably
+        // and throw without running an agent — so the reconcile loop fires live & repeatably
         // (`debug_fail_node_once`).
         if let blocker = forcedFailNodes.removeValue(forKey: node) {
             store.appendChatMessage(SZChatMessage(role: .assistant,
@@ -179,17 +178,17 @@ extension SZHost {
             recordNodeStatus(node: node, phase: .needsInput, message: blocker)
             throw SZMCPError.message("(debug) forced needsInput: \(blocker)")
         }
-        // THE dispatch moment for this node, and so the prompt `promoteStagedNode` holds the agent to.
+        // The dispatch moment for this node, and so the prompt `promoteStagedNode` holds the agent to.
         // Recorded here because the brief is composed from the live graph after the Director decomposes.
         // Each turn re-records, so the reconcile rounds are held to their own latest brief.
         dispatchPrompts[node] = store.project?.graph.node(id: node)?.prompt
-        // The promote evidence is per-DISPATCH, not per-run: a reconcile round redispatching this node
-        // says the last build did not settle it, so an earlier promote no longer vouches for THIS turn.
+        // The promote evidence is per-dispatch, not per-run: a reconcile round redispatching this node
+        // says the last build did not settle it, so an earlier promote no longer vouches for this turn.
         // Without this a second agent that dies silently still counts as implemented. Claim-guarded like
         // every other run-state write here: a cancelled run's zombie dispatch must not erase the promote
-        // evidence the NEW run just recorded for this node.
+        // evidence the new run just recorded for this node.
         activeRun(for: claim)?.promoted.remove(node)
-        // Under the run's CAPTURED claim (it holds every work-set node + transcript while live).
+        // Under the run's captured claim (it holds every work-set node + transcript while live).
         // A cancelled run's zombie dispatch presents its released token; deliver detects that and
         // bows out instead of double-streaming into a scope someone else now owns.
         // The run's spawn re-pins the node's session on purpose, so `continue` resumes the build thread.
@@ -203,7 +202,7 @@ extension SZHost {
             appendWarningLine(detail, to: scope)
         case .provider(let detail):
             // A mid-turn provider death: the red pill carries the same actionable detail —
-            // set BEFORE the run's end so `surfaceUnresolvedNodes` doesn't overwrite it. The HOST's
+            // set before the run's end so `surfaceUnresolvedNodes` doesn't overwrite it. The host's
             // line, not the agent's: it never overrules a build this node already promoted.
             recordHostFailure(node: node, message: detail)
             appendProviderErrorLine(detail, to: scope)
@@ -238,7 +237,7 @@ extension SZHost {
         return run.workSet.contains(id) && nodeAgentState[id]?.reportedProblem == true
     }
 
-    /// A node whose last attempt the HOST failed (a spent budget, a dead CLI) and whose session
+    /// A node whose last attempt the host failed (a spent budget, a dead CLI) and whose session
     /// survived counts its next dispatch as a retry: the coding door then continues that session
     /// on the node's own blocker instead of starting the node over. An agent's own report is the
     /// reconcile loop's business within its run — `stillOwed` keeps that node owed so the loop
@@ -258,7 +257,7 @@ extension SZHost {
     }
 
     /// The one timeout sentence every lane reports — `deliver` stamps it onto the turn's outcome so
-    /// the transcript line, the RUNS record, the node pill and the run narration all read the same.
+    /// the transcript line, the runs record, the node pill and the run narration all read the same.
     /// Wall clock and silence are different stories, so they get different words.
     nonisolated static func timeoutDetail(_ timeout: SZProcessTimeout, request: SZAgentRunRequest) -> String {
         switch timeout {
@@ -276,11 +275,11 @@ extension SZHost {
         result.outcome.message ?? "the provider reported a failure with no message"
     }
 
-    /// WHY a turn failed — the one ladder every lane asks (a coding dispatch, a Director turn, a chat
+    /// Why a turn failed — the one ladder every lane asks (a coding dispatch, a Director turn, a chat
     /// delivery), so their guards and their words cannot drift apart. A user Stop is a choice, not a
     /// failure: nothing to report. `preempt` runs after the provider probe: a provider that is down
     /// is its own verdict, so the chat lane's failed-resume retry only claims a failure on a
-    /// healthy provider. Each lane still decides what to DO with the answer.
+    /// healthy provider. Each lane still decides what to do with the answer.
     func turnFailure(_ result: SZAgentRunResult, provider: any SZProvider,
                      preempt: () -> Bool = { false }) async -> SZTurnFailure? {
         guard result.outcome.failed, !Task.isCancelled else { return nil }
@@ -330,15 +329,15 @@ extension SZHost {
         let workingDirectory = cacheDirectory.appending(path: "agent/director")
         try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
         let request = SZAgentRunRequest(
-            // Read LIVE, never captured at run start: a Save As relocates the project mid-run, and a
+            // Read live, never captured at run start: a Save As relocates the project mid-run, and a
             // grant handed out for the old path points at an abandoned (for an untitled rescue,
             // deleted) directory for the rest of the traversal.
             turn, workingDirectory: workingDirectory, packageDirectory: loadedProjectURL,
             cacheDirectory: cacheDirectory, mcpPort: mcpPort,
             defaultTools: SZHostBridge.agentCallableToolNames)
-        // The Director transcript is claimed for THIS TURN, not for the run's life — that is what
+        // The Director transcript is claimed for this turn, not for the run's life — that is what
         // lets two runs' fleets work at once while their Director turns take the transcript in
-        // turn. Under the run's CAPTURED claim (reentrant per token), never a live lookup: a
+        // turn. Under the run's captured claim (reentrant per token), never a live lookup: a
         // zombie director turn resuming after cancel-and-restart would otherwise adopt another
         // run's claim, pass deliver's holder guard, and stream into a transcript someone owns.
         if let claim {
@@ -377,11 +376,11 @@ extension SZHost {
 
     /// Point the viewport at what this run just built — unless the Director's own
     /// `ui_toggle_display` already aimed it at one of this run's nodes. "Terminal" means it
-    /// feeds NOTHING; a node built upstream of a live chain adopts nothing.
+    /// feeds nothing; a node built upstream of a live chain adopts nothing.
     private func adoptRunRenderEndpoint(_ run: SZRunState) {
         guard let graph = store.project?.graph else { return }
         if let endpoint = graph.renderEndpoint, run.workSet.contains(endpoint.node) { return }
-        // Never adopt a STAGED piece — it is still hidden; its commit moves the endpoint.
+        // Never adopt a staged piece — it is still hidden; its commit moves the endpoint.
         guard let ref = graph.runRenderEndpoint(workSet: run.workSet.subtracting(hiddenPieces)),
               graph.renderEndpoint != ref,
               store.setRenderEndpoint(ref) else { return }
@@ -406,7 +405,7 @@ extension SZHost {
 
     // MARK: - Minting and admitting a run
 
-    /// The door's scheduling effect and the mid-turn `ui_run` land here: SCHEDULE a task and
+    /// The door's scheduling effect and the mid-turn `ui_run` land here: schedule a task and
     /// knock. A task is never dropped for being second — it queues, and the pump admits it the
     /// moment its work set is free, ahead of any queued prose. Returns the task's id so the
     /// caller that minted it can withdraw it again (a stopped Director turn discards its own).
@@ -423,7 +422,7 @@ extension SZHost {
         admissionSuspended = false   // a new ask is the user acting again
         flushTaskQueue()
         pumpMailboxes()   // fires now if the work is free; else the next release re-fires
-        // Nothing is narrated for a task that stays waiting. Queueing is a STATE, and the strip
+        // Nothing is narrated for a task that stays waiting. Queueing is a state, and the strip
         // below the transcript already holds it — as a row that also names what the task is behind
         // and offers the ✕ to drop it, which the sentence never did. `scheduledTaskRows` is that
         // row's one source, and `pendingTasks` order is what "behind N others" meant.
@@ -442,7 +441,7 @@ extension SZHost {
 
     /// Fold more words into a task that has not started — what "I meant blue, not red" does to an
     /// ask still waiting its turn. The parts are kept whole and in order rather than replaced: the
-    /// later words usually REFINE the earlier ones, and only the reader can tell which won.
+    /// later words usually refine the earlier ones, and only the reader can tell which won.
     /// Refuses a task that is already running (that is a steer) or gone.
     @discardableResult
     func amendTask(_ id: UUID, with words: String) -> Bool {
@@ -466,13 +465,13 @@ extension SZHost {
 
     /// Pump head: admit every scheduled task that can claim what it needs. Structural ordering:
     /// admission runs before the prose scan, so a task always beats the next queued message to a
-    /// freed resource. A `waiting` task keeps its place and retries QUIETLY on the next release;
+    /// freed resource. A `waiting` task keeps its place and retries quietly on the next release;
     /// a terminal refusal is narrated once and leaves the queue — without that, every pump pass
     /// would replay it ("nothing to implement" forever, the provider sheet re-presenting per pass).
     func admitPendingTasks() {
         // Held after a Stop until the user acts again (see `cancelRun`).
         guard !admissionSuspended else { return }
-        // Oldest first, and a task that must wait does NOT block the ones behind it: two asks over
+        // Oldest first, and a task that must wait does not block the ones behind it: two asks over
         // disjoint nodes both start, overlapping ones queue behind the holder. A task that must
         // wait keeps its place quietly; a terminal refusal leaves the queue (retrying cannot help).
         var index = 0
@@ -485,7 +484,7 @@ extension SZHost {
         flushTaskQueue()
     }
 
-    /// What a NEW run would take: the nodes dirty right now, minus the undescribed ones (an empty
+    /// What a new run would take: the nodes dirty right now, minus the undescribed ones (an empty
     /// prompt is "undecided", not "build something"), minus the ones a run already holds — without
     /// that last subtraction every run computes the same set and only the first can ever claim it.
     /// `taken` is reported separately so a refusal can say "already being built" instead of
@@ -549,9 +548,9 @@ extension SZHost {
     }
 
     /// Start a run over the current graph with the active provider (the Build press and
-    /// `ui_run`'s direct entry). Runs are scoped by their WORK SET, not serialized: a second
+    /// `ui_run`'s direct entry). Runs are scoped by their work set, not serialized: a second
     /// build over disjoint nodes starts alongside; one that overlaps waits for the holder.
-    /// `narrateContention` quiets ONLY the transient claim-contention line — the admission
+    /// `narrateContention` quiets only the transient claim-contention line — the admission
     /// path auto-retries that case, so per-attempt narration would be advice to a user who
     /// has nothing to do.
     @discardableResult
@@ -569,12 +568,12 @@ extension SZHost {
     /// Build after a Stop leaves every standing task frozen for the rest of the session.
     func buildPressed() {
         admissionSuspended = false   // a press is the user asking again
-        // SCHEDULED, not started directly: the pump admits it at once when the work is free, and
+        // Scheduled, not started directly: the pump admits it at once when the work is free, and
         // keeps it when it is not — a press whose nodes are momentarily held used to vanish.
         mintRun(instruction: "", title: SZTask.title(fromInstruction: "", nodeCount: pendingNodeCount))
     }
 
-    /// Admit a SCHEDULED task: claim its work set and run it. The task carries the identity every
+    /// Admit a scheduled task: claim its work set and run it. The task carries the identity every
     /// per-run write is keyed by.
     @discardableResult
     func startRun(task: SZTask, narrateContention: Bool = true,
@@ -583,11 +582,11 @@ extension SZHost {
         let instruction = task.instruction
         // Land any prompt the user is mid-typing before we read the graph or claim a node.
         flushPendingPromptEdit()
-        // Ownership of a staged op is ASKED FOR by the caller that staged it, never inferred:
+        // Ownership of a staged op is asked for by the caller that staged it, never inferred:
         // inferring it from "nothing else is running" denied ownership to the very run
         // implementing the pieces, and nothing else drains an op.
         let startedForGraphOp = adoptStagedGraphOp && hasStagedGraphOp && graphOpClaim != nil
-        // Every node this ask named is inside a live build. It WAITS for that build rather than
+        // Every node this ask named is inside a live build. It waits for that build rather than
         // folding into it: a change cannot be applied to code that is already being generated, so
         // the ask parks here, shows in the strip as waiting, and runs its own build the moment the
         // nodes are free. A truly redundant ask parks too and settles cheaply once admitted. Needs
@@ -597,14 +596,14 @@ extension SZHost {
             return .waiting
         }
         guard let mcpPort = agentMCPServer?.port, loadedProjectURL != nil else {
-            // NOT-READY, not refused: print-only, and the slot survives — a mint that
+            // Not ready, not refused: print-only, and the slot survives — a mint that
             // raced project load fires when the pump next wakes with a project there.
             print("[SZHost] cannot run — MCP server or project not ready"); return .waiting
         }
-        // This run's WORK SET candidates — the rule lives in `workSetCandidates`.
+        // This run's work-set candidates — the rule lives in `workSetCandidates`.
         let taken = runWorkSet
         var candidates = Self.workSetCandidates(in: store.project?.graph.nodes ?? [], excluding: taken)
-        // A task that NAMES its nodes takes only those. This is what lets two asks about different
+        // A task that names its nodes takes only those. This is what lets two asks about different
         // parts of the graph run at once: without it every run computes "everything dirty", the
         // first takes the lot, and the second has nothing left to be concurrent with.
         if !task.workSet.isEmpty {
@@ -619,12 +618,12 @@ extension SZHost {
         // `needsImplementation`, so the reconcile turn wires them and no agent is sent one.
         let unwired = Self.unwiredCandidates(in: store.project?.graph, excluding: taken,
                                              named: task.workSet)
-        // A task that NAMED its nodes and has none of them available must not run: an empty run
+        // A task that named its nodes and has none of them available must not run: an empty run
         // spends a Director turn to conclude there is nothing to do, and drops the ask on the
         // floor. Two different situations, two different answers.
         if !task.workSet.isEmpty, implementable.isEmpty, unwired.isEmpty {
             if !candidates.taken.isEmpty {
-                // Only SOME of the named nodes are in a live run; the rest are clean or blank, and
+                // Only some of the named nodes are in a live run; the rest are clean or blank, and
                 // the blank ones still deserve the line below. Wait for the holder rather than
                 // folding a set the fold cannot speak for.
                 status = "waiting for \(candidates.taken.count) node(s) another task is building"
@@ -633,7 +632,7 @@ extension SZHost {
             // Words are not nothing to do. "Nothing to build there — say what should change" used
             // to answer an ask that had just said. A run with an instruction goes through:
             // the Director's turn can set a default, re-brief, or retype a port, and the work it
-            // creates joins the run. Only a WORDLESS ask over nothing buildable is a dead end.
+            // creates joins the run. Only a wordless ask over nothing buildable is a dead end.
             if instruction.isEmpty {
                 showChat()
                 narrateDirector(blankIDs.isEmpty
@@ -645,13 +644,13 @@ extension SZHost {
         }
         let dirty = candidates.work.union(candidates.blank).union(candidates.taken)
         // Nothing to implement, nothing asked → skip the run entirely (a full run would burn
-        // a decompose turn to conclude "no work"). A run WITH an instruction still goes
-        // through — the Director may CREATE work mid-run — and a staged split/merge always
+        // a decompose turn to conclude "no work"). A run with an instruction still goes
+        // through — the Director may create work mid-run — and a staged split/merge always
         // runs: its pieces are the work.
         if implementable.isEmpty, unwired.isEmpty, instruction.isEmpty, !startedForGraphOp {
             showChat()
             if !candidates.taken.isEmpty {
-                // Every dirty node belongs to a run already — say THAT, not "nothing to implement".
+                // Every dirty node belongs to a run already — say that, not "nothing to implement".
                 status = "already building"
                 narrateDirector("Everything that needs implementing is already being built.")
             } else if blankIDs.isEmpty {
@@ -667,7 +666,7 @@ extension SZHost {
         }
         // Pre-flight: a missing/logged-out CLI refuses with the setup sheet + remedy instead
         // of a silent generic run failure. Unknown health stays permissive.
-        // Terminal for the admission path above all others: this "narration" is a SHEET.
+        // Terminal for the admission path above all others: this "narration" is a sheet.
         guard isProviderReadyForNewWork(activeProviderID) else {
             trackPromptSentTelemetry(scope: "build", providerID: activeProviderID, rejected: true)
             surfaceProviderNotReady(); return .refused
@@ -693,7 +692,7 @@ extension SZHost {
         // It grows as the run's own tooling creates work (`noteRunCreatedWork`); a node the user
         // adds mid-run never joins.
         let workSet = implementable.union(unwired)
-        // Claim ONLY what this run touches — atomically, refuse on contention.
+        // Claim only what this run touches — atomically, refuse on contention.
         var claimSet: Set<SZResourceID> = []
         for id in workSet {
             claimSet.insert(.node(id))
@@ -708,10 +707,10 @@ extension SZHost {
             }
             return .waiting
         }
-        // The run's own state object — the claim IS its identity, and every write below goes to
-        // THIS object, so a zombie can never touch a sibling's. The RUNS thread id is the build
+        // The run's own state object — the claim is its identity, and every write below goes to
+        // this object, so a zombie can never touch a sibling's. The runs thread id is the build
         // traversal's own record id (its children share it), minted here so the run's closing
-        // RECEIPT can carry it — that stamp is the transcript's durable way back once it scrolls away.
+        // receipt can carry it — that stamp is the transcript's durable way back once it scrolls away.
         // The arrows this run owes, frozen with the work set. Captured by connection id, so laying the
         // edge clears the arrow and shrinks the list, while one drawn later is never in the set.
         let owedArrows = Set((store.project?.graph.unwiredIntent(into: workSet) ?? [])
@@ -732,20 +731,19 @@ extension SZHost {
         nodeGrades = nodeGrades.filter { siblingWork.contains($0.key) }
         status = "running \(providerID)…"
         showChat()                                     // a run settles into the conversation
-        // No opening line. The run strip appears in the same breath, on every tab, for the whole
-        // life of the run — with the provider, a live clock, the ■ that stops THIS build and a tap
-        // into the Agent Graph. "Run started (claude) — implementing 1 node…" restated a surface
-        // ten pixels lower that said strictly more, in the Director's own violet, as if the host
-        // were the agent. Only the ENDING is news, and it arrives as a receipt (`narrateRunReceipt`).
+        // No opening line, and don't put one back: the run strip appears in the same breath, on
+        // every tab, for the whole life of the run — provider, live clock, the ■ that stops this
+        // build, a tap into the Agent Graph. Only the ending is news, and it arrives as a receipt
+        // (`narrateRunReceipt`).
         run.task = Task { @MainActor in
             defer {
-                // The CAPTURED run, never a live lookup — after an eager `cancelRun` this is the
+                // The captured run, never a live lookup — after an eager `cancelRun` this is the
                 // zombie task's idempotent second settle, and the slot may hold a newer run.
                 let live = isLive(run)
                 if live {
                     dropUndeliveredSteers(for: run)
                     activeRuns[taskID] = nil
-                    // Only THIS run's dispatch prompts — a sibling run's are still live evidence.
+                    // Only this run's dispatch prompts — a sibling run's are still live evidence.
                     dispatchPrompts = dispatchPrompts.filter {
                         !run.workSet.contains($0.key) || hiddenPieces.contains($0.key)
                     }
@@ -753,7 +751,7 @@ extension SZHost {
                     // so the next run's cold start can't inherit a stale grade.
                     nodeGrades = nodeGrades.filter { !run.workSet.contains($0.key) }
                 }
-                // Deregister BEFORE the release, the rule `cancelRun` already follows: releasing
+                // Deregister before the release, the rule `cancelRun` already follows: releasing
                 // re-enters the pump synchronously, and a run still registered makes its own
                 // freed nodes read as taken to the task waiting on them.
                 ledger.releaseAll(of: claim)
@@ -768,7 +766,7 @@ extension SZHost {
                     run: run, instruction: instruction, thread: thread, claim: claim,
                     packsRoot: packsRoot, providerID: providerID, mcpPort: mcpPort,
                     cacheDirectory: cacheDirectory)
-                // Liveness-guarded as a whole: after a cancel-and-restart this task is a ZOMBIE,
+                // Liveness-guarded as a whole: after a cancel-and-restart this task is a zombie,
                 // and every line below reads or paints the run's nodes — accounting for, repainting
                 // and narrating over work that is no longer this run's.
                 if isLive(run) {
@@ -789,7 +787,7 @@ extension SZHost {
                 }
             } catch is CancellationError {
                 // A user Stop is not a failure: no red pills, no per-node "didn't finish" lines. This branch
-                // runs SECONDS after `cancelRun` (the CLIs have to die first) and is therefore a zombie —
+                // runs seconds after `cancelRun` (the CLIs have to die first) and is therefore a zombie —
                 // the run is already deregistered. `cancelRun` narrates and counts synchronously,
                 // while the set is still ours; here we stay silent unless the run is somehow still
                 // registered (a cancellation that did not come through `cancelRun`).
@@ -802,7 +800,7 @@ extension SZHost {
                     status = "agent run failed: \(error)"
                     if !run.ownsGraphOp {
                         let (done, failed) = surfaceUnresolvedNodes(run)
-                        // The reason rides ON the receipt (`detail`) rather than in a second line:
+                        // The reason rides on the receipt (`detail`) rather than in a second line:
                         // a build that died still gets one row, and the row is the one that says why.
                         let narrationID = narrateRunReceipt(
                             SZChatReceipt.forFailure(implemented: done, unfinished: failed,
@@ -814,8 +812,8 @@ extension SZHost {
                 }
                 print("[SZHost] agent run failed: \(error)")
             }
-            // Settle a staged split/merge — on success, throw AND cancel, which is what makes a
-            // cancelled op roll back instead of leak. ONLY the run that owns it: a sibling run
+            // Settle a staged split/merge — on success, throw and cancel, which is what makes a
+            // cancelled op roll back instead of leak. Only the run that owns it: a sibling run
             // finishing first would settle (and usually roll back) an op whose pieces are still
             // being built, deleting nodes out from under another fleet.
             if run.ownsGraphOp { drainPendingGraphOp() }
@@ -828,7 +826,7 @@ extension SZHost {
 
     // MARK: - The build delivery
 
-    /// The run as ONE delivery: load + validate the library, build the director's delivery
+    /// The run as one delivery: load + validate the library, build the director's delivery
     /// (its world minted with the run), and let the engine run the graph — the fleet is
     /// served through `deliverFleet` while the dispatch node waits.
     private func runBuildDelivery(
@@ -858,7 +856,8 @@ extension SZHost {
 
         let renderer = SZBriefRenderer(packRoot: packsRoot)
         // The run's routing table, resolved once — a mid-run profile edit never moves a live
-        // run. Dropped routes narrate under "Run started"; an unknown launch-pin profile refuses the run.
+        // run. A dropped route narrates as its own ⚠️ line below; an unknown launch-pin profile
+        // refuses the run.
         let routing: (router: any SZModelRouting, notes: [String])
         do {
             routing = try makeRouter(providerID: providerID)
@@ -869,7 +868,7 @@ extension SZHost {
         for note in routing.notes {
             linkNarrationToRun(narrateDirector("⚠️ \(note)"), thread: thread)
         }
-        // ONE query service per run: every delivery's asks funnel through it.
+        // One query service per run: every delivery's asks funnel through it.
         let queries = SZQueryService(renderer: renderer, router: router,
                                     cacheDirectory: cacheDirectory)
 
@@ -1112,7 +1111,7 @@ extension SZHost {
                         return SZTurnReport(failed: true,
                                             detail: "unknown provider: \(turn.choice.providerID)")
                     }
-                    // Only for a turn that never opened a message. A turn that DID reported
+                    // Only for a turn that never opened a message. One that did reported
                     // its envelope at open (`deliver`), and the record keeps that one — two
                     // spellings of the same fact rewrote the card's receipt mid-turn.
                     let unopenedGeneration = SZTurnGeneration(
@@ -1162,7 +1161,7 @@ extension SZHost {
                 }
             }
         }
-        // Split the deliveries BEFORE the group: an order naming a non-node settles
+        // Split the deliveries before the group: an order naming a non-node settles
         // instantly with the real reason; the rest become the group's children.
         var runnable: [(node: String, sighting: UUID, engine: SZGraphEngine)] = []
         for delivery in deliveries {
@@ -1197,8 +1196,8 @@ extension SZHost {
         await withTaskGroup(of: Land.self) { group in
             for child in children {
                 group.addTask { [weak self] in
-                    // The engine is MainActor-isolated; the child hops for each node step
-                    // and parks off-actor for the long awaits (the provider).
+                    // The engine is MainActor-isolated: the child hops per node step and parks
+                    // off-actor for the long awaits (the provider), so these overlap.
                     let result = await child.engine.run()
                     await self?.concludeAgentGraphRun(child.sighting, SZTraversalEnding(result.conclusion))
                     return .settled(node: child.node,
@@ -1221,7 +1220,7 @@ extension SZHost {
                     continue
                 }
                 // Steers the fleet raised while out (coding agents' messages to the
-                // Director) fold into the run's NEXT brief — drained continuously.
+                // Director) fold into the run's next brief — drained continuously.
                 state.pendingSteers += takeDirectorInboxMessages()
                 switch land {
                 case .settled(let node, let outcome):
@@ -1250,7 +1249,7 @@ extension SZHost {
         }
     }
 
-    /// One EFFECT a step requested with its outcome, landed on its host lane — after the
+    /// One effect a step requested with its outcome, landed on its host lane — after the
     /// step returned, before edge routing, already validated by the engine.
     func perform(effect: SZEffect) async {
         switch effect {
@@ -1287,7 +1286,7 @@ extension SZHost {
     }
 
     /// One JSON line per graph-run event, under Application Support beside debug-turns —
-    /// the RUNS records' debug shadow, off unless SZ_GRAPH_TRACE=1.
+    /// the runs records' debug shadow, off unless SZ_GRAPH_TRACE=1.
     static func appendGraphTrace(_ payload: [String: Any]) {
         guard ProcessInfo.processInfo.environment["SZ_GRAPH_TRACE"] == "1" else { return }
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
@@ -1304,14 +1303,14 @@ extension SZHost {
         }
     }
 
-    /// Cancel EVERY live run (the `Stop` HUD action, and `ui_stop`). Pending tasks stand: Stop
+    /// Cancel every live run (the `Stop` HUD action, and `ui_stop`). Pending tasks stand: Stop
     /// ends what is running, it does not empty the queue.
     func cancelRun() {
-        // Suspend FIRST. Each `cancelRun(_:)` releases its claim synchronously, and the ledger's
+        // Suspend first. Each `cancelRun(_:)` releases its claim synchronously, and the ledger's
         // availability hook re-enters the pump — so a flag set afterwards arrives after the queue
         // has already started the next ask. A Stop must not be answered by more work.
         admissionSuspended = true
-        // SNAPSHOT: `cancelRun(_:)` deregisters, and mutating the table while iterating its own
+        // Snapshot: `cancelRun(_:)` deregisters, and mutating the table while iterating its own
         // values leaves runs alive. Live-caught — Stop stopped one of two.
         for run in Array(activeRuns.values) { cancelRun(run) }
     }
@@ -1325,25 +1324,25 @@ extension SZHost {
         return true
     }
 
-    /// Cancel ONE run. Task cancellation propagates into the fleet's task group; nodes already
+    /// Cancel one run. Task cancellation propagates into the fleet's task group; nodes already
     /// promoted stay promoted.
     func cancelRun(_ run: SZRunState) {
         guard isLive(run) else { return }
         run.task?.cancel()
-        // Eager release: composers and project ops unlock NOW, not when the cancelled task's
+        // Eager release: composers and project ops unlock now, not when the cancelled task's
         // CLI agents finally die. The zombie task's deferred releaseAll of the same token is
         // an idempotent no-op; its still-streaming turns stay safe because the pump's
         // delivery precondition also checks the scope's in-flight marker.
         takeUnconsumedSteers(for: run)   // dropped, not rescheduled: the user stopped this work
-        // DEREGISTER FIRST: releasing a claim re-enters the pump synchronously, and a run still
+        // Deregister first: releasing a claim re-enters the pump synchronously, and a run still
         // in `activeRuns` makes its own freed nodes read as taken to the task waiting on them.
         activeRuns[run.taskID] = nil
         // Settle a staged split/merge before the release too: a task the release admits could
-        // otherwise claim pieces this rollback deletes. Only THIS run's op, never a sibling's.
+        // otherwise claim pieces this rollback deletes. Only this run's op, never a sibling's.
         if run.ownsGraphOp { drainPendingGraphOp() }
         ledger.releaseAll(of: run.claim)
         status = "run cancelled"
-        // Count and narrate HERE, once: the cancelled task's own catch fires seconds later (the
+        // Count and narrate here, once: the cancelled task's own catch fires seconds later (the
         // CLIs must die first), and by then this run is gone. Everything this needs is live now.
         let settled = settledRunNodeCounts(run)
         narrateRunReceipt(
@@ -1355,11 +1354,11 @@ extension SZHost {
         persistAgentSessions()
     }
 
-    /// After a run, account for every work-set node from EVIDENCE — a promote that landed during the
+    /// After a run, account for every work-set node from evidence — a promote that landed during the
     /// run plus the node's derived state now (`SZRunNodeVerdict`). Implemented nodes are silent unless
-    /// they moved after their build, and shed any pill the host painted over them; a node its own AGENT
+    /// they moved after their build, and shed any pill the host painted over them; a node its own agent
     /// explained keeps the agent's words; a failure the host recorded (a spent budget, a dead CLI) is the
-    /// reason a node that built NOTHING gets, never a verdict on a build that landed. Only a node with no
+    /// reason a node that built nothing gets, never a verdict on a build that landed. Only a node with no
     /// promote and no reason at all gets the generic line. Returns (implemented, failed) for the summary.
     @discardableResult
     func surfaceUnresolvedNodes(_ run: SZRunState) -> (implemented: Int, failed: Int) {
@@ -1386,7 +1385,7 @@ extension SZHost {
                     + "it needs a rebuild against the current contract.")
             case .failedSourceMismatch:
                 // The live audit is the detail (a cached one stands in if the source is unreadable) —
-                // and its OWN words are the reason. The audit raises more than one fault (an undeclared
+                // and its own words are the reason. The audit raises more than one fault (an undeclared
                 // port name, an AV resource with no `setPaused`); a fixed sentence names the wrong one.
                 if let audit = liveAuditErrors(id) { nodeAgentState[id, default: SZNodeAgentState()].errorDetail = audit }
                 let reason = rebuildDetail(node: id).map { "the port audit flags it — \(Self.oneLineDetail($0))" }
@@ -1426,7 +1425,7 @@ extension SZHost {
         }
     }
 
-    /// The title of the ONE node a run was for, or nil when it carried several (or none, or the
+    /// The title of the one node a run was for, or nil when it carried several (or none, or the
     /// node has since been merged away). This is what stops concurrent one-node builds from
     /// finishing as the same sentence repeated: three runs, three names.
     private func soleWorkTitle(_ run: SZRunState) -> String? {
@@ -1448,18 +1447,18 @@ extension SZHost {
         }
     }
 
-    /// How long the run took, off the MONOTONIC start — an NTP step mid-run must not stretch or
+    /// How long the run took, off the monotonic start — an NTP step mid-run must not stretch or
     /// shrink the number the receipt shows. The same anchor `attachRunRollup` uses.
     private func elapsed(_ run: SZRunState) -> TimeInterval {
         (ContinuousClock.now - run.startedMono).szSeconds
     }
 
-    /// What a cancelled run actually settled, counted node by node from EVIDENCE — and a work-set
-    /// node that NO LONGER EXISTS is counted neither way, the same discipline `surfaceUnresolvedNodes`
+    /// What a cancelled run actually settled, counted node by node from evidence — and a work-set
+    /// node that no longer exists is counted neither way, the same discipline `surfaceUnresolvedNodes`
     /// keeps for a node merged away mid-run.
     ///
     /// Deriving `implemented` as `workSet.count - unfinished` instead was a false claim waiting to
-    /// happen: a Stop on a run that owns a staged split rolls the op back FIRST, deleting every
+    /// happen: a Stop on a run that owns a staged split rolls the op back first, deleting every
     /// piece, so nothing was left "dirty" and the run reported `built 3 nodes` for work that was
     /// never built and no longer exists. A missing node is not a built one.
     private func settledRunNodeCounts(_ run: SZRunState) -> (implemented: Int, unfinished: Int) {
@@ -1467,7 +1466,7 @@ extension SZHost {
         for id in accountedWork(run) {
             guard let node = store.project?.graph.node(id: id) else { continue }
             // A promoted node that reports a fault at render is still owed (`owedWork`). A blocker
-            // its AGENT reported is deliberately not counted here: a Stop is meant to revert the
+            // its agent reported is deliberately not counted here: a Stop is meant to revert the
             // run's whole block, and until it does, this stays the accounting it shipped with.
             let faulted = run.everPromoted.contains(id) && nodeRuntimeErrors[id] != nil
             if node.needsImplementation || faulted { unfinished += 1 } else { implemented += 1 }
@@ -1492,11 +1491,11 @@ extension SZHost {
         return "chat turn '\(scope.key)'"
     }
 
-    /// The queued steers aimed at the nodes a round is about to dispatch, WITHOUT consuming them.
+    /// The queued steers aimed at the nodes a round is about to dispatch, without consuming them.
     /// Multiple steers to one node fold in FIFO order; each node's envelope ids ride along so
     /// `consumeDirectorMessages` can settle them once the words have actually shipped.
     ///
-    /// Peeked rather than drained because a note only reaches an agent through an ORDER, and
+    /// Peeked rather than drained because a note only reaches an agent through an order, and
     /// three things downstream can decide there is no order: the node left the round's items, the
     /// supervisor was not idle, the item list was empty. Draining first marked the envelope
     /// processed on all three, so the words were gone and `ui_message_status` said delivered.
@@ -1525,7 +1524,7 @@ extension SZHost {
         }
     }
 
-    /// Drain the coding agents' queued `.steer` envelopes TO the Director — rendered into
+    /// Drain the coding agents' queued `.steer` envelopes to the Director — rendered into
     /// the next reconcile brief's `{{inbox}}`. FIFO.
     func takeDirectorInboxMessages() -> [String] {
         var taken: [String] = []
@@ -1542,8 +1541,8 @@ extension SZHost {
     /// words back. A steer is run-scoped: leaving one queued would leak a dead run's steering
     /// into an unrelated next run.
     ///
-    /// The caller decides what the words are worth: a run that ENDED says so once
-    /// (`dropUndeliveredSteers`); a run the user STOPPED drops them silently.
+    /// The caller decides what the words are worth: a run that ended says so once
+    /// (`dropUndeliveredSteers`); a run the user stopped drops them silently.
     ///
     /// Scoped to the run's own nodes for the same reason the drain is: sweeping the host-wide
     /// mailbox meant one run ending destroyed every concurrent run's pending steering.
@@ -1573,7 +1572,7 @@ extension SZHost {
 
 /// Why a turn failed, classified once for every lane (`SZHost.turnFailure`).
 enum SZTurnFailure {
-    /// OUR budget ran out — a plain warning in the turn's own words, never "provider error".
+    /// Our budget ran out — a plain warning in the turn's own words, never "provider error".
     case timedOut(String)
     /// The CLI died or is no longer ready — the actionable line (the setup sheet may have opened).
     case provider(String)

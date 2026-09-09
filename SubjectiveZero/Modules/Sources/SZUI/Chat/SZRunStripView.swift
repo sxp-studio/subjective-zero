@@ -5,13 +5,13 @@
 //   surviving cue that anything was happening was the Stop.
 // - One group per live build: the Director's lane, its coding agents under it on a drawn
 //   connector. Live children first — the cap must never hide the agents actually working.
-// - Past the cap the rest fold into ONE line that OPENS, so the strip stays short by default and
+// - Past the cap the rest fold into one line that opens, so the strip stays short by default and
 //   the whole fleet is a click away. `SZStripPlan` lays the band out in one pass, spending a row
-//   budget read off the PANEL, not one per group.
+//   budget read off the panel, not one per group.
 // - Hovering a live Director lane reveals a Cancel that stops that build; the only per-build stop.
 // - Lanes are the strip's own, not the canvas's `SZAgentSubagentLane` (which fills its card's
 //   width by design). Shared instead: `SZRunBadge`, one word per state.
-// - Deliberately OUTSIDE the transcript's ScrollView — a run is state, not a message, so it must
+// - Deliberately outside the transcript's ScrollView — a run is state, not a message, so it must
 //   not enter the LazyVStack the bottom-pin anchor drives. Growing the band shrinks that viewport,
 //   so it reports through `onLayoutChange` and the panel re-pins.
 // - Presence, not a lock: the composer stays live and a send simply queues.
@@ -36,7 +36,7 @@ struct SZStripPlan {
     }
 
     /// The line that stands in for what is folded away, and the way back to it. Always its group's
-    /// LAST row: the band grows upward from the composer, so revealing ABOVE the line is what leaves
+    /// last row: the band grows upward from the composer, so revealing above the line is what leaves
     /// it under the cursor that clicked it.
     struct Toggle {
         let group: Group
@@ -88,18 +88,18 @@ struct SZStripPlan {
     }
 
     /// Past these the strip would own more of the panel than the conversation does. Both cap the
-    /// CLOSED band only: opening a group spends the budget instead.
+    /// closed band only: opening a group spends the budget instead.
     static let threadCap = 3
     static let laneCap = 3
 
-    /// Rows an expansion may ADD to the closed band: two fifths of the panel, so an open group
+    /// Rows an expansion may add to the closed band: two fifths of the panel, so an open group
     /// cannot crowd out a short window. Whole rows, so a resize drag does not write state per pixel.
     static func budget(panelHeight: CGFloat) -> Int {
         let usable = panelHeight.isFinite ? max(0, panelHeight) : 0
         return max(3, Int(usable * 0.4 / SZLaneMetrics.rowHeight))
     }
 
-    /// - Parameter extraBudget: rows the expansions may add across the WHOLE strip. Per group would
+    /// - Parameter extraBudget: rows the expansions may add across the whole strip. Per group would
     ///   bound nothing, since three open groups would still stack past the panel.
     static func rows(threads: [UUID], runs: [SZAgentGraphRun], scheduled: [SZScheduledRow],
                      expanded: Set<Group>, extraBudget: Int) -> [Row] {
@@ -171,7 +171,7 @@ struct SZStripPlan {
         let open = expanded.contains(.thread(thread))
         let granted = open ? share(children.count - base) : 0
         let hidden = children.count - base - granted
-        // Live first whenever ANY are folded away, open or closed: the fold must never hide the
+        // Live first whenever any are folded away, open or closed: the fold must never hide the
         // agents actually working. Showing all of them keeps dispatch order, which stops the pills
         // reshuffling as agents settle.
         let ordered = hidden > 0 ? children.filter(\.isLive) + children.filter { !$0.isLive }
@@ -216,11 +216,11 @@ struct SZRunStrip: View {
     var stepTitle: (String, String) -> String? = { _, _ in nil }
     /// Open a run in the Agent Graph panel. nil = the surface isn't wired; the strip is a readout.
     let onOpen: ((UUID) -> Void)?
-    /// Work SCHEDULED and not yet started, oldest first — the asks that survived being second.
+    /// Work scheduled and not yet started, oldest first — the asks that survived being second.
     var scheduled: [SZScheduledRow] = []
     /// Drop a scheduled task (its ✕). nil = the surface isn't wired; the rows are a readout.
     var onCancelScheduled: ((UUID) -> Void)?
-    /// Interrupt ONE live traversal by its thread — the running counterpart of a scheduled row's ✕,
+    /// Interrupt one live traversal by its thread — the running counterpart of a scheduled row's ✕,
     /// and the only control that stops a single build.
     var onStopRun: ((UUID) -> Void)?
     /// Rows an expansion may add, from `SZStripPlan.budget`. The floor stands in until the panel
@@ -230,7 +230,7 @@ struct SZRunStrip: View {
     /// the transcript above, and nothing else re-pins it.
     var onLayoutChange: (() -> Void)?
 
-    /// Which groups are OPEN. Closed by default, and the set dies with the strip, so every build
+    /// Which groups are open. Closed by default, and the set dies with the strip, so every build
     /// starts folded. Thread ids are never reused, so a leftover key cannot open a future group.
     @State private var expanded: Set<SZStripPlan.Group> = []
 
@@ -257,7 +257,7 @@ struct SZRunStrip: View {
         // Each lane reports the right edge it wants for its block; the widest wins and is handed back
         // as every lane's box, so the boxes end level without the indent moving.
         .onPreferenceChange(SZBlockRightKey.self) { blockRight = $0 }
-        // A dispatched agent grows an open group the way a click does, so follow the row COUNT.
+        // A dispatched agent grows an open group the way a click does, so follow the row count.
         .onChange(of: rows.count) { onLayoutChange?() }
         // A fold with nothing behind it must not reopen itself when the next build overflows.
         .onChange(of: threads.count) { prune() }
@@ -391,7 +391,7 @@ private struct SZStripToggleRow: View {
             if let connector = toggle.connector { SZLaneConnector(kind: connector) }
             Button(action: action) {
                 HStack(spacing: 4) {
-                    // Open points UP, at the rows it folds away: the band grows upward from the
+                    // Open points up, at the rows it folds away: the band grows upward from the
                     // composer, so what this line reveals sits above it, not below.
                     Image(systemName: "chevron.right")
                         .font(.system(size: 7, weight: .bold))
@@ -418,7 +418,7 @@ private struct SZStripToggleRow: View {
 }
 
 /// The strip's one set of numbers. A row is taller than its pill: the difference is the gap between
-/// pills, and it belongs to the ROW so the connector can draw through it.
+/// pills, and it belongs to the row so the connector can draw through it.
 enum SZLaneMetrics {
     static let pillHeight: CGFloat = 21
     static let rowHeight: CGFloat = 24
@@ -431,7 +431,7 @@ enum SZLaneMetrics {
     /// the two move together instead of the message drifting while the strip settles.
     static let foldDuration: Double = 0.16
     /// Zero: a row already carries its own gap (rowHeight − pillHeight), so anything here made
-    /// the step BETWEEN builds bigger than the step from a Director to its own agents — which
+    /// the step between builds bigger than the step from a Director to its own agents — which
     /// reads as the child belonging to the group below it.
     static let groupGap: CGFloat = 0
 }
@@ -458,7 +458,7 @@ struct SZLaneModel {
 /// meets the row above. `.middle` continues to the next child; `.last` stops at the elbow.
 ///
 /// Two callers, one shape: a coding agent hanging off its Director in the strip, and a build's
-/// RECEIPT hanging off the turn that produced it in the transcript. The defaults are the strip's;
+/// receipt hanging off the turn that produced it in the transcript. The defaults are the strip's;
 /// the transcript re-points the stem at the turn's own rail and rises to meet it.
 struct SZLaneConnector: View {
     enum Kind { case middle, last }
@@ -469,9 +469,9 @@ struct SZLaneConnector: View {
     /// How far the elbow reaches. The pill it points at starts 3pt past this, so the line stops
     /// just short of the box rather than butting into it.
     var width: CGFloat = SZLaneMetrics.connectorWidth
-    /// The box the elbow centres itself on — a strip ROW, or a bare pill in the transcript.
+    /// The box the elbow centres itself on — a strip row, or a bare pill in the transcript.
     var height: CGFloat = SZLaneMetrics.rowHeight
-    /// How far the stem climbs ABOVE its own frame to reach what it hangs from. Zero in the strip,
+    /// How far the stem climbs above its own frame to reach what it hangs from. Zero in the strip,
     /// where lanes tile flush; in the transcript it spans the gap the message rhythm leaves, so
     /// the receipt reads as continuing the turn's rail rather than floating under it. Drawn
     /// outside the frame on purpose — a Path is not clipped by `.frame`.
@@ -539,7 +539,7 @@ struct SZBlockRightKey: PreferenceKey {
     }
 }
 
-/// THE lane, driven by plain values instead of a record.
+/// The lane itself, driven by plain values instead of a record.
 ///
 /// A build is a state while it runs and a receipt once it is over, and this is what makes those
 /// one object rather than two look-alikes: the strip wraps it in a clock (`SZStripLane`), and a
@@ -558,11 +558,11 @@ struct SZLanePill<Badge: View>: View {
     /// Hover text before the open hint: a build's full ask. nil = the hint alone.
     var help: String? = nil
     var onOpen: (() -> Void)?
-    /// The height the lane OCCUPIES, when that is more than the pill it draws. A strip row is
+    /// The height the lane occupies, when that is more than the pill it draws. A strip row is
     /// taller than its pill and the difference is the gap `SZLaneConnector` draws through — and
     /// that band is part of the lane: at `groupGap == 0` the rows tile the strip contiguously, so
     /// the hover wash hands straight from one lane to the next and a click between two pills still
-    /// opens a run. It has to be applied HERE, before `contentShape`, or the interaction area is
+    /// opens a run. It has to be applied here, before `contentShape`, or the interaction area is
     /// the bare pill and the band becomes a 3pt dead zone that makes the wash flicker as you drag
     /// down a group. nil = take the pill flush, which is what a receipt in the transcript wants:
     /// no connector, no neighbours, nothing to tile with.
@@ -716,7 +716,7 @@ struct SZLaneActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            // Sits ON a tinted wash, so it needs its own contrast: a light glyph on a dark disc,
+            // Sits on a tinted wash, so it needs its own contrast: a light glyph on a dark disc,
             // not a grey glyph on a barely-there one.
             Image(systemName: symbol)
                 .font(.system(size: 7.5, weight: .bold))

@@ -1,38 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Muse Code CLI provider (Meta, muse-code beta). Subprocess wrapper around `muse exec --json …`
 // (no API key on the argv — muse owns auth via `muse auth set --api-key-stdin` / `muse login`,
-// credentials in its own config-dir auth.json). All facts below measured against Muse Code 0.1.0
-// (0.1.0-R708.1), 2026-08-07 — the CLI shipped 2026-08-05 and its portal docs are account-gated,
-// so nothing here is taken from documentation — and the model list re-measured against 1.0.1
-// (1.0.1-R2006.1) on 2026-09-03. Distinct from the other providers in:
+// credentials in its own config-dir auth.json). All measured on Muse Code 0.1.0 (0.1.0-R708.1),
+// 2026-08-07, the model list re-measured on 1.0.1 (1.0.1-R2006.1) 2026-09-03; the CLI shipped
+// 2026-08-05 and its portal docs are account-gated, so nothing here comes from documentation.
+// Distinct from the other providers in:
 //
-//  1. STAGED CONFIG HOME. muse reads MCP servers from `<config>/muse/settings.json` — there is no
-//     per-invocation MCP flag, and the settings file also carries the user's own servers/defaults.
-//     `prepare()` stages a throwaway config home INSIDE the scope's working directory (grok's
-//     `.grok/config.toml` / pi's `.subz/` placement — the one per-agent dir the seam provides;
-//     the cache dir is shared app-wide and concurrent scopes would race on it) and `launch()`
-//     points `XDG_CONFIG_HOME` at it: the run gets exactly one MCP server (ours) and the user's
-//     real settings stay untouched. Turns in one scope are serialized by the host (one in flight
-//     per scope), so the rewrite-every-prepare self-heal never races a live reader. Credentials
-//     still come from the USER's store via an `auth.json` symlink into the staged home —
-//     measured: the binary ignores the launcher's `MUSE_AUTH_PATH` env var, but follows the
-//     symlink (a redirected run authenticated and completed).
+//  1. Staged config home. muse reads MCP servers from `<config>/muse/settings.json` — no
+//     per-invocation flag, and that file also holds the user's own servers/defaults. `prepare()`
+//     stages a throwaway config home in the scope's working directory (grok's `.grok/config.toml` /
+//     pi's `.subz/` placement — the one per-agent dir the seam provides; the app-wide cache dir
+//     would race across concurrent scopes) and `launch()` points `XDG_CONFIG_HOME` at it: one MCP
+//     server (ours), the user's real settings untouched. The host serializes turns per scope, so the
+//     rewrite-every-prepare self-heal never races a live reader. Credentials still come from the
+//     user's store via an `auth.json` symlink into the staged home — measured, the binary ignores
+//     `MUSE_AUTH_PATH` but follows the symlink (a redirected run authenticated and completed).
 //
-//  2. SESSIONS ARE claude-STYLE, RESUME IS NOT. The host mints `--session-id <uuid>` (honored
-//     verbatim — the stream's `stream.id` is the minted uuid). A chat turn continues by passing
-//     the SAME `--session-id` again: measured, the second exec appends to the retained session
-//     (its first event lands at sequence 2). There is no `--resume` flag on exec; the `muse
-//     resume` subcommand is the interactive TUI picker, not a headless lane.
+//  2. Sessions are claude-style, resume is not. The host mints `--session-id <uuid>`, honored
+//     verbatim (the stream's `stream.id` is that uuid), and a chat turn continues by passing it
+//     again — measured, the second exec appends to the retained session (first event at sequence 2).
+//     exec has no `--resume`; `muse resume` is the interactive TUI picker, not a headless lane.
 //
-//  3. EVENT-LOG STREAM. `--json` emits the session's event log as JSONL envelopes
+//  3. Event-log stream. `--json` emits the session's event log as JSONL envelopes
 //     ({payload_type, payload:{kind,…}}), not chat messages: `run_output_delta` text chunks,
-//     `task_lifecycle` records for every tool/model task (task_kind `tool.{name}`, MCP tools on
-//     the `mcp__` name prefix — claude's convention), and a final `run_terminal` carrying the
-//     authoritative reply text. No reasoning text ever appears in the stream (muse's own
-//     `export` help describes the stored blobs as "verbatim encrypted reasoning" — the local
-//     observation is the absence; the encryption is muse's claim), and per-turn token usage
-//     rides only the DURABLE log (readable offline later via `muse export`), not the live
-//     stream — so muse turns carry no `.thinking` prose and no `.usage` event.
+//     `task_lifecycle` records per tool/model task (task_kind `tool.{name}`, MCP tools on claude's
+//     `mcp__` name prefix), and a final `run_terminal` carrying the authoritative reply text.
+//     Reasoning text never appears (muse's own `export` help calls the stored blobs "verbatim
+//     encrypted reasoning" — locally we observe only the absence; the encryption is muse's claim),
+//     and per-turn token usage rides only the durable log, read later via `muse export` — so muse
+//     turns carry no `.thinking` prose and no `.usage` event.
 import Foundation
 
 public struct SZMuseCodeProvider: SZProvider {
@@ -113,14 +109,14 @@ public struct SZMuseCodeProvider: SZProvider {
                     "--model", request.model ?? defaultModel,
                     "--reasoning-effort", request.reasoningEffort ?? defaultReasoningEffort,
                     // Headless approval bypass, codex/grok/opencode parity (an unattended turn
-                    // can't answer prompts; exec's `--user-input-auto-resolve` would CANCEL tool
-                    // calls, not approve them). The OS sandbox stays ON — measured, it does not
+                    // can't answer prompts; exec's `--user-input-auto-resolve` would cancel tool
+                    // calls, not approve them). The OS sandbox stays on — measured, it does not
                     // block the MCP bridge's localhost dial. TODO(SZ-muse-permissions): tighten
                     // via muse's approval-mode/workspace policy once the coding flow's tools are
                     // pinned, then live-verify a ui_run coding agent still writes+compiles.
                     "--disable-approval",
                     // Hermetic runs: without this, muse imports the user's personal skills from
-                    // OTHER agent CLIs into the turn (measured: "Including your 1 Codex personal
+                    // other agent CLIs into the turn (measured: "Including your 1 Codex personal
                     // skill") — an app-driven agent must not inherit them.
                     "--no-foreign-personal-context"]
         // One flag for both lanes (header note 2): a chat turn re-passes the session's id, a fresh
@@ -136,7 +132,7 @@ public struct SZMuseCodeProvider: SZProvider {
         let env = SZAgentEnvironment.base(extra: [
             "SWIFT_MODULE_CACHE_PATH": request.cacheDirectory.appending(path: "swift-module-cache").path,
             "CLANG_MODULE_CACHE_PATH": request.cacheDirectory.appending(path: "clang-module-cache").path,
-            // The staged config home (header note 1). Session retention lives under the DATA dir,
+            // The staged config home (header note 1). Session retention lives under the data dir,
             // which is not redirected — resume across spawns keeps working (measured).
             "XDG_CONFIG_HOME": Self.configHome(for: request).path,
             // The `muse` command is a launcher script that checks for launcher+binary updates
@@ -149,7 +145,7 @@ public struct SZMuseCodeProvider: SZProvider {
     }
 
     public func parse(output: String, exitCode: Int32, preallocatedSessionID: String?) -> SZAgentOutcome {
-        // muse's session id is the one we minted. Success needs a zero exit AND a completed
+        // muse's session id is the one we minted. Success needs a zero exit and a completed
         // terminal envelope: the measured lanes (clean turn exit 0 + terminal "completed";
         // credential/argv failures exit 1/2) never disagree, but the exit code of a turn whose
         // terminal is "failed" is unmeasured — and parse() holds the full event log, so it reads

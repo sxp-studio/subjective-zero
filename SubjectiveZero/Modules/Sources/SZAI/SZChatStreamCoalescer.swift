@@ -60,7 +60,7 @@ public final class SZChatStreamCoalescer {
         if ContinuousClock.now - lastFlush >= flushInterval {
             flush()
         } else if trailing == nil {
-            // Armed at the FIRST unflushed data, not re-armed per chunk: the deadline stays
+            // Armed at the first unflushed data, not re-armed per chunk: the deadline stays
             // ≤ trailingDelay after that data arrived even under a steady sub-interval trickle.
             trailing = Task { [trailingDelay] in
                 try? await Task.sleep(for: trailingDelay)
@@ -72,7 +72,7 @@ public final class SZChatStreamCoalescer {
 
     /// What the armed trailing flush does when it fires, minus the wait — true if one was armed.
     /// The wait is `Task.sleep`, which is not ours to test, and asserting it on a real clock made
-    /// a test that fails whenever another suite holds the main actor. That silence PAINTS is ours.
+    /// a test that fails whenever another suite holds the main actor. That the silence paints is ours.
     func fireTrailing() -> Bool {
         guard trailing != nil else { return false }
         flush()

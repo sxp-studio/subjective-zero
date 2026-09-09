@@ -3,12 +3,12 @@
 // input defaults, content updates, display, delete, node body, bindings, library instantiate,
 // split/merge, and the MCP add/edit-ports handlers) notes what it changed and for whom. The actor
 // is derived from the fence's origin plus the calling turn's scope (`SZToolCaller.scope`): user
-// edits are USER; an agent call from a node-scoped turn is that node's Coding Agent; a
-// Director-scoped turn is DIRECTOR; an agent call carrying NO scope (a standing bus, an outside
-// driver) is EXTERNAL — never folded into the Director, or the brief would tell it that someone
+// edits are user; an agent call from a node-scoped turn is that node's Coding Agent; a
+// Director-scoped turn is Director; an agent call carrying no scope (a standing bus, an outside
+// driver) is external — never folded into the Director, or the brief would tell it that someone
 // else's edits are its own.
 //
-// Only DECISIONS belong here. Machinery that re-applies graph state on its own — a card's auto-size
+// Only decisions belong here. Machinery that re-applies graph state on its own — a card's auto-size
 // settle, the backdrop aspect follow, a staged op's deferred commit — journals nothing, or the
 // delta reads as a user changing their mind dozens of times.
 import Foundation
@@ -22,7 +22,7 @@ extension SZHost {
     }
 
     /// The canvas's node add — the panel writes the store directly (there is no host funnel for it),
-    /// so it journals here, at the panel's host callback. It also PERSISTS: a new node reached disk
+    /// so it journals here, at the panel's host callback. It also persists: a new node reached disk
     /// only when something later happened to save (a prompt commit, a connect, a build), so a node
     /// added and left alone — the empty card you drop before deciding what it is, or one the bus
     /// adds — vanished on quit. `persistProject`, not the reload flavour: an empty card compiles
@@ -71,7 +71,7 @@ extension SZHost {
         return text
     }
 
-    /// `A.out → B.in` for a connection, read BEFORE it is removed.
+    /// `A.out → B.in` for a connection, read before it is removed.
     func mutationEdge(_ id: SZConnectionID) -> String? {
         guard let c = store.project?.graph.connections.first(where: { $0.id == id }) else { return nil }
         return "\(mutationLabel(c.from)) → \(mutationLabel(c.to))"

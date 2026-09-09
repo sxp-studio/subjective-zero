@@ -9,7 +9,7 @@
 // `SZAgentStreamEvent`s → appended to the scope's transcript message on the MainActor. The provider owns
 // the parsing; the host stays provider-agnostic (just routes the classified events).
 //
-// It stays BYTES until a line is complete: a chunk is one pipe read, which can end mid-codepoint, so
+// It stays bytes until a line is complete: a chunk is one pipe read, which can end mid-codepoint, so
 // the line buffer is where the UTF-8 decode belongs.
 import Foundation
 import SZAI
@@ -52,7 +52,7 @@ extension SZHost {
         }
         // Spawn → first stdout chunk, ended at the MainActor consumer's first iteration (the
         // AsyncStream hop adds sub-ms skew — fine for a debug readout). The fence and the consumer
-        // task both live inside deliver's context binding, so attribution rides along. NOT
+        // task both live inside deliver's context binding, so attribution rides along. Not
         // per-chunk: nothing else records on the 15 Hz reply/thinking path.
         let firstOutput = SZTrace.begin(SZTurnStage.firstOutput)
         let consumer = Task { @MainActor in

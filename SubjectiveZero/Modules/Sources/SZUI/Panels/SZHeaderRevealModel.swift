@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The auto-hiding header's reveal/hide state, shared by the docked tile header (SZPanelChromeView)
 // and the pop-out window's strip (SZPopoutPanelShell): hover the top band to summon, a grace
-// period before sliding away, hysteresis so the cursor sitting ON the revealed header never counts
+// period before sliding away, hysteresis so the cursor sitting on the revealed header never counts
 // as "out of the band", and a pin for interactions that must keep the header up (a header drag).
 import SwiftUI
 
@@ -56,7 +56,7 @@ final class SZHeaderRevealModel: ObservableObject {
         withAnimation(.easeOut(duration: 0.12)) { visible = true }
     }
 
-    /// One grace timer at a time — the pending task IS the "hide is scheduled" flag, and it
+    /// One grace timer at a time — the pending task is the "hide is scheduled" flag, and it
     /// clears itself on the main actor at the end of the run.
     private func scheduleHide() {
         guard visible, pendingHide == nil else { return }

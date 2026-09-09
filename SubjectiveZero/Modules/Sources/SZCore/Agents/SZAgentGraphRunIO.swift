@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Load/save the agent-graph run history sidecar: `<project>.subz/runs.json` — the RUNS list's
+// Load/save the agent-graph run history sidecar: `<project>.subz/runs.json` — the runs list's
 // archive, `SZChatTranscriptIO`'s shape applied to run records. Live records included: the
 // host persists at begin, coalesced per note, and at seal — a crash mid-traversal leaves the
 // record on disk (`endedAt == nil`), and the host restores it sealed as interrupted.
 //
 // Forgiving the same way: a missing or corrupt file quietly becomes "no history", never a
-// project-open error. And deliberately INDEPENDENT of the transcripts: clearing a chat does
+// project-open error. And deliberately independent of the transcripts: clearing a chat does
 // not clear execution history — this file survives transcript clears and is replaced
 // wholesale on project switch (the host's restore/clear lifecycle).
 import Foundation
@@ -41,8 +41,8 @@ public enum SZAgentGraphRunIO {
     }
 
     /// Write the history — `SZJSON.encoder()`, so the bytes are deterministic and diffable
-    /// like every sidecar's. Saving an empty list REMOVES the file instead (a fully-evicted
-    /// history leaves no husk). The cap is applied HERE, so no write path can put the file
+    /// like every sidecar's. Saving an empty list removes the file instead (a fully-evicted
+    /// history leaves no husk). The cap is applied here, so no write path can put the file
     /// over its budget (a run begins live, and only its conclusion caps the host's list).
     public static func save(_ records: [SZAgentGraphRun], projectURL: URL) throws {
         let url = fileURL(projectURL: projectURL)

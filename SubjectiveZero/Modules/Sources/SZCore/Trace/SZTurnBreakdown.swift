@@ -24,7 +24,7 @@ public struct SZTurnEvent: Sendable, Equatable, Codable {
     public var parentID: UUID?
     /// The owning run, for run-owned turns — how a run's turns are found across scopes.
     public var runID: UUID?
-    /// APPROXIMATE tokens this action added to the agent's context (chars/4): a tool span's
+    /// Approximate tokens this action added to the agent's context (chars/4): a tool span's
     /// result payload, the prompt row's rendered prompt. nil = not a context-adding action.
     /// This is what decomposes a turn's "in" count into causes the app can actually see.
     public var addedTokens: Int?
@@ -83,7 +83,7 @@ extension SZTurnEvent {
 }
 
 /// The stage taxonomy — constants, not an enum (see `SZTurnEvent.stage`). Nested stages (mcp/compile/
-/// promote happen INSIDE the turn's wall time) are breakdowns of it, never additive with it.
+/// promote happen inside the turn's wall time) are breakdowns of it, never additive with it.
 public enum SZTurnStage {
     public static let queueWait      = "queue.wait"        // enqueue → delivery started (chat turns)
     public static let promptSize     = "prompt.size"       // instant; detail = rendered prompt size
@@ -125,7 +125,7 @@ public enum SZTurnStage {
 /// here so they're testable without the app target.
 public enum SZTurnBreakdown {
     /// Turn-end post-processing over the events `SZTrace.take(turnID:)` returns:
-    /// - an MCP tool shows up twice (the CLI's streamed `tool.call` sighting AND the host-measured
+    /// - an MCP tool shows up twice (the CLI's streamed `tool.call` sighting and the host-measured
     ///   `mcp.tool` span) — keep the span, drop the sightings it supersedes; a CLI's local tools
     ///   have no span and keep theirs;
     /// - sort chronologically;
@@ -138,10 +138,9 @@ public enum SZTurnBreakdown {
     public static func finalize(events: [SZTurnEvent], started: Date, ended: Date) -> [SZTurnEvent] {
         guard !events.isEmpty else { return [] }
         var events = events
-        // An MCP tool shows up twice — the CLI's streamed sighting AND the host-measured span.
-        // Pair each span with its closest same-name sighting (±10s) and drop just THAT one: the
-        // old name-set dedupe deleted every sighting of a tool the moment one call got a span,
-        // erasing calls whose spans were attribution-dropped.
+        // Pair each span with its closest same-name sighting (±10s) and drop just that one: a
+        // name-set dedupe deletes every sighting of a tool the moment one call gets a span, erasing
+        // calls whose spans were attribution-dropped.
         let spans = events.filter { $0.stage == SZTurnStage.mcpTool }
         var pairedSightings = Set<Int>()
         for span in spans {
@@ -160,7 +159,7 @@ public enum SZTurnBreakdown {
         events.sort { $0.start < $1.start }
         let reportRows = events.filter { $0.stage == SZTurnStage.providerReport }
         events.removeAll { $0.stage == SZTurnStage.providerReport }
-        // Residual = wall − UNION of the measured spans, never a sum: overlap (a CLI's parallel
+        // Residual = wall − union of the measured spans, never a sum: overlap (a CLI's parallel
         // tool calls, a starved first-output fence) must not drive the residual negative and
         // silently drop the model row while the visible rows overcount the turn.
         let wall = max(0, ended.timeIntervalSince(started))
@@ -199,7 +198,7 @@ public enum SZTurnBreakdown {
         return total
     }
 
-    /// THE row title for every surface (chat disclosure, Profiler rows, text summaries) — three
+    /// The row title for every surface (chat disclosure, Profiler rows, text summaries) — three
     /// renderers drifted composing these independently (the summary printed a legacy phrase the
     /// UIs filtered). `depth` (span-nesting glyphs) is derived when not supplied.
     public static func rowTitle(for event: SZTurnEvent, in events: [SZTurnEvent],
@@ -212,7 +211,7 @@ public enum SZTurnBreakdown {
         case SZTurnStage.toolCall, SZTurnStage.mcpTool:
             base = "\(prefix)→ \(event.detail ?? "tool")"
         case SZTurnStage.modelTime:
-            // Honesty: the residual includes any UNMEASURED local tools (a CLI's own shell/file
+            // Honesty: the residual includes any unmeasured local tools (a CLI's own shell/file
             // work streams as sightings with no span) — a 60s local build must not read as the
             // model thinking.
             let label = modelLabel(of: event) ?? "model"
@@ -229,7 +228,7 @@ public enum SZTurnBreakdown {
             let name = SZTurnStage.displayName(event.stage)
             base = prefix + (event.detail.map { "\(name) · \($0)" } ?? name)
         }
-        // What this action ADDED to the agent's context — the per-action decomposition of the
+        // What this action added to the agent's context — the per-action decomposition of the
         // turn's "in" count, rendered wherever the row renders.
         if let added = event.addedTokens {
             return "\(base) · +\(formatTokens(added)) tok"
@@ -267,7 +266,7 @@ public enum SZTurnBreakdown {
     /// Fold a run's turns into the rollup breakdown for the run-complete narration: one `run.node`
     /// row per work-set node (summed agent time; compile/promote shares in the detail), one
     /// `run.director` row (decompose is the first director turn, later ones are reconcile rounds —
-    /// the strategy runs them sequentially, so transcript order IS round order), a summed
+    /// the strategy runs them sequentially, so transcript order is round order), a summed
     /// `queue.wait`, and a `run.total` with wall time and token/cost totals. Rows are ordered by
     /// when each began — the run's actual timeline (decompose first, then the parallel nodes) —
     /// with the total pinned last. Nested spans stay inside their turn's time — nothing here
@@ -300,7 +299,7 @@ public enum SZTurnBreakdown {
                                     detail: "\(group[0].label) · \(bits.joined(separator: " · "))"))
         }
 
-        // One row PER director turn (not a sum): each is a distinct span on the run's timeline —
+        // One row per director turn (not a sum): each is a distinct span on the run's timeline —
         // decompose before the fleet, reconcile rounds between dispatches.
         for (i, turn) in directorTurns.enumerated() {
             rows.append(SZTurnEvent(stage: SZTurnStage.runDirector, start: turn.start,
@@ -352,7 +351,7 @@ public enum SZTurnBreakdown {
     /// The call-count story for a set of turns — "3 calls · ~55.5k ctx/call", the ctx/call clause
     /// derived from the turns' summed input tokens (reported input ≈ context × calls, so the
     /// division recovers the context; derived at render, never stored). nil when no CLI reported
-    /// a count. Both sums span only the turns that DID report one — a turn with usage but no
+    /// a count. Both sums span only the turns that did report one — a turn with usage but no
     /// count (a killed agent whose result event never arrived) would otherwise inflate the
     /// figure by adding to the numerator and nothing to the divisor.
     public static func callsDetail(of turns: [RunTurn]) -> String? {
@@ -450,15 +449,15 @@ public enum SZTurnBreakdown {
         return detail
     }
 
-    /// The model's ACTUAL working segments: the complement of the measured top-level spans
+    /// The model's actual working segments: the complement of the measured top-level spans
     /// (first output + tool spans; compile/promote nest inside their tool span) within the
     /// turn's extent. Derived on demand — the stored `turn.model` row keeps the total; these
-    /// place it in time. One implementation feeds the timeline blocks AND the detail rows.
+    /// place it in time. One implementation feeds the timeline blocks and the detail rows.
     public static func modelSegments(of turn: RunTurn,
                                      minimum: TimeInterval = 0.05) -> [SZTurnEvent] {
         guard let duration = turn.duration, duration > 0 else { return [] }
         // Segments inherit the stored model row's detail (the model's identity — "gpt-5.6-terra ·
-        // fast"), so every derived segment can say WHO was thinking.
+        // fast"), so every derived segment can say who was thinking.
         let modelDetail = turn.events.first { $0.stage == SZTurnStage.modelTime }?.detail
         let turnEnd = turn.start.addingTimeInterval(duration)
         let covered: [(Date, Date)] = turn.events.compactMap { event in
@@ -635,7 +634,7 @@ public enum SZTurnBreakdown {
     /// The precision tier follows the magnitude — a 200µs host tool must not read as "0ms", and a
     /// 2ms span not as noise.
     public static func format(_ seconds: TimeInterval) -> String {
-        // A negative duration is a measurement bug (a wall-clock step) — render it LOUD, never
+        // A negative duration is a measurement bug (a wall-clock step) — render it with a minus, never
         // mask it as "0µs".
         if seconds < 0 { return "−" + format(-seconds) }
         if seconds < 0.0000005 { return "0µs" }

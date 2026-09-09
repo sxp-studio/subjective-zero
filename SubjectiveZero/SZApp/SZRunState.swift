@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// ONE RUN's state — everything that used to be a singular `run*` field on the host.
+// One run's state — everything that used to be a singular `run*` field on the host.
 //
 // - A run is a task that got admitted: it holds a claim over its work set and lives until its
 //   traversal concludes. Several can be live at once, so none of this can be host-wide.
-// - The claim IS the identity. A cancelled run's task unwinds seconds later as a zombie; it
+// - The claim is the identity. A cancelled run's task unwinds seconds later as a zombie; it
 //   writes into the object it captured, and `SZHost.isLive(_:)` says whether that object is
 //   still the registered run — replacing the old `if runClaim == claim` guard at every write.
 // - Single-writer: the host and its MCP surface write, the UI reads aggregates off the host.
@@ -15,21 +15,21 @@ import SZCore
     let taskID: UUID
     /// Holds the work set's node + transcript pairs and the run's identity. Released at the end.
     let claim: SZClaimToken
-    /// The run's TRACE identity, stamped into run-owned turns' events (`SZTraceContext.runID`).
+    /// The run's trace identity, stamped into run-owned turns' events (`SZTraceContext.runID`).
     let traceID = UUID()
     /// The agent-graph record id this run's build traversal leads — its work children share it,
     /// and it is what a narration or a strip row links to.
     let thread = UUID()
     /// The standing instruction every brief carries ("" = none given).
     let instruction: String
-    /// The title the task was SCHEDULED under — what a brief naming this run must call it. Kept
+    /// The title the task was scheduled under — what a brief naming this run must call it. Kept
     /// rather than re-derived: a derived one drifts as the work set grows.
     let title: String
     /// The transcript bubbles that scheduled this run — not prior conversation to it.
     let origin: Set<UUID>
     /// Does this run own the staged split/merge? Then it narrates at commit, owns the
-    /// hidden-piece UX, and is the ONLY run whose ending may settle it. Set at admission when the
-    /// run was started FOR an op, and by `startOrJoinRun` when a run's own turn stages one —
+    /// hidden-piece UX, and is the only run whose ending may settle it. Set at admission when the
+    /// run was started for an op, and by `startOrJoinRun` when a run's own turn stages one —
     /// never read off a host-wide flag, which would let a sibling run adopt someone else's op.
     var ownsGraphOp: Bool
     let startedAt = Date()
@@ -51,7 +51,7 @@ import SZCore
     /// Nodes another build owned when this run's Director sent it a note (`sendChat`, agent origin).
     /// The receipt names them, so a run that handed its ask on never reports there was nothing to do.
     var handedOff: Set<SZNodeID> = []
-    /// Nodes `promoteStagedNode` landed for their LATEST dispatch — this run's success evidence.
+    /// Nodes `promoteStagedNode` landed for their latest dispatch — this run's success evidence.
     /// Cleared per node at each redispatch: a redispatch says the previous build did not settle it.
     var promoted: Set<SZNodeID> = []
     /// Nodes this run promoted at any point, never cleared: a render fault on one of these is this
@@ -61,7 +61,7 @@ import SZCore
     var turnLog: [SZTurnBreakdown.RunTurn] = []
     /// The traversal task, so Stop can cancel exactly this run.
     var task: Task<Void, Never>?
-    /// This run's OWN Director session. The host's `agentSessions` slot is keyed by scope, so two
+    /// This run's own Director session. The host's `agentSessions` slot is keyed by scope, so two
     /// concurrent runs resuming it would interleave in one CLI conversation — a reconcile turn
     /// would resume whatever the other run last said.
     var directorSession: SZAgentSession?

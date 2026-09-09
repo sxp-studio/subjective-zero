@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Agent-fetchable reference docs (the `agent_docs_*` MCP surface). Bundled markdown the coding / Director
-// agents pull ON DEMAND instead of guessing schemas — the same "earn the tokens" tiering as the node
+// agents pull on demand instead of guessing schemas — the same "earn the tokens" tiering as the node
 // library (index → read). Content is authored to match SZCore (`SZContract`) + the runtime ABI; keep it in
 // sync when those change. The host's `agent_docs_index` / `agent_docs_read` tools call straight through.
 import Foundation
@@ -27,8 +27,8 @@ public enum SZAgentDocs {
               summary: "Card.swift shape (SwiftUI, SZCardMain + SZCardState): reading ports, live/commit gesture rule, telemetry (values, strings, learn), host verbs (`call`), backdrop + plumbing, contract `card` hints, how to ship it with the node."),
     ]
 
-    /// The card doc's worked example, verbatim — ALSO the starter `Card.swift` the app scaffolds for
-    /// "New Custom Card…", so the file a user first opens IS the example the docs teach (one source;
+    /// The card doc's worked example, verbatim — also the starter `Card.swift` the app scaffolds for
+    /// "New Custom Card…", so the file a user first opens is the example the docs teach (one source;
     /// SZAppTests compile it). The first fenced Swift block after the "Worked example" heading.
     public static let cardStarterSource: String = {
         guard let doc = read("card-abi"),
@@ -39,7 +39,7 @@ public enum SZAgentDocs {
         return String(doc[open.upperBound..<close.lowerBound]) + "\n"
     }()
 
-    /// The node-abi doc body — ALSO embedded verbatim into the coding compile prompt (its `{{abi}}`
+    /// The node-abi doc body — also embedded verbatim into the coding compile prompt (its `{{abi}}`
     /// token), so the ABI prose lives in exactly one file (derive-don't-duplicate). The code-level
     /// source of truth stays SZRuntime's `SZNodeKit.source`; this doc mirrors it for agents.
     public static let abiReference: String = {
@@ -61,7 +61,7 @@ public enum SZAgentDocs {
         }
     }
 
-    /// The node-contract doc body — ALSO embedded into cold-start coding briefs when the library
+    /// The node-contract doc body — also embedded into cold-start coding briefs when the library
     /// index is inlined, so the schema prose lives in exactly one file, same as `abiReference`.
     public static let contractReference: String = {
         guard let doc = read("node-contract") else { fatalError("SZAI: missing bundled doc node-contract.md") }

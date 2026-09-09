@@ -31,9 +31,9 @@ extension SZHost {
 
     /// Resolve and apply a body edit. Rules:
     /// - `.none`: compact card.
-    /// - `.preview`: `port` must be a texture output; omitted, the shared default rule picks one
-    ///   (`preferredTextureOutput` — the SAME pick the card's auto-preview shows). No texture
-    ///   output → rejected, so the persisted body is always renderable.
+    /// - `.preview`: `port` must be a texture output; omitted, `preferredTextureOutput` picks one
+    ///   (the same pick the card's auto-preview shows). No texture output → rejected, so the
+    ///   persisted body is always renderable.
     /// - `.custom`: the node's folder must hold a `Card.swift` (the mount reads it; whether it
     ///   compiles is the mount's business — geometry never depends on a build). Re-applying custom
     ///   carries the committed `cols`/`rows`/`pinned` forward unless overridden (auto-size can't
@@ -41,8 +41,7 @@ extension SZHost {
     ///   the contract's `card` hints in the layout, so a later hint change reaches existing cards.
     ///   Flipping rows↔custom never touches the file on disk.
     /// `plugs` is orthogonal to all three and carried forward unless overridden, so the card host's
-    /// auto-size re-apply can never unfold a card behind the user's back.
-    /// Returns the applied body.
+    /// auto-size re-apply can never unfold a card behind the user's back. Returns the applied body.
     @discardableResult
     func applyNodeBody(node id: SZNodeID, mode: SZNodeBodyMode, port: String? = nil,
                        cols: Int? = nil, rows: Int? = nil, pinned: Bool? = nil,

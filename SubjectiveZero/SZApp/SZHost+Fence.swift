@@ -1,26 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The mutation fence — ENFORCEMENT of the locks the view layer only affords. The lock icon and
-// disabled inputs live in SwiftUI predicates; before this fence, every `ui_*` MCP graph edit (and
+// The mutation fence — enforcement of the locks the view layer only affords. The lock icon and
+// disabled inputs are only SwiftUI predicates; before this fence, every `ui_*` MCP graph edit (and
 // any host caller that forgot the view-side filter) reached the unconditional store ops and could
-// delete or re-port a node whose agent was mid-chat or mid-split/merge. The fence is the ONE
-// authoritative check, consulted at the host mutation funnels (delete, the connection trio, content
-// updates, input defaults, display, node body, split/merge targets) and by the MCP handlers for their
+// delete or re-port a node whose agent was mid-chat or mid-split/merge. The fence is the one
+// authoritative check, consulted at the host mutation funnels and by the MCP handlers for their
 // refusal messages; SZStore's `fenceBackstop` debug-assert catches future callers that bypass the
-// funnels — but it is origin-blind and therefore weaker; see `installStoreFenceBackstop`.
+// funnels, but is origin-blind and therefore weaker (see `installStoreFenceBackstop`).
 //
 // Two mutation classes, per-operation — never a blanket node lock:
-// - FENCED (this file's concern): delete, connect/disconnect/reconnect, port edits, content
+// - Fenced (this file's concern): delete, connect/disconnect/reconnect, port edits, content
 //   updates, input defaults, display toggle, node body, split/merge target.
-// - OPEN by documented design: move/tidy (a locked node stays repositionable —
+// - Open by documented design: move/tidy (a locked node stays repositionable —
 //   SZNodeCanvasContentView), add (a new node can't be held by anyone), and an agent's flow
 //   arrow (drawing intent for a wire it could not lay; `SZHost.addConnection`).
-// Delete is fenced one notch tighter than the rest (`deleteDenial`): a node the fleet is still
-// implementing keeps its card live but cannot be removed, because there is no undo.
+// Delete is fenced one notch tighter (`deleteDenial`): a node the fleet is still implementing
+// keeps its card live but cannot be removed, because there is no undo.
 import Foundation
 import SZCore
 
 /// The tool call's caller, bound task-locally by `SZHostBridge.callTool` for the duration of one
-/// dispatch — same idiom as `SZTrace.context`. A per-TURN agent listener knows whose turn it serves
+/// dispatch — same idiom as `SZTrace.context`. A per-turn agent listener knows whose turn it serves
 /// (its port is the identity) and carries that turn's claim token; the shared buses carry nil.
 /// The fence and the store backstop read it to tell "the turn mutating its own held node" from a
 /// bystander on the same origin.
@@ -34,9 +33,9 @@ enum SZToolCaller {
 
 extension SZHost {
     /// Who is asking for a mutation. `.agent` is the MCP `ui_*` surface (the Director / the fleet;
-    /// the CALLER, when a per-turn listener carries it, is `SZToolCaller.claim`); `.user` is the
+    /// the caller, when a per-turn listener carries it, is `SZToolCaller.claim`); `.user` is the
     /// editor UI and host-internal user actions. The rule differences: an agent may mutate nodes
-    /// the RUN holds (steering its own fleet's work is the run's whole point) and nodes its OWN
+    /// the run holds (steering its own fleet's work is the run's whole point) and nodes its own
     /// turn holds; a user may not (those cards are locked).
     enum SZMutationOrigin { case user, agent }
 
@@ -52,14 +51,14 @@ extension SZHost {
             }
             guard let holder = ledger.holder(of: .node(id)) else { continue }
             if origin == .agent {
-                // THE CALLER's run, never "any live run": with runs concurrent, a holder-side
+                // The caller's run, never "any live run": with runs concurrent, a holder-side
                 // check let one run's Director delete, rewire and re-port nodes another run was
-                // mid-implementing. A turn may touch what ITS OWN run holds, and nothing else.
+                // mid-implementing. A turn may touch what its own run holds, and nothing else.
                 if let caller = SZToolCaller.claim {
                     if holder == caller { continue }               // the caller's own turn
                     if holder == activeRun(for: caller)?.claim { continue }   // its own run's work
                 }
-                // A run's own fleet work, when the caller IS the run (no per-turn token bound).
+                // A run's own fleet work, when the caller is the run (no per-turn token bound).
                 if SZToolCaller.claim == nil, isRunClaim(holder) { continue }
             }
             if origin == .user, !userLockDenies(holder: holder, node: id) { continue }
@@ -75,22 +74,22 @@ extension SZHost {
         return nil
     }
 
-    /// THE user-lock rule, stated once — shared by `fenceDenial` (enforcement) and `lockedNodes`
+    /// The user-lock rule, stated once — shared by `fenceDenial` (enforcement) and `lockedNodes`
     /// (the canvas/panel affordance), so what the UI dims and what the fence refuses cannot drift.
     ///
     /// The card greys only when there is nothing on it to work: a node with no build yet, being written
-    /// for the FIRST time. A node that RENDERS stays the user's — its knobs, wires, position and viewport
+    /// for the first time. A node that renders stays the user's — its knobs, wires, position and viewport
     /// toggle — no matter who holds it or what they are doing to its source. Who holds it decides whether
-    /// it can be DELETED (`deleteDenies`), not whether it can be touched: the two questions used to be one,
+    /// it can be deleted (`deleteDenies`), not whether it can be touched: the two questions used to be one,
     /// which is why a node with a chat open froze while it was still making pixels.
     private func userLockDenies(holder _: SZClaimToken, node id: SZNodeID) -> Bool {
         store.project?.graph.node(id: id)?.kind != .generated
     }
 
-    /// A user DELETE is refused while an agent is actually working this node — losing that work to a
+    /// A user delete is refused while an agent is actually working this node — losing that work to a
     /// keystroke is unrecoverable, there being no undo. "Actually working" reads differently per holder:
-    /// a per-turn claim (a node chat) exists ONLY for the length of its turn, so holding it is the work;
-    /// a RUN holds its whole work set to run end, so there the work is the node still needing
+    /// a per-turn claim (a node chat) exists only for the length of its turn, so holding it is the work;
+    /// a run holds its whole work set to run end, so there the work is the node still needing
     /// implementation, and the hold releases at that node's own promote rather than at the run's end.
     private func deleteDenies(holder: SZClaimToken, node id: SZNodeID) -> Bool {
         if userLockDenies(holder: holder, node: id) { return true }   // no build to lose yet
@@ -129,7 +128,7 @@ extension SZHost {
         return held
     }
 
-    /// Node ids a user-origin mutation would be refused on right now — THE ledger-backed source for
+    /// Node ids a user-origin mutation would be refused on right now — the ledger-backed source for
     /// the canvas/panel lock affordances (`SZNodeCanvasContentView.isLocked`), derived through the
     /// same `userLockDenies` predicate the fence enforces. (Mid-split/merge originals are covered
     /// by `graphOpStatus`, which the view checks alongside this.)
@@ -142,21 +141,19 @@ extension SZHost {
     }
 
     /// Install the store's debug tripwire: a fenced-class store mutation on a node held by a claim
-    /// that is neither the run's nor the graph-op path's should have been refused at a funnel —
-    /// assert-fail in debug so a future bypass is caught in development, never enforced in release
-    /// (store ops stay non-throwing). Called once at start.
+    /// that is neither the run's nor the graph-op path's should have been refused at a funnel, so
+    /// assert-fail in debug to catch a future bypass; never enforced in release (store ops stay
+    /// non-throwing). Called once at start.
     ///
-    /// DELIBERATELY ORIGIN-BLIND, and therefore strictly weaker than `fenceDenial` — do not "tighten"
+    /// Deliberately origin-blind, and therefore strictly weaker than `fenceDenial` — do not "tighten"
     /// it to `userLockDenies`. A store op carries no `SZMutationOrigin`, so the backstop can only
-    /// catch what NO origin would permit; the agent rule is the permissive one, hence the `runClaim`
-    /// and caller skips (the caller's identity DOES reach here — `SZToolCaller` rides the tool
-    /// call's stack into the store op). Routing it through the user rule would assert-fail on the
-    /// fleet's own legitimate writes:
+    /// catch what no origin would permit; the agent rule is the permissive one, hence the `isRunClaim`
+    /// and caller skips (the caller's identity does reach here — `SZToolCaller` rides the tool call's
+    /// stack into the store op). The user rule would assert-fail on the fleet's own legitimate writes:
     /// a run holds its work set, and a coding agent's `ui_update_node` lands on a node that is still
-    /// `kind == .prompt` until it compiles and promotes.
-    ///
-    /// The user-origin rule is enforced where it can see origin — at the funnels
-    /// (`updateNodeContent`, `setInputDefault`, `toggleDisplay`, the connection trio, …).
+    /// `kind == .prompt` until it compiles and promotes. That rule is enforced where it can see
+    /// origin — at the funnels (`updateNodeContent`, `setInputDefault`, `toggleDisplay`, the
+    /// connection trio, …).
     func installStoreFenceBackstop() {
         store.fenceBackstop = { [weak self] ids in
             guard let self else { return nil }

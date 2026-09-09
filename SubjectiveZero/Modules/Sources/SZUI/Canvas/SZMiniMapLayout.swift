@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The mini map's geometry — the world rect it shows (graph bounds ∪ viewport, so the viewport is never
 // off the map) and the world↔map transform that fits it into the thumbnail. Pure math over the panel-
-// local camera and SZNodeLayout's card rects (the SAME rects hit-testing, culling and the LOD tiles
+// local camera and SZNodeLayout's card rects (the same rects hit-testing, culling and the LOD tiles
 // use). No SwiftUI, unit-tested headlessly (SZUITests).
 import CoreGraphics
 
@@ -56,7 +56,7 @@ struct SZMiniMapLayout: Equatable {
     }
 
     /// The camera after dragging the map by `translation` (map points) from `start`: the viewport
-    /// moves the same WORLD distance the pointer travelled on the map, so the rectangle stays under
+    /// moves the same world distance the pointer travelled on the map, so the rectangle stays under
     /// the cursor.
     func cameraDragging(by translation: CGSize, from start: SZCanvasCamera) -> SZCanvasCamera {
         var camera = start

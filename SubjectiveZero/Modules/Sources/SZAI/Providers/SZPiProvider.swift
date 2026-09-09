@@ -3,34 +3,34 @@
 // `pi -p --mode json …` (no API key — pi owns auth: ChatGPT/Claude/Copilot OAuth or user keys).
 // Distinct from claude/codex/grok in three ways, all verified on pi 0.80.6 (2026-07-12):
 //
-//  1. DYNAMIC MODEL CATALOG. pi is a BYOK multi-provider harness — the served models depend on
-//     which accounts the USER connected (`/login`), so no static manifest can know them. The
+//  1. Dynamic model catalog. pi is a BYOK multi-provider harness — the served models depend on
+//     which accounts the user connected (`/login`), so no static manifest can know them. The
 //     catalog is enumerated from the CLI itself (`--mode rpc` → `get_available_models`, which
 //     also vends per-model thinking-level maps), cached by the host, and re-fetched on health
 //     transitions — see `refreshModelCatalog`. Model ids are qualified `provider/id` argv tokens
 //     (e.g. "openai-codex/gpt-5.5") — the most pinned form `--model` accepts.
 //
-//  2. MCP VIA A STAGED EXTENSION. pi deliberately ships no MCP support; its extension API is the
+//  2. MCP via a staged extension. pi deliberately ships no MCP support; its extension API is the
 //     seam. `prepare()` stages a dependency-free bridge extension (Resources/Extensions/) that
 //     dials the host's TCP listener and registers each MCP tool via `pi.registerTool` — raw JSON
 //     Schema `parameters` verified working. Loaded with an explicit `--extension` path.
-//     The user's OWN pi config (extensions/skills/context files) is deliberately NOT silenced:
+//     The user's own pi config (extensions/skills/context files) is deliberately not silenced:
 //     pi users self-select for a customized harness (decided 2026-07-12). Known trade-off: a
 //     user extension that opens a `ctx.ui` dialog can stall a headless turn.
 //
-//  3. EXIT CODES DON'T CARRY FAILURE. In `--mode json` a failed turn (bad model, backend error)
+//  3. Exit codes don't carry failure. In `--mode json` a failed turn (bad model, backend error)
 //     still exits 0 — only text mode maps errors to exit 1 (print-mode.js, verified with a bogus
-//     model id: assistant `stopReason:"error"` + exit 0). `parse()` therefore reads the LAST
+//     model id: assistant `stopReason:"error"` + exit 0). `parse()` therefore reads the last
 //     assistant message's stopReason from the event stream, not the exit code alone.
 //
-// Sessions are claude-style: the host mints a UUID; `--session-id` both creates AND resumes
+// Sessions are claude-style: the host mints a UUID; `--session-id` both creates and resumes
 // ("use exact project session ID, creating it if missing" — continuity live-verified: a resumed
-// turn recalled the prior turn's content; the session header echoes the passed id). Sessions are
-// keyed by cwd on pi's side, which matches the host's stable per-scope working directories.
-// - `--session-id` creates the session when missing, so an unknown id resumes as an empty thread.
+// turn recalled the prior turn's content; the session header echoes the passed id), so an unknown
+// id resumes as an empty thread. Sessions are keyed by cwd on pi's side, which matches the host's
+// stable per-scope working directories.
 //
-// STDIN: `pi -p` reads piped stdin to EOF before starting (main.js readPipedStdin) — an inherited
-// stdin that never closes hangs the CLI with ZERO output (reproduced 4×). SZSystemProcessRunner
+// `pi -p` reads piped stdin to EOF before starting (main.js readPipedStdin) — an inherited
+// stdin that never closes hangs the CLI with zero output (reproduced 4×). SZSystemProcessRunner
 // wires /dev/null stdin on every spawn, which is what un-hangs it; the RPC catalog fetch instead
 // pipes its two command lines and closes.
 import Foundation
@@ -62,7 +62,7 @@ public struct SZPiProvider: SZProvider {
     public let supportedReasoningEfforts = ["minimal", "low", "medium", "high"]
     public let supportsFastMode = false   // no fast-mode concept in this CLI's argv
     public let healthArgs = ["pi", "--version"]
-    /// `pi --list-models` exits 0 in BOTH auth states (verified 0.80.6) — logged out it prints
+    /// `pi --list-models` exits 0 in both auth states (verified 0.80.6) — logged out it prints
     /// "No models available. Use /login…", so the auth tier's marker path classifies, grok-style.
     /// `--offline` skips pi's startup network operations (update checks), keeping the check
     /// deterministic inside the tier's 10s timeout; it does not hide OAuth-served models
@@ -78,7 +78,7 @@ public struct SZPiProvider: SZProvider {
     /// npm over the curl installer: matches how the CLI resolves on the synthesized PATH (nvm
     /// bin dirs are already searched). `--ignore-scripts` is the vendor's own documented form.
     public let installCommand = "npm install -g --ignore-scripts @earendil-works/pi-coding-agent"
-    /// pi has no non-interactive login: auth is `/login` INSIDE the TUI (OAuth or API key). The
+    /// pi has no non-interactive login: auth is `/login` inside the TUI (OAuth or API key). The
     /// Terminal launcher opens the TUI; docs/APP_SETUP.md tells the user to type `/login` there.
     public let loginCommand = "pi"
     public let usesPreallocatedSessionID = true   // we mint the UUID and pass --session-id
@@ -206,7 +206,7 @@ public struct SZPiProvider: SZProvider {
 
     public func launch(_ request: SZAgentRunRequest, preallocatedSessionID: String?) -> SZLaunch {
         // --offline skips pi's startup network operations only — an authenticated model call
-        // succeeds under it (verified), and a logged-out one fails FAST with a marker instead of
+        // succeeds under it (verified), and a logged-out one fails fast with a marker instead of
         // hanging on OAuth (a logged-out run without it was observed hanging with zero output).
         var args = ["pi", "-p", "--mode", "json", "--offline"]
         let model = request.model ?? defaultModel
@@ -221,13 +221,13 @@ public struct SZPiProvider: SZProvider {
         if request.mcpServerPort != nil {
             args += ["--extension", Self.bridgePath(in: request.workingDirectory).path]
         }
-        // PERMISSIONS: pi has no approval gate or sandbox — built-in and extension tools run
+        // pi has no approval gate or sandbox — built-in and extension tools run
         // unconditionally with process permissions (verified 0.80.6 docs/security.md + agent-loop),
         // so this is functionally codex's full bypass, minus a flag to say so.
         // TODO(SZ-pi-permissions): narrow with `--tools <allowlist>` / `--no-builtin-tools` once
         // the coding flow's required built-ins are pinned, then live-verify a ui_run still passes.
         //
-        // pi's arg parser flag-parses a leading `-`/`--` (swallowing the NEXT token as a value)
+        // pi's arg parser flag-parses a leading `-`/`--` (swallowing the next token as a value)
         // and treats a leading `@` as a file attachment, with no `--` terminator (verified 0.80.6
         // cli/args.js). A leading space defeats both checks and is invisible to the model — an
         // established node chat sends the user's message raw, so "@State isn't updating" must not
@@ -244,7 +244,7 @@ public struct SZPiProvider: SZProvider {
 
     public func parse(output: String, exitCode: Int32, preallocatedSessionID: String?) -> SZAgentOutcome {
         // Failure detection reads the stream, not just the exit code (header comment #3): the
-        // LAST assistant message's stopReason is the turn's verdict — intermediate ones read
+        // last assistant message's stopReason is the turn's verdict — intermediate ones read
         // "toolUse". No assistant message at all is a failure too (the CLI died pre-reply).
         var lastStopReason: String?
         var headerSessionID: String?
@@ -310,12 +310,12 @@ enum SZPiCatalogError: Error, CustomStringConvertible {
 /// not the token-level `message_update` deltas — deltas would spam the trace (grok's lesson).
 /// An assistant message's `text` block is held as the candidate reply; a later assistant message
 /// supersedes it (the earlier text was narration — claude/codex/grok's reply/trace split), and
-/// `finish()` emits the survivor once. `thinking` blocks carry REAL reasoning text (pi talks to the
+/// `finish()` emits the survivor once. `thinking` blocks carry real reasoning text (pi talks to the
 /// model APIs directly — no CLI-side redaction) → `.thinking`; `tool_execution_start` → `.toolCall`.
-/// EVERY assistant `message_end` carries `usage` {input, output, cacheRead, cacheWrite, reasoning,
-/// cost.total} — and pi's `input` EXCLUDES the cache shares (pi-ai subtracts them from OpenAI's
+/// Every assistant `message_end` carries `usage` {input, output, cacheRead, cacheWrite, reasoning,
+/// cost.total} — and pi's `input` excludes the cache shares (pi-ai subtracts them from OpenAI's
 /// inclusive input_tokens; verified against pi 0.80.6 source + a live run). A tool-use turn has
-/// several assistant messages, so usage is SUMMED across the turn and emitted as one `.usage` in
+/// several assistant messages, so usage is summed across the turn and emitted as one `.usage` in
 /// `finish()`. Lines are strict JSON (pi JSON.stringify's its events — verified, zero raw control
 /// characters), but stderr warnings interleave in the merged stream, so unparseable lines skip.
 final class SZPiStreamConsumer: SZAgentStreamConsumer {

@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The chat composer's text input, backed by NSTextView instead of SwiftUI's TextField.
+// The chat composer's text input, backed by NSTextView instead of SwiftUI's TextField: a TextField greedily
+// turns a dropped file or a pasted file into *text* (its absolute path / filename), so file attachments never
+// reach our handler. An NSTextView lets us override `paste(_:)` and the drag operations to route file URLs /
+// images to `onAttach` and fall back to normal text behavior otherwise. Plain typing, Return-to-send
+// (⇧Return = newline), a placeholder, and growth from one line up to `maxLines` are preserved so it reads
+// like the TextField it replaces.
 //
-// Why AppKit: a plain SwiftUI TextField greedily turns a dropped file or a pasted file into *text* (its
-// absolute path / filename), so file attachments never reach our handler. An NSTextView lets us override
-// `paste(_:)` and the drag operations to route file URLs / images to `onAttach` and fall back to normal
-// text behavior otherwise. Plain typing, Return-to-send (⇧Return = newline), a placeholder, and growth
-// from one line up to `maxLines` are preserved so it reads like the TextField it replaces.
-//
-// Mentions: the buffer carries @mention TOKENS — runs of display text ("@Blur") tagged with a custom
+// Mentions: the buffer carries @mention tokens — runs of display text ("@Blur") tagged with a custom
 // `.szMention` attribute (accent-colored, same font metrics so the height math never changes). The
-// SwiftUI-facing value is `SZComposerDraft` (segments), rebuilt from attribute runs on every edit.
-// Tokens are atomic: the caret can't land inside one, a partial deletion removes the whole token, and
-// any run whose text no longer matches its token (exotic input paths) degrades cleanly to plain text.
-// Typing/paste stays plain (`isRichText = false`); tokens only enter programmatically (autocomplete
-// pick / host draft injection).
+// SwiftUI-facing value is `SZComposerDraft` (segments), rebuilt from attribute runs on every edit. Tokens are
+// atomic: the caret can't land inside one, a partial deletion removes the whole token, and any run whose text
+// no longer matches its token (exotic input paths) degrades cleanly to plain text. Typing/paste stays plain
+// (`isRichText = false`); tokens only enter programmatically (autocomplete pick / host draft injection).
 import AppKit
 import SwiftUI
 import SZCore
@@ -75,7 +73,7 @@ struct SZComposerTextView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self   // refresh captured closures (onSubmit) for this update
         guard let tv = scroll.documentView as? SZPasteDropTextView else { return }
-        // Echo guard: only push the binding INTO the view when it didn't come FROM the view (an
+        // Echo guard: only push the binding into the view when it didn't come from the view (an
         // injected suggestion / a send clearing it) — else every keystroke would round-trip through
         // SwiftUI and teleport the caret to the end.
         if draft != context.coordinator.lastEmittedDraft {
@@ -113,7 +111,7 @@ struct SZComposerTextView: NSViewRepresentable {
 
         static let mentionKey = NSAttributedString.Key("sz.mention")
         static let bodyFont = NSFont.systemFont(ofSize: 12.5)
-        // Same font SIZE as body text (a token wraps and measures like any word — the line-height
+        // Same font size as body text (a token wraps and measures like any word — the line-height
         // math in recalcHeight stays valid); weight + accent color make it read as a chip.
         static let mentionFont = NSFont.systemFont(ofSize: 12.5, weight: .medium)
         static let mentionColor = NSColor(srgbRed: 0.50, green: 0.64, blue: 1.0, alpha: 1.0)
@@ -183,7 +181,7 @@ struct SZComposerTextView: NSViewRepresentable {
             return range
         }
 
-        /// A boundary at `index` is STRICTLY inside a token when the token covers the characters on
+        /// A boundary at `index` is strictly inside a token when the token covers the characters on
         /// both sides of it.
         private func tokenSurrounding(boundary index: Int, in storage: NSTextStorage) -> NSRange? {
             guard let token = tokenRange(at: index, in: storage), index > token.location else { return nil }
@@ -202,7 +200,7 @@ struct SZComposerTextView: NSViewRepresentable {
             for range in stale { storage.setAttributes(Self.bodyAttributes, range: range) }
         }
 
-        // The caret never lands INSIDE a token; a selection endpoint inside one extends to cover it.
+        // The caret never lands inside a token; a selection endpoint inside one extends to cover it.
         func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
                       toCharacterRange new: NSRange) -> NSRange {
             guard let storage = textView.textStorage, !textView.hasMarkedText() else { return new }
@@ -291,7 +289,7 @@ struct SZComposerTextView: NSViewRepresentable {
         /// Undo-coherent: goes through shouldChangeText/didChangeText.
         func insertMention(_ candidate: SZMentionCandidate) {
             guard let tv = textView, let storage = tv.textStorage else { return }
-            // A mention put here from OUTSIDE (a node card's chat button) means the user is about
+            // A mention put here from outside (a node card's chat button) means the user is about
             // to type about it — take focus so they can, without a click of their own.
             tv.window?.makeFirstResponder(tv)
             let range = mentionSessionRange ?? tv.selectedRange()
@@ -308,7 +306,7 @@ struct SZComposerTextView: NSViewRepresentable {
             }
         }
 
-        // A deletion/replacement that PARTIALLY covers a token expands to the whole token (backspace
+        // A deletion/replacement that partially covers a token expands to the whole token (backspace
         // on a token's tail removes the token). Performed here so undo restores the attributed run.
         func textView(_ textView: NSTextView, shouldChangeTextIn affectedRange: NSRange,
                       replacementString: String?) -> Bool {
@@ -348,7 +346,7 @@ struct SZComposerTextView: NSViewRepresentable {
             updateMentionSession(tv)
         }
 
-        // Mention-session keys route to the autocomplete FIRST (an unconsumed Return falls through
+        // Mention-session keys route to the autocomplete first (an unconsumed Return falls through
         // to send — e.g. the filter matched nothing). Then: Return sends; ⇧Return inserts a newline.
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             if mentionSessionRange != nil, let command = Self.mentionCommand(for: selector),
@@ -440,9 +438,9 @@ final class SZPasteDropTextView: NSTextView {
     }
 }
 
-/// A whole-area file-drop target, used as a `.background` so a file dropped ANYWHERE on the chat panel
+/// A whole-area file-drop target, used as a `.background` so a file dropped anywhere on the chat panel
 /// attaches (SwiftUI's `.dropDestination` on a parent only catches where child views pass the drag
-/// through — the transcript — so the tab strip / composer chrome were dead zones). Sitting behind the
+/// through — the transcript — so the composer chrome was a dead zone). Sitting behind the
 /// content, it receives drags the SwiftUI views don't consume while leaving normal clicks to them.
 struct SZFileDropCatcher: NSViewRepresentable {
     /// `onDrop(urls, point)` — `point` is the drop location in the view's own top-left space (AppKit's
@@ -475,7 +473,7 @@ struct SZFileDropCatcher: NSViewRepresentable {
         var onTargeted: ((Bool) -> Void)?
         var onDropLibrary: ((Data, CGPoint) -> Bool)?
 
-        /// Whether this drag CARRIES a library ref. Asks what types are registered, not for the bytes:
+        /// Whether this drag carries a library ref. Asks what types are registered, not for the bytes:
         /// a SwiftUI `.onDrag` provider fills its data in lazily, so `data(forType:)` is nil while the
         /// drag is still in flight and the drop would be refused before it ever started.
         private func hasLibraryRef(_ sender: NSDraggingInfo) -> Bool {

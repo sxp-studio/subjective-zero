@@ -20,7 +20,7 @@ struct SZTurnBreakdownView: View {
     let turnCaption: String?
     let events: [SZTurnEvent]
     /// The Profiler record this breakdown belongs to (the runID for run-owned data, else the
-    /// message id) — a VALUE, so the row's Equatable render skip survives; the action arrives
+    /// message id) — a value, so the row's Equatable render skip survives; the action arrives
     /// via the environment and renders only where the Profiler surface exists.
     let profilerTarget: UUID
     /// The turn's own message id — the prompt-inspection key (distinct from `profilerTarget`,
@@ -47,7 +47,7 @@ struct SZTurnBreakdownView: View {
         return total.detail.map { "\(head) · \($0)" } ?? head
     }
     /// Rollup rows render as a hierarchy: the `run.total` row leads spanning the whole track, its
-    /// children (director turns, node fleets) sorted by start beneath it. Sorted at RENDER, not
+    /// children (director turns, node fleets) sorted by start beneath it. Sorted at render, not
     /// just at fold, so rollups persisted by older builds read correctly too.
     private var rows: [SZTurnEvent] {
         guard turnCaption == nil else { return events }
@@ -71,7 +71,7 @@ struct SZTurnBreakdownView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(effectiveCaption)
-                        // Points DOWN collapsed (the detail expands below), up once open — at the
+                        // Points down collapsed (the detail expands below), up once open — at the
                         // line's end a right-chevron reads as navigation, not disclosure.
                         Image(systemName: "chevron.down")
                             .font(.system(size: 6.5, weight: .bold))
@@ -88,7 +88,7 @@ struct SZTurnBreakdownView: View {
                     captionAction("copy", icon: "doc.on.doc", help: "Copy breakdown") {
                         copyBreakdown()
                     }
-                    // Prompt inspection — only while the host still HOLDS this turn's prompt, so
+                    // Prompt inspection — only while the host still holds this turn's prompt, so
                     // it can never click into nothing.
                     if let viewTurnPrompt, turnCaption != nil, heldPromptTurnIDs.contains(turnID) {
                         captionAction("prompt", icon: "doc.text.magnifyingglass",
@@ -112,7 +112,7 @@ struct SZTurnBreakdownView: View {
                     // are distinct rows, and the array is immutable once rendered.
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, event in
                         GridRow {
-                            // Details fold INTO the name ("compile · ok"; a thinking row wears
+                            // Details fold into the name ("compile · ok"; a thinking row wears
                             // parentheses) — no fourth column to clip in a narrow chat panel,
                             // and thinking keeps full weight (it's usually the bottleneck).
                             titleText(for: event)

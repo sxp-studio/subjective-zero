@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One decoded agent pack — the in-memory shape of an agent FOLDER: `agent.json` (identity +
+// One decoded agent pack — the in-memory shape of an agent folder: `agent.json` (identity +
 // seat) beside `graph.json`, `prompts/*.md.mustache`, and `steps/<name>/Step.swift`. Pure
 // data: everything here was read off disk by `SZAgentPackLoader`, which also owns every
 // judgment about it (validation lives there, not here).
@@ -12,7 +12,7 @@ public struct SZAgentPack: Sendable, Equatable {
     /// The seat this pack claims, if any. Seat arithmetic (exactly one holder per seat over
     /// the loaded set) is the loader's, at the library level.
     public var seat: SZAgentSeat?
-    /// THE graph — one per agent. nil only when `graph.json` is missing or broken (a
+    /// The graph — one per agent. nil only when `graph.json` is missing or broken (a
     /// defect the loader reports; the pack still loads so its seat and siblings stay
     /// visible).
     public var graph: SZAgentGraph?

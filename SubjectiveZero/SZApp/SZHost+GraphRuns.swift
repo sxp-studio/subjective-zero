@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The agent-graph RUNS records — where the delivery's observation hooks become
+// The agent-graph runs records — where the delivery's observation hooks become
 // `SZAgentGraphRun` values the Agent Graph panel draws and `runs.json` archives. The
 // engine's note type (SZAI) maps onto the record's own trace entry (SZCore) here, and
 // nowhere else. Live records persist too — written at begin, coalesced per note, and
@@ -15,7 +15,7 @@ extension SZHost {
     // MARK: - Record lifecycle
 
     /// A traversal began — open its live record. `thread` groups a build with the work
-    /// children it dispatched (the build passes its OWN record id, which is what makes it
+    /// children it dispatched (the build passes its own record id, which is what makes it
     /// the thread's leader); a conversation passes nil and never joins a thread. `title` is
     /// the leader's ask.
     func beginAgentGraphRun(_ sighting: SZTraversalSighting, thread: UUID?, title: String? = nil) {
@@ -44,9 +44,9 @@ extension SZHost {
         persistAgentGraphRuns()
     }
 
-    /// A failed work child knows WHY it failed; without this the post-run sweep paints the
+    /// A failed work child knows why it failed; without this the post-run sweep paints the
     /// node with its generic never-compiled line and the reason is lost. Written as the
-    /// HOST's line, never the agent's: the traversal died (a spent budget, a dead CLI),
+    /// host's line, never the agent's: the traversal died (a spent budget, a dead CLI),
     /// which says nothing about a build the agent may already have promoted — run
     /// accounting must still count that node implemented. Whoever already explained the
     /// node keeps their words; cancelled work says nothing (a stopped run is not a failed node).
@@ -68,10 +68,10 @@ extension SZHost {
         }
     }
 
-    /// Run-task drain: seal anything of THIS run's still live as cancelled. A no-op on
+    /// Run-task drain: seal anything of this run's still live as cancelled. A no-op on
     /// every healthy path (each traversal seals itself as its engine returns) — the belt
     /// for the task unwinding abnormally. Thread-scoped, so a zombie draining after a
-    /// cancel-and-restart can never touch the NEW run's records.
+    /// cancel-and-restart can never touch the new run's records.
     func sealLeakedAgentGraphRuns(thread: UUID?) {
         guard let thread else { return }
         var sealed = false
@@ -86,7 +86,7 @@ extension SZHost {
         }
     }
 
-    /// Point one of the run's OWN lines — today its closing receipt — at its record, so the row
+    /// Point one of the run's own lines — today its closing receipt — at its record, so the row
     /// stays a way back into the run long after it scrolled into history. Not gated on
     /// tracing, unlike the Profiler's sibling link — the Agent Graph panel ships everywhere.
     /// The thread is passed, never looked up: with several runs live there is no "the" run, and
@@ -251,7 +251,7 @@ extension SZHost {
 }
 
 /// The engine's note, respelled as the record's own trace entry — the SZAI→SZCore map the
-/// record model asks its host to own. Wall-clock stamps stay the RECORD's business.
+/// record model asks its host to own. Wall-clock stamps stay the record's business.
 private extension SZAgentGraphRun.Entry {
     init(_ note: SZTraversalNote) {
         let phase: SZAgentGraphRun.Entry.Phase = switch note.phase {

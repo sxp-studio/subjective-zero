@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Data-edge topology — the one home of the DAG invariant. The runtime scheduler orders each frame
-// with `topologicalOrder` (Kahn); the connect surfaces ask `wouldCloseCycle` BEFORE adding a data
+// with `topologicalOrder` (Kahn); the connect surfaces ask `wouldCloseCycle` before adding a data
 // edge so a cycle is refused where it is attempted; and `repairDataCycles` is the load-time repair
 // for a persisted cycle (a hand-edited or externally-written file), so no project fails to open for
 // this reason.
 //
 // An arrow never constrains a data edge — a wish must not block a fact — so `wouldCloseCycle` reads
 // data only. Arrows do constrain each other: a ring of them asks for a ring of wires, which a DAG
-// cannot carry (feedback is the feedback node, never a cycle — RUNTIME). `wouldCloseIntentCycle` asks
+// cannot carry (feedback is the feedback node, never a cycle — docs/RUNTIME.md). `wouldCloseIntentCycle` asks
 // that, where an arrow is drawn.
 import Foundation
 
 extension SZGraph {
-    /// Kahn's algorithm over DATA edges (flow is authoring intent, not runtime order). Returns nil on a
+    /// Kahn's algorithm over data edges (flow is authoring intent, not runtime order). Returns nil on a
     /// cycle. Ties broken by graph node order for determinism. Self-loops and edges naming missing
     /// nodes are skipped — they cannot order anything.
     public func topologicalOrder() -> [SZNodeID]? {
@@ -43,7 +43,7 @@ extension SZGraph {
         return result.count == nodeIDs.count ? result : nil
     }
 
-    /// Would a DATA edge `from → to` close a cycle? Returns the offending node walk
+    /// Would a data edge `from → to` close a cycle? Returns the offending node walk
     /// (`from → to → … → from`, ready for a titled "A → B → A" message), nil if the edge is safe.
     /// A self-loop is refused here (`[from, from]`): the scheduler kernel deliberately skips
     /// self-loops rather than failing on them, so this guard is the only thing that stops one.
@@ -92,7 +92,7 @@ extension SZGraph {
     }
 
     /// Drop data edges until the graph orders again — the load-time repair for a persisted cycle.
-    /// While `topologicalOrder()` fails, the LAST cycle-participating data edge in `connections`
+    /// While `topologicalOrder()` fails, the last cycle-participating data edge in `connections`
     /// order goes (insertion order, so the newest edge is dropped first — deterministic). Returns
     /// the dropped edges in drop order.
     public mutating func repairDataCycles() -> [SZConnection] {

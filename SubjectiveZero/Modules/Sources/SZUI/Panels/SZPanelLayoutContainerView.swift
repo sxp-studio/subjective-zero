@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The rearrangeable panel container — renders the SZCore split tree as a FLAT ZStack of absolutely
-// positioned tiles, NOT nested split views. Flatness is the point: each panel's SwiftUI identity is
+// The rearrangeable panel container — renders the SZCore split tree as a flat ZStack of absolutely
+// positioned tiles, not nested split views. Flatness is the point: each panel's SwiftUI identity is
 // its SZPanelID (stable ForEach id), so re-parenting a panel in the tree just moves a rect — the
 // viewport's Metal view is never torn down and the node editor's zoom/pan and the chat draft survive
 // any rearrangement. Dividers draw on top and drag to resize.
 //
-// State-derived like every SZUI panel: takes the layout VALUE plus intent callbacks; the host owns
+// State-derived like every SZUI panel: takes the layout value plus intent callbacks; the host owns
 // the state (docs/UI.md). Geometry comes from SZPanelLayoutGeometry — this file only renders it.
 import SwiftUI
 import SZCore
@@ -14,7 +14,7 @@ import SZCore
 /// (A standalone constant: the container view is generic, so a static on it is awkward to name.)
 let szPanelGridSpaceName = "szpanelgrid"
 
-/// A pending dock from OUTSIDE the container (a popped-out window dragged over the main window):
+/// A pending dock from outside the container (a popped-out window dragged over the main window):
 /// the tinted rect to preview and the label spelling out the change. The host computes it from the
 /// pop-out drag (SZPopoutDockSession) and passes it down; the container just renders it with the
 /// same affordance as its own header drags.
@@ -35,7 +35,7 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
     /// content so the lights read as sitting inline with that header.
     private let windowControlsZone: CGRect?
     /// Margin above the tiles — defaults to the uniform outer gap; SZApp passes 0 with the hidden
-    /// titlebar so the top row's header IS the titlebar row (lights vertically centered in it).
+    /// titlebar so the top row's header is the titlebar row (lights vertically centered in it).
     private let topInset: CGFloat
     /// View ▸ Auto-Hide Panel Headers — passed through to every tile's chrome.
     private let autoHideHeaders: Bool
@@ -63,7 +63,7 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
     private let onToggleMaximize: (SZPanelID) -> Void
     private let onClonePanel: (SZPanelID) -> Void
     private let onPopOutPanel: (SZPanelID) -> Void
-    /// A header drag released OUTSIDE the container (dragged out of the window): tear the tile out
+    /// A header drag released outside the container (dragged out of the window): tear the tile out
     /// into its own window at the cursor. Gated by `canPopOut` like the header button.
     private let onTearOutPanel: (SZPanelID) -> Void
     private let content: (SZPanelID) -> Content
@@ -213,10 +213,10 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
         return (target, zone, SZPanelLayoutGeometry.dropPreviewRect(zone: zone, in: rect))
     }
 
-    /// Commit (or cancel) a header drag: over another panel → move; released OUTSIDE the window
+    /// Commit (or cancel) a header drag: over another panel → move; released outside the window
     /// (the gesture keeps tracking past the edge — its location just leaves the bounds) → tear
     /// the tile out into its own window, if its kind can pop out. Released in an in-window gap →
-    /// no-op, as ever. The margin keeps near-edge releases that are still visually INSIDE the
+    /// no-op, as ever. The margin keeps near-edge releases that are still visually inside the
     /// window (the titlebar strip above the container, the outer gaps) as cancels — tear-out
     /// means clearly past the edge, not one point over a boundary.
     private static var tearOutMargin: CGFloat { 40 }   // computed: stored statics don't fit generic types
@@ -309,7 +309,7 @@ public struct SZPanelLayoutContainerView<Content: View>: View {
 }
 
 /// One divider strip: a full AppKit view owning its hit area, drag, and cursor rect. This is the
-/// third cursor implementation and the one that CAN'T flicker: with a SwiftUI gesture view the
+/// third cursor implementation and the one that can't flicker: with a SwiftUI gesture view the
 /// window's cursor updates route to NSHostingView (arrow) while a tracking area asserts resize —
 /// they alternate per event. As the genuine hit-test owner, this view's `addCursorRect` is the only
 /// cursor authority over the strip, and the drag maps straight to the fraction callbacks. The
@@ -348,7 +348,7 @@ private struct SZPanelDividerView: NSViewRepresentable {
 
         // Passive cursor rects alone still lose to NSHostingView's tracking machinery on hover (the
         // drag worked only because mouseDragged sets the cursor explicitly). So: own tracking area,
-        // re-assert on enter AND every move. Unlike the earlier flicker, this now converges — the
+        // re-assert on enter and every move. Unlike the earlier flicker, this now converges — the
         // window routes cursorUpdate to the hit-test owner, which is this view.
         override func updateTrackingAreas() {
             super.updateTrackingAreas()
@@ -396,8 +396,8 @@ private struct SZPanelDividerView: NSViewRepresentable {
     }
 }
 
-/// The container's backdrop: paints the near-black window background AND drags the window when
-/// grabbed — but ONLY where no tile or divider sits (`passthroughRects` punch holes in its hit
+/// The container's backdrop: paints the near-black window background and drags the window when
+/// grabbed — but only where no tile or divider sits (`passthroughRects` punch holes in its hit
 /// area), so the gaps/margins around the tiles become the window's drag handle without stealing a
 /// single click from panel content or divider gestures. This replaces both the plain background
 /// Color and any titlebar-wide drag strip.

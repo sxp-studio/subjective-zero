@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Subprocess runner for spawning provider CLIs (claude, codex) and health checks.
-//
-// Swift-Concurrency-native (per Apple's Synchronization guidance: prefer concurrency, reach for a
-// lock only when concurrency isn't feasible). Going async removed the need for any lock at all —
-// output is accumulated inside one child task's *local* buffer (no shared mutable state), so there
-// is no NSLock/Mutex/@unchecked Sendable and no DispatchSemaphore poll-loop. Structured pieces:
-//   - output drain: `readabilityHandler` bridged to an `AsyncStream<Data>` (chunked, not byte-by-byte
-//     AsyncBytes), collected by a child task;
+// Swift-Concurrency-native (Apple's Synchronization guidance: reach for a lock only when concurrency
+// isn't feasible). Going async removed the need for one entirely — output accumulates in a single
+// child task's *local* buffer, so there is no shared mutable state, no NSLock/Mutex/@unchecked
+// Sendable and no DispatchSemaphore poll-loop. The pieces:
+//   - output drain: `readabilityHandler` bridged to an `AsyncStream<Data>` (chunked, not
+//     byte-by-byte AsyncBytes), collected by a child task;
 //   - termination: `terminationHandler` bridged to an `AsyncStream` signal;
-//   - timeouts: a task-group race against `Task.sleep` — a wall-clock deadline, and an optional
-//     inactivity deadline that every output chunk pushes forward (the drain and the watchdog share one
-//     atomic last-output timestamp; a plain counter, not a lock — see `SZActivityClock`);
+//   - timeouts: a task-group race against `Task.sleep` — a wall-clock deadline and an optional
+//     inactivity deadline every output chunk pushes forward (drain and watchdog share one atomic
+//     last-output timestamp; a plain counter, not a lock — see `SZActivityClock`);
 //   - cancellation: `withTaskCancellationHandler` SIGTERMs the process.
 // We signal by pid (Sendable Int32), never capturing the non-Sendable `Process` in a @Sendable
 // closure.
@@ -31,8 +30,8 @@ public struct SZProcessResult: Sendable {
     public var output: String          // stdout + stderr, interleaved
     /// Which deadline killed the run; nil when it ended on its own (or was cancelled).
     public var timeout: SZProcessTimeout?
-    /// Signal number when the process died to an uncaught signal (killed/crashed) OUT FROM UNDER
-    /// US — a plain `exitCode` can't tell `exit(9)` from SIGKILL. nil on normal exit and whenever
+    /// Signal number when the process died to an uncaught signal out from under us — a plain
+    /// `exitCode` can't tell `exit(9)` from SIGKILL. nil on normal exit and whenever
     /// the kill was ours: a spent budget (`timeout` names which deadline fired) or task
     /// cancellation (a user Stop is a choice, not a crash).
     public var uncaughtSignal: Int32?
@@ -53,7 +52,7 @@ public struct SZProcessResult: Sendable {
 /// Either way the child sees EOF — never the app's inherited stdin, which may stay open forever
 /// (a CLI that reads piped stdin to EOF, like `pi -p`, would block with zero output; verified
 /// pi 0.80.6, 2026-07-12).
-/// `onOutput` carries RAW BYTES, never text: a pipe read ends wherever the kernel says it does, so
+/// `onOutput` carries raw bytes, never text: a pipe read ends wherever the kernel says it does, so
 /// decoding one on its own would replace any multi-byte codepoint straddling that boundary with
 /// U+FFFD — permanently, and inside a JSONL line that makes the whole event unparseable. Consumers
 /// accumulate the bytes and decode at a boundary they own (a complete line).
@@ -161,7 +160,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         }
         let pid = process.processIdentifier
 
-        // Inactivity bound: `inactivityTimeout` seconds of SILENCE kills the turn, where every output
+        // Inactivity bound: `inactivityTimeout` seconds of silence kills the turn, where every output
         // chunk pushes the deadline forward — an agent still streaming progress is alive by definition,
         // however long the turn runs. `timeout` stays the wall-clock cap for a CLI that wedges (or
         // streams) forever. The drain task sees every chunk, so it stamps the clock; the watchdog in
@@ -190,12 +189,12 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         // The main process has exited (or been killed), so its buffered output drains in milliseconds.
         // But a descendant it spawned (codex forks the vendor binary; a killed tree can leak a fork that
         // outlived the snapshot) can inherit the pipe's write end and hold it open, so the read side may
-        // never hit EOF. Bound the drain so `run()` ALWAYS returns — otherwise the dispatch task group
+        // never hit EOF. Bound the drain so `run()` always returns — otherwise the dispatch task group
         // never completes and the run wedges with `isRunning` stuck true forever (the reported hang).
         let output = await Self.boundedDrain(collectTask, within: 3.0)
         let exitCode: Int32 = timedOut ? 124 : (process.isRunning ? -1 : process.terminationStatus)
         // `terminationStatus` is the signal number when the reason is `.uncaughtSignal`; not
-        // meaningful when the kill was OURS — timeout or cancellation — or while somehow still
+        // meaningful when the kill was ours — timeout or cancellation — or while somehow still
         // running. Excluding both keeps the field's contract ("the CLI died out from under us"):
         // a user Stop must never read as a crash.
         let uncaughtSignal: Int32? =
@@ -209,12 +208,12 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         )
     }
 
-    /// Signal `pid` AND every live descendant. The provider CLIs are wrappers (codex is a Node
+    /// Signal `pid` and every live descendant. The provider CLIs are wrappers (codex is a Node
     /// script that spawns the vendor binary as a grandchild), so signalling only the direct child
     /// orphans the process actually talking to the model — it keeps burning tokens after Stop.
     /// Foundation.Process can't put the child in its own process group (no `posix_spawn` attribute
     /// access, and parent-side `setpgid` fails post-exec), so this enumerates the tree via
-    /// `proc_listchildpids` at signal time: collect breadth-first FIRST, then signal deepest-first
+    /// `proc_listchildpids` at signal time: collect the whole tree breadth-first, then signal deepest-first
     /// so no still-live parent can respawn or reap into the gap. Inherently a snapshot — a process
     /// forking mid-kill can slip through; if that ever bites, the deeper fix is the posix_spawn +
     /// `POSIX_SPAWN_SETPGROUP` rewrite.
@@ -228,7 +227,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         for pid in pids.reversed() { kill(pid, signal) }
     }
 
-    /// Direct live children of `pid`. `proc_listchildpids` returns the ENTRY count, unlike
+    /// Direct live children of `pid`. `proc_listchildpids` returns the entry count, unlike
     /// `proc_listpids`'s bytes — verified empirically (two sleeping children → 2).
     /// The fixed buffer bounds a pathological fork storm, not normal use.
     private static func childPIDs(of pid: Int32) -> [pid_t] {
@@ -283,7 +282,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
         return output
     }
 
-    /// Wait for the process to exit, returning WHICH deadline — wall clock, or silence past
+    /// Wait for the process to exit, returning which deadline — wall clock, or silence past
     /// `inactivityTimeout` — won the race (nil = the process exited on its own). SIGTERMs on cancel.
     private static func awaitExit(_ terminations: AsyncStream<Void>, timeout: TimeInterval?,
                                   inactivityTimeout: TimeInterval? = nil, activity: SZActivityClock? = nil,
@@ -302,7 +301,7 @@ public struct SZSystemProcessRunner: SZProcessRunning {
                 }
                 if let inactivityTimeout, let activity {
                     group.addTask {
-                        // Sleep to the CURRENT silence deadline. A chunk that lands while we sleep moves
+                        // Sleep to the current silence deadline. A chunk that lands while we sleep moves
                         // the deadline, so on wake either it moved (loop and sleep again) or the window
                         // truly elapsed in silence.
                         while true {

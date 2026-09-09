@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A built node whose contract has moved since that build: classifying WHY, and the one-click way out.
+// A built node whose contract has moved since that build: classifying why, and the one-click way out.
 //
-// `SZNode.rebuildReason` is DERIVED — the build stamp (what the last promote compiled against) gives the two
+// `SZNode.rebuildReason` is derived — the build stamp (what the last promote compiled against) gives the two
 // benign states; `SZPortBindingAudit` over the live source gives the one fault state:
 // - `.contractChanged` — the contract declares ports the code hasn't implemented yet; the node draws, they are inert.
 // - `.intentChanged` — the prompt moved off the brief the build was written to; the fleet must regenerate.
@@ -12,10 +12,10 @@
 // the rebuild classifier cannot reach: `unreadableInputs` is the host's file audit, and `runtimeError` is
 // what the node said about itself (`ctx.reportError`, ABI v9).
 //
-// Classified by CONDITION, not by cause: a port the Director removed and one a human deleted by hand leave the
+// Classified by condition, not by cause: a port the Director removed and one a human deleted by hand leave the
 // node equally broken. Either way it heals the same two ways: a run picks it up (`runWorkSet` is built from
 // `needsImplementation`; a promote re-stamps it), or `stageRebuildFix` composes a message to the node's own
-// Coding Agent (never auto-sent — host-drafted messages COMPOSE).
+// Coding Agent (never auto-sent — host-drafted messages compose).
 import Foundation
 import SZCore
 import SZRuntime
@@ -48,7 +48,7 @@ extension SZHost {
 
     /// The live audit's human-readable errors for a built node (one line each), nil when the audit is clean
     /// or cannot run (no project / not built / unreadable source). Recomputed on demand — the fix draft and
-    /// the run-end accounting read the source as it is NOW, not a cached verdict.
+    /// the run-end accounting read the source as it is now, not a cached verdict.
     func liveAuditErrors(_ id: SZNodeID) -> String? {
         guard let node = store.project?.graph.node(id: id), let errors = auditErrors(node), !errors.isEmpty
         else { return nil }
@@ -94,7 +94,7 @@ extension SZHost {
             classifyRebuild(node: node.id)
         }
         // Files are a separate question and every node is a candidate — a node with a perfectly good
-        // build renders black when its file has gone. Kept OUT of the loop above deliberately: that one
+        // build renders black when its file has gone. Kept out of the loop above deliberately: that one
         // reads each `Node.swift` off disk, this one is a stat per file port.
         auditInputFiles()
     }
@@ -106,7 +106,7 @@ extension SZHost {
         for node in store.project?.graph.nodes ?? [] { classifyInputFiles(node: node.id) }
     }
 
-    /// Re-audit ONE node's file inputs and store the verdict — the file-side sibling of `classifyRebuild`.
+    /// Re-audit one node's file inputs and store the verdict — the file-side sibling of `classifyRebuild`.
     /// One `stat` per file port holding an unconnected, non-empty value; nothing here reads a node source
     /// or touches the GPU. Writes only on a real change, so a clean node costs a comparison.
     func classifyInputFiles(node id: SZNodeID) {
@@ -151,10 +151,10 @@ extension SZHost {
         nodeRuntimeErrors = live
     }
 
-    /// The pill's one-click fix: compose (never send) a message to the node's Coding Agent, and reveal that tab.
-    /// Mirrors the split/merge suggestion path.
+    /// The pill's one-click fix: compose (never send) a message that mentions the node, into the one
+    /// composer. Mirrors the split/merge suggestion path.
     ///
-    /// A `.sourceMismatch` says the source and the contract disagree — it does NOT say which one is stale, and
+    /// A `.sourceMismatch` says the source and the contract disagree — it does not say which one is stale, and
     /// the two repairs are opposites. A port the code reads may have been wrongly dropped from the contract (the
     /// bug this whole feature exists for: a Director re-declaring a node's ports and deleting its knobs), or it
     /// may have been deliberately removed and the read is the leftover. Telling the agent to "rewrite Node.swift

@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The spec of everything a step can read. It compiles into SZCore, and SZFactGen splices
-// the sentinel-marked region into the step kit verbatim — one source on both sides of the
-// ABI.
+// The spec of everything a step can read. It compiles into SZCore, and SZFactGen splices the
+// sentinel-marked region into the step kit verbatim — one source on both sides of the ABI.
 //
-// The model: a message is WORDS. Everything structural is world state, true between
-// messages (a run exists, an assignment stands). New machinery mints
-// world state; the message never grows.
+// The model: a message is words; everything structural is world state, true between messages (a run
+// exists, an assignment stands). New machinery mints world state; the message never grows.
 //
-// The consumer rule: every field's doc names the shipped reader. A fact nothing reads is
-// deleted. Growing the spec = add the field here, project it in SZWorld.
+// The consumer rule: every field's doc names the shipped reader. A fact nothing reads is deleted.
+// Growing the spec = add the field here, project it in SZWorld.
 //
 // Grammar (enforced by Plugins/SZFactGenCore, any other line fails the build): structs
-// `public struct SZ<Name>: Codable, Sendable {` (one must be SZFacts, the wire document);
-// one documented `public var name: Type` per line (Int, Int?, Bool, String, String?,
-// [String], UUID?, [UUID], [String: String], or an optional of a struct declared here);
-// `public init` blocks pass through unparsed; at most one `SZEffect` string enum.
-// Conveniences go below the end sentinel.
+// `public struct SZ<Name>: Codable, Sendable {` (one must be SZFacts, the wire document); one
+// documented `public var name: Type` per line (Int, Int?, Bool, String, String?, [String], UUID?,
+// [UUID], [String: String], or an optional of a struct declared here); `public init` blocks pass
+// through unparsed; at most one `SZEffect` string enum. Conveniences go below the end sentinel.
 import Foundation
 
 // SZFactGen:begin
@@ -56,7 +53,7 @@ public struct SZRun: Codable, Sendable {
     public var round: Int
     /// The retry budget, read off the settled edge's leash — the reconcile brief's `{{cap}}`.
     public var roundCap: Int
-    /// Steering messages folded into the NEXT brief, oldest first — the reconcile brief's `{{inbox}}`.
+    /// Steering messages folded into the next brief, oldest first — the reconcile brief's `{{inbox}}`.
     public var steers: [String]
     /// The run's standing instruction — the decompose brief's `{{instruction}}`.
     public var instruction: String

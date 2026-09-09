@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The typed per-node agent lifecycle state the host tracks during runs / chat turns / hot reloads —
 // one struct per node, keyed by SZNodeID.
-// The AGENT-facing wire stays strings (`agent_report_status` status values, the reconcile-prompt
-// blocker lines); this is the HOST-internal representation, converted at the MCP boundary.
+// The agent-facing wire stays strings (`agent_report_status` status values, the reconcile-prompt
+// blocker lines); this is the host-internal representation, converted at the MCP boundary.
 import Foundation
 
 /// A node's last observable agent/workflow phase. `.idle` = nothing reported (a fresh node); the rest
@@ -47,7 +47,7 @@ public struct SZNodeAgentState: Sendable, Equatable {
     /// The node's Coding Agent is mid-chat-turn (`ui_send_chat` to the node) — editor shows Coding +
     /// locks the card, exactly like a run does.
     public var isChatting: Bool
-    /// The node's OWN agent wrote this phase (`agent_report_status`), rather than the host writing it
+    /// The node's own agent wrote this phase (`agent_report_status`), rather than the host writing it
     /// on the agent's behalf (a provider that died, a spent turn budget, a failed hot reload).
     public var reportedByAgent: Bool
 

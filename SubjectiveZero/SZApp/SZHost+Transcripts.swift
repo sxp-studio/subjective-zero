@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Chat-transcript durability — the host side of the two-layer persistence split:
 //
-//  - PORTABLE: per-scope transcript sidecars in the .subz bundle (SZChatTranscriptIO). They travel
+//  - Portable: per-scope transcript sidecars in the .subz bundle (SZChatTranscriptIO). They travel
 //    with the project; on a machine with no resumable session, the cold-start recap (SZHost+Chat)
 //    replays this history so a fresh agent session catches up.
-//  - MACHINE-LOCAL: resumable provider session ids in agent-sessions.json (SZAgentSessionIO) — the
+//  - Machine-local: resumable provider session ids in agent-sessions.json (SZAgentSessionIO) — the
 //    same-machine fast path. Best-effort by design: the OS purging the temp working dirs doesn't
 //    break ~/.claude / ~/.codex session lookup, but providers may expire threads; a disk-restored
 //    session that fails its first resumed turn is dropped (self-heal in `sendChat`) and the next
@@ -27,7 +27,7 @@ extension SZHost {
     }
 
     /// A scope's durable view: completed messages only — the currently-streaming assistant message
-    /// and transient host notes ("(busy…)" rejections) are excluded. THE definition shared by flushes
+    /// and transient host notes ("(busy…)" rejections) are excluded. The definition shared by flushes
     /// and the cold-start recap, so the two can't drift on what counts as conversation.
     private func persistableMessages(for scope: SZChatScope) -> [SZChatMessage] {
         var messages = store.messages(for: scope).filter { !$0.transient }
@@ -39,11 +39,11 @@ extension SZHost {
 
     /// Flush the undelivered message queue to `.staging/message-queue.json` — wired to
     /// `mailbox.onChange`, so every enqueue/state change lands on disk (KB-scale, same no-dirty-
-    /// tracking stance as transcripts). Skips the write when the PERSISTABLE subset didn't change:
+    /// tracking stance as transcripts). Skips the write when the persistable subset didn't change:
     /// most transitions can't affect it (steers never persist; `.delivering` reloads as `.queued`
     /// anyway), and a reconcile drain would otherwise burst N byte-identical writes.
-    /// NOTE: `mailbox.reset()` deliberately does NOT fire onChange — project teardown must never
-    /// write an empty queue over the OLD project's file (see clearPerProjectState).
+    /// Note: `mailbox.reset()` deliberately does not fire onChange — project teardown must never
+    /// write an empty queue over the old project's file (see clearPerProjectState).
     func flushMessageQueue() {
         guard let url = loadedProjectURL else { return }
         let persistable = SZMessageQueueIO.persistable(mailbox.envelopes)
@@ -64,7 +64,7 @@ extension SZHost {
         try? SZTaskQueueIO.save(pendingTasks, suspended: admissionSuspended, projectURL: url)
     }
 
-    /// Bring back the asks that were still waiting when the app closed. A RUNNING task is not
+    /// Bring back the asks that were still waiting when the app closed. A running task is not
     /// restored — its claim, its fleet and its traversal died with the process, and re-admitting it
     /// would redo work that may already have landed.
     func restoreTaskQueue() {
@@ -86,7 +86,7 @@ extension SZHost {
         }
     }
 
-    /// EVERYTHING durable, on disk, now. This is the crash-recovery contract in one place: what ⌘S
+    /// Everything durable, on disk, now. This is the crash-recovery contract in one place: what ⌘S
     /// means, what a project switch freezes before the swap, what a Save As re-lands at the new
     /// path, and what quit writes. Named once so those four can never drift on what "saved" covers.
     /// Each member is idempotent and skips an unchanged write, so calling it often costs nothing.
@@ -141,17 +141,17 @@ extension SZHost {
     /// Restore the undelivered message queue from `.staging/message-queue.json` — the redelivery
     /// half of restore. Guards, in order: live scopes only; `.chat` only (a stray persisted steer
     /// must never leak into a fresh run); attachment urls re-derived from bundle paths; and the
-    /// NO-DOUBLE-EXECUTE check — an envelope whose bubble is already followed by a completed
+    /// no-double-execute check — an envelope whose bubble is already followed by a completed
     /// assistant reply finished its turn (the crash hit between the turn-end transcript flush and
     /// the queue flush), so redelivering would re-run a completed turn: token spend, second reply.
     /// `sanitized` guarantees a surviving assistant message means the turn really completed (empty
-    /// husks are dropped). Also surfaces ORPHANS: a trailing user bubble with no envelope and no
+    /// husks are dropped). Also surfaces orphans: a trailing user bubble with no envelope and no
     /// reply (queue file lost/older) gets a transient note instead of silently looking sent.
     /// Delivery starts when the switch's deferred pump resumes.
     private func restoreMessageQueue(live: Set<String>) {
         guard let url = loadedProjectURL else { return }
         var restoredIDs = Set<UUID>()
-        // Answered-check applies only to envelopes a turn actually STARTED for (`deliveryStartedAt`).
+        // Answered-check applies only to envelopes a turn actually started for (`deliveryStartedAt`).
         // Inferring the fold from the file's leading same-sender run dropped a message: type B while
         // A streams and B's bubble is followed by A's reply, which looks like an answer to B.
         let persisted = SZMessageQueueIO.load(projectURL: url)
@@ -162,8 +162,8 @@ extension SZHost {
             var restored = envelope
             for i in restored.message.attachments.indices { restored.message.attachments[i].rebase(in: url) }
             if let bubbleID = restored.transcriptMessageID {
-                // Deliveries are FIFO per scope, so only the FIRST pending envelope can have been
-                // mid-delivery at the crash — later envelopes' bubbles are followed by EARLIER
+                // Deliveries are FIFO per scope, so only the first pending envelope can have been
+                // mid-delivery at the crash — later envelopes' bubbles are followed by earlier
                 // messages' replies (replies append at the end, after every queued bubble), and
                 // treating those as "answered" silently dropped the later messages.
                 let messages = store.messages(for: scope)
@@ -176,7 +176,7 @@ extension SZHost {
             }
             mailbox.enqueue(restored)
         }
-        // Orphan sweep: a scope whose LAST persistable message is an unanswered user bubble with no
+        // Orphan sweep: a scope whose last persistable message is an unanswered user bubble with no
         // envelope will never get a reply — say so instead of letting it read as sent.
         for key in store.chat.keys {
             guard let scope = SZChatScope(key: key),
@@ -188,27 +188,26 @@ extension SZHost {
         }
     }
 
-    /// Delete a node through the host — THE delete path for both the editor panel (`onDeleteNodes`)
+    /// Delete a node through the host — the delete path for both the editor panel (`onDeleteNodes`)
     /// and the `ui_remove_node` MCP tool, so the two can't drift.
     @discardableResult
     func deleteNode(id: SZNodeID, origin: SZMutationOrigin = .user) -> Bool {
         deleteNodes(ids: [id], origin: origin)
     }
 
-    /// Batch node delete, done properly: store removal + chat-artifact purge + watcher stop, then ONE
-    /// persist + runtime reload (a marquee delete reloads once, not per node) — so deletion is real:
-    /// it survives relaunch (project.json no longer carries the node; an unpersisted delete would
-    /// zombie back amnesiac, its transcript already purged) and the live render drops the node now.
-    /// Mid-run this reloads the runtime exactly like `promoteStagedNode`/split/merge already do.
+    /// Batch node delete: store removal + chat-artifact purge + watcher stop, then one persist +
+    /// runtime reload (a marquee delete reloads once, not per node), so the delete is real: it survives
+    /// relaunch (project.json no longer carries the node; an unpersisted delete would zombie back
+    /// amnesiac, its transcript already purged) and the live render drops the node now. Mid-run this
+    /// reloads the runtime exactly like `promoteStagedNode`/split/merge already do.
     ///
-    /// Deliberately NOT removed: the node's `nodes/<id>/` folder (Node.swift + contract). With no undo
-    /// yet it's the only surviving copy of the node's source, so it stays as an orphan (invisible —
-    /// nothing references it; `watchNodeSources` skips non-graph folders). Files the node's file ports
-    /// brought into `media/` stay for the same reason and one more: with no undo, deleting them could
-    /// destroy the user's only copy of a file they long since cleared out of Downloads. TODO: folder
-    /// cleanup rides the undo/checkpoint layer when it ships. Ditto the wider asymmetry that add/move/connect/update
-    /// edits still persist only via run/promote — unifying edit persistence belongs to that command/
-    /// checkpoint layer, not a delete fix.
+    /// Deliberately not removed: the node's `nodes/<id>/` folder (Node.swift + contract). With no undo
+    /// it is the only surviving copy of the node's source, so it stays as an orphan — invisible, nothing
+    /// references it, and `watchNodeSources` skips non-graph folders. Files its file ports brought into
+    /// `media/` stay for that reason and one more: deleting them could destroy the user's only copy of a
+    /// file they long since cleared out of Downloads. TODO: folder cleanup rides the undo/checkpoint
+    /// layer when it ships, as does the wider asymmetry that add/move/connect/update edits still persist
+    /// only via run/promote — unifying edit persistence belongs there, not in a delete fix.
     @discardableResult
     func deleteNodes(ids: [SZNodeID], origin: SZMutationOrigin = .user) -> Bool {
         // The fence, not the view filter, is what actually stops a delete of a held node — the
@@ -227,7 +226,7 @@ extension SZHost {
         return true
     }
 
-    /// Reset one scope's durable chat state — THE shared teardown for the clear button and the node
+    /// Reset one scope's durable chat state — the shared teardown for the clear button and the node
     /// purge, so the artifact list can't drift between the two: durable attachment copies, transcript
     /// (store + sidecar), resumable session, and any queued Director message (it
     /// belongs to the conversation being reset — folding it into a later retry would resurrect
@@ -241,9 +240,9 @@ extension SZHost {
     }
 
     /// Chat-side cleanup for node ids leaving the graph (delete, split/merge commit and rollback):
-    /// the shared scope reset PLUS the node-level artifacts a clear deliberately keeps — the status
-    /// pill state (node state, not chat state), the open tab, and the source watcher (a removed
-    /// node's watcher must stop on EVERY removal path, or an edit to the orphaned `nodes/<id>/`
+    /// the shared scope reset plus the node-level artifacts a clear deliberately keeps — the status
+    /// pill state (node state, not chat state) and the source watcher (a removed
+    /// node's watcher must stop on every removal path, or an edit to the orphaned `nodes/<id>/`
     /// folder resurrects ghost agent state).
     func purgeChatArtifacts(for ids: some Sequence<SZNodeID>) {
         for id in ids {
@@ -279,7 +278,7 @@ extension SZHost {
     /// Restore-side sanitation for one scope: drop empty assistant husks a crash between flushes can
     /// leave (never-completed turns: empty text + thinking, nil duration — narration and guard
     /// replies always carry text, so this only matches true husks), and resolve each attachment's
-    /// url from its bundle-relative path against THIS machine's project URL.
+    /// url from its bundle-relative path against this machine's project URL.
     private static func sanitized(_ messages: [SZChatMessage], projectURL: URL) -> [SZChatMessage] {
         messages
             .filter { !($0.role == .assistant && $0.text.isEmpty && $0.thinking.isEmpty && $0.duration == nil) }

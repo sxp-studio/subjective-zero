@@ -5,14 +5,12 @@
 //   { "formatVersion": 1,
 //     "projects": { "<project path>": { "<scope key>": { "providerID": …, "sessionID": … } } } }
 //
-// Deliberately MACHINE-LOCAL, not a `.subz` sidecar: a provider session id is bound to this
-// machine's CLI state (~/.claude / ~/.codex) and its working-directory hash — on another computer
-// it is dead weight that would only churn a shared bundle. The portable catch-up path for a project
-// opened elsewhere is transcript replay (SZChatTranscriptIO + the host's cold-start recap); sessions
-// are just the fast path when the same machine relaunches. Keyed by the project's standardized path
-// (paths are machine-local by definition here — that's the point).
-// Each save holds an advisory lock on a sibling `.lock` file, so concurrent windows never lose entries.
-// A save also prunes projects whose path no longer exists on disk.
+// Machine-local, not a `.subz` sidecar: a provider session id is bound to this machine's CLI state
+// (~/.claude / ~/.codex) and its working-directory hash, so in a shared bundle it is dead weight that
+// only churns. Keyed by the project's standardized path. A project opened elsewhere catches up by
+// transcript replay (SZChatTranscriptIO + the host's cold-start recap); sessions are just the fast
+// path on a same-machine relaunch. Each save holds an advisory lock on a sibling `.lock` file, so
+// concurrent windows never lose entries, and prunes projects whose path is gone from disk.
 import Foundation
 
 public enum SZAgentSessionIO {

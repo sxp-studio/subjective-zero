@@ -116,14 +116,14 @@ extension SZHostBridge {
     /// working directory is a scratch dir and its tool allowlist has no shell. `nonisolated` and
     /// `static` because it touches no host state at all — that is what lets it run off the main actor.
     ///
-    /// The `reason` string comes from the SAME audit behind the node's pill, so an agent and the user
+    /// The `reason` string comes from the same audit behind the node's pill, so an agent and the user
     /// never describe one fault in two vocabularies.
     nonisolated static func agentCheckPath(_ arguments: [String: Any]) throws -> String {
         guard let raw = arguments.string("path"), !raw.isEmpty else {
             throw SZMCPError.message("agent_check_path needs `path`")
         }
         let path = (raw as NSString).expandingTildeInPath
-        // There is no working directory to be relative TO: nodes run inside the render loop, and this
+        // There is no working directory to be relative to: nodes run inside the render loop, and this
         // tool deliberately reads no project state. Say that rather than answering about some path the
         // caller did not mean.
         guard path.hasPrefix("/") else {
@@ -203,7 +203,7 @@ extension SZHostBridge {
 
     /// `rebuildReason` is derived, not encoded with the node, and its evidence is host state — both ride on the
     /// agent surface as `rebuildReason` / `rebuildDetail` (the audit's lines, or the ports off the build stamp),
-    /// so an agent sees WHY a node is flagged instead of guessing at the files. Absent when clean.
+    /// so an agent sees why a node is flagged instead of guessing at the files. Absent when clean.
     ///
     /// `buildStamp` goes the other way: it is host bookkeeping a promote rewrites, and an agent that sees it
     /// reads it as something to reconcile. The derived reason says everything about it an agent may act on.
@@ -246,12 +246,12 @@ extension SZHostBridge {
     }
 
     /// Tier 1: the offered libraries as the grouped block (`SZHost.libraryCategoriesBlock`), wrapped in
-    /// the tool-response framing (how to spend the deeper tiers). The framing stays OUT of the brief
+    /// the tool-response framing (how to spend the deeper tiers). The framing stays out of the brief
     /// embed — a brief carries its own (`reference-inline`), and the two must not ship together.
     private func libraryIndexText(query: String?) -> String {
         let categories = host.libraryCategoriesBlock(target: host.projectTarget, query: query)
             ?? query.map { "(no library node matches \"\($0)\")" } ?? "(the library is empty)"
-        // The framing template lives in the coding pack (the ONE home for agent prose;
+        // The framing template lives in the coding pack (the one home for agent prose;
         // the equivalence gate pins the bytes). No packs, or a render refusal → the bare
         // categories block, which is the payload's substance — degrade, never invent.
         guard let root = SZHost.graphAgentPacksRoot() else { return categories }
@@ -324,9 +324,9 @@ extension SZHostBridge {
         let dir = projectURL.appending(path: ".staging/nodes/\(id.uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try source.write(to: dir.appending(path: host.nodeSourceFileName), atomically: true, encoding: .utf8)
-        // The contract, when given, is decoded and re-encoded through the SAME serializer the live
+        // The contract, when given, is decoded and re-encoded through the same serializer the live
         // `node-contract.json` uses, so staged vs live diff on content only (never on float formatting).
-        // A contract staged in an earlier write of the SAME attempt stays (a source-only fix after a red
+        // A contract staged in an earlier write of the same attempt stays (a source-only fix after a red
         // compile keeps its knobs); a successful promote clears the whole staged folder.
         if let contract = arguments.object("contract") {
             let authored: SZNodeContract
@@ -334,7 +334,7 @@ extension SZHostBridge {
                 let raw = try JSONSerialization.data(withJSONObject: contract)
                 authored = try JSONDecoder().decode(SZNodeContract.self, from: raw)
             } catch {
-                // Same self-correction channel as a build failure. Node.swift IS staged at this point.
+                // Same self-correction channel as a build failure. Node.swift is staged at this point.
                 let msg = Self.contractSchemaError(error, then: "Fix node-contract.json and re-stage (\(host.nodeSourceFileName) was staged; the previous staged contract, if any, is untouched).")
                 host.recordBuildErrors(msg)
                 return SZJSONRPC.encode(["ok": false, "errors": msg])
@@ -345,7 +345,7 @@ extension SZHostBridge {
             }
             try SZProjectIO.contractData(authored).write(to: dir.appending(path: "node-contract.json"), options: .atomic)
         }
-        // Staging mirrors the LAST write: a card staged earlier and omitted now is removed, so a
+        // Staging mirrors the last write: a card staged earlier and omitted now is removed, so a
         // stale card can never re-promote over a live one the user has since hand-edited.
         let stagedCard = dir.appending(path: "Card.swift")
         if let card = arguments.string("card") {
@@ -390,8 +390,8 @@ extension SZHostBridge {
             host.recordBuildErrors(log)
             return SZJSONRPC.encode(["ok": false, "errors": log])
         case .ok:
-            // A staged contract that's PRESENT but doesn't decode must be a hard error the agent fixes —
-            // NOT silently dropped (which would promote a source whose ports the contract never declares →
+            // A staged contract that's present but doesn't decode must be a hard error the agent fixes —
+            // not silently dropped (which would promote a source whose ports the contract never declares →
             // dead/missing UI controls; the #knobs bug). Validate before promoting; source+contract stay
             // consistent.
             let stagedContract = projectURL.appending(path: ".staging/nodes/\(id.uuidString)/node-contract.json")
@@ -409,12 +409,12 @@ extension SZHostBridge {
                     return SZJSONRPC.encode(["ok": false, "errors": msg])
                 }
             }
-            // Audit against what the promote will actually PUT LIVE (`SZPortBindingAudit.auditForPromote`):
-            // the authored contract merged into the node, or — with no staged contract — the LIVE
+            // Audit against what the promote will actually put live (`SZPortBindingAudit.auditForPromote`):
+            // the authored contract merged into the node, or — with no staged contract — the live
             // contract itself, so a source-only re-stage never bypasses the gate. A port the code
             // reads/writes that the contract never declares is a hard error (nothing is promoted); a
             // declared-but-unused port and any boundary-merge conflict ride back as warnings.
-            // The merge happens ONCE, here: its result is what the promote writes, so the gate audits
+            // The merge happens once, here: its result is what the promote writes, so the gate audits
             // exactly what lands.
             var merged: SZNodeContract?
             if let node = host.store.project?.graph.node(id: id),
@@ -481,7 +481,7 @@ extension SZHostBridge {
     }
 
     /// A red Card.swift compile, surfaced through the same channel as a node build failure so the
-    /// coding agent's fix loop self-corrects — and knows it's the CARD, not the node, that failed.
+    /// coding agent's fix loop self-corrects — and knows it's the card, not the node, that failed.
     private static func cardCompileError(_ log: String, file: String) -> String {
         """
         Card.swift failed to compile (nothing was promoted — \(file) included):

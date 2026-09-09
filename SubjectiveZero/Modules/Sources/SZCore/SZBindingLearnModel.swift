@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The learn-gesture state machine: fed (seq, key, value01) samples from a controller node's
-// `lastEvent`/`lastKey` outputs, it elects the control the user moves AFTER arming. The control that
+// `lastEvent`/`lastKey` outputs, it elects the control the user moves after arming. The control that
 // was already moving at arm time is excluded — a learn armed mid-gesture must not catch the previous
 // knob still settling — and exclusion lifts once that control stays quiet for `exclusionQuiet`
 // (a deliberate re-twist of the same knob can then win). Pure value logic: the caller owns time
@@ -20,8 +20,8 @@ public struct SZBindingLearnModel: Equatable, Sendable {
     /// How long the arm-time control must stay quiet before it may compete again.
     public let exclusionQuiet: TimeInterval
     /// The exclusion's hard deadline after arm. The arm-time rule protects against a knob still
-    /// SETTLING when learn arms — a brief tail, not a performance. Without a cap, the natural
-    /// gesture (arm, then immediately twist the knob you last touched — which IS the excluded one)
+    /// settling when learn arms — a brief tail, not a performance. Without a cap, the natural
+    /// gesture (arm, then immediately twist the knob you last touched — which is the excluded one)
     /// extends the quiet-chain forever and reads as seconds of "nothing happens" until the user
     /// pauses, baffled (the hardware-checkpoint finding). Past the cap, a still-emitting excluded
     /// control is plainly the user's deliberate choice: it competes.
@@ -34,7 +34,7 @@ public struct SZBindingLearnModel: Equatable, Sendable {
     private var lastSeq: Int
 
     /// `armEvent` is the source's last event at arm time (nil when the source has never emitted) —
-    /// its control starts excluded, and only events with a LATER seq count at all.
+    /// its control starts excluded, and only events with a later seq count at all.
     public init(armEvent: (seq: Int, key: String)?, at now: Date,
                 exclusionQuiet: TimeInterval = 0.4, exclusionCap: TimeInterval = 0.8) {
         self.armedAt = now
@@ -62,7 +62,7 @@ public struct SZBindingLearnModel: Equatable, Sendable {
                 excludedLastSeen = now
                 return false
             }
-            // Quiet-then-back OR still going past the cap: a deliberate move. It competes.
+            // Quiet-then-back or still going past the cap: a deliberate move. It competes.
             self.excluded = nil
         }
 

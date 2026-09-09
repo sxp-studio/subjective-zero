@@ -211,7 +211,7 @@ public struct SZCodexProvider: SZProvider {
             ]
         }
         // codex `exec` has no per-tool allowlist (unlike claude's --allowedTools), and currently runs
-        // with a FULL approvals+sandbox bypass. A tighter setup — `--sandbox workspace-write` (no
+        // with a full approvals+sandbox bypass. A tighter setup — `--sandbox workspace-write` (no
         // bypass) — also works with MCP (the default `exec` sandbox is read-only, which blocks the
         // agent's writes; workspace-write is the right level).
         // TODO(SZ-codex-sandbox): switch to `--sandbox workspace-write` + flags-before-`resume`
@@ -263,7 +263,7 @@ enum SZCodexCatalogError: Error, CustomStringConvertible {
 
 /// Parses codex's `--json` jsonl. codex surfaces narration as `agent_message` items and tools as
 /// `mcp_tool_call` / `command_execution` items, plus optional `reasoning` summaries (→ `.thinking`).
-/// The final answer is the LAST `agent_message`, so messages are held: a superseded one becomes
+/// The final answer is the last `agent_message`, so messages are held: a superseded one becomes
 /// narration (`.thinking`) and the last is emitted once as `.reply` at the end — matching claude's
 /// reply/trace split. The turn's usage rides the final `turn.completed` event (recorded from 0.144.1;
 /// `cached_input_tokens` is a subset of `input_tokens`, so input needs no summing, and

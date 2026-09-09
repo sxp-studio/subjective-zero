@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Which nodes are on screen — the culling input for the live-preview watch set. Pure math over the
-// panel-local camera and SZNodeLayout's card rects (the SAME rects hit-testing and the LOD tiles
+// panel-local camera and SZNodeLayout's card rects (the same rects hit-testing and the LOD tiles
 // use, so "visible" here is exactly "drawn"). No SwiftUI, unit-tested headlessly.
 import CoreGraphics
 import SZCore

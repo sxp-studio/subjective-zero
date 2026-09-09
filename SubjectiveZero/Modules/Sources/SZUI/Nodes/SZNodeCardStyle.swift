@@ -34,7 +34,7 @@ enum SZNodeCardStyle {
     static let readOnlyValueColor = Color.white.opacity(0.55)
     static let chipFill = Color.white.opacity(0.08)
 
-    // Keyboard-editable fields read as inset WELLS (darker fill, hairline border, square-ish corners) —
+    // Keyboard-editable fields read as inset wells (darker fill, hairline border, square-ish corners) —
     // distinct from the raised capsule chips, which are pick-from-a-list (dropdowns) or read-only.
     static let fieldFill = Color.black.opacity(0.28)
     static let fieldStroke = Color.white.opacity(0.14)

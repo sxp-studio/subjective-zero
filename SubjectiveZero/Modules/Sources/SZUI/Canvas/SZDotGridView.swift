@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The node canvas's dotted background grid. Drawn in SCREEN space (a sibling of the transformed
+// The node canvas's dotted background grid. Drawn in screen space (a sibling of the transformed
 // content layer, not inside it): a world grid point at k·pitch lands at k·(pitch·zoom) + offset, so
 // tiling dots at `pitch·zoom` starting from `offset mod spacing` tracks pan/zoom exactly while dot
 // radius stays constant on screen (no scaleEffect blur) and the grid is infinite for free. Purely

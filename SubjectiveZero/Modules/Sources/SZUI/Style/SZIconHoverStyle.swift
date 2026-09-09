@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shared hover treatment for small icon buttons/links in the chat transcript and Profiler:
 // a subtle fill + brightened glyph on hover, dimmed while pressed — so every clickable glyph
-// LOOKS clickable before it's clicked. (The HUD's big buttons have their own chrome; this is
+// looks clickable before it's clicked. (The HUD's big buttons have their own chrome; this is
 // for the tiny inline ones.)
 import SwiftUI
 

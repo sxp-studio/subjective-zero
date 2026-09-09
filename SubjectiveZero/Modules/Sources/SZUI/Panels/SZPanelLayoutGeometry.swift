@@ -18,7 +18,6 @@ public enum SZPanelLayoutGeometry {
     /// look: rounded tiles floating on the window background).
     public static let outerGap: CGFloat = 8
 
-    /// Panel tile corner radius.
     public static let tileCornerRadius: CGFloat = 8
 
     /// Per-panel minimum content sizes (ports of the old SplitView `.frame(min…)` constraints; the

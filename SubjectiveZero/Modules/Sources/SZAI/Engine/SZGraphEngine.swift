@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The traversal engine: one delivered message, through one graph, to one conclusion. It
 // holds no host types — everything arrives through the SZTraversalServing / SZStepRunning /
-// SZModelRouting seams — so tests drive the real engine with stubs.
+// SZModelRouting seams — so tests drive the real engine with stubs. One message is one
+// traversal: door to conclusion, fleets and all, and the record's trace is the whole journey.
 //
 // Three node forms:
-// - step:     compiled async code; the ONLY home of routing intelligence (it may ask). The
-//             door is the step at the reserved `door` id, where every traversal begins.
+// - step:     compiled async code; the only home of routing intelligence (it may ask). The
+//             door, at the reserved `door` id, is where every traversal begins.
 // - turn:     a full agent turn; mechanically dumb — ok/error, nothing else.
-// - dispatch: fan the run's work set out and WAIT — the delivery supervises the set and
-//             returns its one settled summary; the node produces `settled` and routes.
-//             A retry round is the settled edge looping back under a `maxTraversals` leash.
-//
-// One message is one traversal: the engine runs from the door to the conclusion, fleets
-// and all, and the record's trace is the whole journey.
+// - dispatch: fans the run's work set out and waits; the delivery supervises the set and
+//             returns one settled summary, which the node routes on as `settled`. A retry
+//             round is the settled edge looping back under a `maxTraversals` leash.
 import Foundation
 import SZCore
 
@@ -110,7 +108,7 @@ public struct SZGraphEngine {
             var noteTurnID: UUID?
             switch node.form {
             case .step(let name):
-                // The snapshot is pinned HERE: the evaluation and every ask it makes see
+                // The snapshot is pinned here: the evaluation and every ask it makes see
                 // the same document, however long the step runs.
                 let askSlot = graph.askSlot(of: node)
                 let report = await steps.evaluate(
@@ -137,7 +135,7 @@ public struct SZGraphEngine {
                 }
                 // Effects: typed host actions the step requested with its outcome — an
                 // unknown name is a defect and nothing performs. Performed in the step's
-                // order, AFTER the step returned and BEFORE edge routing.
+                // order, after the step returned and before edge routing.
                 if !report.effects.isEmpty {
                     var validated: [SZEffect] = []
                     for effectName in report.effects {
@@ -166,7 +164,7 @@ public struct SZGraphEngine {
                     conclusion = .defect(node: id, detail: detail)
                     continue
                 }
-                // The ONE place a prompt is composed: a spawned turn whose node declares
+                // The one place a prompt is composed: a spawned turn whose node declares
                 // `context: conversation` reads the conversation above its brief. A resumed session
                 // already holds it, and an ask never gets it (asks render, they don't compose).
                 var prompt = rendered
@@ -201,7 +199,7 @@ public struct SZGraphEngine {
                 // A dispatch sends the run's work set — the only dispatchable list.
                 let items = host.facts().run?.workSet ?? []
                 let orders = items.map { SZWorkOrder(node: $0.uuidString) }
-                // The visit is RUNNING for the whole fleet phase — the card pulses and
+                // The visit stays running for the whole fleet phase — the card pulses and
                 // its tally counts up through the progress notes.
                 let visitOrdinal = ordinal
                 let summary = await host.deliver(orders: orders, to: dispatch.to) { [host] tally in

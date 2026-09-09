@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // @mention substrate — the canonical inline markup mentions live as inside stored chat text
-// (docs/UI.md "Mentions"). A mention addresses a graph ENTITY (`@project`, `@all`, a node by title);
+// (docs/UI.md "Mentions"). A mention addresses a graph entity (`@project`, `@all`, a node by title);
 // routing resolves the entity to its agent (SZChatRouting). The markup is markdown-link-shaped —
 // `@[Blur](node:UUID)` — so a renderer that knows nothing about mentions still shows something sane,
 // and the stored form is self-describing: transcripts stay portable with no side-table of ranges.
-// Display text is frozen at pick time (what the user actually said); the CURRENT title is resolved
+// Display text is frozen at pick time (what the user actually said); the current title is resolved
 // at render / expansion time by whoever holds the graph.
 import Foundation
 
@@ -12,7 +12,7 @@ import Foundation
 public enum SZMentionTarget: Hashable, Sendable {
     /// The project as a whole — routed to the project's Director Agent.
     case project
-    /// Every node in the graph (broadcast INTENT — routed to the Director Agent, which fans out;
+    /// Every node in the graph (broadcast intent — routed to the Director Agent, which fans out;
     /// never N parallel sends). Expansion enumerates the node set at egress time.
     case all
     case node(SZNodeID)
@@ -44,7 +44,7 @@ public enum SZMentionTarget: Hashable, Sendable {
 /// One run of a chat message: literal text, or a mention token.
 public enum SZMessageSegment: Equatable, Sendable {
     case text(String)
-    /// `display` is the title as picked (WITHOUT the leading `@`); rendered as `@display`.
+    /// `display` is the title as picked (without the leading `@`); rendered as `@display`.
     case mention(SZMentionTarget, display: String)
 }
 
@@ -101,7 +101,7 @@ public enum SZMentionMarkup {
         }
     }
 
-    /// The mention a message OPENS with (only whitespace text may precede it) — the recipient
+    /// The mention a message opens with (only whitespace text may precede it) — the recipient
     /// under the leading-mention routing policy. nil when the message doesn't lead with one.
     public static func leadingMention(in text: String) -> SZMentionTarget? {
         for segment in parse(text) {

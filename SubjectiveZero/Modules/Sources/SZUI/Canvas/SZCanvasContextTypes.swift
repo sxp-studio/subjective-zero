@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Canvas context-menu values — the dumb rows the custom right-click menu renders. The menu never
-// computes rows: the host derives suggestions (drafted MESSAGES, per the run-UX paradigm — the
+// computes rows: the host derives suggestions (drafted messages, per the run-UX paradigm — the
 // menu is "what can I say here"), the panel assembles the action rows from its own inputs, and
 // every activation routes back through closures.
 import CoreGraphics
@@ -15,7 +15,7 @@ public enum SZCanvasContextTarget: Equatable, Sendable {
     case canvas
 }
 
-/// One suggestion row — a complete draft message (mention tokens included), which clicking SENDS.
+/// One suggestion row — a complete draft message (mention tokens included), which clicking sends.
 /// `label` is the row's one-line preview (usually the draft's plainText).
 public struct SZContextSuggestion: Identifiable, Equatable, Sendable {
     public let id: UUID
@@ -30,7 +30,7 @@ public struct SZContextSuggestion: Identifiable, Equatable, Sendable {
 }
 
 /// One open right-click menu: the target under the click, the click point (panel space), and the
-/// suggestion and action rows SNAPSHOTTED at open (mid-run promotes don't reshuffle an open menu, and
+/// suggestion and action rows snapshotted at open (mid-run promotes don't reshuffle an open menu, and
 /// the action rows are not recomputed per render).
 struct SZContextMenuSession: Identifiable {
     let id = UUID()

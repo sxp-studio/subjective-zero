@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Bringing a picked or dropped file INTO the project, so a `.subz` is self-contained.
+// Bringing a picked or dropped file into the project, so a `.subz` is self-contained.
 //
 // A file port holds a bundle-relative path (`media/<uuid>/<name>`, see SZProjectMedia). Everything
 // that writes one funnels through `SZHost.setInputDefault`, so the import hangs off its tail plus
 // the one writer that bypasses it (`createMediaNodes`, which pins the default into the contract
 // directly).
 //
-// The copy is TWO-STAGE and never blocks the main actor — which drives the render loop, so a
+// The copy is two-stage and never blocks the main actor — which drives the render loop, so a
 // blocking copy would freeze the whole graph, and the slow cases are real (an external SSD is ~10s
 // for 4 GB, a camera card far worse). Stage one leaves the node on the original absolute path, which
 // exists and renders today; stage two flips it to the bundle copy when the bytes have landed. On an
@@ -17,7 +17,7 @@ import SZCore
 
 @MainActor
 extension SZHost {
-    /// What the RUNTIME should hold for a string value: a file port's portable value resolved against
+    /// What the runtime should hold for a string value: a file port's portable value resolved against
     /// the bundle, anything else verbatim. Mirrors what `SZRuntime.loadProject` seeds.
     func runtimeString(_ value: String, port: SZPort?) -> String {
         guard port?.ui?.kind == .filePicker, let projectURL = loadedProjectURL else { return value }

@@ -28,7 +28,7 @@ struct SZPortControl: View {
     /// Effective enum choices: the static `port.options` today, the node's dynamic list once Step 3 wires
     /// it through. Empty → an enum renders as a read-only chip.
     var options: [SZEnumOption] = []
-    /// Re-resolves the effective choices when the dropdown OPENS (Menu content is built lazily). The node
+    /// Re-resolves the effective choices when the dropdown opens (Menu content is built lazily). The node
     /// cards skip re-rendering while nothing they show changes, so a dynamic enum (e.g. the camera list)
     /// can't rely on body re-evaluation for freshness — pulling here keeps "open the menu, see the
     /// just-connected device" working. `nil` → the menu lists the snapshot in `options`.
@@ -131,7 +131,7 @@ struct SZPortControl: View {
         }
     }
 
-    /// Read-only numerics render per-component CELLS on the same scaffold as the editable fields
+    /// Read-only numerics render per-component cells on the same scaffold as the editable fields
     /// (parseable, column-aligned) but in the card's read-only language: borderless capsules with dim
     /// text — the crisp bordered square well stays exclusive to "you can type here". Matrices show
     /// their first 4 components (no trailing ellipsis — it pushed these rows off the shared right
@@ -146,7 +146,7 @@ struct SZPortControl: View {
         }
     }
 
-    /// The ONE numeric-cell scaffold — editable fields and read-only cells share this exact geometry
+    /// The one numeric-cell scaffold — editable fields and read-only cells share this exact geometry
     /// (card-wide width, trailing alignment, cell padding), so the column grid cannot drift.
     private func numericCell(_ content: some View) -> some View {
         content
@@ -273,15 +273,15 @@ struct SZPortControl: View {
     /// Present a file open panel and commit the chosen path. A pick has no meaningful live-preview state
     /// (unlike a slider drag), so it commits once with `persist: true`.
     ///
-    /// The port says what it accepts through `ui.fileTypes`, and the filter matches on the FILENAME
-    /// EXTENSION rather than on `allowedContentTypes`. That is deliberate:
+    /// The port says what it accepts through `ui.fileTypes`, and the filter matches on the filename
+    /// extension rather than on `allowedContentTypes`. That is deliberate:
     /// `UTType(filenameExtension: "mlpackage")` is nil on a Mac where nothing registered that type, so a
     /// content-type filter silently drops exactly the types worth declaring. Matching the extension needs
     /// no type to exist anywhere, and nothing here knows what any particular extension means.
     ///
-    /// Declaring types also allows DIRECTORIES: several formats are packages (a folder the Finder shows
+    /// Declaring types also allows directories: several formats are packages (a folder the Finder shows
     /// as one file), and whether this Mac knows that depends on what is installed. `treatsFilePackages‑
-    /// AsDirectories = false` keeps a REGISTERED package selectable as a file either way.
+    /// AsDirectories = false` keeps a registered package selectable as a file either way.
     private func chooseFile() {
         let types = port.ui?.acceptedExtensions ?? []
         let panel = NSOpenPanel()
@@ -364,7 +364,7 @@ final class SZFileTypeFilter: NSObject, NSOpenSavePanelDelegate {
     func panel(_ sender: Any, shouldEnable url: URL) -> Bool {
         guard !extensions.isEmpty else { return true }
         // A plain folder stays enabled so the user can still navigate into it; a package or file has to
-        // match. A package whose extension matches IS the thing being picked.
+        // match. A package whose extension matches is the thing being picked.
         return matches(url) || isPlainFolder(url)
     }
 

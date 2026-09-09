@@ -7,7 +7,7 @@
 // copied lock file is inert: flock state lives on the open file description, not in the file, so
 // the copy is unlocked and `acquire` takes it fresh.
 //
-// It is NOT a coordination channel: it only ever conflicts when two instances open the exact same
+// It is not a coordination channel: it only ever conflicts when two instances open the exact same
 // project. In the normal "each window is a different project" flow every instance owns its own
 // project's lock and stays fully editable.
 import Foundation

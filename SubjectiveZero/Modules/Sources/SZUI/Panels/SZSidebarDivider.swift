@@ -7,9 +7,9 @@
 // alternate per event, so the resize cursor flickers. As the real hit-test owner, this view's
 // cursor rect is the only authority over the strip.
 //
-// It reports the pointer's travel in POINTS from where the drag began; the caller adds that
+// It reports the pointer's travel in points from where the drag began; the caller adds that
 // to whatever size it stamped at `onDragBegan` and clamps. No geometry knowledge here — the
-// caller owns its own limits. Right is positive on a vertical strip, UP is positive on a
+// caller owns its own limits. Right is positive on a vertical strip, up is positive on a
 // horizontal one, which is the direction that grows the thing below it.
 import AppKit
 import SwiftUI

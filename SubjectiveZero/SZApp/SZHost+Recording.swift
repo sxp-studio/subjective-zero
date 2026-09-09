@@ -252,7 +252,7 @@ extension SZHost {
         persistAppState()
         // settle the permission at selection time, not at the record press: macOS applies Screen
         // Recording only after a relaunch, so record-time discovery costs a soundless recording
-        // AND a restart. First-ever pick fires the system prompt; already-denied gets our alert.
+        // and a restart. First-ever pick fires the system prompt; already-denied gets our alert.
         guard source != .off, !CGPreflightScreenCaptureAccess() else { return }
         if !CGRequestScreenCaptureAccess() {
             presentSoundPermissionAlert()

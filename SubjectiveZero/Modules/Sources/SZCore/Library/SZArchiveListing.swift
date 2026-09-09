@@ -82,7 +82,7 @@ public enum SZArchiveListing {
 
     /// One `tar -tv` line: mode, links, owner, group, size, a three-part date, then the path.
     ///
-    /// The path is taken by field POSITION, not by searching for a separator: a name may contain
+    /// The path is taken by field position, not by searching for a separator: a name may contain
     /// spaces, and a size like "2024" is indistinguishable from a year if you go looking for one.
     /// A line we cannot read is skipped rather than trusted, since the archive is refused on the
     /// ones we can read.

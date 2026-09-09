@@ -172,7 +172,7 @@ struct SZLibraryPanelModel {
     var showsSourceChips: Bool { sources.count >= 2 }
 
     /// Whether a row should name its library after the title. Only when more than one library is
-    /// offering rows AND the sections are not already libraries: otherwise two nodes with the same
+    /// offering rows and the sections are not already libraries: otherwise two nodes with the same
     /// name from different libraries are two identical-looking rows.
     var rowsNameTheirLibrary: Bool { grouping == .category && sources.count >= 2 }
 

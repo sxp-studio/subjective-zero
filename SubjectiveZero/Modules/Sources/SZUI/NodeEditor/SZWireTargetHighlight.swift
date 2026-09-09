@@ -20,7 +20,7 @@ struct SZWireTargetHighlight: View {
 
     var body: some View {
         if isActiveTarget {
-            // Pulse off the SAME shared clock as the status pill / structural-op glow, so every
+            // Pulse off the same shared clock as the status pill / structural-op glow, so every
             // breathing element in the UI swells in lockstep (see SZGraphOpGlow).
             TimelineView(.animation) { ctx in
                 let p = SZPulse.phase(at: ctx.date)

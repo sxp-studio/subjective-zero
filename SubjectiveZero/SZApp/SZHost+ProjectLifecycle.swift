@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Project lifecycle — the document-UI intents behind Project ▸ New / Open… / Open Recent /
-// Save As…, and the launch chain. This file owns WHEN each runs (panels, menu items, launch) and
+// Save As…, and the launch chain. This file owns when each runs (panels, menu items, launch) and
 // the error surface (NSAlert — testers must see why an open failed, not read a status line); the
 // mechanics live in SZHost (switchProject, relocateProject), which touches private host state.
 //
-// There is NO Save item for a placed project: it is written as it changes (persistProject on every
+// There is no Save item for a placed project: it is written as it changes (persistProject on every
 // edit), so one would imply dirty state that doesn't exist. An untitled project is the real case —
 // it has nowhere to save yet — so it shows Save… on ⌘S, which opens the Save As panel.
 //
 // Two classes of intent, and only one of them can hurt a working fleet:
-//  - PLACE the document (Save As): duplicate-and-relocate. Writes, tears nothing down, so agent
+//  - Place the document (Save As): duplicate-and-relocate. Writes, tears nothing down, so agent
 //    activity is no reason to refuse it.
-//  - REPLACE the document (New, Open, Open Recent): switchProject tears live runs down, so these
+//  - Replace the document (New, Open, Open Recent): switchProject tears live runs down, so these
 //    refuse while an agent owns the project.
 import AppKit
 import Foundation
@@ -19,9 +19,9 @@ import SZCore
 import UniformTypeIdentifiers
 
 extension SZHost {
-    /// New / Open / Open Recent REPLACE the document, so they refuse while an agent owns it:
+    /// New / Open / Open Recent replace the document, so they refuse while an agent owns it:
     /// `switchProject` tears live runs down, and their output would land in the next project's
-    /// store. An open counts too, so a second one can't start on top of one. Does NOT gate edits.
+    /// store. An open counts too, so a second one can't start on top of one. Does not gate edits.
     /// Menu items disable on this; the methods guard on it too (the MCP surface can race a click).
     var isBusyForProjectSwitch: Bool { agentsOwnProject || openingProject != nil }
 
@@ -32,9 +32,9 @@ extension SZHost {
 
     /// The agent half alone: what `switchProject` re-checks across its own suspensions, where the
     /// opening flag is its own and must not read as someone else's claim. The `chatInFlight` term
-    /// is NOT redundant with the claims: `cancelRun` releases eagerly while a killed CLI can stream
+    /// is not redundant with the claims: `cancelRun` releases eagerly while a killed CLI can stream
     /// for seconds more, and the physical stream is still writing during that window.
-    /// Queued-but-undelivered messages deliberately do NOT block (they persist and redeliver).
+    /// Queued-but-undelivered messages deliberately do not block (they persist and redeliver).
     var agentsOwnProject: Bool { isRunning || ledger.anyHeld || !chatInFlight.isEmpty }
 
     /// The `.subz` package content type for the save/open panels. Prefers the app's exported UTI
@@ -76,7 +76,7 @@ extension SZHost {
         }
         // Whether the fresh-project fallback below should become the remembered reopen target. Off
         // only when the remembered project is healthy but locked by another instance — then we boot
-        // a throwaway untitled here WITHOUT overwriting the shared `openProjectPath`.
+        // a throwaway untitled here without overwriting the shared `openProjectPath`.
         var recordFallbackInHistory = true
         if let path = lastOpenProjectPath, FileManager.default.fileExists(atPath: path) {
             do {
@@ -84,8 +84,8 @@ extension SZHost {
                 return
             } catch SZProjectLifecycleError.alreadyOpenElsewhere {
                 // Another running instance already owns the remembered project. It's healthy — keep
-                // it remembered — and boot THIS instance into a fresh untitled project below (so a
-                // second `open -n` launch gets its own window/project instead of colliding). Do NOT
+                // it remembered — and boot this instance into a fresh untitled project below (so a
+                // second `open -n` launch gets its own window/project instead of colliding). Do not
                 // record that throwaway as the reopen target, or we'd clobber the remembered path in
                 // the shared app-state while the other instance is still live.
                 print("[SZHost] last project already open in another instance — starting a fresh untitled project")
@@ -166,7 +166,7 @@ extension SZHost {
     }
 
     /// File ▸ Open… (⌘O). A `.subz` is a registered `com.apple.package` bundle, so the panel scopes
-    /// to that type. Both files AND directories stay selectable (a `.subz` reads as a file once
+    /// to that type. Both files and directories stay selectable (a `.subz` reads as a file once
     /// Launch Services registers the package UTI, as a plain folder before then), and the extension
     /// check on confirm is the backstop either way.
     func openProjectViaPanel() {
@@ -220,7 +220,7 @@ extension SZHost {
 
     /// A Save As that turned out to name the project we are already in. There is deliberately no
     /// Save item for a placed project — it is written as it changes — so this is not "saving", it is
-    /// landing the one thing automatic persistence cannot: a prompt still being typed. It must NOT
+    /// landing the one thing automatic persistence cannot: a prompt still being typed. It must not
     /// re-enter the panel, or picking your own project would bounce you straight back into it.
     private func saveInPlace() {
         flushPendingPromptEdit()
@@ -234,7 +234,7 @@ extension SZHost {
     }
 
     /// Copy the bundle, then relocate onto the copy — never a switch, which is what made a save
-    /// unsafe mid-run. Untitled → the temp folder goes once the new location is written AND
+    /// unsafe mid-run. Untitled → the temp folder goes once the new location is written and
     /// recorded, so a crash between the two still reopens one of them; saved → the source stays,
     /// as a duplicate does. Not async on purpose: everything after the panel is one uninterruptible
     /// MainActor stretch, and a signature that cannot suspend keeps a future `await` out of it.
@@ -257,7 +257,7 @@ extension SZHost {
         }
         guard panel.runModal() == .OK, var dest = panel.url else { return false }
         if dest.pathExtension != "subz" { dest.appendPathExtension("subz") }
-        // Re-read AFTER the panel: `runModal` spins a nested runloop that pumps the MainActor, so a
+        // Re-read after the panel: `runModal` spins a nested runloop that pumps the MainActor, so a
         // turn, a delivery or a promote can have landed while it was up.
         guard let sourceURL = loadedProjectURL, store.project != nil else { return false }
         let source = sourceURL.resolvingSymlinksInPath().standardizedFileURL
@@ -266,7 +266,7 @@ extension SZHost {
         // bundle and the copy would then have nothing to read. Canonical paths, not URLs: the panel
         // and the loaded URL disagree about the directory flag for one and the same bundle.
         guard !SZProjectLocation.isSame(target, source) else { saveInPlace(); return true }
-        // A destination under whatever this save will REMOVE afterwards: inside the bundle it would
+        // A destination under whatever this save will remove afterwards: inside the bundle it would
         // recurse the copy, and for an untitled rescue the cleanup takes the whole `Projects/<uuid>/`
         // wrapper, so a sibling picked in that folder would be deleted moments after being written.
         let doomed = SZUntitledProjects.contains(sourceURL) ? source.deletingLastPathComponent() : source
@@ -281,7 +281,7 @@ extension SZHost {
             // One synchronous stretch from here: every host write into the bundle is MainActor, so
             // not suspending is what makes the copy atomic against the agents still working in it.
 
-            // Freeze the source COMPLETELY — the new location has to carry the whole recovery set
+            // Freeze the source completely — the new location has to carry the whole recovery set
             // (transcripts, both queues, run history, graph), not the graph alone. A rolling take
             // finalizes first: an AVAssetWriter cannot re-point its file, so the copy must carry a
             // finished take, not a half-written one that keeps growing at the old path.
@@ -303,7 +303,7 @@ extension SZHost {
                 }   // .cannotOpen (dest isn't lockable, e.g. not our bundle) → proceed to overwrite
                 try fm.removeItem(at: dest)
             }
-            // `.staging` travels: the destination IS the live document now, so its undelivered
+            // `.staging` travels: the destination is the live document now, so its undelivered
             // messages, scheduled asks, feed epoch and the fleet's not-yet-promoted node sources
             // must move with it. The copied instance.lock is inert — flock state is per open file
             // description and is not copied — and `relocateProject` takes its own.
@@ -325,7 +325,7 @@ extension SZHost {
             store.mutate { $0.name = dest.deletingPathExtension().lastPathComponent }
             persistProject()
 
-            // LAST, and only now: the relocation has written the full set at the new path and
+            // Last, and only now: the relocation has written the full set at the new path and
             // recorded it as the reopen target, so removing the temp home can no longer strand us.
             if SZUntitledProjects.contains(sourceURL) {
                 try? fm.removeItem(at: sourceURL.deletingLastPathComponent())
@@ -341,7 +341,7 @@ extension SZHost {
 
     // MARK: - Close / quit guard
 
-    /// Prompt to rescue an UNTITLED project (one still in the temp `Projects/<uuid>/` home) before
+    /// Prompt to rescue an untitled project (one still in the temp `Projects/<uuid>/` home) before
     /// it's cleaned up. Saved projects autosave on every edit, so they never prompt. Returns true if
     /// the caller may proceed (saved elsewhere, discarded, or nothing to rescue); false only when the
     /// user cancels. Mirrors the prototype's single "you're about to lose the untitled project" gate.

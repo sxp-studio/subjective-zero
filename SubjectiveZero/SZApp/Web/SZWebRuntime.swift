@@ -464,7 +464,6 @@ extension SZWebRuntime: SZRenderBackend {
 // MARK: - Recording
 
 extension SZWebRuntime {
-    /// Whether a take is rolling.
     var isRecording: Bool { take != nil }
 
     /// The picture size a take is framed against: the take's own while rolling, else the page's

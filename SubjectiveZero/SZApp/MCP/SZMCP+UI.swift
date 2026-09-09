@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The `ui_*` MCP surface — user-equivalent graph edits (docs/MCP.md). These mirror what a user does
 // in the Node Editor; both land here so headless agent runs and user actions share one path. The edits
-// are thin arg-parsers over the named `SZStore` graph-edit ops (SZStore+GraphEdits.swift) — the SAME
+// are thin arg-parsers over the named `SZStore` graph-edit ops (SZStore+GraphEdits.swift) — the same
 // ops the SwiftUI editor calls, so user and agent edits ride one tested mutation path. The
 // `ui_run` entry point routes to the host orchestrator. (TODO: route the edits through the
 // Command/undo engine once undo/checkpoints ship.)
@@ -164,7 +164,7 @@ extension SZHostBridge {
                     "pinned": ["type": "boolean", "description": "custom only: pin the size against auto-measure"],
                     "plugs": ["type": "boolean", "description": "false folds the port rows away (needs a preview or custom body to show instead)"],
                  ]),
-            // The chat-tab and panel tools below are view/window navigation — no graph or render
+            // The panel tools below are view/window navigation — no graph or render
             // effect — so they are withheld from agents (`agentCallable: false`); only the human
             // (and the `.full` test bus) drives the workspace layout.
             tool("ui_show_panel", "Show a top-level panel (mirrors its View-menu toggle) — reopens at its remembered spot; a popped-out panel docks back instead. Returns the resulting layout tree.",
@@ -250,7 +250,7 @@ extension SZHostBridge {
     /// Agent placements ride the same snap-to-grid pref as human drags (Graph ▸ Snap to Grid) — the
     /// grid is the canvas's shared spatial vocabulary, so both input paths land on one lattice. The
     /// anchor is the card's top-left edge (SZNodeLayout.snappedCenter), so the returned center can sit
-    /// on half-cells — the handlers return the APPLIED x/y so the agent's world model tracks the truth.
+    /// on half-cells — the handlers return the applied x/y so the agent's world model tracks the truth.
     private func placedPosition(x: Double, y: Double, cardSize: CGSize) -> SZPoint {
         guard host.snapToGrid else { return SZPoint(x: x, y: y) }
         let snapped = SZNodeLayout.snappedCenter(CGPoint(x: x, y: y), size: cardSize)
@@ -292,9 +292,9 @@ extension SZHostBridge {
     /// Shares the drop's classifier + stagger (`SZMediaSource`) and its placement path
     /// (`host.createMediaNodes`), so a human drag and an agent call produce the same graph.
     ///
-    /// Two things the drop gets for free and this must do itself: a dropped file always EXISTS (the
+    /// Two things the drop gets for free and this must do itself: a dropped file always exists (the
     /// classifier reads the extension, never disk), and a stray type just bounces off the canvas. An agent
-    /// hands us strings, so every path is validated BEFORE anything is created — a rejected call leaves the
+    /// hands us strings, so every path is validated before anything is created — a rejected call leaves the
     /// graph untouched rather than half-built.
     private func uiAddSourceNode(_ arguments: [String: Any]) throws -> String {
         let paths = arguments.stringList("paths")
@@ -350,7 +350,7 @@ extension SZHostBridge {
         guard let kind = SZConnectionKind(rawValue: kindRaw) else {
             throw SZMCPError.message("invalid kind '\(kindRaw)' — expected \"data\" or \"flow\"")
         }
-        // Mid-run, refuse an edge onto a `.prompt` node that ISN'T the fleet's work — i.e. a node the user
+        // Mid-run, refuse an edge onto a `.prompt` node that isn't the fleet's work — i.e. a node the user
         // added on the canvas during this run. It's theirs; the fleet must not wire it (a stray edge would
         // also mutate a real work node's derived port set). Generated endpoints and work-set nodes pass.
         if host.isRunning {
@@ -371,7 +371,7 @@ extension SZHostBridge {
         let toPort = arguments.string("toPort") ?? "input"
         // Resolve each endpoint to a real socket. Flow sockets are portless (match on side+kind); data
         // sockets must name an existing contract port. A missing socket = an invalid/unknown port.
-        // `connectableSockets`, not `sockets`: the latter is what the CANVAS DRAWS, and a prompt card
+        // `connectableSockets`, not `sockets`: the latter is what the canvas draws, and a prompt card
         // draws no data dots until it's implemented. The Director's whole flow is to set a contract on a
         // draft node and then wire it — those ports exist the moment the contract lands.
         func resolveSocket(on node: SZNode, side: SZSocketSide, port: String) throws -> SZSocket {
@@ -411,7 +411,7 @@ extension SZHostBridge {
         }
         if kind == .data { try requireUnfenced([from, to]) }   // an arrow is open, see addConnection
         // A flow ref is the plain node-to-node marker unless the caller explicitly named a declared
-        // data port — then the flow edge is PINNED to that slot (`SZConnection.pinnedPort`), like a
+        // data port — then the flow edge is pinned to that slot (`SZConnection.pinnedPort`), like a
         // canvas drop on a blue dot. The "output"/"input" defaults never pin.
         func ref(_ node: SZNode, side: SZSocketSide, port: String, explicit: Bool) -> SZPortRef {
             guard kind == .flow else { return SZPortRef(node: node.id, port: port) }
@@ -430,8 +430,8 @@ extension SZHostBridge {
     }
 
     private func uiStop(_ arguments: [String: Any]) throws -> String {
-        // ONE graph, addressed by the thread the RUNS list shows — the others keep building.
-        // An id that does not PARSE is an error, never "no id": treating a truncated or misspelled
+        // One graph, addressed by the thread the runs list shows — the others keep building.
+        // An id that does not parse is an error, never "no id": treating a truncated or misspelled
         // thread as an absent one turns "stop this build" into "stop every build", which is the
         // one mistake this tool must not make silently.
         if let raw = arguments.string("run") {
@@ -456,7 +456,7 @@ extension SZHostBridge {
 
     private func uiUpdateNode(_ arguments: [String: Any]) throws -> String {
         guard let id = arguments.uuid("node") else { throw SZMCPError.message("ui_update_node needs `node` id") }
-        // Presentation + identity only. The port surface is `ui_edit_ports`' business: a whole-contract PUT here
+        // Presentation + identity only. The port surface is `ui_edit_ports`' business: a whole-contract put here
         // silently dropped every port the caller failed to re-send.
         //
         // Reject the old shape loudly. A caller still sending `contract` (an agent whose session predates the
@@ -508,7 +508,7 @@ extension SZHostBridge {
         // The grade never rides the node mutation — it is run-scoped host state, not node data
         // (persisting an orchestration hint onto the artifact graph is the P02 mistake).
         if let complexity { host.recordNodeGrade(id, complexity) }
-        // A blank prompt node that `startRun` kept OUT of the work set becomes real work the instant the
+        // A blank prompt node that `startRun` kept out of the work set becomes real work the instant the
         // Director gives it a prompt — join it to the run so the fleet builds it this pass, exactly as
         // `ui_edit_ports` and `ui_add_prompt_node` do. `result.raisedRebuild` covers only `.generated`
         // nodes, so without this a Director authoring a previously-excluded blank node during a run leaves
@@ -519,7 +519,7 @@ extension SZHostBridge {
            node.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
             host.noteRunCreatedWork([id])
         }
-        // Report the node's STATE, not what this call changed (same terms as `ui_edit_ports`): a node
+        // Report the node's state, not what this call changed (same terms as `ui_edit_ports`): a node
         // already awaiting a rebuild is still awaiting one.
         let stillNeedsRebuild = host.store.project?.graph.node(id: id)?.needsRebuild ?? result.raisedRebuild
         return SZJSONRPC.encode(["updated": true, "needsRebuild": stillNeedsRebuild])
@@ -540,7 +540,7 @@ extension SZHostBridge {
             }
             return (upsert, obj["remove"] as? [String] ?? [])
         }
-        // This tool declares a port SURFACE; `ui_set_input_default` is how an agent sets a VALUE. A
+        // This tool declares a port surface; `ui_set_input_default` is how an agent sets a value. A
         // file-port `def` that does change a value here rides the same import tail as any committed
         // write (`applyPortValueChanges`), so a machine path never persists.
         let inputs = try ports("inputs"), outputs = try ports("outputs")
@@ -568,7 +568,7 @@ extension SZHostBridge {
         // to be pushed, or the node keeps rendering the one the card no longer shows.
         host.applyPortValueChanges(node: id, result.changedValues)
 
-        // Report the node's STATE, not what this call changed: a node that was already awaiting a rebuild is
+        // Report the node's state, not what this call changed: a node that was already awaiting a rebuild is
         // still awaiting one, and answering `needsRebuild: false` because *this* edit didn't raise the flag
         // would tell the Director its node is current when it is not.
         let stillNeedsRebuild = host.store.project?.graph.node(id: id)?.needsRebuild ?? result.raisedRebuild
@@ -626,7 +626,7 @@ extension SZHostBridge {
                                        instruction: arguments.string("instruction")) else {
             throw SZMCPError.message("cannot split \(node) (missing node, pieces < 2, no project, or no run could start)")
         }
-        // `staged` is the truth the caller needs: the pieces exist but are HIDDEN, and the original still
+        // `staged` is the truth the caller needs: the pieces exist but are hidden, and the original still
         // renders, until the run commits them (or rolls them back). `running` is the live host state — a
         // staged op may have started a run or joined one already in flight.
         return SZJSONRPC.encode(["pieces": ids.map(\.uuidString), "staged": run, "running": host.isRunning])
@@ -695,7 +695,7 @@ extension SZHostBridge {
         return NSNull()
     }
 
-    /// Activate a profile (or Off) through the SAME host mutator as AI Settings, so the busy
+    /// Activate a profile (or Off) through the same host mutator as AI Settings, so the busy
     /// guard, persistence, and session affinity are the one shipped behavior.
     private func uiSetRoutingProfile(_ arguments: [String: Any]) throws -> String {
         // null strips to absent at dispatch, so null, "" and omitted all mean Off.
@@ -721,7 +721,7 @@ extension SZHostBridge {
         ])
     }
 
-    /// The profile SZ_MODEL_ROUTING pins by NAME — nil when unset or when the value is only the
+    /// The profile SZ_MODEL_ROUTING pins by name — nil when unset or when the value is only the
     /// 0/1 switch (kill / app-state governs).
     static var envPinnedRoutingProfileName: String? {
         switch SZHost.modelRoutingEnv {
@@ -732,7 +732,7 @@ extension SZHostBridge {
 
     private func uiRun(_ arguments: [String: Any]) -> String {
         let instruction = arguments.string("instruction") ?? ""
-        // Naming nodes SCOPES the task to them — the only way two asks can be concurrent.
+        // Naming nodes scopes the task to them — the only way two asks can be concurrent.
         let nodes = Set((arguments["nodes"] as? [Any] ?? [])
             .compactMap { ($0 as? String).flatMap(UUID.init(uuidString:)) })
         // A turn inside a run may not schedule another: its run already dispatches a fleet off
@@ -749,20 +749,20 @@ extension SZHostBridge {
                     + "ui_send_chat.",
             ])
         }
-        // NOT gated on "something is already running" — that is the whole point: an ask over
+        // Not gated on "something is already running" — that is the whole point: an ask over
         // other nodes starts alongside. Only a claim it cannot get makes it wait, and that is
         // `startRun`'s own verdict below.
-        // Called from the Director Agent's OWN streaming chat turn: starting now would race that
+        // Called from the Director Agent's own streaming chat turn: starting now would race that
         // turn on the same transcript (deliver's one-in-flight-marker-per-scope invariant), so the
-        // run is MINTED — the door's `requestBuild` lane, one home for supersede + narration —
+        // run is minted — the door's `requestBuild` lane, one home for supersede + narration —
         // and admitted at the pump's head when that turn's claim frees.
         if host.chatInFlight.contains(SZChatScope.directorKey) {
             host.mintRun(instruction: instruction, nodes: nodes)
             return SZJSONRPC.encode(["status": "queued",
                                      "detail": "the run starts when your current turn ends"])
         }
-        // The START's own answer, not `isRunning`: with several runs live, another one being in
-        // flight says nothing about whether THIS ask started.
+        // The start's own answer, not `isRunning`: with several runs live, another one being in
+        // flight says nothing about whether this ask started.
         // `narrateContention: false` — the `.waiting` branch below mints the ask, so the transient
         // "wait for it to finish, then build again" line would be advice to do what just happened
         // automatically, immediately contradicted by the queue's own line.
@@ -823,7 +823,7 @@ extension SZHostBridge {
         // carries its id so the caller can poll `ui_message_status`.
         switch host.sendChat(scope: scope, message: message, origin: .agent) {
         case .rejected:
-            // A pre-flight refusal (provider/host not ready, dead mention) — the message will NOT
+            // A pre-flight refusal (provider/host not ready, dead mention) — the message will not
             // deliver. The old wire meaning of "sent" was "a turn started"; answering that here
             // would tell the caller a dropped message succeeded.
             return SZJSONRPC.encode(["status": "rejected", "scope": scope.key,
@@ -861,7 +861,7 @@ extension SZHostBridge {
         let value = try Self.portValue(portModel.type, from: arguments["value"])
         try requireUnfenced([node])
         // The host clamps a slider port to its declared range, exactly as the slider does. Echo the
-        // APPLIED value (like ui_move_node echoes the snapped x/y) so the agent's world model tracks
+        // applied value (like ui_move_node echoes the snapped x/y) so the agent's world model tracks
         // the truth instead of the value it asked for.
         let applied = host.setInputDefault(node: node, port: port, value: value, origin: .agent)
         var response: [String: Any] = ["set": port]
@@ -890,8 +890,8 @@ extension SZHostBridge {
     private func uiToggleDisplay(_ arguments: [String: Any]) throws -> String {
         guard let node = arguments.uuid("node") else { throw SZMCPError.message("ui_toggle_display needs `node`") }
         guard let port = arguments.string("port") else { throw SZMCPError.message("ui_toggle_display needs `port`") }
-        // Reject what the node card can't offer: the monitor icon renders for a `texture` OUTPUT and
-        // nothing else (SZNodeView.outputRow) — note it does NOT require `display: true`, which only
+        // Reject what the node card can't offer: the monitor icon renders for a `texture` output and
+        // nothing else (SZNodeView.outputRow) — note it does not require `display: true`, which only
         // picks the run's default endpoint. `store.setRenderEndpoint` enforces the same rule but merely
         // returns false, and `toggleDisplay` then hands back the unchanged endpoint — indistinguishable
         // from a legitimate clear. Reject here so `{endpoint: null}` can only ever mean "cleared".
@@ -899,7 +899,7 @@ extension SZHostBridge {
         guard let outputPort = outputs?.first(where: { $0.name == port }), outputPort.type == .texture else {
             throw SZMCPError.message("node \(node) has no texture output port '\(port)' — call agent_read_node to see its ports")
         }
-        // A STAGED split/merge piece isn't on the canvas: the editor strips it from the drawn graph and from
+        // A staged split/merge piece isn't on the canvas: the editor strips it from the drawn graph and from
         // hit-testing (`SZNodeEditorPanel.contentGraph` / `nodeHit`), so its monitor icon cannot be clicked.
         // The Director, which reads the raw graph, otherwise "helpfully" parks the viewport on the unbuilt
         // final stage — a black viewport for the whole run, and a dangling endpoint if the op rolls back.
@@ -922,7 +922,7 @@ extension SZHostBridge {
         guard let modeRaw = arguments.string("mode"), let mode = SZNodeBodyMode(rawValue: modeRaw) else {
             throw SZMCPError.message("ui_set_node_body needs `mode` ∈ {none, preview, custom}")
         }
-        // The same host op as the card's photo toggle and the context-menu card toggle — ONE
+        // The same host op as the card's photo toggle and the context-menu card toggle — one
         // resolve+apply choreography (validation, store write, stale thumb drop, persist,
         // watch-set refresh) for human and agent edits. Its errors are the agent's guidance.
         try requireUnfenced([id])
@@ -1058,8 +1058,8 @@ extension SZHostBridge {
             case let v?: "\(v)"
             }
         }
-        // A numeric string is parsed with the JSON number grammar, NOT `Double(_:)` — which also accepts
-        // "nan", "inf" and hex floats ("0x1p3"). And whatever the form, the value must be FINITE: a NaN
+        // A numeric string is parsed with the JSON number grammar, not `Double(_:)` — which also accepts
+        // "nan", "inf" and hex floats ("0x1p3"). And whatever the form, the value must be finite: a NaN
         // compares false against every bound, so it survives the slider's clamp and lands in the runtime's
         // uniform buffer as a black frame nobody can trace back to a tool call.
         func finite(_ value: Double?) -> Double? { (value?.isFinite ?? false) ? value : nil }
@@ -1076,7 +1076,7 @@ extension SZHostBridge {
             }
             let numbers = elements?.compactMap { finite(($0 as? NSNumber)?.doubleValue) }
             // One refusal for every way the array can be wrong (missing, mistyped entry, wrong arity), and
-            // like the others it names what the agent SENT — a count would answer a question nobody asked.
+            // like the others it names what the agent sent — a count would answer a question nobody asked.
             guard let numbers, numbers.count == elements?.count, numbers.count == count else {
                 throw SZMCPError.message("value must be an array of \(count) finite numbers (got \(got()))")
             }
@@ -1130,9 +1130,8 @@ extension SZHostBridge {
 
     private func uiClosePanel(_ arguments: [String: Any]) throws -> String {
         let id = try panelIDArgument(arguments, key: "panel")
-        // The close no-ops on the last panel and on one that isn't open (tile OR pop-out). Report
-        // what happened rather than echoing a layout that silently didn't change (cf.
-        // ui_close_chat_tab's Director refusal).
+        // The close no-ops on the last panel and on one that isn't open (tile or pop-out). Report
+        // what happened rather than echoing a layout that silently didn't change.
         guard host.panelLayout.contains(id) || host.isPoppedOut(id) else {
             return refusedPanelOp("closed", "the \(id.token) panel isn't open")
         }
@@ -1164,7 +1163,7 @@ extension SZHostBridge {
     private func uiClonePanel(_ arguments: [String: Any]) throws -> String {
         let source = try panelIDArgument(arguments, key: "panel")
         // Diagnose the refusal precisely — the gates mirror canClonePanel's, spelled out so the
-        // caller learns WHICH one bit.
+        // caller learns which one bit.
         guard source.kind.maxInstances > 1 else {
             return refusedPanelOp("cloned", "\(source.kind.rawValue) isn't cloneable")
         }
@@ -1233,7 +1232,7 @@ extension SZHostBridge {
     }
 
     /// A structured panel-op refusal: `{<verb>: false, reason, layout, popped_out_panels}`.
-    /// The token array is deliberately NOT named "popped_out": that is ui_popout_panel's verb key,
+    /// The token array is deliberately not named "popped_out": that is ui_popout_panel's verb key,
     /// and a dictionary literal with a duplicate key traps at runtime.
     private func refusedPanelOp(_ verb: String, _ reason: String) -> String {
         SZJSONRPC.encode([verb: false, "reason": reason, "layout": panelLayoutObject(),

@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One RUN of an agent graph — a single message's whole journey as a record: who received
+// One run of an agent graph — a single message's whole journey as a record: who received
 // it, the ordered trace (entry 1 is the door visit, whose outcome says what arrived), and
 // the conclusion. The record carries no kind and derives none: `thread` groups a parent
 // traversal with the work children it dispatched, and everything the list needs is that
 // structure. The host begins a record at delivery, feeds it trace entries, and seals it on
-// the conclusion. The mutation RULES live here so they are testable without a host.
+// the conclusion. The mutation rules live here so they are testable without a host.
 import Foundation
 
 public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     public var id: UUID
     /// The traversing agent's pack id ("director", "coding").
     public var agent: String
-    /// The build THREAD this traversal belongs to — the build traversal's own id, shared
+    /// The build thread this traversal belongs to — the build traversal's own id, shared
     /// by the work children it dispatched. nil = a standalone conversation.
     public var thread: UUID?
     /// For a dispatched work child: the node id it serves.
@@ -27,7 +27,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         title.flatMap { let n = SZBuildName.short($0); return n.isEmpty ? nil : n }
     }
     public var startedAt: Date
-    /// nil while the traversal is under way — the record is LIVE. Live records persist too;
+    /// nil while the traversal is under way — the record is live. Live records persist too;
     /// one restored still live was interrupted (`sealInterrupted`).
     public var endedAt: Date?
     /// The executed trace, in traversal order — loops unrolled, one entry per node visit.
@@ -36,7 +36,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     public var conclusion: Conclusion?
     public var isLive: Bool { endedAt == nil }
 
-    /// Whether this record LEADS its thread — the parent traversal whose own id is the
+    /// Whether this record leads its thread — the parent traversal whose own id is the
     /// thread id, which its dispatched children share. Structure, not classification:
     /// drives list ordering (the panel follows the thread's spine) and the cap budgets
     /// (children outnumber parents many to one).
@@ -85,14 +85,14 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     public struct Entry: Sendable, Equatable, Identifiable, Codable {
         /// Position in the traversal, the engine's own numbering (1 is the door).
         public var ordinal: Int
-        /// The graph node this entry is a visit OF.
+        /// The graph node this entry is a visit of.
         public var node: String
         public var phase: Phase
         /// The outcome the node produced, once settled.
         public var outcome: String?
         /// A failed entry's reason — agent-reported words, preserved verbatim.
         public var detail: String?
-        /// A dispatch visit's fleet tally, amended on every settle WHILE the visit runs —
+        /// A dispatch visit's fleet tally, amended on every settle while the visit runs —
         /// per entry, because a retry loop visits the dispatch twice and each visit owns
         /// its own set.
         public var tally: Tally?
@@ -102,7 +102,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         /// The transcript message this turn streamed into — where a card reads its activity
         /// and tokens, and the key to the prompt it actually sent. nil on every non-turn visit.
         public var turnID: UUID?
-        /// HOST-stamped wall clock (`note` stamps on first sight / settle) — never
+        /// Host-stamped wall clock (`note` stamps on first sight / settle) — never
         /// engine-stamped. Persisted with the trace.
         public var startedAt: Date?
         public var endedAt: Date?
@@ -136,7 +136,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             return endedAt.timeIntervalSince(startedAt)
         }
 
-        // An absent value is NOT encoded — no key that says nothing.
+        // An absent value is not encoded — no key that says nothing.
         private enum CodingKeys: String, CodingKey {
             case ordinal, node, phase, outcome, detail, tally, generation, turnID, startedAt, endedAt
         }
@@ -174,7 +174,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
 
     // MARK: - Conclusion and tally
 
-    /// How a traversal ENDED — the closed vocabulary (`SZTraversalEnding`), respelled as a
+    /// How a traversal ended — the closed vocabulary (`SZTraversalEnding`), respelled as a
     /// Codable archive value so the sidecar's format is owned here.
     public enum Conclusion: Sendable, Equatable, Codable {
         case ended
@@ -184,7 +184,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         /// never reported by a traversal. Its own class: a Stop is someone's decision and a
         /// truncated run is nobody's, and the panel must not read them as the same event.
         case interrupted
-        /// The graph REFUSED the work and said why — not a failure (nothing broke), not an
+        /// The graph refused the work and said why — not a failure (nothing broke), not an
         /// ending (the work was deliberately not done): its own class.
         case declined(reason: String)
         /// The traversal's own integrity broke — recorded loudly rather than crashed on.
@@ -200,8 +200,8 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             }
         }
 
-        /// THE word for this ending — five across the whole app, one per state. It lives here, not
-        /// on the badge that draws it, because a word is DATA: the strip, the RUNS list, a
+        /// The word for this ending — five across the whole app, one per state. It lives here, not
+        /// on the badge that draws it, because a word is data: the strip, the runs list, a
         /// transcript receipt and the `debug_*` MCP surface all have to say the same thing, and
         /// only the colour is presentation (`SZRunBadge.style(for:)` pairs one with the other).
         /// A driver that had to invent its own word from the case names would be a second
@@ -211,12 +211,12 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
             // A traversal that broke and one whose integrity broke are one word: both mean the
             // work did not land, and nothing downstream acts on the difference.
             case .failed, .defect: "failed"
-            // Stopped and interrupted are ONE word: both mean unfinished with nothing broken.
+            // Stopped and interrupted are one word: both mean unfinished with nothing broken.
             // Which it was stays in the record, and in the row's tooltip.
             case .cancelled, .interrupted: "stopped"
-            // A DECISION, not an accident — never folded into failure.
+            // A decision, not an accident — never folded into failure.
             case .declined: "declined"
-            // "complete", not "end": a traversal that ran to its own finish SUCCEEDED, and
+            // "complete", not "end": a traversal that ran to its own finish succeeded, and
             // the word people read next to a green badge should say so.
             case .ended: "complete"
             }
@@ -237,10 +237,10 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
 
     // MARK: - The traversal feeding its record
 
-    /// Fold one reported entry in. The SEALED-RECORD GUARD is the generalized zombie
-    /// protection: once a record ended, nothing may write it. Same-`(ordinal, node)`
-    /// reports replace, PRESERVING the stamps: first sight stamps `startedAt`; the first
-    /// non-running report stamps `endedAt`; a re-emit never restamps.
+    /// Fold one reported entry in. Sealed-record guard: once a record ended, nothing may
+    /// write it. Same-`(ordinal, node)` reports replace, preserving the stamps: first sight
+    /// stamps `startedAt`; the first non-running report stamps `endedAt`; a re-emit never
+    /// restamps.
     public mutating func note(_ entry: Entry, at now: Date = Date()) {
         guard endedAt == nil else { return }
         var merged = entry
@@ -261,10 +261,10 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         }
     }
 
-    /// End the record: stamp the conclusion, flip EVERY still-running entry to `cancelled`
+    /// End the record: stamp the conclusion, flip every still-running entry to `cancelled`
     /// (the eager-cancel path arrives before their own settles ever will — and a fan-out
     /// leaves several visits open at once, not just the last), and close `endedAt`.
-    /// IDEMPOTENT and conclusion-guarded: a record that already carries a conclusion (its
+    /// Idempotent and conclusion-guarded: a record that already carries a conclusion (its
     /// task merely hasn't drained) keeps its real ending.
     public mutating func seal(conclusion: Conclusion, at now: Date = Date()) {
         guard endedAt == nil else { return }
@@ -278,7 +278,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         endedAt = now
     }
 
-    /// The restore policy for a record that was LIVE on disk: the app closed while it ran.
+    /// The restore policy for a record that was live on disk: the app closed while it ran.
     /// Sealed `.interrupted` at the trace's latest stamp (or the start), every flipped entry
     /// carrying the interrupted detail — it reads as an interrupted run, in place.
     public static let interruptedDetail = "the app closed while this run was in flight"
@@ -293,7 +293,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
     // MARK: - Reading the trace
 
     /// How often `node` was visited over the whole trace — any count above one puts the
-    /// visit mark on ALL of that node's entries.
+    /// visit mark on all of that node's entries.
     public func visits(of node: String) -> Int {
         trace.lazy.filter { $0.node == node }.count
     }
@@ -305,7 +305,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
 
     // MARK: - The list's rules
 
-    /// List order: live first, and among the live ones the thread's LEADER leads (it runs
+    /// List order: live first, and among the live ones the thread's leader leads (it runs
     /// for minutes while children come and go, and the head of the list is what the panel
     /// follows); then by start, newest first.
     public static func ordered(_ runs: [SZAgentGraphRun]) -> [SZAgentGraphRun] {
@@ -316,7 +316,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
         }
     }
 
-    /// The work children a thread dispatched. OLDEST FIRST on purpose: a band of lanes must not
+    /// The work children a thread dispatched. Oldest first on purpose: a band of lanes must not
     /// reshuffle as items settle, and `ordered` sorts live-first for the sidebar's benefit, not
     /// this one's. Read by both surfaces that draw the fleet — the run canvas's sub-agent band and
     /// the transcript's run strip — so there is one notion of who a build sent out.
@@ -328,7 +328,7 @@ public struct SZAgentGraphRun: Sendable, Equatable, Identifiable, Codable {
 
     /// Cap the history (~50) — never a live record. Two budgets: thread children outnumber
     /// their leaders many to one, so a shared cap would let one busy afternoon evict every
-    /// recorded thread. Order-independent: the victim is the OLDEST ENDED record of its
+    /// recorded thread. Order-independent: the victim is the oldest ended record of its
     /// budget by its own clock.
     public static func capped(_ runs: [SZAgentGraphRun],
                               leaders: Int = 20, others: Int = 30) -> [SZAgentGraphRun] {

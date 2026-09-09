@@ -206,7 +206,7 @@ public struct SZPortUI: Codable, Equatable, Sendable {
     public var max: Double?
     public var step: Double?
     /// `filePicker` only: the filename extensions this port accepts, lowercased and without a dot
-    /// (`["mlpackage", "mlmodelc"]`). Nil/empty means any file. One of these may name a PACKAGE — a
+    /// (`["mlpackage", "mlmodelc"]`). Nil/empty means any file. One of these may name a package — a
     /// folder the Finder shows as a single file — and nothing in the app knows which, which is the
     /// point of declaring it: the chooser matches on the extension rather than on a type some other
     /// installed app has to have registered.
@@ -274,9 +274,9 @@ public enum SZEntitlement: String, Codable, Sendable {
 
 /// How a node's custom card (its `Card.swift`, when it ships one) wants to be mounted — the contract's
 /// `"card"` block. All optional: `cols`/`rows` seed the card-body footprint in grid cells the first time
-/// the card is shown (the body ref in the graph then owns them); `backdrop` names a texture OUTPUT the
-/// host draws as a live thumbnail UNDER the card, so overlay controls (corner handles, crops) can map onto
-/// the rendered image. `plumbing` names input ports the card OWNS (its handles/knobs write them): while
+/// the card is shown (the body ref in the graph then owns them); `backdrop` names a texture output the
+/// host draws as a live thumbnail under the card, so overlay controls (corner handles, crops) can map onto
+/// the rendered image. `plumbing` names input ports the card owns (its handles/knobs write them): while
 /// the card is shown their generated rows — control and socket — step aside, so a value is never
 /// presented twice; they stay settable over MCP and come back when the user flips to rows. Declared
 /// here — not in a second manifest — because the contract is the one file a card author already

@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Compiles an authored Swift file — a node's `Node.swift` or a decision step's `Step.swift` —
-// into a signed, loadable dylib. One pipeline, two tiers: they differ only in the host-owned
-// support source compiled alongside, the module-name prefix, and the product name.
-//
-// The essential compile pipeline: write the
-// host-owned RuntimeSupport beside the node, `swiftc -emit-library`, then `codesign -s -` (ad-hoc
-// signing is REQUIRED for `dlopen` on macOS). This compiles ONE node's source; the graph wiring lives
-// elsewhere (topo order in `SZScheduler`, per-node loaders in `SZRuntime.loadGraph`). Still not
-// built — added only when earned: a `CompileRequest`/file manifest and runtime contract validation
-// (the node touches only its declared ports).
+// Compiles one authored Swift file — a node's `Node.swift`, a decision step's `Step.swift`, or a
+// node's `Card.swift` — into a signed, loadable dylib. One pipeline, three tiers: they differ only in
+// the host-owned support source compiled alongside, the module-name prefix, and the product name.
+// The graph wiring lives elsewhere (topo order in `SZScheduler`, per-node loaders in
+// `SZRuntime.loadGraph`).
 //
 // Node artifacts are content-addressed per node dir, so an unchanged node never runs swiftc twice,
 // across launches included. That is what makes opening a project fast.
@@ -122,13 +117,13 @@ public struct SZToolchain {
     }
 
     /// The one pipeline all tiers share: write the host-owned support source beside the
-    /// authored file, `swiftc -emit-library`, then `codesign -s -` (ad-hoc signing is
-    /// REQUIRED for `dlopen` on macOS). Returns the dylib URL.
+    /// authored file, `swiftc -emit-library`, then `codesign -s -` (ad-hoc signing is required for
+    /// `dlopen` on macOS). Returns the dylib URL.
     ///
-    /// `cached` is the NODE tier only, and two rules keep it safe:
+    /// `cached` is the node tier only, and two rules keep it safe:
     ///   - `buildDir` is per node, so the module name stays a fresh `UUID` per build and two nodes with
     ///     identical source never share mangled type metadata while co-resident.
-    ///   - Steps and cards are NOT cached: neither ever `dlclose`s, so re-mapping one artifact would put
+    ///   - Steps and cards are not cached: neither ever `dlclose`s, so re-mapping one artifact would put
     ///     two images with one module name in the process.
     /// A cached build is staged and moved into place only once signed, so an interrupted compile leaves
     /// nothing half-built to be trusted later.
@@ -280,7 +275,7 @@ public struct SZToolchain {
     /// hashed inputs can't see. An ABI change rides the support source and needs no bump.
     private static let formatSalt = "1"
 
-    /// Resolved once per process; `xcrun` was being spawned per node. A FAILURE is never memoized, or
+    /// Resolved once per process; `xcrun` was being spawned per node. A failure is never memoized, or
     /// one transient `xcrun` would kill every compile until relaunch.
     private static let resolved = Mutex<(sdk: String, compiler: String)?>(nil)
     private static func toolchain() throws -> (sdk: String, compiler: String) {
@@ -301,7 +296,7 @@ public struct SZToolchain {
 
     private func resolveSDKPath() throws -> String {
         let result = try run("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-path"])
-        // Read stdout ONLY for the path. On macOS 26+, subprocesses launched from an Xcode-run app
+        // Read stdout only for the path. On macOS 26+, subprocesses launched from an Xcode-run app
         // inherit an environment that makes them spew `objc[...]: Class USK... implemented in both`
         // duplicate-class warnings to *stderr*; merging those into the path yields a multi-line blob
         // that swiftc rejects as a bogus `-sdk`. Defensively pick the line that is an absolute `.sdk`
@@ -329,7 +324,7 @@ public struct SZToolchain {
         }
     }
 
-    /// Run a subprocess, capturing stdout and stderr SEPARATELY. Drains stderr on a background queue
+    /// Run a subprocess, capturing stdout and stderr separately. Drains stderr on a background queue
     /// while draining stdout on this thread, so neither full pipe buffer can deadlock the other.
     private func run(_ launchPath: String, _ args: [String]) throws -> RunResult {
         let process = Process()

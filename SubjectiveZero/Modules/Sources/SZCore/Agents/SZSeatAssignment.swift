@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The two SEATS and who holds them — resolved once, at pack load. Deliberately dumb: the
+// The two seats and who holds them — resolved once, at pack load. Deliberately dumb: the
 // pack loader (SZAI) decides how a seat gets filled and reports unfilled/contested seats as
 // defects; this type only records the outcome, so SZCore and SZUI can speak "the director"
 // without knowing how packs load.

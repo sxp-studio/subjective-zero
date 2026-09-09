@@ -11,7 +11,7 @@ public struct SZQueryRecord: Sendable, Equatable {
     public var step: String
     /// The ask's 0-based attempt (0 = first ask, 1+ = repair retries).
     public var attempt: Int
-    /// The template NAME the step asked for, as it asked (pack-relative resolution is the
+    /// The template name the step asked for, as it asked (pack-relative resolution is the
     /// service's).
     public var template: String
     /// A stable digest of the rendered prompt bytes — identity without the payload.

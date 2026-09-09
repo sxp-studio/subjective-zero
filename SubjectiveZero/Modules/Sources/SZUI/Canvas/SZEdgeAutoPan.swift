@@ -3,7 +3,7 @@
 // a wire within `zone` pt of the viewport edge pans the camera so offscreen nodes can be reached.
 // The math is a pure namespace (headless-testable); the driver is a dumb 60fps metronome that emits
 // screen-space pan deltas — the panel applies them to `canvasOffset` and re-derives the in-flight
-// drag's world position. Speeds are SCREEN-space so the pan feels identical at every zoom level.
+// drag's world position. Speeds are screen-space so the pan feels identical at every zoom level.
 import CoreGraphics
 import Foundation
 import QuartzCore
@@ -19,7 +19,7 @@ enum SZEdgeAutoPan {
         var isActive: Bool { left > 0 || right > 0 || top > 0 || bottom > 0 }
     }
 
-    /// Quadratic ramp: 0 at `zone` pt from the edge, 1 at the edge. A cursor dragged PAST the edge
+    /// Quadratic ramp: 0 at `zone` pt from the edge, 1 at the edge. A cursor dragged past the edge
     /// (negative distance) saturates at 1 — exactly what you want when the drag leaves the panel.
     static func intensities(cursor: CGPoint, in size: CGSize) -> Intensities {
         guard size.width > 0, size.height > 0 else { return Intensities() }
@@ -34,7 +34,7 @@ enum SZEdgeAutoPan {
                            bottom: ramp(size.height - cursor.y))
     }
 
-    /// Screen-space camera velocity (pt/s) to ADD to `canvasOffset`. Revealing content to the right
+    /// Screen-space camera velocity (pt/s) to add to `canvasOffset`. Revealing content to the right
     /// means the offset shrinks, so the right edge contributes negatively; opposing edges cancel.
     static func velocity(cursor: CGPoint, in size: CGSize) -> CGSize {
         let i = intensities(cursor: cursor, in: size)

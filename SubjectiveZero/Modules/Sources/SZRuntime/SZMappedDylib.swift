@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one dlopen motion every plugin tier (node, step, card) shares: copy the built dylib to a
 // unique path under `runtime-loads/` (so the canonical build artifact can be overwritten while the
-// mapped copy stays live), `dlopen(RTLD_NOW|RTLD_LOCAL)`, check the ABI version symbol FIRST, then
+// mapped copy stays live), `dlopen(RTLD_NOW|RTLD_LOCAL)`, check the ABI version symbol first, then
 // resolve what the tier needs. Any failure before the image served an instance unmaps it and
 // unlinks the copy, so a throw never leaks a mapping. What happens at retirement is each tier's
 // decision (`discard(dlclose:)`) — nodes unmap, steps and cards keep the image resident.
@@ -50,7 +50,7 @@ struct SZMappedDylib {
         return image
     }
 
-    /// A REQUIRED symbol as a C function pointer; missing → the image is discarded and the throw
+    /// A required symbol as a C function pointer; missing → the image is discarded and the throw
     /// names the symbol.
     func symbol<F>(_ name: String) throws -> F {
         guard let sym = dlsym(handle, name) else {
@@ -60,7 +60,7 @@ struct SZMappedDylib {
         return unsafeBitCast(sym, to: F.self)
     }
 
-    /// An OPTIONAL symbol — nil when the dylib doesn't export it (older authored source).
+    /// An optional symbol — nil when the dylib doesn't export it (older authored source).
     func optionalSymbol<F>(_ name: String) -> F? {
         dlsym(handle, name).map { unsafeBitCast($0, to: F.self) }
     }

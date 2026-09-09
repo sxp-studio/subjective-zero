@@ -3,7 +3,7 @@
 //
 //   MyProject.subz/
 //   ├─ project.json            // { "project": { name, author, viewport, graph } } — nodes by id,
-//   │                          //   connections, render endpoint. Node CONTRACTS are NOT inline here.
+//   │                          //   connections, render endpoint. Node contracts are not inline here.
 //   └─ nodes/<node-id>/
 //      ├─ node-contract.json   // the node's contract (when generated)
 //      └─ Node.swift           // the node's source (owned by the runtime/host, untouched here);
@@ -41,7 +41,7 @@ public enum SZProjectIO {
 
     private static func encoder() -> JSONEncoder { SZJSON.encoder() }
 
-    /// The one serialization of a `node-contract.json` — used by `save` for the live file AND by the
+    /// The one serialization of a `node-contract.json` — used by `save` for the live file and by the
     /// staging writer, so a staged contract is byte-comparable to the live one (no serializer noise).
     public static func contractData(_ contract: SZNodeContract) throws -> Data {
         try encoder().encode(contract)
@@ -105,7 +105,7 @@ public enum SZProjectIO {
     /// stamp from here on (`SZNode.rebuildReason`).
     ///
     /// The audit sets the ephemeral `sourceMismatch` (never persisted; the host attaches the diagnostic
-    /// text and re-audits after promote / hot reload). Only `errors` — a port the CODE NAMES that the
+    /// text and re-audits after promote / hot reload). Only `errors` — a port the code names that the
     /// contract does not declare — count. The audit's other half (a contract port the code never names)
     /// is unreliable: it is a string-literal scan, so a node that builds a port name at runtime
     /// (`NodeLibrary/audio-bands`: `ctx.setOutputFloat(kBandNames[b], …)`) would read dirty on every open.

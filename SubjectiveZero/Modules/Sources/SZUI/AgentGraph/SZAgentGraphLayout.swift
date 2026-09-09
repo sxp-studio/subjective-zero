@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Auto-layout for the Agent Graph panel: what each node's card SAYS (its face) and where it
-// sits (its frame). Pure and SwiftUI-free (CoreGraphics only) so it is unit-testable
-// headlessly — the house split, same as `SZGraphLayout` and `SZCanvasCamera`.
+// Auto-layout for the Agent Graph panel: what each node's card says (its face) and where it
+// sits (its frame). Pure and SwiftUI-free (CoreGraphics only) so it unit-tests headlessly — the
+// house split, same as `SZGraphLayout` and `SZCanvasCamera`.
 //
-// The FACE is one derivation: a node takes exactly one of three forms (step / turn /
-// dispatch; the step at the reserved `door` id is the door), and icon, title and outcome
-// rows all derive from the form plus the node's own title. A compiled step's declared
-// outcome set lives in SZAI (attached at pack load), which this module may not import, so
-// a step card draws the outcomes its graph file actually WIRES, and a Run entry's produced
-// outcome joins the rows if the wiring never named it (`ensuring`).
+// A node takes exactly one of three forms (step / turn / dispatch; the step at the reserved
+// `door` id is the door), and icon, title and outcome rows derive from the form plus the node's
+// own title. A compiled step's declared outcome set lives in SZAI (attached at pack load), which
+// this module may not import, so a step card draws the outcomes its graph file actually wires,
+// and a Run entry's produced outcome joins the rows if the wiring never named it (`ensuring`).
 //
-// The frame algorithm is deliberately boring: rank by longest path from the entry over
-// FORWARD edges only, stack within a rank, done. Back edges (the bounded ones — the retry
-// loop) are excluded from ranking on purpose: including them would make the rank graph
-// cyclic and read backwards.
+// Frames: rank by longest path from the entry over forward edges only, then stack within a rank.
+// Back edges (the bounded ones — the retry loop) are excluded from ranking on purpose: including
+// them would make the rank graph cyclic and read backwards.
 import CoreGraphics
 import Foundation
 import SZCore
@@ -25,15 +23,15 @@ public struct SZAgentGraphFace: Equatable, Sendable {
     /// every mechanical way, told apart so the card can wear the door's identity.
     public enum Form: Equatable, Sendable { case door, step, turn, dispatch }
     /// What the card's source affordance opens: the step's authored Swift, the brief template
-    /// that IS a turn's body, or — on a visit that actually ran — the prompt that turn SENT, macros
+    /// that is a turn's body, or — on a visit that actually ran — the prompt that turn sent, macros
     /// expanded. A value, not an action; the host resolves the file or the capture.
     public enum Source: Equatable, Sendable {
         case step(name: String)
         case brief(path: String)
-        /// The rendered prompt of one turn, by the id of the turn that ran it. Only a RUN card ever
+        /// The rendered prompt of one turn, by the id of the turn that ran it. Only a run card ever
         /// carries this: browsing a graph there is no run, so there is nothing rendered to show.
         case sentPrompt(turnID: UUID, template: String)
-        /// A dispatch's "body" is the graph it calls into — the pill LINKS to the target
+        /// A dispatch's "body" is the graph it calls into — the pill links to the target
         /// seat's graph rather than opening a file.
         case dispatch(target: String)
     }
@@ -42,11 +40,11 @@ public struct SZAgentGraphFace: Equatable, Sendable {
     public var symbol: String
     /// The rows the card draws, in display order.
     public var outcomes: [String]
-    /// Declared outcomes NO edge leaves — the graph's "this answer ends the run here",
+    /// Declared outcomes no edge leaves — the graph's "this answer ends the run here",
     /// drawn dimmed so the ending is visible instead of the port simply vanishing.
     public var unwired: Set<String>
     public var source: Source?
-    /// The turn's model-slot LABEL ("Planner", "Builder - Normal") — worn as a chip in the
+    /// The turn's model-slot label ("Planner", "Builder - Normal") — worn as a chip in the
     /// fixed-height header so it never enters `size(of:)`. nil on other forms and slotless turns.
     public var slot: String?
 
@@ -83,7 +81,7 @@ public enum SZAgentGraphLayout {
     static let layerGap: CGFloat = SZGraphLayout.layerGap
     static let nodeGap: CGFloat = SZGraphLayout.nodeGap
 
-    // Width is content-driven: a card grows until its own header fits WHOLE — the chip must
+    // Width is content-driven: a card grows until its own header fits whole — the chip must
     // never cost the title its words, and no ceiling clips it. The text is measured with the
     // fonts the header actually draws (`SZCardText`), not estimated per character: a
     // char-count average is wrong by a word on exactly the strings that matter, and it was
@@ -94,7 +92,7 @@ public enum SZAgentGraphLayout {
     /// padding, the 22pt glyph, the title, a Spacer, the slot chip (its own 4+4 padding), the
     /// finished badge, 12pt padding.
     ///
-    /// The SPACER takes a spacing slot of its own — that is the gap the old estimate dropped,
+    /// The spacer takes a spacing slot of its own — that is the gap the old estimate dropped,
     /// and being one gap short is what cropped "Implement" to "Implem…" on a slotted card.
     public static func width(of face: SZAgentGraphFace) -> CGFloat {
         // glyph|title, title|spacer, spacer|(chip or badge).
@@ -109,7 +107,7 @@ public enum SZAgentGraphLayout {
     /// `SZAgentGraphCardView.header`'s HStack spacing.
     static let headerGap: CGFloat = 7
 
-    /// A hair of slack on the measured fit. CoreText reports the advance a line WOULD take;
+    /// A hair of slack on the measured fit. CoreText reports the advance a line would take;
     /// SwiftUI lays the same string out with its own rounding, and landing within a fraction
     /// of a point of exact still ellipsized. Small enough to be invisible, big enough that
     /// the header never loses a character to a rounding difference.
@@ -129,7 +127,7 @@ public enum SZAgentGraphLayout {
     public static let footerRowHeight: CGFloat = 17
     public static let footerVerticalPad: CGFloat = 4
 
-    /// The stats strip under the outcome rows — what the visit COST in wall time. Below the
+    /// The stats strip under the outcome rows — what the visit cost in wall time. Below the
     /// ports rather than on the subheader: the rows are the card's contract and must not be
     /// pushed around by a number that arrives mid-traversal.
     public static let statsFooterHeight: CGFloat = footerRowHeight + footerVerticalPad * 2
@@ -150,7 +148,7 @@ public enum SZAgentGraphLayout {
 
     /// The card face of one node: derived from its form + its own title, nothing stored.
     /// `stepOutcomes` carries the compiled steps' declared outcome sets (host-resolved);
-    /// with it a step card shows EVERY answer it can give — the unwired ones dimmed, since
+    /// with it a step card shows every answer it can give — the unwired ones dimmed, since
     /// an outcome with no edge is how a graph spells "this ends the run".
     public static func face(of node: SZAgentGraph.Node, in graph: SZAgentGraph,
                             stepOutcomes: [String: [String]] = [:]) -> SZAgentGraphFace {
@@ -184,7 +182,7 @@ public enum SZAgentGraphLayout {
                                         graph.slot(id).map { $0.label ?? $0.id } ?? id
                                     })
         case .dispatch(let dispatch):
-            // Fan out and WAIT; `settled` routes onward — dimmed when nothing is wired,
+            // Fan out and wait; `settled` routes onward — dimmed when nothing is wired,
             // the honest "its first settlement concludes".
             return SZAgentGraphFace(form: .dispatch, title: node.title ?? "→ \(dispatch.to)",
                                     symbol: "arrow.triangle.branch", outcomes: ["settled"],
@@ -203,7 +201,7 @@ public enum SZAgentGraphLayout {
             return .fallback(node: entry.node, outcome: entry.outcome)
         }
         var face = face(of: node, in: graph, stepOutcomes: stepOutcomes).ensuring(entry.outcome)
-        // A visit that ran a turn shows what it SENT; the template rides along, so a visit
+        // A visit that ran a turn shows what it sent; the template rides along, so a visit
         // without a turn keeps opening the file.
         if case .brief(let path) = face.source, let turnID = entry.turnID {
             face.source = .sentPrompt(turnID: turnID, template: path)
@@ -219,7 +217,7 @@ public enum SZAgentGraphLayout {
 
     // MARK: - Sizing
 
-    /// One anatomy for every node — a form differs by COLOUR, not by shape. `subheader`
+    /// One anatomy for every node — a form differs by colour, not by shape. `subheader`
     /// reserves the Run view's second header line; `stats` reserves the footer. A Plan card
     /// keeps the plain anatomy, so the two modes stay byte-identical where they can.
     /// - Parameter extraFooterLines: footer lines under the clock's (the envelope receipt).
@@ -235,7 +233,7 @@ public enum SZAgentGraphLayout {
     }
 
     /// Whether a Run entry's card carries the subheader line (visit mark / dispatch tally).
-    /// Sizing and rendering both derive from THIS, so the frame a card is given and the
+    /// Sizing and rendering both derive from this, so the frame a card is given and the
     /// pixels it draws can never disagree.
     public static func hasSubheader(_ entry: SZAgentGraphRun.Entry, in record: SZAgentGraphRun,
                                     face: SZAgentGraphFace) -> Bool {
@@ -243,14 +241,14 @@ public enum SZAgentGraphLayout {
     }
 
     /// Whether a Run entry's card carries the stats footer. A spending step gets it from its
-    /// FIRST frame — `startedAt` is stamped the moment the entry is first reported — so the
+    /// first frame — `startedAt` is stamped the moment the entry is first reported — so the
     /// ticking clock appears with the card rather than growing it a second later.
     public static func hasStats(_ entry: SZAgentGraphRun.Entry, spends: Bool) -> Bool {
         spends && entry.startedAt != nil
     }
 
     /// The footer lines under the clock's — the envelope receipt. Its own line because beside
-    /// the clock it truncated to "cla…opus-5", hiding the model it names. Read from the FORM,
+    /// the clock it truncated to "cla…opus-5", hiding the model it names. Read from the form,
     /// not from `entry.generation`: the receipt lands mid-turn, and sizing by it grew the card
     /// under the pointer.
     public static func extraFooterLines(_ face: SZAgentGraphFace) -> Int {
@@ -263,7 +261,7 @@ public enum SZAgentGraphLayout {
         entry.turnID != nil
     }
 
-    /// Which forms SPEND — the ones whose cards carry wall time. A mid-graph step settles
+    /// Which forms spend — the ones whose cards carry wall time. A mid-graph step settles
     /// in sub-millisecond noise; the door may ask the model, so it counts.
     public static func spends(_ form: SZAgentGraphFace.Form) -> Bool {
         form == .turn || form == .dispatch || form == .door
@@ -271,11 +269,7 @@ public enum SZAgentGraphLayout {
 
     // MARK: - The Run view's chain
 
-    /// The Run view's chain frames: one per trace entry, in traversal order, centred on
-    /// y = 0 so mixed heights share a spine. Sized by the same `size(of:)` the plan uses.
-    /// Pure and here (not in the renderer) so the panel's follow-cam and the canvas content
-    /// can never disagree about where the live card sits.
-    /// The scrolling region of an OPEN card, in the same space its frame is in. The band
+    /// The scrolling region of an open card, in the same space its frame is in. The band
     /// scrolls its own text, so a scroll landing here must not also pan the canvas — the
     /// panel reads this to leave the camera alone. Measured from the bottom: the footer sits
     /// under the band, and carries a second line while the band is open.
@@ -288,8 +282,12 @@ public enum SZAgentGraphLayout {
                       width: frame.width, height: activityBandHeight)
     }
 
+    /// The Run view's chain frames: one per trace entry, in traversal order, centred on
+    /// y = 0 so mixed heights share a spine. Sized by the same `size(of:)` the plan uses.
+    /// Pure and here (not in the renderer) so the panel's follow-cam and the canvas content
+    /// can never disagree about where the live card sits.
     /// - Parameter opened: the entries whose activity band is showing, by ordinal. View state,
-    ///   unlike the subheader and footer, so it arrives as an argument — and BOTH readers (the
+    ///   unlike the subheader and footer, so it arrives as an argument — and both readers (the
     ///   canvas and the panel's follow-cam) must pass the same set or the camera lands wrong.
     public static func runFrames(for record: SZAgentGraphRun, graph: SZAgentGraph?,
                                  stepOutcomes: [String: [String]] = [:],
@@ -301,7 +299,7 @@ public enum SZAgentGraphLayout {
             let closed = size(of: face, subheader: hasSubheader(entry, in: record, face: face),
                               stats: hasStats(entry, spends: spends(face.form)),
                               extraFooterLines: extraFooterLines(face))
-            // Opening a band grows the card DOWNWARD: y stays on the closed height, so the
+            // Opening a band grows the card downward: y stays on the closed height, so the
             // header, the ports and every wire into them hold still while you read.
             let height = closed.height + (opened.contains(entry.ordinal) ? activityBandHeight : 0)
             frames.append(CGRect(origin: CGPoint(x: x, y: -closed.height / 2),
@@ -332,7 +330,7 @@ public enum SZAgentGraphLayout {
     public static func lay(out graph: SZAgentGraph, from seed: String,
                            stepOutcomes: [String: [String]] = [:]) -> Placement {
         let ranks = ranks(of: graph, from: seed)
-        // Within a rank, order by DECLARATION order in the file. Stable, and it hands the
+        // Within a rank, order by declaration order in the file. Stable, and it hands the
         // author a real lever: reordering the `nodes` array reorders the column.
         var byRank: [Int: [SZAgentGraph.Node]] = [:]
         for node in graph.nodes {
@@ -361,7 +359,7 @@ public enum SZAgentGraphLayout {
         for (rank, nodes) in byRank {
             let sizes = sizesByRank[rank] ?? []
             let total = sizes.reduce(0) { $0 + $1.height } + nodeGap * CGFloat(max(0, nodes.count - 1))
-            // A rank something SKIPS over lifts off the main line, so the bypassing wire has
+            // A rank something skips over lifts off the main line, so the bypassing wire has
             // clear air instead of being drawn straight through the card it is bypassing.
             var y = -total / 2 - (bypassed.contains(rank) ? bypassLift : 0)
             let x = xByRank[rank] ?? 0
@@ -382,7 +380,7 @@ public enum SZAgentGraphLayout {
     public static let laneGap: CGFloat = 4
     static let bandGap: CGFloat = 34
 
-    /// Where a dispatch's sub-agents are drawn: a stack of lanes in the VERTICAL AIR under
+    /// Where a dispatch's sub-agents are drawn: a stack of lanes in the vertical air under
     /// the dispatch card, one per dispatched item. Under, not inline between ranks — an
     /// inline sub-graph would have to reserve horizontal room, reflowing every downstream
     /// rank and making the return wire's geometry depend on the callee's width.
@@ -431,8 +429,8 @@ public enum SZAgentGraphLayout {
         }
         // Kahn, seeded with the entry first so a disconnected fragment can't claim column 0
         // ahead of it. Validation guarantees the forward subgraph is acyclic, so this drains.
-        // The `enqueued` set keeps a seed from being processed TWICE — a valid graph may
-        // have a forward edge INTO its entry (a settled lane), and re-enqueueing it when its
+        // The `enqueued` set keeps a seed from being processed twice — a valid graph may
+        // have a forward edge into its entry (a settled lane), and re-enqueueing it when its
         // indegree drains would double-decrement its successors.
         var rank: [String: Int] = [:]
         let entry = seed
@@ -453,7 +451,7 @@ public enum SZAgentGraphLayout {
 
     // MARK: - Ports
 
-    /// The control-flow input rides the HEADER's left edge — the node's "in", not a row.
+    /// The control-flow input rides the header's left edge — the node's "in", not a row.
     public static func inputPoint(_ frame: CGRect) -> CGPoint {
         CGPoint(x: frame.minX, y: frame.minY + SZNodeLayout.headerHeight / 2)
     }
@@ -473,7 +471,7 @@ public enum SZAgentGraphLayout {
             + CGFloat(row) * SZNodeLayout.rowHeight + SZNodeLayout.rowHeight / 2
     }
 
-    /// Which port a traversal's TERMINAL stub leaves by: the outcome the last entry actually
+    /// Which port a traversal's terminal stub leaves by: the outcome the last entry actually
     /// produced, else the face's first declared port. One home, because the capsule's colour
     /// and the stub's origin must name the same port.
     public static func terminalPort(_ outcome: String?, in face: SZAgentGraphFace) -> String {
@@ -482,7 +480,7 @@ public enum SZAgentGraphLayout {
 
     // MARK: - The projected future
 
-    /// Where a projected ("what's coming up next") wire STARTS. An edge leaving the live
+    /// Where a projected ("what's coming up next") wire starts. An edge leaving the live
     /// node leaves that card's real port — the projection is laid out plan-sized and dropped
     /// onto the chain by centring, but the live card carries what only a run has (the visit
     /// mark, the tally, the stats strip), so its rows sit at a different height than the
@@ -499,7 +497,7 @@ public enum SZAgentGraphLayout {
                             subheader: liveSubheader)
     }
 
-    /// The plan, re-rooted at `id`: every node reachable over FORWARD edges. The loop back
+    /// The plan, re-rooted at `id`: every node reachable over forward edges. The loop back
     /// is a possibility the bounded edge already states, not a path to draw twice — so
     /// bounded edges are dropped from both the reachability and the result. nil when nothing
     /// follows (the live node is the last stage — the terminal will say so when it ends).

@@ -6,19 +6,17 @@
 //      ├─ director.json         // { "transcript": { "formatVersion": 1, "messages": [ … ] } }
 //      └─ <node-uuid>.json      // one file per node Coding Agent conversation
 //
-// The filename IS the scope key (SZChatScope.key) — one file per conversation, so a node delete is
-// one file removal and a flush rewrites only that scope. Portable by design: transcripts travel with
-// the bundle (git, zip, another machine) and are the catch-up substrate for a fresh agent session;
-// provider session ids are machine-bound and live in SZAgentSessionIO instead. `.debug` is never
-// persisted (a scratch agent, ephemeral by contract) — excluded on save AND load.
+// The filename is the scope key (SZChatScope.key), so a node delete is one file removal and a flush
+// rewrites only that scope. Transcripts travel with the bundle (git, zip, another machine) and are
+// the catch-up substrate for a fresh agent session; machine-bound provider session ids live in
+// SZAgentSessionIO instead. `.debug` is a scratch agent, ephemeral by contract: never persisted,
+// excluded on save and load.
 //
-// Forgiving like SZAppStateIO, strict like nothing: a transcript is a convenience, so a missing or
-// corrupt file quietly becomes "no history" rather than a project-open error. Host-internal format
-// (agents don't read or author these files); the message shape is append-tolerant, see SZChat.swift.
-//
-// Lifecycle policy (enforced by the host): node delete AND split/merge commit/rollback drop the
-// removed nodes' sidecars — ids are never reused, so an orphaned transcript would be unreachable in
-// the UI, and the Director transcript already narrates the op.
+// Forgiving like SZAppStateIO: a missing or corrupt file quietly becomes "no history" rather than a
+// project-open error. Host-internal format (agents don't read or author these files); the message
+// shape is append-tolerant, see SZChat.swift. The host drops a removed node's sidecar on delete and
+// on split/merge commit/rollback — ids are never reused, so an orphaned transcript would be
+// unreachable in the UI, and the Director transcript already narrates the op.
 import Foundation
 
 public enum SZChatTranscriptIO {
@@ -52,7 +50,7 @@ public enum SZChatTranscriptIO {
         projectURL.appending(path: dirName).appending(path: "\(scopeKey).json")
     }
 
-    /// Write one scope's transcript. Saving an empty array REMOVES the file instead (a fully-pruned
+    /// Write one scope's transcript. Saving an empty array removes the file instead (a fully-pruned
     /// scope leaves no husk). The debug scope is silently skipped.
     public static func save(_ messages: [SZChatMessage], scopeKey: String, projectURL: URL) throws {
         guard scopeKey != SZChatScope.debugKey else { return }
@@ -76,7 +74,7 @@ public enum SZChatTranscriptIO {
     }
 
     /// Every transcript in the bundle, keyed by scope key. Skips filenames that aren't a valid scope
-    /// key (junk, .DS_Store), the debug scope, and files that fail to decode. The CALLER filters node
+    /// key (junk, .DS_Store), the debug scope, and files that fail to decode. The caller filters node
     /// keys down to ids still present in the graph — this reads what's on disk, policy stays host-side.
     public static func loadAll(projectURL: URL) -> [String: [SZChatMessage]] {
         let dir = projectURL.appending(path: dirName)

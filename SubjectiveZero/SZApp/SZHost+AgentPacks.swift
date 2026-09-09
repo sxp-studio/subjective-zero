@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The bundled agent packs' host policy: materialize the SZAI-bundled pack tree into
-// Application Support — the packs root every consumer (runs, the Plan panel, the debug
-// tools) then reads — arm hot reload over the compiled steps, and resolve the Director's
-// run-graph variant (env > persisted > pack default).
+// Host policy for the bundled agent packs: materialize the SZAI-bundled pack tree into
+// Application Support — the packs root every consumer reads (runs, the Plan panel, the debug
+// tools) — arm hot reload over the compiled steps, and resolve the Director's run-graph
+// variant (env > persisted > pack default).
 //
-// Materialized rather than read in place: bundled resources live inside the app bundle,
-// which is read-only in an installed, signed .app, so the writable copy is the one the user
-// edits and it survives relaunches. One copy per app (see `packInstallKey`), so two builds
-// can never drag one copy back and forth. Ours-or-theirs is decided by content, not mtime:
-// the manifest records a hash of every byte we wrote, so a copy still holding those bytes
-// is ours and follows the bundle either way (an update, a downgrade), while a copy the user
-// changed is theirs and stays. Prompts need no watcher — SZBriefRenderer reads them per
-// render. Step sources do: a step is compiled code, and the runtime swaps modules on green.
+// Materialized, not read in place: an installed, signed .app's bundle is read-only, so the
+// writable copy is the one the user edits and it survives relaunches. One copy per app (see
+// `packInstallKey`), so two builds can never drag one copy back and forth. Ours-or-theirs is
+// by content, not mtime: the manifest hashes every byte we wrote, so a copy still holding
+// them is ours and follows the bundle either way (an update, a downgrade), while a copy the
+// user changed is theirs and stays. Prompts need no watcher (SZBriefRenderer reads them per
+// render); step sources do — a step is compiled code, and the runtime swaps modules on green.
 import AppKit
 import CryptoKit
 import Foundation
@@ -101,24 +100,22 @@ extension SZHost {
     }
 
     /// Bring one materialized agent folder in line with its bundled original, and return
-    /// the manifest to record — path → hash of the bytes WE wrote there.
+    /// the manifest to record — path → hash of the bytes we wrote there.
     ///
-    /// Per shipped file, ours-or-theirs by content: a copy whose bytes still hash to what we
-    /// last wrote is ours and is refreshed whenever the bundle's bytes differ, newer or older,
-    /// so a downgrade cannot leave a pack half of each; a copy that no longer matches was
-    /// edited by the user and stays, its recorded hash kept so it stays theirs until it once
-    /// more reads as ours. A file we have no hash for (a manifest from before hashes were
-    /// recorded, or a user file the bundle now also ships) falls back to mtime — bundle newer
-    /// refreshes, else keep — and is recorded only once we have written it, so a guess never
-    /// claims their bytes as ours.
+    /// Ours-or-theirs per shipped file, by content: a copy still hashing to what we last wrote is
+    /// ours and refreshes whenever the bundle's bytes differ, newer or older, so a downgrade cannot
+    /// leave a pack half of each. A copy that no longer matches is the user's edit and stays, its
+    /// recorded hash kept so it stays theirs until it reads as ours again. A file we have no hash
+    /// for (a manifest from before hashes were recorded, or a user file the bundle now also ships)
+    /// falls back to mtime — bundle newer refreshes, else keep — and is recorded only once we have
+    /// written it, so a guess never claims their bytes as ours.
     ///
-    /// Then prune what a previous materialization wrote and this bundle no longer ships — a
-    /// renamed graph or brief would otherwise stay load-visible forever (a variant the
-    /// pack never meant, a brief nothing renders). Only that: a file the bundle never wrote
-    /// is the user's — the authoring tutorial has them add a graph and a step folder inside
-    /// the shipped director pack, and deleting those would take their work. Finally sweep
-    /// the directories the removals emptied — an empty dir holds no user work, but reads
-    /// as a step folder to every folder-scanning consumer.
+    /// Then prune what a previous materialization wrote and this bundle no longer ships: a renamed
+    /// graph or brief would otherwise stay load-visible forever (a variant the pack never meant, a
+    /// brief nothing renders). Only that — a file the bundle never wrote is the user's work, and the
+    /// authoring tutorial has them add a graph and a step folder inside the shipped director pack.
+    /// Finally sweep the directories the removals emptied: they hold no user work, but read as step
+    /// folders to every folder-scanning consumer.
     nonisolated static func syncAgentPack(from bundledAgent: URL, to dest: URL,
                                           previous: [String: String],
                                           log: (String) -> Void = { _ in }) throws -> [String: String] {
@@ -213,7 +210,7 @@ extension SZHost {
         return paths
     }
 
-    /// Watch every pack's `steps/<name>/Step.swift` in the LIVE packs root and recompile on
+    /// Watch every pack's `steps/<name>/Step.swift` in the live packs root and recompile on
     /// save — the node hot-reload discipline (watch source → recompile → swap on green, keep
     /// old on red) applied to the one pack tier that is compiled code. The schedule shares
     /// the run adapter's key + build dirs (SZHostStepRunning), so an edit mid-session
@@ -241,7 +238,7 @@ extension SZHost {
 }
 
 extension SZHost {
-    /// The panel's source affordance: resolve a card's authored file inside the ACTIVE
+    /// The panel's source affordance: resolve a card's authored file inside the active
     /// packs root and open it in the user's editor. `.md.mustache` claims no default app,
     /// so unopenable files fall through to the plain-text editor, then TextEdit — never
     /// a shrug.

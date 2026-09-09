@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Which viewport instance DRIVES: it owns renderSize (the graph renders at ITS resolution) and its
+// Which viewport instance drives: it owns renderSize (the graph renders at its resolution) and its
 // display link paces the loop; every other visible viewport mirrors. Host-side arbiter, main thread,
 // re-run on visibility and size edges; SZHost+Viewports pushes the result to the runtime.
 //

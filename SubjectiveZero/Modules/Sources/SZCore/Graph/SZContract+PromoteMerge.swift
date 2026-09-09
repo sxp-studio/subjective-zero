@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The promote-time boundary merge — how the contract an agent just authored folds into the one already
-// LIVE on the node, instead of replacing it.
+// The promote-time boundary merge — how the contract an agent just authored folds into the one
+// already live on the node, instead of replacing it.
 //
-// A node's contract wears three hats at once: it is the typed I/O BOUNDARY the graph wires and the runtime
-// enforces, the AGENT SURFACE a coding agent authors alongside `Node.swift`, and the PARAMETER STORE holding
-// every unconnected input's current value (`SZStore.setInputDefault` writes the user's slider straight into
-// `inputs[].def`). A promote that took either side wholesale would break one of those roles: taking the
-// agent's contract drops the user's values and lets a port silently change type under live edges; taking the
-// live one deletes the control ports the agent just added and wired into its source (a declared-vs-read
-// mismatch — exactly what `SZPortBindingAudit` exists to catch).
-//
-// So promote MERGES, per port, by name. The invariant that makes it safe: **promote never retypes a live
-// port and never drops one**. Edges, the render endpoint and the runtime's override arity were all validated
-// against the live type, so a retype has to go through `SZStore.editPorts`, which prunes what it invalidates
-// atomically. Because nothing here removes or retypes, a merge needs no pruning of its own.
+// A node's contract wears three hats: the typed I/O boundary the graph wires and the runtime enforces,
+// the agent surface authored alongside `Node.swift`, and the parameter store holding every unconnected
+// input's current value (`SZStore.setInputDefault` writes the user's slider straight into
+// `inputs[].def`). Taking the agent's side wholesale drops the user's values and lets a port silently
+// change type under live edges; taking the live side deletes the control ports the agent just added
+// and wired into its source (a declared-vs-read mismatch — what `SZPortBindingAudit` catches). So
+// promote merges per port, by name, under one invariant: **it never retypes a live port and never
+// drops one**. Edges, the render endpoint and the runtime's override arity were all validated against
+// the live type, so a retype has to go through `SZStore.editPorts`, which prunes what it invalidates
+// atomically. Nothing here removes or retypes, so a merge needs no pruning of its own.
 import Foundation
 
 /// A merged contract plus the human-readable notes for anything the merge refused to take from the agent.
@@ -32,29 +30,27 @@ public struct SZBoundaryMergeResult: Equatable, Sendable {
 
 extension SZNodeContract {
     /// Fold an agent-authored contract into the node's live boundary, keeping every port either side
-    /// declares.
+    /// declares. Per port (matched by `name`, same rules for inputs and outputs):
+    /// - **both sides, same type** — the boundary's `type`/`def`/`display` win, and any facet it leaves
+    ///   nil (`ui`, `options`, `def`, `display`) is filled from the authored port. `def` is the user's
+    ///   current value, so this is what makes a slider survive a rebuild.
+    /// - **both sides, different type** — the boundary port stands wholesale, with a `conflicts` line.
+    /// - **boundary only** (the agent dropped it) — kept: it may be wired, an unread declared port is a
+    ///   warning rather than an error, and removing a port is `ui_edit_ports`' job, not a promote's.
+    /// - **authored only** — appended verbatim: the control knobs an agent mints alongside the source
+    ///   it just wrote.
     ///
-    /// Per port (matched by `name`, same rules for inputs and outputs):
-    /// - **both sides, same type** — the boundary's `type`/`def`/`display` win, and any facet it leaves nil
-    ///   (`ui`, `options`, `def`, `display`) is filled from the authored port. `def` is the user's CURRENT
-    ///   value, so this is what makes a slider survive a rebuild.
-    /// - **both sides, different type** — the boundary port stands wholesale and a `conflicts` line says so.
-    /// - **boundary only** (the agent dropped it) — kept. It may be wired, and an unread declared port is a
-    ///   warning, never an error; removing a port is `ui_edit_ports`' job, not a promote's.
-    /// - **authored only** (the agent added it) — appended verbatim. These are the control knobs an agent
-    ///   mints alongside the source it just wrote.
+    /// Ordering is boundary-first, authored additions in authored order — stable and idempotent, so
+    /// repeated reconcile rounds converge instead of shuffling the card's rows. Outputs come out a
+    /// superset of the boundary's, so a render endpoint can never dangle across a promote.
     ///
-    /// Ordering is boundary-first, authored additions appended in authored order — stable and idempotent, so
-    /// repeated reconcile rounds converge instead of shuffling the card's rows. Outputs come out a superset of
-    /// the boundary's, so a render endpoint can never dangle across a promote.
+    /// Permissions are the union (boundary first, new authored appended; empty union → nil), so an
+    /// authored entitlement stands when the live boundary declares none (a camera node). Accepted
+    /// tradeoff: a union can resurrect a permission the Director removed mid-run — an over-grant prompt
+    /// the user answers, not a fault.
     ///
-    /// Permissions are the UNION (boundary first, new authored appended; empty union → nil), which also covers
-    /// the case where the live boundary declares none and the agent's authored entitlement must stand (a camera
-    /// node). Accepted tradeoff: a union can resurrect a permission the Director removed mid-run — that is an
-    /// over-grant prompt the user answers, not a fault.
-    ///
-    /// Identity: `title`/`sfSymbol` are the BOUNDARY's — the card's name and icon belong to whoever named the
-    /// node (Director, user), not to the agent that last rebuilt its source; the authored values only fill a
+    /// `title`/`sfSymbol` are the boundary's — the card's name and icon belong to whoever named the node
+    /// (Director, user), not to the agent that last rebuilt its source; the authored values only fill a
     /// boundary field that is empty or still the drawn-node placeholder (`SZNode.placeholderTitle` /
     /// `placeholderSymbol`). A deliberate rename is an explicit `ui_update_node`, never a promote side
     /// effect. `summary` stays the agent's: it describes the implementation just written.
@@ -79,7 +75,7 @@ extension SZNodeContract {
         return SZBoundaryMergeResult(contract: merged, conflicts: conflicts)
     }
 
-    /// The promote's entry: fold an authored contract into a NODE — its live contract as the port
+    /// The promote's entry: fold an authored contract into a node — its live contract as the port
     /// boundary (none → an empty one, so the authored ports land verbatim) and the node's displayed
     /// `title`/`sfSymbol` as the identity boundary. The node, not its contract, is the identity truth: a
     /// Director-titled node the run dispatched contract-less keeps its name, and a bundle whose node and

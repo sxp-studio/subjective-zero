@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Canvas context-menu suggestions — the host side of "right-click = what can I say here". Each row
-// is a complete DRAFT MESSAGE (mention tokens included) derived from what's under the click; picking
+// is a complete draft message (mention tokens included) derived from what's under the click; picking
 // one (or typing in the free-text row) lands it in the composer via the injection handshake — V1
 // ruling: suggestions compose, they never auto-send. Determinism lives downstream in the agent's
 // `ui_*` tools (split/merge/run), not in these strings.
@@ -14,7 +14,7 @@ extension SZHost {
     func contextSuggestions(for target: SZCanvasContextTarget) -> [SZContextSuggestion] {
         guard let graph = store.project?.graph else { return [] }
         switch target {
-        // Row labels are SHORT action phrases (the user sees at a glance what a row will do); the
+        // Row labels are short action phrases (the user sees at a glance what a row will do); the
         // full mention-addressed message only materializes in the composer on pick.
         case .node(let id):
             guard let node = graph.node(id: id) else { return [] }
@@ -66,7 +66,7 @@ extension SZHost {
         }
     }
 
-    /// A picked suggestion SENDS. These rows are whole instructions — "merge A and B into one
+    /// A picked suggestion sends. These rows are whole instructions — "merge A and B into one
     /// node" needs nothing added — so landing one in the composer only asked you to press send on
     /// a sentence you had already chosen. (The free-text row below still composes: you are the one
     /// writing it, and a half-typed thought deserves the field.)

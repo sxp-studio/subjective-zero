@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One graph edit, with WHO made it — the reconcile brief's delta. The host appends an entry at
+// One graph edit, with who made it — the reconcile brief's delta. The host appends an entry at
 // each origin-carrying mutation funnel; the Director's brief lists the entries since its last
 // turn so it never has to guess whether the user, itself, or a Coding Agent changed the graph.
 // In-memory only, bounded, cleared with the project.

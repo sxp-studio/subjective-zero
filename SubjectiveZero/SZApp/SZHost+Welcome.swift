@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SZHost+Welcome — the welcome/home window's launch gating.
 //
-// The home overlay is the FIRST view of every cold launch, including the very first one: it is where
+// The home overlay is the first view of every cold launch, including the very first one: it is where
 // a new user meets the app. Provider setup is not skipped, only deferred — it auto-presents on the way
-// OUT of welcome, once a project is live (SZHost+ProviderHealth's autoPresentProviderSetupIfNeeded),
+// out of welcome, once a project is live (SZHost+ProviderHealth's autoPresentProviderSetupIfNeeded),
 // so the two surfaces still never overlap. Reopen the window any time from Help ▸ Welcome. Persisted
 // state (`showWelcomeAtStartup`) rides the same app-state.json single-writer (persistAppState) as the
 // other prefs.
@@ -12,7 +12,7 @@ import SZCore
 
 @MainActor
 extension SZHost {
-    /// Launch routing decision: is the welcome/home surface the FIRST view this cold launch (so no
+    /// Launch routing decision: is the welcome/home surface the first view this cold launch (so no
     /// project opens yet — nothing touches the camera/mic until the user picks one)? Only when enabled,
     /// and never when launched by opening a `.subz` (the user already has intent). A first run routes
     /// here too — the provider sheet follows on the way out rather than pre-empting the greeting.
@@ -22,10 +22,10 @@ extension SZHost {
 
     /// Help ▸ Welcome / gear ▸ Welcome — return to the home screen from the editor (guarded against the
     /// provider sheet so the two never stack). Going Home means leaving the current work, so an unsaved
-    /// UNTITLED project is rescued NOW (Save… / Discard) rather than surprising the user with the prompt
+    /// untitled project is rescued now (Save… / Discard) rather than surprising the user with the prompt
     /// at quit; Cancel keeps them in the editor.
     ///
-    /// The rescue is SKIPPED while agents own the project, even though Save… itself is now safe: the
+    /// The rescue is skipped while agents own the project, even though Save… itself is now safe: the
     /// prompt's other answer is Discard, which deletes the bundle and nils the project URL under a live
     /// traversal. Home is a step away from the work, not a place to destroy it — the project stays
     /// loaded behind the overlay, and Save As… is on the menu the whole time.
@@ -45,7 +45,7 @@ extension SZHost {
     /// open, not at launch.
     func continueFromWelcome() {
         guard welcomePresented else { return }
-        // `loadedProjectURL == nil` covers both a launch with nothing opened yet AND an untitled
+        // `loadedProjectURL == nil` covers both a launch with nothing opened yet and an untitled
         // project just Discarded on the way to Home. Either way there is nothing to continue into.
         if loadedProjectURL == nil {
             presentNewProject()   // switchProject dismisses welcome once the project is live

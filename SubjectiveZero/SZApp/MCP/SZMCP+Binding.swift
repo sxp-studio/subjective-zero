@@ -2,7 +2,7 @@
 // The `binding_*` MCP surface — the learn-to-bind vocabulary (agent-facing: this is how the Director
 // turns "give me a knob for X" into graph state). The flow: arm learn on a binding-source node (MIDI,
 // OSC, …), ask the human to move the control they want, poll until the move is seen, then commit —
-// which lands as ONE store transaction (mappings row + a derived output on the instance contract +
+// which lands as one store transaction (mappings row + a derived output on the instance contract +
 // a data edge to the target). Everything durable is ordinary graph state: readable, persisted.
 // This file only parses arguments: the arm lives in SZBindingLearnController and the commit/remove
 // path in SZHost+DerivedBinding — one implementation shared with the controller cards' verbs.
@@ -76,8 +76,8 @@ extension SZHostBridge {
 
     private func bindingCommit(_ arguments: [String: Any]) throws -> String {
         let node = try bindingSource(arguments)
-        // Target is OPTIONAL: with one, the binding also wires output→target (the Director's flow);
-        // without one, learn MINTS — table row + derived output socket, no edge — and the user wires
+        // Target is optional: with one, the binding also wires output→target (the Director's flow);
+        // without one, learn mints — table row + derived output socket, no edge — and the user wires
         // it by an ordinary canvas drag (the control-surface flow).
         var target: SZPortRef?
         if let rawTarget = arguments.object("target") {

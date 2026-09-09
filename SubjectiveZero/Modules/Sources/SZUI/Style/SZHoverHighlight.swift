@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One place for the "brighten under the cursor" boilerplate repeated across the node cards, card
 // pills, HUD buttons, and composer controls: track pointer hover into a bound flag and animate the
-// change with a standard quick ease. The VISUAL (fill / scale / brightness) stays at each call site
+// change with a standard quick ease. The visual (fill / scale / brightness) stays at each call site
 // — only the plumbing is shared.
 import SwiftUI
 

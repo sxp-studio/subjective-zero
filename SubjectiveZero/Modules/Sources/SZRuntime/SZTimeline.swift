@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// SZTimeline — the runtime's virtual playback clock. It sits between the wall/media clock and the
-// per-frame node context, producing the `(frameIndex, timeSeconds)` each encode reads. Making it a
-// value type owned by `EngineState` means pause/reset are just field mutations under the engine
-// `Mutex` — no new locking, no threading hazard (see SZRuntime's class header).
+// SZTimeline — the runtime's virtual playback clock, sitting between the wall/media clock and the per-frame
+// node context and producing the `(frameIndex, timeSeconds)` each encode reads. As a value type owned by
+// `EngineState`, pause/reset are field mutations under the engine `Mutex`: no new locking, no threading
+// hazard (see SZRuntime's class header).
 //
-// SEPARATION OF CONCERNS: freezing the *visible output* on pause is the RUNTIME's job — while paused
-// it stops advancing the schedule and re-presents the current endpoint (SZRuntime.tick). This clock
-// only owns *time*: it's a pausable, resettable elapsed clock. Ticking it while paused returns the
-// frozen frame (a paused clock doesn't advance), and on resume the paused span is excluded so time is
-// continuous — that's what makes Play pick up exactly where Pause left off.
+// Freezing the *visible output* on pause is the runtime's job (SZRuntime.tick stops advancing the schedule
+// and re-presents the current endpoint). This pausable, resettable elapsed clock owns only *time*: ticking
+// it while paused returns the frozen frame, index included so `frameIndex` and `time` stay coherent; on
+// resume the paused span is excluded, so time is continuous and Play picks up exactly where Pause left off.
 //
-// Ported from the proto's `SDRendererTimeline`, with one change: pause freezes the FRAME INDEX too, so
-// `frameIndex` and `time` stay coherent across a pause.
-//
-// Why a LOCAL elapsed clock (`timeSeconds = now - baseTime`) rather than raw media time: absolute
-// `CACurrentMediaTime()` grows large enough that Double precision collapses per-frame deltas toward
-// zero. Rebasing to a local zero keeps time precise for the life of a run.
+// A local elapsed clock (`timeSeconds = now - baseTime`) rather than raw media time because absolute
+// `CACurrentMediaTime()` grows large enough that Double precision collapses per-frame deltas toward zero;
+// rebasing to a local zero keeps time precise for the life of a run.
 import Foundation
 
 /// The per-frame timing the runtime hands each node.
@@ -52,7 +48,7 @@ struct SZTimeline: Sendable {
         guard paused != isPaused else { return }
         isPaused = paused
         if paused {
-            // Freeze on the LAST frame we actually issued (`frameIndex` is the next-to-issue counter,
+            // Freeze on the last frame we actually issued (`frameIndex` is the next-to-issue counter,
             // `lastTime` the elapsed we last returned) — so pausing produces zero visible jump. Before
             // any frame is drawn, `frameIndex`/`lastTime` are both 0.
             frozen = SZFrameTiming(frameIndex: frameIndex == 0 ? 0 : frameIndex - 1,

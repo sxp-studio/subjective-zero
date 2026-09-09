@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Load/save the SCHEDULED tasks that have not started:
+// Load/save the scheduled tasks that have not started:
 //
 //   MyProject.subz/
 //   └─ .staging/
 //      └─ tasks.json     // { "tasks": { "formatVersion": 1, "tasks": [ … ] } }
 //
-// Under `.staging/` for the same reason the message queue is, and it is the same hazard: a task
-// starts an agent run — token spend — so a queue that traveled with the bundle (git, zip, Save As)
-// would build someone else's copy the moment they opened it. Same-machine restart survival, the
-// actual requirement, comes free.
+// Under `.staging/` like the message queue, and for the same hazard: a task starts an agent run —
+// token spend — so a queue that traveled with the bundle (git, zip, Save As) would build someone
+// else's copy the moment they opened it. Same-machine restart survival comes free.
 //
-// Only PENDING tasks persist. A running task cannot be restored: its claim, its fleet and its
-// traversal all died with the process, and re-admitting it would redo work that may have already
-// landed. It comes back as a run that ended, not as an ask waiting to happen.
+// Only pending tasks persist. A running task cannot be restored: its claim, its fleet and its
+// traversal died with the process, and re-admitting it would redo work that may already have landed.
+// It comes back as a run that ended, not as an ask waiting to happen.
 // Forgiving like its siblings: missing or corrupt → no tasks, never a project-open error.
 import Foundation
 
@@ -26,7 +25,7 @@ public enum SZTaskQueueIO {
     private struct Queue: Codable {
         var formatVersion: Int
         var tasks: [SZTask]
-        /// The queue was HELD when the app closed — a Stop's hold, which is a decision about these
+        /// The queue was held when the app closed — a Stop's hold, which is a decision about these
         /// tasks and therefore belongs with them. Without it a Stop then a relaunch admitted
         /// everything the Stop had just frozen, spending tokens on asks the user had killed.
         var suspended: Bool
@@ -69,7 +68,7 @@ public enum SZTaskQueueIO {
         tasks.filter { $0.state == .pending }
     }
 
-    /// Write the scheduled tasks. Saving an empty set REMOVES the file (no husk).
+    /// Write the scheduled tasks. Saving an empty set removes the file (no husk).
     public static func save(_ tasks: [SZTask], suspended: Bool = false, projectURL: URL) throws {
         let keep = persistable(tasks)
         let url = fileURL(projectURL: projectURL)

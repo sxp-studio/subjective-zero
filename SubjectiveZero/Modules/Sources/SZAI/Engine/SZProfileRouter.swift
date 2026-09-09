@@ -14,7 +14,7 @@ public struct SZProfileRouter: SZModelRouting {
     public var fallback: SZModelChoice
     /// agent id → slot id → the profile's resolved choice.
     public var agents: [String: [String: SZModelChoice]]
-    /// THIS delivery's grade-selected choice — set only on a fleet child's copy, frozen at
+    /// This delivery's grade-selected choice — set only on a fleet child's copy, frozen at
     /// dispatch. The engine never learns about grading; the host primes the router.
     public var graded: SZModelChoice?
 

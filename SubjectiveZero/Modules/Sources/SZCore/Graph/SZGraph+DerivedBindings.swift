@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Read-side queries over a controller node's derived bindings: the mappings table a node carries as
 // port data, and the edge↔table join that says which derived output feeds a given target. Pure graph
-// logic so the rebind rule (a target's existing binding is REPLACED in place, never duplicated) and
+// logic so the rebind rule (a target's existing binding is replaced in place, never duplicated) and
 // the surfaces that show bindings share one testable answer. Source-agnostic: a row's `key` is the
 // controller's own wire identity (MIDI `"ch1/cc7"`, OSC `"/1/fader1"`) — opaque to the graph.
 import Foundation

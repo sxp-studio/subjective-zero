@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The DEFAULT provider's generation choices (model / reasoning effort / fast mode) — the
+// The default provider's generation choices (model / reasoning effort / fast mode) — the
 // preference half of provider selection, following the SZHost+Chat.swift sibling pattern; the
 // setup sheet's per-card picker and `ui_set_provider` are the ways in. Mutators validate against
-// the ACTIVE provider's real capability surface, write that provider's row, persist immediately
+// the active provider's real capability surface, write that provider's row, persist immediately
 // (the snapToGrid story — a preference, not the setup sheet's Confirm gate), and re-fire the
 // provider-default telemetry (its joined signature dedupes no-op repeats). Rows are stored raw and
 // clamped at read (`resolvedGenerationSettings(for:)`), so a stale app-state.json entry degrades
@@ -21,8 +21,8 @@ extension SZHost {
         return provider.resolvedGenerationSettings(from: providerGenerationSettings[providerID])
     }
 
-    /// Pick the ACTIVE provider's model (the composer picker / `ui_set_provider`). Thin wrapper over
-    /// `setModel(_:for:)` — the setup sheet's per-card picker sets ANY provider's model, including one
+    /// Pick the active provider's model (the composer picker / `ui_set_provider`). Thin wrapper over
+    /// `setModel(_:for:)` — the setup sheet's per-card picker sets any provider's model, including one
     /// that isn't active (and can't be made active while it's failing).
     @discardableResult
     func setActiveModel(_ model: String) -> Bool {
@@ -34,13 +34,13 @@ extension SZHost {
     /// a thread belongs to the model that opened it (see `resetAgentSessions`) — and drops any held
     /// probe verdict, since a `Verified` badge earned by the previous model doesn't carry to this one
     /// (the same rule a cheap-status transition applies in `refreshProviderHealthOnce`). Effort and
-    /// fast mode deliberately do NOT reset: they're per-turn argv the CLI re-sends on every resume, so
-    /// they retune the SAME thread.
+    /// fast mode deliberately do not reset: they're per-turn argv the CLI re-sends on every resume, so
+    /// they retune the same thread.
     @discardableResult
     func setModel(_ model: String, for providerID: String) -> Bool {
         guard let provider = SZProviderRegistry.shared.provider(id: providerID),
               provider.models.contains(where: { $0.id == model }) else { return false }
-        // Compare against the RESOLVED model, so re-picking the current one is a no-op reset — but
+        // Compare against the resolved model, so re-picking the current one is a no-op reset — but
         // still persist it, pinning a choice that today only matches the default by coincidence.
         let changed = model != resolvedGenerationSettings(for: providerID).model
         providerGenerationSettings[providerID, default: SZProviderGenerationSettings()].model = model
@@ -49,7 +49,7 @@ extension SZHost {
             resetAgentSessions(ownedBy: providerID)
             providerProbes[providerID] = nil   // the old model's verdict no longer describes this one
         }
-        // Telemetry reads the ACTIVE provider's context, so only fire when this IS that provider.
+        // Telemetry reads the active provider's context, so only fire when this is that provider.
         if providerID == activeProviderID { trackProviderDefaultTelemetry() }
         return true
     }

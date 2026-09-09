@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The card plugin ABI: a runtime-compiled `Card.swift` (beside a node's `Node.swift`) yields a
-// SwiftUI-backed NSView the editor mounts as that node's card body. Separate from the node ABI
-// (SZNode.swift) on purpose — cards link SwiftUI/AppKit while nodes link Metal, and the frozen
-// node ABI must not absorb UI churn.
+// The card plugin ABI: a runtime-compiled `Card.swift` (beside a node's `Node.swift`) yields a SwiftUI-backed
+// NSView the editor mounts as that node's card body. Kept apart from the node ABI (Nodes/SZNodeABI.swift)
+// because cards link SwiftUI/AppKit while nodes link Metal, and the frozen node ABI must not absorb UI churn.
 //
-// Boundary rules (why each type below is shaped the way it is): system-framework types
-// (SwiftUI/AppKit) exist ONCE per process and are shared with every dylib; ObjC classes (NSView)
-// have runtime-global identity; types defined in the support source are duplicated per dylib
-// module and must NEVER cross the boundary. So the crossing surface is only C function pointers,
-// opaque Unmanaged pointers, and the byte-mirrored struct below (same-toolchain ⇒ identical
-// layout — the same accepted constraint as SZRuntimeContextRaw). The card hands its view across
-// as an opaque NSView pointer, not a SwiftUI value: everything dylib-defined stays behind one
-// AppKit object whose lifetime the host controls (unmount → release → retire).
+// What may cross the boundary, and why the types below look as they do: system frameworks (SwiftUI/AppKit)
+// exist once per process and are shared with every dylib, ObjC classes (NSView) have runtime-global identity,
+// but types defined in the support source are duplicated per dylib module and must never cross. So the
+// crossing surface is only C function pointers, opaque Unmanaged pointers, and the byte-mirrored struct below
+// (same-toolchain ⇒ identical layout, the same accepted constraint as SZRuntimeContextRaw). The card's view
+// crosses as an opaque NSView pointer, not a SwiftUI value: everything dylib-defined stays behind one AppKit
+// object whose lifetime the host controls (unmount → release → retire).
 import Foundation
 
 // Host-side verbs a card invokes; `hostContext` is the host's opaque box, borrowed for the
@@ -22,7 +20,7 @@ typealias SZCardSizeFn = @convention(c) (UnsafeMutableRawPointer?, Float) -> Voi
 /// node kind; no return value — the card reads the outcome back from its state/telemetry pushes.
 typealias SZCardCallFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
 
-/// The frozen contract between the host and a compiled card dylib. Version bumps on ANY change to
+/// The frozen contract between the host and a compiled card dylib. Version bumps on any change to
 /// the symbols, their signatures, or `SZCardHostRaw`'s layout (append-only, like the node ABI).
 /// All five entry points are main-thread calls by contract (the dylib asserts via
 /// `MainActor.assumeIsolated`). v2 = `callFn` (named host verbs — binding learn).
@@ -48,7 +46,7 @@ enum SZCardABI {
 }
 
 /// Host→card context handed to `SZCardCreate`, copied by value inside the dylib. Byte-mirrored in
-/// `SZCardKit.source`; fields are APPEND-ONLY (layout pinned by SZABILayoutTests).
+/// `SZCardKit.source`; fields are append-only (layout pinned by SZABILayoutTests).
 struct SZCardHostRaw {
     var apiVersion: Int32 = SZCardABI.version
     /// Opaque host box, unretained borrow — the host guarantees it outlives the instance.

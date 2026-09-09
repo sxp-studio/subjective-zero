@@ -7,12 +7,12 @@
 //
 // This is the pure, Codable model: geometry (rects, drop-zone hit-testing) lives in SZUI, rendering
 // in SZPanelLayoutContainerView, and the live instance on SZHost. Persisted as local per-machine app
-// state (SZAppState → app-state.json), NEVER in project.json — a project is a portable document and
+// state (SZAppState → app-state.json), never in project.json — a project is a portable document and
 // says nothing about how this machine's window is arranged.
 import Foundation
 
 /// A top-level panel of the app window. The raw value is the persisted key.
-/// The debug-only panels (`.profiler`, `.agentGraph`) are LAST in `allCases` so the
+/// The debug-only panels (`.profiler`, `.agentGraph`) are last in `allCases` so the
 /// production panels' ⌘⌥1/2/3 shortcuts never shift.
 public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
     case viewport
@@ -42,10 +42,9 @@ public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
         self == .viewport ? 8 : 1
     }
 
-    /// Whether the Profiler panel surface exists in this build — debug-only for now. The CASE
-    /// ships everywhere (Codable tolerance: a release build must decode a layout a DEBUG build
-    /// saved); the SURFACE doesn't: `normalize()` strips the leaf and the View menu filters the
-    /// toggle.
+    /// Whether the Profiler panel surface exists in this build — debug-only for now. The case ships
+    /// everywhere (Codable tolerance: a release build must decode a layout a DEBUG build saved); the
+    /// surface doesn't — `normalize()` strips the leaf and the View menu filters the toggle.
     public static var profilerPanelAvailable: Bool {
         #if DEBUG
         true
@@ -55,7 +54,7 @@ public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
     }
 
     /// Debug-only surfaces. The Profiler is one — its numbers only mean something next to a
-    /// trace. The Agent Graph panel is NOT: what an agent does is authored content now, and
+    /// trace. The Agent Graph panel is not: what an agent does is authored content now, and
     /// the panel is how you read it, so it ships everywhere the packs do.
     public var isDebugOnly: Bool {
         self == .profiler
@@ -94,13 +93,13 @@ public enum SZPanelKind: String, Codable, CaseIterable, Hashable, Sendable {
 /// Stable identity of one panel tile: a kind plus an instance ordinal. Instance 0 is the primary —
 /// the tile that existed before cloning; clones take 1..<kind.maxInstances. Persisted and
 /// MCP-addressed as a single string token: "viewport" (the primary), "viewport:2", "viewport:3"…
-/// The suffix is the DISPLAY ordinal (instance + 1), so "viewport:2" is exactly the tile titled
-/// "Viewport 2" — one vocabulary for users, agents, and disk. Identity is STABLE: closing
+/// The suffix is the display ordinal (instance + 1), so "viewport:2" is exactly the tile titled
+/// "Viewport 2" — one vocabulary for users, agents, and disk. Identity is stable: closing
 /// Viewport 2 never renames Viewport 3 (restore records, popped-out windows, and future
 /// per-instance render routing all hold these ids); the next clone fills the lowest free number,
 /// so gaps are transient.
 ///
-/// Deliberately NOT CodingKeyRepresentable: dictionaries keyed by SZPanelID must keep encoding as
+/// Deliberately not CodingKeyRepresentable: dictionaries keyed by SZPanelID must keep encoding as
 /// the alternating flat array they used while keyed by SZPanelKind, so pre-instance app-state
 /// bytes decode unchanged and clone-free state re-encodes byte-identically (old builds keep
 /// reading new files until a clone actually exists).
@@ -146,16 +145,16 @@ public struct SZPanelID: Hashable, Codable, Sendable, Comparable {
         }
     }
 
-    /// The IDENTITY name: "Viewport", "Viewport 2" — the token's ordinal, spelled out. Fallback
-    /// only; user-facing surfaces show POSITIONAL titles from `displayTitles(for:)` instead, so
+    /// The identity name: "Viewport", "Viewport 2" — the token's ordinal, spelled out. Fallback
+    /// only; user-facing surfaces show positional titles from `displayTitles(for:)` instead, so
     /// visible numbers stay dense as instances come and go.
     public var displayName: String {
         instance == 0 ? kind.displayName : "\(kind.displayName) \(instance + 1)"
     }
 
-    /// User-facing titles for the LIVE panel population (tiles + popped-out windows): a kind's
+    /// User-facing titles for the live panel population (tiles + popped-out windows): a kind's
     /// lone instance keeps its plain name ("Viewport"); several live instances are numbered by
-    /// POSITION in instance order — always a dense "Viewport 1", "Viewport 2", … whatever
+    /// position in instance order — always a dense "Viewport 1", "Viewport 2", … whatever
     /// identity gaps exist underneath. Identity (tokens, records, routing) stays stable; only
     /// the label is positional, so closing "Viewport 2" of three relabels the third tile
     /// "Viewport 2" without renaming anything a record or agent holds.
@@ -296,7 +295,7 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
         root = detached.replacingLeaf(target, with: Self.splitNode(around: target, inserting: id, zone: zone, share: 0.5))
     }
 
-    /// Pin a panel to one side of the WHOLE window: detach it, then split everything that's left
+    /// Pin a panel to one side of the whole window: detach it, then split everything that's left
     /// with the panel on that side, so it spans that edge with the rest stacked beside it. The one
     /// arrangement an onto-a-panel drop can't make, since that always pairs it with one other panel.
     /// No-op for `.center`, an absent panel, the last panel, or one already pinned to that side.
@@ -357,7 +356,7 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
         }
     }
 
-    /// Dock a DETACHED panel at an explicit spot: split `target` with `id` on `zone`'s side taking
+    /// Dock a detached panel at an explicit spot: split `target` with `id` on `zone`'s side taking
     /// `share` of the axis — the drag-to-dock commit, where the drop zone overrides any remembered
     /// position. No-op if `id` is already present or `target` absent. Callers resolve `.center` to
     /// an edge before committing (a detached panel has nothing to swap with).
@@ -385,7 +384,7 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
             if let removal = root.removingLeaf(bad) {
                 root = removal.remaining
             } else {
-                // The unhostable leaf IS the whole tree (e.g. a DEBUG session closed everything
+                // The unhostable leaf is the whole tree (e.g. a DEBUG session closed everything
                 // but the Profiler) — land on the default layout, not an unremovable empty tile.
                 self = .default
                 return
@@ -444,7 +443,7 @@ public struct SZPanelLayoutState: Codable, Equatable, Sendable {
 
 extension SZPanelLayoutNode {
     /// Result of detaching a leaf: the collapsed remaining tree, and where the leaf was (nil when the
-    /// leaf WAS the whole tree — the caller decides whether that's allowed).
+    /// leaf was the whole tree — the caller decides whether that's allowed).
     struct SZPanelLeafRemoval {
         var remaining: SZPanelLayoutNode
         var record: SZPanelRestorePosition?

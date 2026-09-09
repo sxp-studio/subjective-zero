@@ -21,14 +21,14 @@ struct SZMiniMapView: View {
     /// The corner button — frame the whole graph (Graph ▸ Zoom to Fit, animated by the panel).
     let onFit: () -> Void
 
-    static let cornerRadius: CGFloat = 2   // deliberately NOT the node-card radius — a well, not a card
-    static let padding: CGFloat = 0        // the map IS the frame: no bezel between pane and content
+    static let cornerRadius: CGFloat = 2   // deliberately not the node-card radius — a well, not a card
+    static let padding: CGFloat = 0        // the map is the frame: no bezel between pane and content
     /// The card's outer size (map + padding) — the panel uses it to place/hit-test the overlay.
     static var cardSize: CGSize {
         CGSize(width: SZMiniMapLayout.size.width + padding * 2, height: SZMiniMapLayout.size.height + padding * 2)
     }
 
-    /// The camera + layout captured at drag start. The layout is FROZEN for the drag: the extent
+    /// The camera + layout captured at drag start. The layout is frozen for the drag: the extent
     /// re-fits around the moving viewport otherwise, and then the rectangle stands still while the
     /// nodes slide under it. Frozen, the rectangle follows the pointer; release re-fits.
     @State private var dragStart: (camera: SZCanvasCamera, layout: SZMiniMapLayout)?

@@ -14,7 +14,7 @@ enum SZCardText {
         case title   // SZNodeCardStyle.titleFont — 12pt semibold
         case chip    // the slot chip — 8pt semibold monospaced
 
-        /// Asked for by WEIGHT, not by name: the UI font at a size is the regular face, and
+        /// Asked for by weight, not by name: the UI font at a size is the regular face, and
         /// measuring "Implement" regular under a semibold title is 3pt short — enough to
         /// ellipsize it on a card whose width was otherwise right.
         fileprivate var font: NSFont {
@@ -46,7 +46,7 @@ enum SZCardText {
         if let hit = cache[key] { return hit }
         let line = CTLineCreateWithAttributedString(
             NSAttributedString(string: text, attributes: [.font: style.font]))
-        // The typographic ADVANCE, not the inked bounds: what the layout must reserve is where
+        // The typographic advance, not the inked bounds: what the layout must reserve is where
         // the next element starts, which a trailing space or a glyph overhang changes.
         let measured = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
         cache[key] = measured

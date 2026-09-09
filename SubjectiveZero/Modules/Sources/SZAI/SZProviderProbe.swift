@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Tier 3 of provider health (see SZProviderHealth.swift): one real one-shot prompt through the
-// provider's OWN launch()/parse() path — the "actually works" check that `--version` and an auth
+// provider's own launch()/parse() path — the "actually works" check that `--version` and an auth
 // status can't give (model access, quota, a functioning agent loop). This is the only tier that
 // costs tokens, so callers gate it: the first-run setup flow probes each healthy provider once,
 // the setup sheet's per-card Test button probes on demand, and the poll loop never probes.
@@ -74,7 +74,7 @@ public extension SZProvider {
             let seconds = Int(Date().timeIntervalSince(startedAt).rounded())
             return report(.ready, "Verified — replied in \(seconds)s.", diagnostic: diagnostic)
         }
-        // Markers outrank the timeout: a CLI that answers a logged-out run by WAITING for an
+        // Markers outrank the timeout: a CLI that answers a logged-out run by waiting for an
         // interactive login never exits, so the killed run's output showing the login wall is
         // authNeeded — reporting it as a timeout would send the user to debugging instead of login.
         if authFailureMarkers.contains(where: result.output.contains) {

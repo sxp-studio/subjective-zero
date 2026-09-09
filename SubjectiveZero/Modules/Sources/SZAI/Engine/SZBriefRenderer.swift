@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The prompt assembler — the ONE place a template becomes the bytes a turn (or ask) sends.
-// Host internals, not kit surface: pack authors see templates and tokens; steps see ctx.
-//
-// ONE flat table: token → recipe over (message text, world, extras). Every token has one
-// meaning; a few recipes select their source by what the world carries (a staged op's
-// boundary vs the graph's), which is data selection, not a kind. A token is only computed
-// when the template mentions it, and after substitution any leftover `{{token}}` throws —
-// a literal token can never ship to a model. That refusal judges AUTHORED text only
-// (templates and partials): every value carrying outside words — user prose, node
-// titles/prompts, agent statuses, file contents — is `defused` on its way in, so data
-// that happens to spell a token neither expands nor trips the check.
-//
-// THE PINS live on this output: SZBriefPinTests pins every shipped brief's bytes; a
-// deliberate prose change re-records its pin there. Value assembly reuses the shared builders
-// (SZDirectorPrompt, SZBoundaryPrompt, SZGraphPrompts, SZAgentDocs) — one home per value.
+// The prompt assembler: the one place a template becomes the bytes a turn (or ask) sends.
+// Host internals, not kit surface — pack authors see templates and tokens, steps see ctx.
+// One flat table: token → recipe over (message text, world, extras). Every token has one
+// meaning; a few recipes pick their source from what the world carries (a staged op's
+// boundary vs the graph's), which is data selection, not a kind. A token is computed only
+// when the template mentions it; any `{{token}}` left after substitution throws, so no
+// literal token can ever ship to a model. That check judges authored text only (templates
+// and partials): values carrying outside words — user prose, node titles/prompts, agent
+// statuses, file contents — are `defused` on the way in, so data that spells a token
+// neither expands nor trips it.
+// SZBriefPinTests pins every shipped brief's bytes; a deliberate prose change re-records its
+// pin there. Values come from the shared builders (SZDirectorPrompt, SZBoundaryPrompt,
+// SZGraphPrompts, SZAgentDocs) — one home per value.
 import Foundation
 import SZCore
 
@@ -39,7 +37,7 @@ public enum SZBriefRenderError: Error, Sendable, CustomStringConvertible {
     }
 }
 
-/// Host-READ render input the world cannot carry: files read off disk at delivery time and
+/// Host-read render input the world cannot carry: files read off disk at delivery time and
 /// the split/merge render bundle. Never step-visible, never sender-authored.
 public struct SZBriefExtras: Sendable {
     /// A staged piece preserves the original's behavior (its reference is quoted in its
@@ -161,7 +159,7 @@ public struct SZBriefRenderer: Sendable {
     static let schemaInlinePartial = "prompts/schema-inline.md.mustache"
     static let schemaFetchPartial = "prompts/schema-fetch.md.mustache"
 
-    /// Every `{{token}}` a template may mention — the ONE namespace the pack gate checks
+    /// Every `{{token}}` a template may mention — the one namespace the pack gate checks
     /// briefs against. Tied to the assembly: `add` asserts each computed token is listed.
     public static let knownTokens: Set<String> = [
         "graph", "message", "toolbelt", "cards", "node", "contract", "source",
@@ -287,8 +285,8 @@ public struct SZBriefRenderer: Sendable {
         try add("target") {
             extras.target == .web ? "\n" + (try template(agent, Self.targetWebPartial)) : ""
         }
-        // The reference/schema SECTIONS: a conversion translates the other platform's source;
-        // a staged piece preserves (and keeps the fetch schema); an inlined index flips BOTH to
+        // The reference/schema sections: a conversion translates the other platform's source;
+        // a staged piece preserves (and keeps the fetch schema); an inlined index flips both to
         // their inlined variants; otherwise the tiered library framing + the fetch schema.
         try add("reference") {
             if let source = extras.convertSource {
@@ -349,7 +347,7 @@ public struct SZBriefRenderer: Sendable {
         }
 
         // With every data-borne value defused above, anything still spelling `{{token}}`
-        // was AUTHORED — by this template or a partial it pulled in — and must not ship.
+        // was authored — by this template or a partial it pulled in — and must not ship.
         let rendered = SZPromptTemplate.render(text, values)
         let leftover = SZPromptTemplate.tokens(in: rendered)
         guard leftover.isEmpty else {

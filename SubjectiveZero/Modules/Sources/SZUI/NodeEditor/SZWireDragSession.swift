@@ -10,7 +10,7 @@ import SZCore
 
 struct SZWireDragSession {
     let grabbed: SZSocket   // the socket the gesture started on (gesture identity across ticks)
-    let source: SZSocket    // the preview wire's fixed anchor — the KEPT end's socket for a pickup
+    let source: SZSocket    // the preview wire's fixed anchor — the kept end's socket for a pickup
     let start: CGPoint      // world point where the grab began (click/wobble guard)
     var current: CGPoint
     var lastScreen: CGPoint // last cursor position, screen (szcanvas) space — auto-pan re-derivation
@@ -22,7 +22,7 @@ struct SZWireDragSession {
     /// a refused drop leaves a stray card on top of the one being aimed at.
     var overCard = false
 
-    /// Begin from a SOCKET grab. Grabbing a CONNECTED data input picks its wire up to re-route: the
+    /// Begin from a socket grab. Grabbing a connected data input picks its wire up to re-route: the
     /// preview re-anchors to the far output socket and the original edge hides until drop — refused
     /// when the far end is locked (re-routing would unwire its node too, the same both-ends rule as
     /// the edge-path pickup). Everything else (outputs, flow, unwired inputs) starts a new wire — a
@@ -42,7 +42,7 @@ struct SZWireDragSession {
                                  lastScreen: screen, target: nil, picked: nil)
     }
 
-    /// Begin from a grab anywhere ALONG an edge (data or flow): the end nearer the grab detaches
+    /// Begin from a grab anywhere along an edge (data or flow): the end nearer the grab detaches
     /// (nearer the input → re-route the input end, nearer the output → re-route the source) and the
     /// preview anchors at the kept end. Nil if the edge's endpoints don't resolve.
     static func begin(along connection: SZConnection, atWorld world: CGPoint, screen: CGPoint,
@@ -81,7 +81,7 @@ struct SZWireDragSession {
         /// here": spawn a prompt node at `center` (raw; the panel applies its snap rule) and join
         /// it with an edge of `kind`. A data wire additionally seeds the new node's contract with
         /// one port of the dragged port's type (the panel resolves the type from the live graph).
-        /// `downstream` follows the dragged socket (OUT → source feeds new; IN → new feeds source).
+        /// `downstream` follows the dragged socket (out → source feeds new; in → new feeds source).
         case spawnPromptNode(center: CGPoint, source: SZPortRef, kind: SZConnectionKind,
                              downstream: Bool)
     }
@@ -103,15 +103,15 @@ struct SZWireDragSession {
         if let target {
             let out = source.side == .output ? source : target
             let inp = source.side == .input ? source : target
-            // Any flow socket makes it a flow edge; a data socket on the other end PINS that slot.
+            // Any flow socket makes it a flow edge; a data socket on the other end pins that slot.
             let flow = out.kind == .flow || inp.kind == .flow
             return .connect(from: Self.ref(out, flow: flow), to: Self.ref(inp, flow: flow),
                             kind: flow ? .flow : .data)
         }
         if moved, !overCard {
-            // Anchor the new node by the EDGE the wire lands on, not its centroid: drop from an
-            // OUT socket and the node grows rightward with its LEFT edge (input side) at the drop
-            // point; drop from an IN socket and it grows leftward with its RIGHT edge at the drop.
+            // Anchor the new node by the edge the wire lands on, not its centroid: drop from an
+            // out socket and the node grows rightward with its left edge (input side) at the drop
+            // point; drop from an in socket and it grows leftward with its right edge at the drop.
             // So the wire terminates cleanly at the node's socket instead of burying the drop point
             // in the card's middle. Shift the centroid by half the (fixed) prompt-node width toward
             // the wire direction. Snapping is the panel's (snappedPromptCenter), not the session's.

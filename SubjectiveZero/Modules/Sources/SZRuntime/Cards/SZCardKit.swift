@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The host-owned Swift source compiled into every card dylib alongside the author's `Card.swift`
-// — the card tier's SZRuntimeSupport. Card authors implement `SZCardMain.make(_:)` returning
-// their root view; they must NOT redeclare the `@_cdecl` symbols or touch the raw struct.
+// The host-owned Swift source compiled into every card dylib alongside the author's `Card.swift` —
+// the card tier's counterpart to `SZNodeKit`. Card authors implement `SZCardMain.make(_:)` returning
+// their root view; they must not redeclare the `@_cdecl` symbols or touch the raw struct.
 //
-// Everything the card can see or do goes through ONE object, `SZCardState`: the host pushes the
+// Everything the card can see or do goes through one object, `SZCardState`: the host pushes the
 // node's scoped snapshot ("state") and a lossy display stream ("telemetry") in; the card streams
 // gesture values out (`live` while the hand moves, `commit` once on release). Sizing is reported
 // by the root wrapper below, so every card gets auto-size for free.

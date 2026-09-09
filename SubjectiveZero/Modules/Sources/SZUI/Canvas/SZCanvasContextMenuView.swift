@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The canvas right-click menu — a custom floating card, NOT an NSMenu/.contextMenu, because its
-// rows are draft MESSAGES ("what can I say here"), it hosts an inline free-text field (native menus
+// The canvas right-click menu — a custom floating card, not an NSMenu/.contextMenu, because its
+// rows are draft messages ("what can I say here"), it hosts an inline free-text field (native menus
 // can't), and a later pass sends in place from here (same surface, per the run-UX rulings).
 // Dumb values in (suggestion rows + action rows + a free-text placeholder), closures out.
 //
@@ -10,7 +10,7 @@
 import SwiftUI
 
 struct SZCanvasContextMenuView: View {
-    /// What the thing under the pointer IS, read not clicked, so it stays out of the row count.
+    /// What the thing under the pointer is, read not clicked, so it stays out of the row count.
     let note: String?
     let suggestions: [SZContextSuggestion]
     let actions: [SZContextAction]
@@ -139,11 +139,11 @@ struct SZCanvasContextMenuView: View {
             Image(systemName: "bubble.left")
                 .font(.system(size: 11, weight: .medium))
                 .frame(width: 15)
-                // The SAME full message-accent as the suggestion rows — both are "say something"
+                // The same full message-accent as the suggestion rows — both are "say something"
                 // rows; a dimmer bubble here read as a different (disabled) kind of row.
                 .foregroundStyle(SZNodeCardStyle.mentionAccent)
             // Native TextField placeholders can't be styled, so pass an empty prompt and draw our
-            // own ITALIC-tertiary placeholder — it reads as an instruction, not pre-typed text.
+            // own italic-tertiary placeholder — it reads as an instruction, not pre-typed text.
             TextField("", text: $freeText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
@@ -169,7 +169,7 @@ struct SZCanvasContextMenuView: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 28)
-        // Highlight on hover OR focus, same weight as the suggestion rows — a row that never
+        // Highlight on hover or focus, same weight as the suggestion rows — a row that never
         // reacts to the cursor reads as disabled.
         .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .fill(fieldFocused || freeTextHover ? Color.white.opacity(0.09) : .clear))

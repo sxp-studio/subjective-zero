@@ -4,14 +4,14 @@
 // closes it (collapsing its split; disabled on the last panel). With View ▸ Auto-Hide Panel
 // Headers on (a per-machine app-state.json pref), the header stays hidden until the cursor nears
 // the tile's top edge, then slides down over the content (and back out when the cursor leaves),
-// so tiles read as pure content at rest; off, every header is permanent and chat's tab strip lays
-// out below it as before.
+// so tiles read as pure content at rest; off, every header is permanent and chat's content lays
+// out below it.
 import SwiftUI
 import SZCore
 
 struct SZPanelChromeView<Content: View>: View {
     let id: SZPanelID
-    /// The user-facing name (positional — "Viewport 2" means the second LIVE viewport, not
+    /// The user-facing name (positional — "Viewport 2" means the second live viewport, not
     /// instance identity; the container passes it from the host's title source).
     let title: String
     let canClose: Bool
@@ -64,8 +64,8 @@ struct SZPanelChromeView<Content: View>: View {
     var body: some View {
         // The header is a translucent HUD-material overlay (the node-editor HUD's .ultraThinMaterial):
         // the viewport render / node canvas shows through behind it. Content deliberately extends
-        // UNDER the header — except chat with permanent headers, whose top-anchored tab strip must
-        // stay visible, so it lays out below instead. With auto-hide on, chat's transcript takes the top
+        // under the header — except chat with permanent headers, whose top-anchored content must stay
+        // clear of it, so it lays out below instead. With auto-hide on, chat's transcript takes the top
         // and the summoned header slides in over them (its thin trigger band keeps that rare).
         ZStack(alignment: .top) {
             content()

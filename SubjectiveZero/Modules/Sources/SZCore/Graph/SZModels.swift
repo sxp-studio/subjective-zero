@@ -73,10 +73,10 @@ public struct SZViewport: Codable, Equatable, Sendable {
 
 // MARK: - Nodes & connections
 
-/// Whether a node HAS A BUILD — a compiled `Node.swift` the runtime can render. Monotonic: `promoteStagedNode`
+/// Whether a node has a build — a compiled `Node.swift` the runtime can render. Monotonic: `promoteStagedNode`
 /// is the only writer, and it only ever moves `prompt → generated`. Never flipped backward.
 ///
-/// This is deliberately NOT "is the node up to date" — that is `SZNode.needsRebuild`, an orthogonal fact. A node
+/// This is deliberately not "is the node up to date" — that is `SZNode.needsRebuild`, an orthogonal fact. A node
 /// whose contract moved is both renderable (it still has last run's build) and pending work; `SZGraph.renderable`
 /// keys on `kind` alone, so flipping a drifted node back to `.prompt` would drop it from the render graph and
 /// black it out.
@@ -84,10 +84,10 @@ public enum SZNodeKind: String, Codable, Sendable {
     case prompt, generated
 }
 
-/// Why a built node must be regenerated. Classified by the CONDITION of the code, not by who caused it — a
+/// Why a built node must be regenerated. Classified by the condition of the code, not by who caused it — a
 /// port the Director removed and a port a human deleted by hand leave the node equally broken.
 ///
-/// Never stored: `SZNode.rebuildReason` DERIVES it every read from evidence (the build stamp and the source
+/// Never stored: `SZNode.rebuildReason` derives it every read from evidence (the build stamp and the source
 /// audit), so an edit that is undone heals by construction and a stale flag cannot outlive its cause.
 public enum SZRebuildReason: String, Codable, Sendable {
     /// The contract's port surface differs from the one the build consumed (`SZBuildStamp.portSurface`).
@@ -111,7 +111,7 @@ public enum SZRebuildReason: String, Codable, Sendable {
     case notBuiltForTarget
 }
 
-/// What a node's build CONSUMED — the evidence `SZNode.rebuildReason` is derived from. Written by
+/// What a node's build consumed — the evidence `SZNode.rebuildReason` is derived from. Written by
 /// `promoteStagedNode` from what the compile actually saw (the merged contract's surface, the prompt the agent
 /// was briefed with), and seeded once for a built node that has none ("trust the build": its current contract
 /// + prompt). Persisted with the node in `project.json`.
@@ -162,7 +162,7 @@ public enum SZNodeBodyMode: String, Codable, Sendable {
     case custom
 }
 
-/// A `.custom` body's COMMITTED footprint — the region's `cols`/`rows` in GRID CELLS once auto-size or
+/// A `.custom` body's committed footprint — the region's `cols`/`rows` in grid cells once auto-size or
 /// the user set them (nil = the contract's `card` hints, then the defaults). The card itself is the
 /// node's own `Card.swift`; there is nothing else to name. `pinned`: the user fixed the size — the
 /// auto-measure loop must not override it.
@@ -180,7 +180,7 @@ public struct SZCustomCardRef: Codable, Equatable, Sendable {
 /// A node card's body: which mode, plus the datum that mode needs. `previewPort` names the texture output a
 /// `.preview` shows (nil = the display-marked/first texture output); `custom` carries a `.custom` body's
 /// committed footprint (nil = defaults). `preview` and `custom` share the one body slot and are mutually
-/// exclusive. `plugs`: false folds the card's port rows away so the body IS the card (nil/true = shown) —
+/// exclusive. `plugs`: false folds the card's port rows away so the body is the card (nil/true = shown) —
 /// a separate axis from `mode`, which picks what fills the body slot.
 public struct SZNodeBody: Codable, Equatable, Sendable {
     public var mode: SZNodeBodyMode
@@ -197,7 +197,7 @@ public struct SZNodeBody: Codable, Equatable, Sendable {
 }
 
 public extension Array where Element == SZPort {
-    /// The preferred texture output of a port list: the display-marked one, else the first. The ONE
+    /// The preferred texture output of a port list: the display-marked one, else the first. The one
     /// encoding of the default "which texture output represents this node" pick — the preview-port
     /// fallback and `ui_set_node_body` both resolve through it, so they can never disagree.
     var preferredTextureOutput: SZPort? {
@@ -207,8 +207,8 @@ public extension Array where Element == SZPort {
 }
 
 public extension SZNode {
-    /// The body region this card EFFECTIVELY renders: an explicit `body` pins the choice; `nil` falls
-    /// back to the legacy rule (a texture output → auto-preview). Validated against the CURRENT
+    /// The body region this card effectively renders: an explicit `body` pins the choice; `nil` falls
+    /// back to the legacy rule (a texture output → auto-preview). Validated against the current
     /// contract — a `.preview` pin on a node whose texture outputs vanished (rebuild, port edit)
     /// degrades to `.none` instead of reserving a body region nothing can ever fill. A `.custom` pin
     /// needs no texture output (a knob card drives a float); whether the `Card.swift` behind it
@@ -225,7 +225,7 @@ public extension SZNode {
     /// The texture output this card's body shows live: for `.preview`, the explicit `previewPort`
     /// when it still names a texture output on the current contract, else the preferred texture
     /// output; for `.custom`, the contract's `card.backdrop` port when it names a texture output
-    /// (the thumbnail drawn UNDER the custom card). Nil otherwise — so `nil`/non-nil IS the "does this
+    /// (the thumbnail drawn under the custom card). Nil otherwise — so `nil`/non-nil is the "does this
     /// node stream a thumb" predicate the preview watch-set keys on; callers never need to consult
     /// `effectiveBodyMode` separately.
     var effectivePreviewPort: String? {
@@ -294,7 +294,7 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// The host's other audit verdict: file inputs whose file cannot be used right now, port name →
     /// one sentence saying why (`SZFileInputAudit`). Ephemeral — never encoded; recomputed at load,
     /// on every committed input write, after a contract change, and when the app returns to the front.
-    /// Kept on the NODE rather than on the transient status state, which every agent report clears.
+    /// Kept on the node rather than on the transient status state, which every agent report clears.
     public var unreadableInputs: [String: String] = [:]
 
     /// The platforms whose source file the node's folder holds (`Node.swift`, `Node.js`). Ephemeral: read
@@ -328,7 +328,7 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     /// the render graph or a rebuild.
     public var body: SZNodeBody?
 
-    /// Why this node's build no longer satisfies its contract or intent, or nil when it does. DERIVED, never
+    /// Why this node's build no longer satisfies its contract or intent, or nil when it does. Derived, never
     /// stored: the audit fault outranks the stamp comparisons; a built node with no stamp is trusted. Orthogonal
     /// to `kind`: a node awaiting a rebuild keeps rendering its existing source rather than going black.
     public var rebuildReason: SZRebuildReason? {
@@ -401,7 +401,7 @@ public struct SZNode: Codable, Identifiable, Equatable, Sendable {
     }
 
     /// `sourceMismatch`, `unreadableInputs`, `builtTargets` and `activeTarget` are host state, not document
-    /// state: they stay out of `project.json` (a file missing on THIS machine is not a fact about the
+    /// state: they stay out of `project.json` (a file missing on this machine is not a fact about the
     /// project). A legacy stored `rebuildReason` key is ignored on decode — the reason is derived now; a
     /// legacy single `buildStamp` is this Mac's.
     private enum CodingKeys: String, CodingKey {
@@ -465,8 +465,8 @@ public struct SZPortRef: Codable, Equatable, Hashable, Sendable {
     public var port: String
     public init(node: SZNodeID, port: String) { self.node = node; self.port = port }
 
-    /// The port marker of a node-to-node flow ref — the one home for the literal. (Flow SOCKETS key
-    /// port as "".) A flow end naming any OTHER port is PINNED to that slot (`SZConnection.pinnedPort`).
+    /// The port marker of a node-to-node flow ref — the one home for the literal. (Flow sockets key
+    /// port as "".) A flow end naming any other port is pinned to that slot (`SZConnection.pinnedPort`).
     public static let flowMarker = "flow"
 
     /// A plain (unpinned) flow endpoint: `port` is the marker.
@@ -493,7 +493,7 @@ public struct SZConnection: Codable, Identifiable, Equatable, Sendable {
     }
 
     /// The contract port a flow edge's `end` is pinned to — the user dropped the flow wire on that
-    /// specific data socket ("feed THIS slot") — or nil for a plain node-to-node flow end / data edge.
+    /// specific data socket ("feed this slot") — or nil for a plain node-to-node flow end / data edge.
     public func pinnedPort(_ end: SZConnectionEnd) -> String? {
         guard kind == .flow else { return nil }
         let ref = end == .from ? from : to

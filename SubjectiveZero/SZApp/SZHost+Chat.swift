@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 
 extension SZHost {
 
-    /// THE feed the one chat panel shows: every Director message, plus each node agent's own
+    /// The feed the one chat panel shows: every Director message, plus each node agent's own
     /// conversation and its build turns, in the order they were said.
     ///
     /// Derived per body evaluation from the per-scope transcripts (a few hundred messages at
@@ -29,7 +29,7 @@ extension SZHost {
         return items.sorted { $0.message.timestamp < $1.message.timestamp }
     }
 
-    /// The composer autocomplete's pickable @mentions — the addressable ENTITIES: the project
+    /// The composer autocomplete's pickable @mentions — the addressable entities: the project
     /// (routed to the Director Agent), every node (broadcast intent, also the Director Agent's to
     /// fan out), and each node (its Coding Agent). Computed from the live graph so a rename shows
     /// immediately; a token freezes whatever title it was picked under.
@@ -62,7 +62,7 @@ extension SZHost {
     }
 
     /// The node card's chat button: put a reference to that node in the message you are writing.
-    /// With one conversation there is no tab to open — talking about a node means MENTIONING it,
+    /// With one conversation there is no tab to open — talking about a node means mentioning it,
     /// which the Director's triage reads as the target. The panel inserts it at the caret and
     /// focuses the field.
     func mentionNodeInComposer(_ id: SZNodeID) {
@@ -103,7 +103,7 @@ extension SZHost {
         showPanel(.chat)
     }
 
-    /// Nodes still waiting to be kicked off — the HUD Build badge. Nodes a run ALREADY holds are
+    /// Nodes still waiting to be kicked off — the HUD Build badge. Nodes a run already holds are
     /// not pending: they are being built, and counting them made Build offer work it could not take.
     var pendingNodeCount: Int {
         let claimed = runWorkSet
@@ -111,7 +111,7 @@ extension SZHost {
             .filter { $0.needsImplementation && !claimed.contains($0.id) }.count ?? 0
     }
 
-    /// Work waiting to be kicked off. NOT gated on "nothing is running" any more: a run is scoped
+    /// Work waiting to be kicked off. Not gated on "nothing is running" any more: a run is scoped
     /// to its own nodes, so a draft added while another build is going is perfectly buildable —
     /// and gating it here was half of why that draft had no control at all.
     ///
@@ -130,9 +130,9 @@ extension SZHost {
         if chatVisible { closePanel(.chat) } else { showPanel(.chat) }
     }
 
-    /// Clear THE CONVERSATION (the composer's ⋯ menu): every scope the one feed is made of, not
+    /// Clear the conversation (the composer's ⋯ menu): every scope the one feed is made of, not
     /// just the Director's — resetting one left the visible half nothing could reach. Each is a
-    /// FULL reset via `resetScopeChat`: transcript, attachment copies, resumable session, queued
+    /// full reset via `resetScopeChat`: transcript, attachment copies, resumable session, queued
     /// messages, so the next turn cold-starts. A scope mid-turn keeps its transcript; resetting it
     /// under a streaming agent would strand the reply.
     func clearChatTranscript(_ scope: SZChatScope) {
@@ -150,7 +150,7 @@ extension SZHost {
 
     /// Who initiated a chat send — the panel composer (`.user`) or an MCP `ui_send_chat` call
     /// (`.agent`, e.g. the Director Agent). The one place the two senders legitimately diverge is a
-    /// node-scoped message DURING a run: from an agent it's the Director steering that node's Coding
+    /// node-scoped message during a run: from an agent it's the Director steering that node's Coding
     /// Agent (recorded for the reconcile loop); from the user it gets the busy guard (TODO: mid-run
     /// user messaging).
     enum SZChatSendOrigin { case user, agent }
@@ -165,12 +165,12 @@ extension SZHost {
         case recordedForReconcile(UUID)
     }
 
-    /// Send a chat message to an agent — THE single entry point for both the chat panel's composer and
+    /// Send a chat message to an agent — the single entry point for both the chat panel's composer and
     /// the `ui_send_chat` MCP tool, so the two paths can't drift. Reveals the chat,
     /// records the user message, opens an empty assistant message, and streams the reply into it.
     /// A node-scoped chat resumes that node's coding-agent session (built by a run, so it carries
     /// the node's context); a Director chat resumes its session or, on the first turn, starts a fresh
-    /// one. Fire-and-forget: streams via the provider's `onOutput` → `assistantText` → transcript.
+    /// one. Fire-and-forget: the provider's `onOutput` streams into that assistant message.
     /// A fresh session (first-turn Director Agent chat) uses the host's `activeProviderID`; resuming an
     /// existing session ignores it and continues on the CLI that owns that session.
     @discardableResult
@@ -179,7 +179,7 @@ extension SZHost {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return .rejected }
 
-        // V1 routing (SZChatRouting — the policy seam): a USER message that leads with a mention
+        // V1 routing (SZChatRouting — the policy seam): a user message that leads with a mention
         // goes to that entity's agent; `scope` (the composing tab) is only the fallback. Agent-
         // origin sends keep their explicit scope — the Director addressing a node must not be
         // re-routed by mentions inside its own words.
@@ -199,13 +199,13 @@ extension SZHost {
             scope = resolved
         }
 
-        // Agent-origin messages DURING a run are fleet-internal steering — recorded, never a nested
+        // Agent-origin messages during a run are fleet-internal steering — recorded, never a nested
         // turn inside a synchronous MCP handler (deadlock-safe: its connection thread is blocked on a
-        // semaphore until we return). Neither path steals the tab. A USER's mid-run message falls
+        // semaphore until we return). Neither path steals the tab. A user's mid-run message falls
         // through instead.
         if origin == .agent, isRunning {
             // Director → a node a run owns: folded into that node's next brief. When the owner is
-            // ANOTHER run, the caller's run just handed part of its ask on, and its receipt must say
+            // another run, the caller's run just handed part of its ask on, and its receipt must say
             // so rather than that nothing needed building.
             if let nodeID = scope.nodeID, let holder = ledger.holder(of: .node(nodeID)), isRunClaim(holder) {
                 if let mine = activeRun(for: SZToolCaller.claim), mine.claim != holder {
@@ -218,7 +218,7 @@ extension SZHost {
             if scope == .director {
                 return .recordedForReconcile(recordDirectorInboxMessage(trimmed))
             }
-            // A node the run does NOT own falls through to the normal enqueue path below.
+            // A node the run does not own falls through to the normal enqueue path below.
         }
 
         // A user send reveals the panel. An agent's does not — background traffic lands in the
@@ -229,7 +229,7 @@ extension SZHost {
             lastUserAskAt = Date()       // the canvas is the agent's to reveal into until the user touches it
         }
 
-        // A pre-flight rejection: shown in the tab but TRANSIENT — never flushed, never recapped.
+        // A pre-flight rejection: shown in the tab but transient — never flushed, never recapped.
         // It isn't conversation; restoring "(busy…)" as assistant history (or replaying it to a
         // fresh session) would misrepresent what was said. Only checks queueing can't fix reject
         // here — a busy scope/run is exactly what the queue is for.
@@ -244,7 +244,7 @@ extension SZHost {
 
         // Stage attachments on disk first (the native layer owns the bytes): copy each picked/dropped/
         // pasted file into the agent's working dir so a real CLI agent can Read it by absolute path, and
-        // so the copy outlives the source URL. The user turn carries the DURABLE records (bundle copies
+        // so the copy outlives the source URL. The user turn carries the durable records (bundle copies
         // that persist + travel — and that a delivery after a restart can still point the agent at).
         // `.debug` stays staging-only, ephemeral like its transcript.
         let cacheDirectory = FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache")
@@ -256,7 +256,7 @@ extension SZHost {
         store.appendChatMessage(userMessage, to: scope)
 
         // Enqueue-time pre-flights — problems no amount of waiting fixes. (Provider readiness is
-        // ALSO checked at delivery; the world can change while a message waits.)
+        // also checked at delivery; the world can change while a message waits.)
         guard agentMCPServer?.port != nil, loadedProjectURL != nil else {
             flushTranscript(scope)
             return reject("(host not ready)")
@@ -276,13 +276,13 @@ extension SZHost {
             providerID = provider.id
         }
 
-        // Queue-everywhere: EVERY send is an envelope; the pump delivers it the moment the scope is
+        // Queue-everywhere: every send is an envelope; the pump delivers it the moment the scope is
         // free (immediately for an idle scope — the common case is one synchronous hop away). The
         // old rejections ("still replying…", "busy — stop the run…") are gone: a busy scope just
-        // means the message waits its turn, visibly queued on its bubble. Envelope BEFORE the
+        // means the message waits its turn, visibly queued on its bubble. Envelope before the
         // transcript flush: a crash between the two leaves envelope-without-bubble (tolerated —
         // redelivery re-appends), never bubble-without-envelope (silent loss).
-        // The envelope's id IS the bubble's id: the panel's queued chip looks messages up by the
+        // The envelope's id is the bubble's id: the panel's queued chip looks messages up by the
         // bubble id, and one shared id keeps envelope, bubble, and `ui_message_status` congruent.
         let envelope = SZMessageEnvelope(
             id: userMessage.id,

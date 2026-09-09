@@ -5,15 +5,15 @@
 // pump's delivery gate — derives from the claims table instead of keeping its own boolean.
 //
 // Deadlock discipline (docs/AGENT_ORCHESTRATION.md, the future behavior-tree engine leans on this):
-// - Acquisition is ATOMIC all-or-queue: a claimant declares its full set upfront and never holds a
+// - Acquisition is atomic all-or-queue: a claimant declares its full set upfront and never holds a
 //   partial set while waiting, so hold-and-wait between resource waiters is structurally impossible.
 // - Waiters queue FIFO with reserved-for-earlier-waiter fairness: a resource wanted by an earlier
 //   waiter is not grantable — not even via tryAcquire — to a later claimant, so a big multi-resource
 //   acquire (a run) cannot be starved by a stream of small ones.
-// - Every wait is cycle-checked AT REGISTRATION with edges resolved dynamically against the live
-//   table, targeting holders AND reservers of the wanted resources (a reservation blocks exactly
+// - Every wait is cycle-checked at registration with edges resolved dynamically against the live
+//   table, targeting holders and reservers of the wanted resources (a reservation blocks exactly
 //   like a hold, so it must count as an edge — see `SZResourceLedgerTests.reservationEdgeCycle`).
-//   External waits (a message-ack awaiting a delivery or a consumer) register in the SAME graph, so
+//   External waits (a message-ack awaiting a delivery or a consumer) register in the same graph, so
 //   resource waits and ack waits deadlock-check together.
 // - Waits carry an optional deadline and are task-cancellation-safe; both paths drop the waiter's
 //   reservations and re-run the grant scan so nothing dangles.
@@ -156,7 +156,7 @@ public final class SZResourceLedger {
         return true
     }
 
-    /// Atomic multi-acquire: the full set is claimed in one step, or the caller suspends as ONE
+    /// Atomic multi-acquire: the full set is claimed in one step, or the caller suspends as one
     /// waiter for the whole set — never a partial hold. FIFO with reservation fairness. Throws
     /// `.wouldDeadlock` instead of parking a wait that would close a cycle, `.deadlineExceeded`
     /// when the optional deadline passes first, `CancellationError` on task cancellation.
@@ -215,14 +215,14 @@ public final class SZResourceLedger {
 
     // MARK: - External waits (message-ack edges)
 
-    /// Register a wait edge for an ack that resolves when a DELIVERY to these resources runs —
+    /// Register a wait edge for an ack that resolves when a delivery to these resources runs —
     /// edges target their holders ∪ reservers, re-resolved dynamically on every later check.
     public func registerExternalWait(from token: SZClaimToken, on resources: Set<SZResourceID>,
                                      label: String) throws -> SZWaitRegistration {
         try registerExternalWait(from: token, target: .resources(resources), label: label)
     }
 
-    /// Register a wait edge for an ack that resolves when a specific CONSUMER drains it (a `.steer`
+    /// Register a wait edge for an ack that resolves when a specific consumer drains it (a `.steer`
     /// folded by the run). A direct self-edge is deliberately legal — a consumer awaiting its own
     /// steer is a fold in its own control flow, not a lock — but the edge still participates in
     /// transitive cycle checks for everyone else.
@@ -312,13 +312,13 @@ public final class SZResourceLedger {
     // MARK: - Cycle detection
 
     /// A hypothetical reservation in force only while a cycle check runs: an `acquire` candidate
-    /// would park at the FIFO tail and reserve its wanted set against everything that comes LATER —
+    /// would park at the FIFO tail and reserve its wanted set against everything that comes later —
     /// which includes every external delivery's future tryAcquire. Without modeling it, the
     /// reservation-induced cycle (B1 awaits a delivery to N; the candidate B2 waits on B1's hold
-    /// AND reserves N) passes the check and deadlocks after parking.
+    /// and reserves N) passes the check and deadlocks after parking.
     @ObservationIgnored private var probeWait: (token: SZClaimToken, wanted: Set<SZResourceID>)?
 
-    /// Would parking `token` on `target` close a cycle? Edges are resolved against the LIVE table
+    /// Would parking `token` on `target` close a cycle? Edges are resolved against the live table
     /// at call time (never snapshotted): a wait's blockers are the holders ∪ reservers of what it
     /// wants, so hand-offs and reservations are always current. Returns the cycle as token labels
     /// in path order (first == last) for the diagnostic, or nil when the wait is safe.
@@ -356,8 +356,8 @@ public final class SZResourceLedger {
     }
 
     /// Every token the given wait target is blocked by right now. `excludingOwnHolds` is true only
-    /// for an ACQUIRE candidate's own edges: its holds are reentrant-satisfiable, so they don't
-    /// block it. An EXTERNAL wait resolves via a third party (the pump's delivery under its own
+    /// for an acquire candidate's own edges: its holds are reentrant-satisfiable, so they don't
+    /// block it. An external wait resolves via a third party (the pump's delivery under its own
     /// token), so the origin's own hold blocks it like anyone else's — a token holding the very
     /// resource its ack needs is a direct self-deadlock and must flag.
     private func targets(of target: ExternalWait.Target, from: SZClaimToken,

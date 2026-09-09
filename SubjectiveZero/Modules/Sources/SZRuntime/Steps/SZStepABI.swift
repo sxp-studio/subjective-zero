@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The frozen DECISION-STEP ABI, v5 — the async step tier over the kind-free wire. A step is
-// a standalone `Step.swift` compiled and hot-reloaded exactly like a node's `Node.swift`;
-// what crosses the `dlopen` boundary is C-ABI, and the ergonomic kit (`SZStep`, `ctx.ask`)
-// is compiled INTO each step from the host-owned `SZStepKit.source`.
+// The frozen decision-step ABI, v5 — the async step tier over the kind-free wire. A step is a standalone
+// `Step.swift`, compiled and hot-reloaded exactly like a node's `Node.swift`; what crosses the `dlopen`
+// boundary is C-ABI, and the ergonomic kit (`SZStep`, `ctx.ask`) is compiled into each step from the
+// host-owned `SZStepKit.source`.
 //
 // The async shape (since v4), and why:
-// - Evaluation is ASYNC: `SZStepEvaluate` starts the step's body in a Task and returns a
-//   cancel token; the result arrives through a completion callback that fires EXACTLY ONCE
-//   (ok / cancelled / failed). A step may `await` — which is what admits `askModel`.
-// - Facts arrive EAGERLY: one JSON document in the request, decoded once by the
-//   kit. The snapshot is pinned at evaluate-start; that is the determinism contract (a step
-//   that awaits and then reads a fact sees the world as it was when evaluation began).
-// - ONE outbound capability: the `ask` function pointer, through which the kit's `askModel`
-//   requests a stateless model completion from the host. The host answers every accepted
-//   call exactly once — on success, failure, or cancellation — so the kit never needs its
-//   own cancellation plumbing for an in-flight ask.
-// - Payloads are push-style: the producer owns the buffer, the consumer copies inside the
-//   callback frame. The v3 grow-and-retry pull survives only in `SZStepDeclare`, which is
-//   synchronous and load-time-only.
+// - Evaluation is async: `SZStepEvaluate` starts the step's body in a Task and returns a cancel token; the
+//   result arrives through a completion callback that fires exactly once (ok / cancelled / failed). A step
+//   may `await`, which is what admits `askModel`.
+// - Facts arrive eagerly: one JSON document in the request, decoded once by the kit and pinned at
+//   evaluate-start. That is the determinism contract: a step that awaits and then reads a fact sees the
+//   world as it was when evaluation began.
+// - One outbound capability: the `ask` function pointer, through which the kit's `askModel` requests a
+//   stateless model completion from the host. The host answers every accepted call exactly once — success,
+//   failure or cancellation — so the kit needs no cancellation plumbing of its own for an in-flight ask.
+// - Payloads are push-style: the producer owns the buffer, the consumer copies inside the callback frame.
+//   The v3 grow-and-retry pull survives only in `SZStepDeclare`, which is synchronous and load-time-only.
 import Foundation
 
 /// dylib → host, once per evaluation: `(completionCtx, status, payloadUTF8, payloadLen)`.
@@ -38,12 +36,12 @@ typealias SZStepAskReplyFn = @convention(c) (UnsafeMutableRawPointer?, Int32, Un
 /// dylib → host: start one stateless model completion.
 /// `(hostContext, requestJSONUTF8, requestLen, replyFn, replyCtx) -> callID`. 0 = rejected
 /// and `replyFn` will never be called; nonzero = accepted, and the host guarantees `replyFn`
-/// fires EXACTLY ONCE, from any thread. The request is `SZAskRequest` as JSON.
+/// fires exactly once, from any thread. The request is `SZAskRequest` as JSON.
 typealias SZStepAskFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int32, SZStepAskReplyFn?, UnsafeMutableRawPointer?) -> UInt64
 
 enum SZStepABI {
     /// Bumped on a breaking ABI change. The loader rejects a mismatch.
-    /// v5: the kind-free wire — the facts document is the ONE `SZFacts` shape (a message is
+    /// v5: the kind-free wire — the facts document is the one `SZFacts` shape (a message is
     /// words; structure is world state), the declaration payload is `{outcomes}` (no facts
     /// kind), and the teardown symbol is gone (steps are stateless). The C function
     /// shapes are unchanged from v4 — the bump
@@ -63,8 +61,8 @@ enum SZStepABI {
     /// Returns a nonzero dylib-minted token and guarantees `completion` fires exactly once
     /// (possibly before this returns). Returns 0 = the evaluation could not start (nil
     /// request, no completion, or the facts document was rejected); `completion` is then
-    /// never called. The request struct and everything it points to are valid ONLY for the
-    /// duration of this call — the kit copies before returning.
+    /// never called. The request struct and everything it points to are valid for the
+    /// duration of this call, and only for it — the kit copies before returning.
     typealias EvaluateFn = @convention(c) (UnsafeRawPointer?, SZStepCompletionFn?, UnsafeMutableRawPointer?) -> UInt64
     /// Cancel one in-flight evaluation by token. Idempotent; an unknown or already-settled
     /// token is a no-op. The evaluation still settles through its completion (cancelled).

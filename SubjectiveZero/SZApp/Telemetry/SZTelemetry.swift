@@ -135,7 +135,7 @@ final class SZTelemetry {
 
     /// The three things a session can do between `app_launch` and the first 15-minute heartbeat
     /// that the funnel was blind to: the user sent a prompt, an agent turn ended (and whether it
-    /// failed), an agent-built node went live. Each fires ONCE PER PROCESS — the session-level
+    /// failed), an agent-built node went live. Each fires once per process — the session-level
     /// funnel — and carries `first_in_install` (persisted marker) so the install-level funnel and
     /// `minutes_since_launch` (how deep into the session it happened) read off the same event.
     /// The marker records the milestone, not the send — set even while telemetry is disabled, so
@@ -210,7 +210,7 @@ final class SZTelemetry {
         return report
     }
 
-    /// Test seam: every report handed to `send`, before the pref/config gate — what WOULD go out.
+    /// Test seam: every report handed to `send`, before the pref/config gate — what would go out.
     var reportObserverForTests: (([String: SZJellystatReportValue]) -> Void)?
 
     private func send(_ report: [String: SZJellystatReportValue]) {

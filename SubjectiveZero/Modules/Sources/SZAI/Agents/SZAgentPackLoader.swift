@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Loads a ROOT of agent packs and validates the library as a whole. Loading collects, never
+// Loads a root of agent packs and validates the library as a whole. Loading collects, never
 // first-errors: an unreadable pack becomes a defect while its siblings load, and a broken
 // graph.json becomes a defect while the folder's seat still loads. Only a broken agent.json
 // drops a pack — without its manifest a folder has no identity. A pack root is user
 // content, never a reason to crash.
 //
-// Split of labor: SZAgentGraph.defects() checks graph SHAPE; validate(packs:steps:) checks
+// Split of labor: SZAgentGraph.defects() checks graph shape; validate(packs:steps:) checks
 // everything needing pack or library context — briefs (existence, the one token table, the
 // partials a mentioned token pulls), step folders, seats, dispatch targets, and (through
 // the injected SZStepProviding seam) the compiled steps' declared outcomes. With no
-// provider those step-attached checks are SKIPPED and the report says so.
+// provider those step-attached checks are skipped and the report says so.
 import Foundation
 import SZCore
 
@@ -105,7 +105,7 @@ public struct SZAgentPackLoadResult: Sendable {
 // MARK: - The loader
 
 public enum SZAgentPackLoader {
-    /// The pack root this module SHIPS (`Resources/Agents`, bundled whole via `.copy`).
+    /// The pack root this module ships (`Resources/Agents`, bundled whole via `.copy`).
     /// nil only in a build whose bundle carries no resources. Callers that want the packs
     /// user-editable materialize a copy and load that instead — the host owns that policy.
     public static var bundledRoot: URL? {
@@ -137,7 +137,7 @@ public enum SZAgentPackLoader {
         return SZAgentPackLoadResult(packs: packs, defects: defects, seats: seats(of: packs))
     }
 
-    /// The seats as the loaded set fills them: an id only where EXACTLY one pack claims the
+    /// The seats as the loaded set fills them: an id only where exactly one pack claims the
     /// seat. Unfilled and contested both resolve nil; `validate` names the difference.
     static func seats(of packs: [SZAgentPack]) -> SZSeatAssignment {
         var seats = SZSeatAssignment()
@@ -156,7 +156,7 @@ public enum SZAgentPackLoader {
     }
 
     /// One folder's load: the pack (nil only when `agent.json` itself is broken) plus
-    /// EVERY defect the folder shows.
+    /// every defect the folder shows.
     private static func load(folder: URL) -> (pack: SZAgentPack?, defects: [SZAgentPackDefect]) {
         let fm = FileManager.default
         let folderName = folder.lastPathComponent
@@ -240,7 +240,7 @@ public enum SZAgentPackLoader {
                                 steps: (any SZStepProviding)?) async -> [SZAgentPackDefect] {
         var defects: [SZAgentPackDefect] = []
 
-        // Seats — a rule about the COMPLETE library: exactly one holder each.
+        // Seats — a rule about the complete library: exactly one holder each.
         for seat in SZAgentSeat.allCases {
             let holders = packs.filter { $0.seat == seat }.map(\.id).sorted()
             if holders.isEmpty {
@@ -357,7 +357,7 @@ public enum SZAgentPackLoader {
                 + " · \(pack.prompts.count) prompt\(pack.prompts.count == 1 ? "" : "s")")
             if let graph = pack.graph {
                 var facts = ["\(graph.nodes.count) node\(graph.nodes.count == 1 ? "" : "s")"]
-                // The door's declared outcomes ARE the agent's front page — what it can
+                // The door's declared outcomes are the agent's front page — what it can
                 // decide about a message — shown when a provider can compile the door.
                 if let steps, case .step(let doorStep) = graph.door?.form,
                    let declaration = (try? await steps.declaration(agent: pack.id, step: doorStep)) ?? nil,

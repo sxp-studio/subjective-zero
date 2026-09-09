@@ -15,7 +15,7 @@ final class SZMCPServer: @unchecked Sendable {
     /// Which tool surface this listener serves. The host runs one of each: agents dial the `.agent`
     /// listener (no `debug_*`), closed-loop tests dial the `.full` one.
     let surface: SZHostBridge.Surface
-    /// A per-TURN listener's trace identity: a raw TCP connection carries no caller identity, so
+    /// A per-turn listener's trace identity: a raw TCP connection carries no caller identity, so
     /// the port is it — `deliver` spawns one listener per agent turn and every tool call arriving
     /// here attributes to that turn exactly, parallel agents included. nil on the standing buses
     /// (whose calls fall back to the bridge's attribution rule).
@@ -36,7 +36,7 @@ final class SZMCPServer: @unchecked Sendable {
 
     /// Bind the first free port at or after `from`, within 42100–42199.
     ///
-    /// `from` matters: `NWListener` does NOT throw when a port is already bound — it fails later, on its
+    /// `from` matters: `NWListener` does not throw when a port is already bound — it fails later, on its
     /// state handler — so a second listener started at the same base would "succeed", collide, and die
     /// quietly. The host starts its agent bus above the port the full bus took.
     @MainActor
@@ -65,7 +65,7 @@ final class SZMCPServer: @unchecked Sendable {
         self.traceContext = traceContext
         self.caller = caller
         self.callerScope = callerScope
-        // LOOPBACK ONLY. Plain `NWListener(using: .tcp, on:)` binds every interface (lsof shows
+        // Loopback only. Plain `NWListener(using: .tcp, on:)` binds every interface (lsof shows
         // `*:<port>`), so on a shared network any host could drive this bus — and its tools include
         // `ui_run`, which spawns a coding agent that writes and executes code with no approval gate.
         // `requiredLocalEndpoint` pins the bind to 127.0.0.1; every client dials IPv4 loopback (the
@@ -118,7 +118,7 @@ final class SZMCPServer: @unchecked Sendable {
             if let data, !data.isEmpty {
                 for line in buffer.appendAndExtractLines(data) {
                     // Serialize: handle this line (hopping to the MainActor bridge) before the next.
-                    // Signal once the response is *dispatched* — NOT from send's completion, which NW
+                    // Signal once the response is *dispatched* — not from send's completion, which NW
                     // delivers on this same (blocked) connection queue and would deadlock.
                     let done = DispatchSemaphore(value: 0)
                     Task {
@@ -169,7 +169,7 @@ final class SZMCPServer: @unchecked Sendable {
             do {
                 let result: SZMCPToolResult
                 if SZHostBridge.offMainToolNames.contains(name) {
-                    // A declared-off-main tool (a long compile pass) runs on THIS task —
+                    // A declared-off-main tool (a long compile pass) runs on this task —
                     // never inside the MainActor hop, where it would wedge every tool call.
                     let arguments = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
                     result = try await bridge.callOffMainTool(name: name, arguments: arguments,

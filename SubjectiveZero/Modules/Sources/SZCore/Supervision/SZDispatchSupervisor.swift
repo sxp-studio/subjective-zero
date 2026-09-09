@@ -1,21 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// THE dispatch-set supervisor — one pure value machine owning the fleet's lifecycle while
-// a traversal's dispatch node waits. The host is its motor: it delivers items, arms
-// timers, and reports back as events — and tests drive THE REAL THING with event lists.
+// The dispatch-set supervisor — one pure value machine owning the fleet's lifecycle while a
+// traversal's dispatch node waits. The host is its motor: it delivers items, arms timers, and reports
+// back as events; tests drive the real thing with event lists.
 //
-// The model, stated once:
-//  - ONE open set at a time, structurally: the engine is sequential and a dispatch node
-//    holds the traversal until its set closes, so a second set cannot be minted while one
-//    is open. The machine still refuses one defensively.
-//  - Exactly one settled summary per set: collected from item outcomes when the last
-//    lands, or synthesized when the watchdog fires with stragglers marked timed-out. A
-//    closed set drops every later event — keyed by set id, never node id, which is
-//    ambiguous the moment a re-dispatch puts the same node in a younger set.
-//  - Attempts accumulate per item ACROSS sets (a retry loop re-dispatches the same node),
-//    stamped into each order as it is minted, so no other agent's step ordering can
-//    reframe an item's briefing.
-//  - All bounds are injected once (`Bounds`); the machine never reads an environment
-//    variable. The host resolves those, exactly once, at its own boundary.
+//  - One open set at a time, structurally: the engine is sequential and a dispatch node holds the
+//    traversal until its set closes, so a second set cannot be minted while one is open. The machine
+//    still refuses one defensively.
+//  - Exactly one settled summary per set: collected from item outcomes when the last lands, or
+//    synthesized when the watchdog fires with stragglers marked timed-out. A closed set drops every
+//    later event — keyed by set id, never node id, which is ambiguous the moment a re-dispatch puts
+//    the same node in a younger set.
+//  - Attempts accumulate per item across sets (a retry loop re-dispatches the same node), stamped into
+//    each order as it is minted, so no other agent's step ordering can reframe an item's briefing.
+//  - All bounds are injected once (`Bounds`); the machine never reads an environment variable. The
+//    host resolves those, exactly once, at its own boundary.
 import Foundation
 
 /// One dispatched unit of work as the machine orders it delivered: the node, which attempt
@@ -32,7 +30,7 @@ public struct SZDispatchOrder: Sendable, Equatable {
     }
 }
 
-/// A dispatch node's decision — WHO (a seat name) and WHAT (node ids), exactly what the
+/// A dispatch node's decision — who (a seat name) and what (node ids), exactly what the
 /// graph declared. Content, never engine knowledge: the machine stamps attempts, mints
 /// the set, and orders delivery; it never second-guesses the target or the items.
 public struct SZDispatchIntent: Sendable, Equatable {
@@ -79,7 +77,7 @@ public enum SZTraversalEnding: Sendable, Equatable {
     case ended
     case failed(reason: String)
     case cancelled
-    /// The graph REFUSED the work and said why — its own class, so a refusal never
+    /// The graph refused the work and said why — its own class, so a refusal never
     /// reads as a failure (nothing broke) nor as "complete" (the work was not done).
     case declined(reason: String)
     /// The traversal's own integrity broke (unknown step mid-flight).
@@ -114,7 +112,7 @@ public struct SZDispatchSupervisor: Sendable {
         case dispatched(SZDispatchIntent)
         /// One work message's traversal actually opened.
         case workDelivered(node: String, setID: Int)
-        /// One work message's terminal outcome, keyed to ITS OWN set — never matched by node
+        /// One work message's terminal outcome, keyed to its own set — never matched by node
         /// id, which a re-dispatch makes ambiguous.
         case workSettled(node: String, setID: Int, outcome: String)
         /// The watchdog the machine armed for this set fired.
@@ -127,7 +125,7 @@ public struct SZDispatchSupervisor: Sendable {
     public enum Command: Sendable, Equatable {
         /// Deliver these orders to the target seat as one supervised set.
         case deliverItems(setID: Int, target: String, orders: [SZDispatchOrder])
-        /// Arm the set's watchdog. The host MAY cancel the timer when the set closes —
+        /// Arm the set's watchdog. The host may cancel the timer when the set closes —
         /// a fired watchdog on a closed set is absorbed either way, so correctness
         /// never depends on the cancel landing.
         case armWatchdog(setID: Int, after: Duration)
@@ -135,7 +133,7 @@ public struct SZDispatchSupervisor: Sendable {
         /// allowed to run on would later settle a set that isn't its own), or what a
         /// stop sweeps.
         case cancelItems(setID: Int, nodes: [String])
-        /// The set's live tally for the dispatch card — on every settle AND every
+        /// The set's live tally for the dispatch card — on every settle and every
         /// timeout, so the card counts up while items land.
         case amendTally(setID: Int, settled: Int, total: Int, failed: Int)
         /// The set's one summary — what the waiting dispatch node resumes with. A
@@ -225,7 +223,7 @@ public struct SZDispatchSupervisor: Sendable {
             }
             set.outstanding = []
             openSet = set
-            // Cancel BEFORE the summary ships — a straggler allowed to run on would
+            // Cancel before the summary ships — a straggler allowed to run on would
             // later settle a set that isn't its own.
             return [.cancelItems(setID: set.id, nodes: stragglers), tally(of: set)]
                 + closeSet(set)
@@ -251,8 +249,6 @@ public struct SZDispatchSupervisor: Sendable {
             }
         }
     }
-
-    // MARK: - Transitions
 
     /// The set is fully settled (collected or synthesized): ship the one summary the
     /// waiting dispatch node resumes with.

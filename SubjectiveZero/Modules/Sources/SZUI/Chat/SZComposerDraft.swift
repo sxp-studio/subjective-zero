@@ -53,10 +53,10 @@ public struct SZComposerDraft: Equatable, Sendable {
         plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Drop a redundant LEADING `@project` mention (plus the space after it): inside the Project
-    /// tab you already address the Director, so seeding "@project …" reads oddly. The message still
-    /// routes to the Director (no leading mention → the active Project tab). Non-leading `@project`
-    /// or `@all` / node references are untouched.
+    /// Drop a redundant leading `@project` mention (plus the space after it): the composer already
+    /// addresses the Director, so seeding "@project …" reads oddly. The message routes there either
+    /// way (no leading mention → the Director). Non-leading `@project` or `@all` / node references
+    /// are untouched.
     public func strippingLeadingProjectMention() -> SZComposerDraft {
         guard case .mention(.project, _)? = segments.first else { return self }
         var rest = Array(segments.dropFirst())
@@ -71,7 +71,7 @@ public struct SZComposerDraft: Equatable, Sendable {
 /// A host-authored draft landing in the composer (a context-menu suggestion click, the HUD's
 /// pending-work beacon). `id` is the event identity — the panel consumes each injection exactly
 /// once (`onConsumePendingDraft`), so a re-render can never re-inject over the user's edits.
-/// Applied only when the panel shows `scope`. `replacesNonEmpty: false` = a SOFT injection (the
+/// Applied only when the panel shows `scope`. `replacesNonEmpty: false` = a soft injection (the
 /// beacon): it lands only in an empty composer and is dropped otherwise — an explicit menu pick
 /// replaces, a nudge never stomps.
 public struct SZComposerDraftInjection: Equatable, Sendable {
@@ -89,7 +89,7 @@ public struct SZComposerDraftInjection: Equatable, Sendable {
     }
 }
 
-/// A host request to drop ONE mention token into the composer at the caret — the node card's chat
+/// A host request to drop one mention token into the composer at the caret — the node card's chat
 /// button. With a single conversation there is no tab to open, so "talk about this node" means
 /// putting a reference to it in the message you are already writing, and focusing the field.
 /// Consumed once by id, like a draft injection, so a re-render can't insert it twice.

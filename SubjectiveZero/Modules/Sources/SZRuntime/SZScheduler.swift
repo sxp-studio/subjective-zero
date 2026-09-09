@@ -7,7 +7,7 @@
 //
 // Flow vs data: data edges carry the runtime texture a node actually reads and define execution order.
 // Flow edges are a transient authoring annotation (drawing intent the Director resolves into data wiring)
-// and are NOT a runtime construct — the topological order is derived from DATA edges only (GRAPH_AND_NODES).
+// and are not a runtime construct — the topological order is derived from data edges only (GRAPH_AND_NODES).
 // The topo kernel is Kahn's algorithm.
 import Foundation
 import Metal
@@ -20,9 +20,9 @@ final class SZFrameBindings {
     var outputs: [String: any MTLTexture] = [:]
     var values: [String: [Float]] = [:]
     var strings: [String: String] = [:]   // v4: enum/string input values (unconnected inputs)
-    var outputValues: [String: [Float]] = [:]   // v5: scalar OUTPUT values the node emits this frame
-    var outputStrings: [String: String] = [:]   // v8: string OUTPUT values the node emits this frame
-    var holds: SZFrameHolds?              // v6: the FRAME-wide hold list (one per encodeFrame, shared)
+    var outputValues: [String: [Float]] = [:]   // v5: scalar output values the node emits this frame
+    var outputStrings: [String: String] = [:]   // v8: string output values the node emits this frame
+    var holds: SZFrameHolds?              // v6: the frame-wide hold list (one per encodeFrame, shared)
     /// v9: why the node produced nothing this frame (`reportError`). One per node, last call wins.
     var reportedError: String?
 
@@ -31,7 +31,7 @@ final class SZFrameBindings {
 }
 
 /// Objects pinned for one frame's GPU lifetime (v6, `holdUntilFrameCompletes`): accumulated across every
-/// node's encode, then captured by the command buffer's completed-handler — that capture IS the
+/// node's encode, then captured by the command buffer's completed-handler — that capture is the
 /// retention; GPU completion releases it.
 final class SZFrameHolds: @unchecked Sendable {   // append-only during single-threaded encode; immutable once the handler holds it
     var objects: [AnyObject] = []
@@ -55,7 +55,7 @@ private func szResolveTexture(
 }
 
 /// Resolves a port name to its value(s): copies up to `capacity` floats into `out`, returns the value's
-/// FULL count (0 if the port has no value) so an undersized caller can grow + retry (a `floatArray` read).
+/// full count (0 if the port has no value) so an undersized caller can grow + retry (a `floatArray` read).
 let szResolveInputValue: SZValueResolver = { ctx, name, out, capacity in
     guard let ctx, let name, let out else { return 0 }
     let bindings = Unmanaged<SZFrameBindings>.fromOpaque(ctx).takeUnretainedValue()
@@ -66,7 +66,7 @@ let szResolveInputValue: SZValueResolver = { ctx, name, out, capacity in
 }
 
 /// Resolves a port name to its string value (v4): copies up to `capacity` UTF-8 bytes into `out`, returns
-/// the value's FULL byte length (0 if the port has no value) so the node can grow + retry on truncation.
+/// the value's full byte length (0 if the port has no value) so the node can grow + retry on truncation.
 let szResolveInputString: SZStringResolver = { ctx, name, out, capacity in
     guard let ctx, let name, let out else { return 0 }
     let bindings = Unmanaged<SZFrameBindings>.fromOpaque(ctx).takeUnretainedValue()
@@ -77,7 +77,7 @@ let szResolveInputString: SZStringResolver = { ctx, name, out, capacity in
     return Int32(bytes.count)
 }
 
-/// Records a node's emitted scalar OUTPUT value(s) (v5): copies `count` floats from `in` into the node's
+/// Records a node's emitted scalar output value(s) (v5): copies `count` floats from `in` into the node's
 /// bindings, where the scheduler reads them back after the frame to feed a connected downstream input.
 let szResolveOutputValue: SZOutputValueResolver = { ctx, name, in_, count in
     guard let ctx, let name, let in_ else { return }
@@ -85,7 +85,7 @@ let szResolveOutputValue: SZOutputValueResolver = { ctx, name, in_, count in
     bindings.outputValues[String(cString: name)] = Array(UnsafeBufferPointer(start: in_, count: Int(count)))
 }
 
-/// Records a node's emitted string OUTPUT value (v8): decodes `count` UTF-8 bytes from `in` into the
+/// Records a node's emitted string output value (v8): decodes `count` UTF-8 bytes from `in` into the
 /// node's bindings, where the scheduler reads it back after the frame to feed a connected downstream input.
 let szResolveOutputString: SZOutputStringResolver = { ctx, name, in_, count in
     guard let ctx, let name, let in_ else { return }
@@ -103,7 +103,7 @@ let szReportError: SZReportErrorFn = { ctx, in_, count in
     bindings.reportedError = String(decoding: UnsafeRawBufferPointer(start: in_, count: n), as: UTF8.self)
 }
 
-/// Pins an object until the frame's command buffer completes (v6). OWNERSHIP TRANSFER: the node side
+/// Pins an object until the frame's command buffer completes (v6). Ownership transfer: the node side
 /// passed a +1-retained pointer (`passRetained`), balanced here by `takeRetainedValue` into the frame's
 /// hold list. Dropped (released immediately) if the frame has no hold list — nothing to pin against.
 let szFrameHold: SZFrameHoldFn = { ctx, object in
@@ -176,7 +176,7 @@ struct SZScheduler: Sendable {
             bindings.strings = inputStrings[nodeID] ?? [:]  // string/enum input values (unconnected inputs)
             bindings.holds = holds
 
-            // Route each data edge into this node by its SOURCE port's type: a texture binds the upstream
+            // Route each data edge into this node by its source port's type: a texture binds the upstream
             // texture; a string/enum source feeds the upstream node's emitted string; any other source feeds
             // its emitted floats — each overriding the unconnected default seeded just above.
             for connection in graph.connections where connection.kind == .data && connection.to.node == nodeID {
@@ -236,14 +236,13 @@ struct SZScheduler: Sendable {
             valueOutputs, stringOutputs, nodeErrors)
     }
 
-    /// The pooled texture the CURRENT `renderEndpoint` points at, WITHOUT encoding a frame and
-    /// WITHOUT allocating — at whatever size the last schedule pass rendered it, nil when there's
-    /// no endpoint or it has never been written. The by-id pool still holds every node's
-    /// last-written output, so a paused or mirror viewport can present the live endpoint by
-    /// reading it directly — and following a display-target switch shows that node's held frame
-    /// rather than a stale cached one. Non-allocating is the point: the pool reallocates (and
-    /// thereby DESTROYS) a texture on any size change, so a present-only reader asking at its own
-    /// size would trash the held frame it came for.
+    /// The pooled texture the current `renderEndpoint` points at, without encoding a frame and without
+    /// allocating — at whatever size the last schedule pass rendered it, nil when there's no endpoint or
+    /// it has never been written. The by-id pool still holds every node's last-written output, so a
+    /// paused or mirror viewport can present the live endpoint by reading it directly, and a
+    /// display-target switch shows that node's held frame rather than a stale cached one. Non-allocating
+    /// is the point: the pool reallocates (destroying) a texture on any size change, so a present-only
+    /// reader asking at its own size would trash the held frame it came for.
     func heldEndpointTexture(assets: SZAssetManager) -> (any MTLTexture)? {
         guard let endpoint = renderEndpoint else { return nil }
         return assets.existing(id: Self.textureID(node: endpoint.node, port: endpoint.port))
@@ -258,7 +257,7 @@ struct SZScheduler: Sendable {
         graph.node(id: ref.node)?.contract?.outputs.first { $0.name == ref.port }?.type
     }
 
-    /// Kahn's algorithm over DATA edges (flow is authoring intent, not runtime order). Returns nil on a
+    /// Kahn's algorithm over data edges (flow is authoring intent, not runtime order). Returns nil on a
     /// cycle. Forwards to the shared kernel (`SZGraph.topologicalOrder`) — the same one the connect
     /// guards and load-time repair consult, so the scheduler cannot disagree with them. The
     /// `SchedulerError.cycle` throw in `init` stays as the backstop.

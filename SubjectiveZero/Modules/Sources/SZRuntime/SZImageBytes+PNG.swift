@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// PNG encoding for captured frames. Lives with `SZImageBytes` in SZRuntime (it's a graphics concern,
-// excluded from SZCore by the no-Metal/graphics rule) — capture + encode stay together, as the type's
-// own doc note anticipated ("PNG encoding layers on when a consumer needs it"; e.g. agent_view_frame).
+// PNG encoding for captured frames (agent_view_frame). Lives with `SZImageBytes` in SZRuntime rather
+// than SZCore, which the no-Metal/graphics rule keeps clear of it.
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -9,7 +8,7 @@ import UniformTypeIdentifiers
 
 public extension SZImageBytes {
     /// Fit `width`×`height` so the long edge is at most `maxDimension`: never upscales, preserves
-    /// aspect, floors at 1px per side. The ONE sizing rule shared by the CPU downscale here and the
+    /// aspect, floors at 1px per side. The one sizing rule shared by the CPU downscale here and the
     /// preview stream's GPU thumb targets (`SZRuntime.encodeThumbScales`), so a thumb and an
     /// agent-frame downscale of the same source can't disagree on dimensions.
     static func fittedSize(width: Int, height: Int, maxDimension: Int) -> (width: Int, height: Int) {

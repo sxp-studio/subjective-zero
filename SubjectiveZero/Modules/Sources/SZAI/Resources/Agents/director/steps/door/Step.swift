@@ -1,5 +1,5 @@
 // The director's door — where every delivery is decided. A granted run goes straight to work:
-// the grant arrives PRE-RULED (the Build press, a target switch, or a previous turn's own ruling),
+// the grant arrives already ruled on (the Build press, a target switch, or a previous turn's ruling),
 // and re-triaging it would spend a token to maybe drop a build. A conversion run (the project just
 // switched platforms) takes its own lane, since it is dispatched as it stands rather than planned.
 // Prose is triaged by the model; `implement` requests the build — the run is the reply — `amend`

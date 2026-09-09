@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The bytes a cold turn reads ABOVE its brief when its node declares `context: conversation`: the
+// The bytes a cold turn reads above its brief when its node declares `context: conversation`: the
 // scope's prior conversation as `SZWorld.conversation` projects it, labeled and bounded (the user's
-// opening message, then the last 20 messages within ~8 KB). Data only — the transcript IS the
+// opening message, then the last 20 messages within ~8 KB). Data only — the transcript is the
 // context, no framing prose beyond the one-line header. The seam a future memory system replaces.
 import Foundation
 import SZCore
@@ -48,7 +48,7 @@ public enum SZConversationRecap {
             body = "(…truncated)\n" + String(body.suffix(characterLimit))
         }
         lines.append(body)
-        // Mentions replay as readable `@display`; ONE aggregate manifest below re-expands them.
+        // Mentions replay as readable `@display`; one aggregate manifest below re-expands them.
         let texts = (pinned.map { [$0.text] } ?? []) + kept.map(\.message.text)
         if let manifest = SZMentionExpansion.recapManifest(for: texts, nodes: nodes) {
             lines.append("")
@@ -64,7 +64,7 @@ public enum SZConversationRecap {
 
     /// One message as the recap prints it: a role label, the words, and any durable attachment.
     private static func block(_ message: SZChatMessage) -> String {
-        // A build's receipt is not something anyone SAID: labelled as the event it is, not as
+        // A build's receipt is not something anyone said: labelled as the event it is, not as
         // the agent's own prior words. An agent's own reply is cut; the user's never is.
         var text = SZMentionMarkup.plainText(message.text)
         let label: String

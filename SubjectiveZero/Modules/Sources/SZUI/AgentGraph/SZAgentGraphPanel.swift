@@ -1,30 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Agent Graph panel: the orchestration, drawn. Read-only — pan and zoom, no editing.
 //
-// Two views of one vocabulary. PLAN is the authored graph as a static document. RUN is an
-// accumulating list applied to executions: every recorded RUN down the left, the selected
-// one's canvas beside it — and each run draws ITS OWN graph, so an item traversal renders
-// its agent's item graph rather than whatever the Director happens to have selected.
+// Plan is the authored graph as a static document. Run is an accumulating list of executions: every
+// recorded run down the left, the selected one's canvas beside it, each run drawing its own graph — so an
+// item traversal renders its agent's item graph, not whatever the Director happens to have selected.
 //
-// SZUI may not import SZAI, which is exactly why `SZAgentGraph` and `SZAgentGraphRun` live
-// in SZCore: the host hands this view values, not an engine. The graph a record resolves to
-// arrives through a closure for the same reason — the pack library sits on the other side
-// of that line, and a record it no longer carries degrades to an honest empty canvas.
+// SZUI may not import SZAI, which is exactly why `SZAgentGraph` and `SZAgentGraphRun` live in SZCore: the
+// host hands this view values, not an engine. The graph a record resolves to arrives through a closure for
+// the same reason, and a record the pack library no longer carries degrades to an honest empty canvas.
 //
-// Composed from the canvas pieces that are already model-free rather than reaching for
-// `SZNodeEditorPanel` — that view owns marquee, wire-drag, docking and hit-testing this
-// panel has no use for. What it borrows: `SZCanvasCamera` (the same zoom range and pivot
-// maths), `SZDotGridView` (the same ground), `monitorCanvasScrollWheel` (the same pan/zoom
-// feel), and `SZCubic` for wire geometry — so the two canvases read as one app.
+// Composed from the canvas pieces that are already model-free rather than `SZNodeEditorPanel`, which owns
+// marquee, wire-drag, docking and hit-testing this panel has no use for. Borrowed so the two canvases read
+// as one app: `SZCanvasCamera` (the same zoom range and pivot maths), `SZDotGridView` (the same ground),
+// `monitorCanvasScrollWheel` (the same pan/zoom feel) and `SZCubic` for wire geometry.
 //
-// THIS file keeps the panel itself: what is shown, the sidebar tree, and the camera
-// (framing and follow-cam). Its two halves live beside it — `SZAgentGraphRunList` (the RUNS
-// column and the selection rule) and `SZAgentGraphCanvasContent` (world space) — and the
-// geometry both read is `SZAgentGraphLayout`.
+// Here: what is shown, the sidebar tree, and the camera (framing and follow-cam). Beside it:
+// `SZAgentGraphRunList` (the RUNS column and the selection rule) and `SZAgentGraphCanvasContent` (world
+// space); the geometry both read is `SZAgentGraphLayout`.
 import SwiftUI
 import SZCore
 
-/// One agent in the Plan view's tree: who it is and THE graph it carries. Built by the
+/// One agent in the Plan view's tree: who it is and the graph it carries. Built by the
 /// host — the agent-pack library lives in SZAI, which this module may not import — and
 /// drawn here, the pattern every prop on this panel follows.
 public struct SZAgentGraphPlanAgent: Identifiable, Equatable, Sendable {
@@ -32,7 +28,7 @@ public struct SZAgentGraphPlanAgent: Identifiable, Equatable, Sendable {
     public var title: String
     public var symbol: String
     public var graph: SZAgentGraph
-    /// Declared outcomes per STEP node id, from the compiled steps' own exports —
+    /// Declared outcomes per step node id, from the compiled steps' own exports —
     /// resolved host-side (SZUI may not reach the compiler) and filled in asynchronously
     /// as declarations warm. Empty until then: a card falls back to its wired ports.
     public var stepOutcomes: [String: [String]]
@@ -63,7 +59,7 @@ public struct SZAgentGraphPanel: View {
     /// Open a card's authored source in the user's editor, agent-qualified — the host
     /// resolves the materialized file. nil = the affordance is absent (tests, previews).
     private let openStepSource: ((String, SZAgentGraphFace.Source) -> Void)?
-    /// A record's OWN graph. nil = the pack library no longer carries it (an archive from a
+    /// A record's own graph. nil = the pack library no longer carries it (an archive from a
     /// build whose agents have since changed) — the canvas says so and stops.
     private let resolveGraph: (SZAgentGraphRun) -> SZAgentGraph?
     /// A work node's display title, resolved against the live project — the sub-agent
@@ -72,7 +68,7 @@ public struct SZAgentGraphPanel: View {
     /// A run the transcript asked to reveal (host-owned, consumed once shown).
     private let focusRequest: UUID?
     private let onConsumeFocus: () -> Void
-    /// An agent whose PLAN the settings sheet asked to reveal (the Routing pane's View
+    /// An agent whose plan the settings sheet asked to reveal (the Routing pane's View
     /// Graph) — same consume handshake as the run focus above, but by agent id.
     private let planFocusRequest: String?
     private let onConsumePlanFocus: () -> Void
@@ -83,7 +79,7 @@ public struct SZAgentGraphPanel: View {
     private let store: SZStore?
 
     @State private var mode: SZAgentGraphPanelMode = .plan
-    /// The run the user PICKED, if any. nil = follow the head of the list, which is how the
+    /// The run the user picked, if any. nil = follow the head of the list, which is how the
     /// panel tracks the latest run without fighting an explicit choice.
     @State private var selectedRunID: UUID?
     /// The Plan view's browse position. nil = the first agent; an id the library dropped
@@ -93,13 +89,13 @@ public struct SZAgentGraphPanel: View {
     /// The Run view's follow-cam: while armed, the camera re-centres on the newest entry —
     /// the traversing head — each time the chain grows. A manual pan disengages it (the
     /// user took the camera; don't fight them); a new traversal starting re-arms it, the
-    /// same moment the panel switches itself back to Run. Zoom deliberately does NOT
+    /// same moment the panel switches itself back to Run. Zoom deliberately does not
     /// disengage: the follow re-centres the head on the next growth either way, so a zoom
     /// (pinch about the view centre, ⌘-scroll about the pointer) just picks the scale the
     /// follow then honours.
     @State private var following = true
 
-    /// A focus request that landed on a SEALED run: there is no head to chase, so the camera
+    /// A focus request that landed on a sealed run: there is no head to chase, so the camera
     /// goes to the last thing that agent did instead of the start of its graph. Deferred because
     /// the record has to be laid out before its final frame exists.
     @State private var landOnFinalEntry = false
@@ -108,14 +104,14 @@ public struct SZAgentGraphPanel: View {
     @State private var pinchAnchor: SZCanvasCamera?
     @State private var viewSize: CGSize = .zero
     @State private var centred = false
-    /// Per-node nudges, in world points. Session-only and deliberately NOT persisted: the
+    /// Per-node nudges, in world points. Session-only and deliberately not persisted: the
     /// layout is computed, and these exist so a graph can be pulled apart to read it, not
     /// to author a picture. Reset by switching graph.
     @State private var nudges: [String: CGSize] = [:]
-    /// Which visits of the SELECTED run have their activity band open, by ordinal. Session-only
+    /// Which visits of the selected run have their activity band open, by ordinal. Session-only
     /// and reset by switching run: a band is something you opened to watch, not a saved view.
     @State private var openActivity: Set<Int> = []
-    /// The two SECTIONS collapse too: AGENTS starts folded (the plans are reference
+    /// The two sections collapse too: AGENTS starts folded (the plans are reference
     /// material), RUNS starts open (the live surface).
     @State private var agentsSectionOpen = false
     @State private var runsSectionOpen = true
@@ -130,7 +126,7 @@ public struct SZAgentGraphPanel: View {
     /// mouse-down: dropping it mid-drag is what re-anchoring on the current width means.
     @State private var resizeAnchor: CGFloat?
     /// The whole panel's width, so the sidebar can be clamped against the room it actually
-    /// has. The tile's own minimum is 420 — the sidebar's maximum — and the tile CLIPS, so
+    /// has. The tile's own minimum is 420 — the sidebar's maximum — and the tile clips, so
     /// an unclamped sidebar can push its own divider and fold button off the edge and strand
     /// itself there (the width is session state; nothing would put it back).
     @State private var panelWidth: CGFloat = 0
@@ -143,7 +139,7 @@ public struct SZAgentGraphPanel: View {
     /// what keeps the divider and the fold button inside the clip, and so reachable.
     private static let canvasFloor: CGFloat = 120
     /// The fold button's top, in both the open sidebar and the rail: the chrome header floats
-    /// OVER the tile, and this is the first y that clears it.
+    /// over the tile, and this is the first y that clears it.
     private static let foldButtonTop = SZPanelChromeView<EmptyView>.headerHeight + 4
     private static let foldButtonHeight: CGFloat = 18
     /// Where a section label's centre sits inside its own row: 10 pt above an ~11 pt line.
@@ -228,7 +224,7 @@ public struct SZAgentGraphPanel: View {
     /// authored document, deliberately state-free.
     private struct Displayed {
         /// What "a different canvas" means for the per-canvas state (nudges, framing): a
-        /// different RUN, or a different agent's graph — graph NAMES repeat across agents,
+        /// different run, or a different agent's graph — graph names repeat across agents,
         /// so the agent belongs in the key.
         var key: String
         var graph: SZAgentGraph
@@ -240,15 +236,15 @@ public struct SZAgentGraphPanel: View {
     }
 
     public var body: some View {
-        // ONE sidebar, one outline — and the outline IS the mode: picking a graph shows its
+        // One sidebar, one outline, and the outline is the mode: picking a graph shows its
         // plan, picking a traversal shows that run. No Plan/Run toggle to place, no chips
         // floating over the canvas — the tree carries the whole selection surface.
-        // It FOLDS but never leaves: a rail stands in its place, so the canvas identity
+        // It folds but never leaves: a rail stands in its place, so the canvas identity
         // stays put and the `.onAppear` land-on-runs default still runs exactly once.
         GeometryReader { proxy in
             HStack(spacing: 0) {
                 if sidebarOpen {
-                    // The CLAMPED width, not the stored one: a tile narrower than the stored
+                    // The clamped width, not the stored one: a tile narrower than the stored
                     // preference borrows from the sidebar and hands it back when it widens.
                     sidebar.frame(width: min(sidebarWidth, maxSidebarWidth))
                     sidebarDivider
@@ -261,9 +257,9 @@ public struct SZAgentGraphPanel: View {
             .onAppear { panelWidth = proxy.size.width }
             .onChange(of: proxy.size.width) { _, new in panelWidth = new }
         }
-        // A NEW live run is the moment the Run view becomes the interesting one: switch to
-        // it and re-arm the follow. TWO things it deliberately does not do: it never
-        // interrupts a record that is itself LIVE (an item starting mid-build must not yank
+        // A new live run is the moment the Run view becomes the interesting one: switch to
+        // it and re-arm the follow. Two things it deliberately does not do: it never
+        // interrupts a record that is itself live (an item starting mid-build must not yank
         // the canvas), and it never clears an explicit pick — a picked run is released only
         // by ageing out of the list, which the selection rule already falls back from.
         .onChange(of: runs.first?.id) { old, _ in
@@ -289,7 +285,7 @@ public struct SZAgentGraphPanel: View {
         mode = .run
         let live = runs.first { $0.id == focusRequest }?.isLive ?? false
         following = live
-        // Asked for a run that is over: show what it ENDED on. Landing on the start of the graph
+        // Asked for a run that is over: show what it ended on. Landing on the start of the graph
         // answers nothing, and every traversal starts the same way, so it reads as a dead click.
         landOnFinalEntry = !live
         onConsumeFocus()
@@ -310,10 +306,10 @@ public struct SZAgentGraphPanel: View {
     // MARK: The sidebar and its edge
 
     /// The outline: the two sections, with the fold button sharing the AGENTS label's line.
-    /// The button is an OVERLAY, not a row — pinned, so the control that hides the list can't
+    /// The button is an overlay, not a row — pinned, so the control that hides the list can't
     /// scroll away from whoever wants it, and level with the label rather than stacked above
     /// it in a strip of its own. `foldButtonTop` is the y that clears the floating chrome
-    /// header; the scroll's own top is derived FROM it, so the two share one baseline and
+    /// header; the scroll's own top is derived from it, so the two share one baseline and
     /// moving either means moving the pair.
     private var sidebar: some View {
         ScrollView {
@@ -360,7 +356,7 @@ public struct SZAgentGraphPanel: View {
         .background(Color.white.opacity(0.02))
     }
 
-    /// ONE glyph for both directions — the standard sidebar toggle. A mirrored icon on the
+    /// One glyph for both directions — the standard sidebar toggle. A mirrored icon on the
     /// rail would draw a sidebar on the right, which is not a place this panel has.
     private func foldButton(hiding: Bool) -> some View {
         Button { setSidebar(open: !hiding) } label: {
@@ -426,10 +422,9 @@ public struct SZAgentGraphPanel: View {
                     empty
                 }
 
-                // (The "this graph only runs when dispatched to" note lived here while a
-                // graph handled exactly one kind. A document now routes several, so the
-                // statement belongs to a PORT, not a canvas — the message card's ports say
-                // which kinds arrive, and the RUNS list shows where each one's traces land.)
+                // No "this graph only runs when dispatched to" note belongs on the canvas: a
+                // document routes several kinds, so the statement belongs to a port. The message
+                // card's ports say which kinds arrive, and the RUNS list where their traces land.
             }
             // The world is unbounded and the camera pans it anywhere: without this the
             // chain draws straight over the sidebar sitting beside it (the canvas is the
@@ -437,7 +432,7 @@ public struct SZAgentGraphPanel: View {
             .clipped()
             .coordinateSpace(name: Self.space)
             .contentShape(Rectangle())
-            // Only scrolls that land ON this canvas arrive here — the catcher's frame is this
+            // Only scrolls that land on this canvas arrive here — the catcher's frame is this
             // space, so the ones panning the node editor next door never reach it.
             .monitorCanvasScrollWheel { scroll in
                 if scroll.commandHeld {
@@ -465,7 +460,7 @@ public struct SZAgentGraphPanel: View {
                 viewSize = proxy.size; centreIfNeeded()
                 // A panel recreated mid-traversal (the user visited another leaf and came
                 // back) must land on the runs, not the default Plan — on the live head.
-                // Unless a plan focus is pending: View Graph may have just SHOWN the panel,
+                // Unless a plan focus is pending: View Graph may have just shown the panel,
                 // and this onAppear must not race the consume back into Run.
                 if planFocusRequest == nil, !runs.isEmpty { mode = .run; followActiveEntry() }
             }
@@ -483,14 +478,14 @@ public struct SZAgentGraphPanel: View {
                 followActiveEntry()
                 landFinalEntryIfNeeded()
             }
-            // The shown record GROWING is the traversal moving — chase its head. Keyed on
-            // COUNT rather than a flag: a record swapped under the selection can land at
+            // The shown record growing is the traversal moving — chase its head. Keyed on
+            // count rather than a flag: a record swapped under the selection can land at
             // the same count, and shrinkage means a different chain entirely.
             .onChange(of: displayed?.record?.trace.count) { old, new in
                 if let new, new > 0, old == 0 || new < (old ?? 0) { following = true }
                 followActiveEntry()
             }
-            // A chain that regrows to the SAME count in one observation slips past the
+            // A chain that regrows to the same count in one observation slips past the
             // count check above — the head entry is the tiebreaker.
             .onChange(of: displayed?.record?.trace.first) { old, new in
                 if let new, new.phase == .running, old != new {
@@ -498,7 +493,7 @@ public struct SZAgentGraphPanel: View {
                     followActiveEntry()
                 }
             }
-            // Flipping back to Run rejoins the traversal at its head — IF the follow is
+            // Flipping back to Run rejoins the traversal at its head — if the follow is
             // still armed; a pan-disengaged camera stays wherever the user parked it.
             .onChange(of: mode) { _, _ in followActiveEntry() }
         }
@@ -509,7 +504,7 @@ public struct SZAgentGraphPanel: View {
         SZAgentGraphCanvasContent(graph: displayed.graph,
                                   stepOutcomes: displayed.stepOutcomes,
                                   // A file pill is drawn only when a host can actually open
-                                  // it; dispatch LINKS are the panel's own business, so they
+                                  // it; dispatch links are the panel's own business, so they
                                   // stand whether or not one is wired.
                                   openSource: { [self] source in
                                       if case .dispatch(let target) = source {
@@ -580,7 +575,7 @@ public struct SZAgentGraphPanel: View {
         .buttonStyle(.plain)
     }
 
-    /// The AGENTS outline: one row per agent — each IS its graph, so the row selects the
+    /// The AGENTS outline: one row per agent — each is its graph, so the row selects the
     /// plan directly.
     private var agentTree: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -624,7 +619,7 @@ public struct SZAgentGraphPanel: View {
         let bounds = SZAgentGraphLayout.lay(out: displayed.graph,
                                             stepOutcomes: displayed.stepOutcomes).bounds
         guard !bounds.isNull else { return }
-        // 130, not a slimmer margin: the Run view hangs its `start` capsule ~90pt LEFT of
+        // 130, not a slimmer margin: the Run view hangs its `start` capsule ~90pt left of
         // the entry card, and the initial framing must include it rather than clip it.
         camera = SZCanvasCamera(zoom: 1,
                                 offset: CGSize(width: 130 - bounds.minX,
@@ -633,17 +628,17 @@ public struct SZAgentGraphPanel: View {
     }
 
     /// Centre the camera on the chain's newest entry at the current zoom — the follow-cam's
-    /// one move. Reads the SAME `runFrames` the canvas renders from, so "centred" means the
+    /// one move. Reads the same `runFrames` the canvas renders from, so "centred" means the
     /// card, not an estimate of it. No-ops unless the follow is armed, the Run view is what
     /// is actually showing (a user reading the Plan mid-traversal must not have the camera
-    /// yanked), and the shown run is LIVE — an archive has no head to chase.
+    /// yanked), and the shown run is live — an archive has no head to chase.
     private func followActiveEntry() {
         guard following, effectiveMode == .run, shown?.isLive == true,
               let frame = finalEntryFrame() else { return }
         centre(on: frame)
     }
 
-    /// The same move for a run that is OVER: the camera goes to its last entry once, when the
+    /// The same move for a run that is over: the camera goes to its last entry once, when the
     /// transcript or the run strip asked for that run by name.
     private func landFinalEntryIfNeeded() {
         guard landOnFinalEntry, effectiveMode == .run, let frame = finalEntryFrame() else { return }
@@ -672,7 +667,7 @@ public struct SZAgentGraphPanel: View {
         return false
     }
 
-    /// The chain's last card, in world points — nil until the record is laid out. The CLOSED
+    /// The chain's last card, in world points — nil until the record is laid out. The closed
     /// frame: the camera centres on a card's middle, which an open band would pull downward.
     private func finalEntryFrame() -> CGRect? {
         guard viewSize.height > 0, let displayed, let record = displayed.record else { return nil }
@@ -681,7 +676,7 @@ public struct SZAgentGraphPanel: View {
     }
 
     /// Centre one entry's card at the current zoom, biased right by the outcome stub's reach so
-    /// the card AND what it ended on are both in view.
+    /// the card and what it ended on are both in view.
     private func centre(on frame: CGRect) {
         withAnimation(.easeInOut(duration: 0.3)) {
             camera.offset = CGSize(width: viewSize.width / 2 - camera.zoom * (frame.midX + 50),
@@ -690,15 +685,15 @@ public struct SZAgentGraphPanel: View {
     }
 }
 
-/// PLAN is the authored graph as a static document — loops as back edges, each node once,
-/// no live state, so it can be read the way its file is read. RUN is the executed trace —
-/// the same traversal UNROLLED, one card per entry, so a node visited twice is two cards
+/// Plan is the authored graph as a static document — loops as back edges, each node once,
+/// no live state, so it can be read the way its file is read. Run is the executed trace —
+/// the same traversal unrolled, one card per entry, so a node visited twice is two cards
 /// with two outcomes instead of the second overwriting the first.
 enum SZAgentGraphPanelMode: String, CaseIterable { case plan = "Plan", run = "Run" }
 
 
 /// The transcript's jump into the Agent Graph panel, set by the app layer. An Environment value
-/// on purpose, matching `\.szRevealInProfiler`: chat rows are VALUE-ONLY for their Equatable
+/// on purpose, matching `\.szRevealInProfiler`: chat rows are value-only for their Equatable
 /// render skip, and environment reads don't participate in `==`. Unlike the Profiler's, this one
 /// is never nil in the app — the Agent Graph panel ships everywhere the packs do.
 public struct SZRevealInAgentGraphKey: EnvironmentKey {

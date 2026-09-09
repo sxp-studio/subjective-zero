@@ -191,7 +191,7 @@ extension SZHostBridge {
     /// The automated drive's ⌘Q: reply, then terminate through the ordinary AppKit path on
     /// the next runloop turn — windows close, state persists, capture devices stop. Never a
     /// signal: SIGKILL skips exactly the teardown a drive needs to have happened. And never
-    /// a PROMPT: the untitled-rescue dialog (`applicationShouldTerminate`) waits for a human
+    /// a prompt: the untitled-rescue dialog (`applicationShouldTerminate`) waits for a human
     /// no drive has — an automated quit skips it (the untitled project is autosaved; ending
     /// deterministically is this tool's whole contract).
     private func debugQuit() -> String {
@@ -207,7 +207,7 @@ extension SZHostBridge {
         return SZJSONRPC.encode(["quitting": true])
     }
 
-    /// OFF-MAIN by declaration (`SZHostBridge.offMainToolNames`): the check reads only the
+    /// Off-main by declaration (`SZHostBridge.offMainToolNames`): the check reads only the
     /// packs root and compiles through the main-actor-free step provider, and a full compile
     /// pass takes seconds — on the main actor it would wedge every tool call and ⌘Q with it.
     nonisolated static func debugCheckPack(_ arguments: [String: Any]) async -> String {
@@ -216,7 +216,7 @@ extension SZHostBridge {
             return "no packs root — the bundled packs did not materialize and no SZ_AGENT_PACKS "
                 + "override is set; pass `path` to a pack root (a directory of agent folders)"
         }
-        // The deadline is an async RACE, not a blocking wait: a pathological Step.swift can
+        // The deadline is an async race, not a blocking wait: a pathological Step.swift can
         // hang swiftc, and a hung check must degrade to one honest sentence — stalling at
         // worst this connection's call, never a thread.
         return await withTaskGroup(of: String?.self) { group in
@@ -236,7 +236,7 @@ extension SZHostBridge {
 
     /// The check tool's step seam: each step folder compiles through the real toolchain —
     /// the same swiftc → codesign → dlopen → declaration read launch will use — into
-    /// throwaway build dirs, entirely OFF the main actor (the tool handler blocks the
+    /// throwaway build dirs, entirely off the main actor (the tool handler blocks the
     /// bridge thread while waiting, so nothing here may hop to it). nil = no `Step.swift`
     /// or a step that declares nothing; throw = the compile went red, with the compiler's
     /// message as the defect detail.
@@ -317,7 +317,7 @@ extension SZHostBridge {
         for key in scopeKeys {
             guard let scope = SZChatScope(key: key) else { continue }
             let turns: [[String: Any]] = host.store.messages(for: scope).compactMap { message in
-                // A build's RECEIPT carries both a duration and the run rollup, but its duration is
+                // A build's receipt carries both a duration and the run rollup, but its duration is
                 // the whole run's wall, not a turn's — a driver summing per-turn durations would
                 // double-count every run. (The old run-complete narration passed this filter too,
                 // but `narrateDirector` left `duration` nil, so it was inert.)
@@ -409,7 +409,7 @@ extension SZHostBridge {
             if let via = generation.via { g["via"] = via }
             m["generation"] = g
         }
-        // A finished build, STRUCTURALLY. Without this a driving agent can only string-match the
+        // A finished build, structurally. Without this a driving agent can only string-match the
         // receipt's prose to learn how a run ended — which is what every harness did back when the
         // outcome only ever existed as the sentence "Run complete — 1 node implemented."
         if let receipt = message.receipt {
@@ -453,7 +453,7 @@ extension SZHostBridge {
         guard let data = try? encoder.encode(project),
               var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return "{}" }
 
-        // Enrich each enum port with its EFFECTIVE options (the node's runtime-enumerated list for a
+        // Enrich each enum port with its effective options (the node's runtime-enumerated list for a
         // dynamic enum like `camera`, else the static contract `options`) so an agent reading the snapshot
         // sees the same choices the editor dropdown offers (its current value is already in `default`).
         if var graph = root["graph"] as? [String: Any], var nodes = graph["nodes"] as? [[String: Any]] {

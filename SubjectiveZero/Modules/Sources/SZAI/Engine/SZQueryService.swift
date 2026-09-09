@@ -3,7 +3,7 @@
 // whole exchange: decode the kit's ask request, render the named template exactly like a
 // brief (same pack-relative resolution, same facts document the evaluation was pinned to),
 // append the host-owned repair wrapper on a retry, route through the model-routing seam
-// (`class: .query`), run ONE stateless completion — no MCP, no session, no tools — and
+// (`class: .query`), run one stateless completion — no MCP, no session, no tools — and
 // journal the exchange. Steps never name a model and never see a provider; both live
 // entirely on this side of the ABI.
 import Foundation
@@ -35,12 +35,11 @@ public enum SZQueryError: Error, CustomStringConvertible {
     }
 }
 
-/// Per-query budgets, tighter than a turn's: a step's ask is one small stateless completion,
-/// so two minutes of wall clock (or silence) means something is wrong — fail the ask and let
-/// the step's own error contract take over.
-/// A step's question is one small stateless completion, not a turn: it must never hold a
-/// scope's claim for a turn's patience. (The claim it rides is the delivery's — see the
-/// delivery's, so a slow ruling delays the next message on that scope.)
+/// Per-query budgets, deliberately far tighter than a turn's: a step's ask is one small
+/// stateless completion, so a slow one means something is wrong — fail the ask and let the
+/// step's own error contract take over. The ask rides the delivery's scope claim, so it must
+/// never hold that claim for a turn's patience: a slow ruling delays the next message on that
+/// scope.
 public enum SZQueryBudgets {
     public static let timeout: TimeInterval = 45
     public static let inactivityTimeout: TimeInterval = 30
@@ -88,7 +87,7 @@ public final class SZQueryService {
 
     // MARK: - Serving
 
-    /// Serve one step ask end to end. `message`/`world` are the SAME pinned snapshot the
+    /// Serve one step ask end to end. `message`/`world` are the same pinned snapshot the
     /// evaluation holds — the delivery supplies them. Throwing `CancellationError` answers
     /// the ask as cancelled; any other throw as failed.
     public func serve(agent: String, step: String, slot: String? = nil, message: String,
@@ -102,7 +101,7 @@ public final class SZQueryService {
             throw SZQueryError.unreadableRequest(detail: String(describing: error))
         }
 
-        // The named template, rendered EXACTLY like a brief — one resolution, one token
+        // The named template, rendered exactly like a brief — one resolution, one token
         // table, one snapshot.
         var prompt = try renderer.render(agent: agent, template: request.template,
                                          message: message, world: world, extras: extras)
@@ -110,7 +109,7 @@ public final class SZQueryService {
         // re-rendered ask so the model sees the question and why its last answer failed.
         if request.attempt > 0, let repair = request.repair {
             prompt += "\n" + SZPromptTemplate.render(SZPrompts.askRepair, [
-                // Defused: these are MODEL-controlled text — a live token inside a
+                // Defused: this is model-controlled text — a live token inside a
                 // substituted value must ship as words, never expand.
                 "error": SZPromptTemplate.defused(repair.error),
                 "previousReply": SZPromptTemplate.defused(repair.previousReply),

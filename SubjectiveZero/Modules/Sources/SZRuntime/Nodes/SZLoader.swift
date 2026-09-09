@@ -1,24 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// dlopen-based loader for a compiled node dylib. Holds one live node; on reload it tears down the
-// old module, then sets up the new one (teardown-then-swap).
+// dlopen-based loader for a compiled node dylib. Holds one live node, mapped through the shared
+// `SZMappedDylib` motion, and drives setup/update/teardown.
 //
-// Copy the dylib to a unique
-// runtime-loads path (so the canonical build artifact can be overwritten while the previous copy
-// stays mapped), `dlopen(RTLD_NOW|RTLD_LOCAL)`, dlsym the four C symbols, check the API version,
-// then drive setup/update/teardown.
-//
-// Loading is split into two phases so the runtime can tear the OLD graph down *between* them
-// (`SZRuntime.loadGraph`): `open` maps the dylib + resolves symbols WITHOUT running `setup()`, then
+// Loading is split into two phases so the runtime can tear the old graph down *between* them
+// (`SZRuntime.loadGraph`): `open` maps the dylib + resolves symbols without running `setup()`, then
 // `activate` runs `setup()`. A node that grabs an exclusive device in `setup()` (the camera's
 // `AVCaptureSession`) must not start until the previous node holding that device has been torn down,
-// or the two sessions contend and the new feed freezes. `load` keeps the one-shot open→setup
-// swap for the single-loader path.
+// or the two sessions contend and the new feed freezes. `load` is the one-shot spelling for the
+// single-loader path, and still opens the new module before tearing the old one down.
 import Foundation
 import SZCore
 
 /// `@unchecked Sendable`: all mutation (open/load/unload) happens on the load paths, which run inside
 /// the runtime's engine lock (or single-threaded tests); `enumerateOptions` is the one documented
-/// concurrent READ (UI dropdown vs render thread) and touches only the immutable resolved symbols.
+/// concurrent read (UI dropdown vs render thread) and touches only the immutable resolved symbols.
 final class SZLoader: @unchecked Sendable {
     private var handle: UnsafeMutableRawPointer?
     private var update: SZNodeABI.UpdateFn?
@@ -47,7 +42,7 @@ final class SZLoader: @unchecked Sendable {
     deinit { unload() }
 
     /// Phase 1: copy `dylib` to a unique path under `runtimeLoadsDir`, dlopen, verify the ABI version,
-    /// and resolve symbols — but DO NOT run `setup()`. Stashed in `pending` until `activate`. Throwing
+    /// and resolve symbols, without running `setup()`. Stashed in `pending` until `activate`. Throwing
     /// here leaves any live module untouched (the runtime's atomic-failure property). Discards a prior
     /// un-activated pending first.
     func open(dylib: URL, runtimeLoadsDir: URL) throws {
@@ -84,7 +79,7 @@ final class SZLoader: @unchecked Sendable {
 
     /// One-shot load (open → swap → activate) for the single-loader path: tear down this loader's own
     /// live module, then set up the new one. Multi-node reloads use `open`/`activate` directly so the
-    /// runtime can tear ALL old nodes down before activating ANY new one.
+    /// runtime can tear all old nodes down before activating any new one.
     func load(dylib: URL, runtimeLoadsDir: URL, setupContext: UnsafeMutableRawPointer?) throws {
         try open(dylib: dylib, runtimeLoadsDir: runtimeLoadsDir)
         unloadLive()                              // tear down the old live module (keeps `pending`)
@@ -129,7 +124,7 @@ final class SZLoader: @unchecked Sendable {
         discardPending()
     }
 
-    /// Tear down ONLY the live module (leaving any `pending` intact) — the swap step of `load`, where the
+    /// Tear down only the live module (leaving any `pending` intact) — the swap step of `load`, where the
     /// freshly-`open`ed pending must survive the old module's teardown.
     private func unloadLive() {
         teardownFn?()

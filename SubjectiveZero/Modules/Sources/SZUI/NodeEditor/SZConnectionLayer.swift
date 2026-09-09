@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The edge layer: one cubic-bezier curve per connection, drawn between the two ports' world-space socket
 // points (resolved by SZGraphCanvasModel). Two visual languages:
-//   • DATA (committed) — a solid blue wire with a single glowing cyan-white "comet" head gliding toward
-//     the target: the realized pipeline reads as real AND alive (agentic).
-//   • FLOW (drawing intent) — a bold violet dashed edge whose dashes flow toward the target, tagged with a
+//   • data (committed) — a solid blue wire with a single glowing cyan-white "comet" head gliding toward
+//     the target: the realized pipeline reads as real and alive (agentic).
+//   • flow (drawing intent) — a bold violet dashed edge whose dashes flow toward the target, tagged with a
 //     "then" pill at the midpoint. It's the user's intent that the agent realizes into a data wire (which
 //     resolves it away). Violet keeps it distinct from the blue wire and clear of the app's greens.
 // Motion is one TimelineView + one overlay stroke per edge, so animating costs a single timer per edge.
@@ -16,7 +16,7 @@ struct SZConnectionShape: Shape {
     var from: CGPoint
     var to: CGPoint
 
-    /// Both endpoints, so a socket that MOVES under an animation (the plugs fold restacking a card's
+    /// Both endpoints, so a socket that moves under an animation (the plugs fold restacking a card's
     /// dots) drags its wire along instead of teleporting it. Endpoint changes that aren't animated —
     /// every drag tick — still land in one step.
     var animatableData: AnimatablePair<CGPoint.AnimatableData, CGPoint.AnimatableData> {
@@ -73,7 +73,7 @@ struct SZConnectionLayer: View {
     var zoom: CGFloat = 1
     var selectedID: SZConnectionID?
     var hiddenID: SZConnectionID?      // a picked-up edge: invisible (the drag preview stands in), but the
-                                       // view STAYS in the tree — removing it would cancel its live drag gesture
+                                       // view stays in the tree — removing it would cancel its live drag gesture
     var hiddenNodeIDs: Set<SZNodeID> = []   // mid-drag (ghosted) nodes: their edges hide the same way —
                                             // the panel's drag overlay draws the moving copies
     var space = ""                     // the editor's named gesture coordinate space (drag locations)
@@ -92,7 +92,7 @@ struct SZConnectionLayer: View {
                 if let points = SZGraphCanvasModel.endpoints(of: connection, in: graph,
                                                              previewsEnabled: previewsEnabled) {
                     // The visual stroke is an Equatable subtree: a drag tick re-strokes only the edges
-                    // whose endpoints actually moved. The hit shape + gestures stay OUT here so their
+                    // whose endpoints actually moved. The hit shape + gestures stay out here so their
                     // closures are rebuilt every render and never capture a stale graph.
                     SZConnectionStrokeView(from: points.from, to: points.to, kind: connection.kind,
                                            selected: connection.id == selectedID,
@@ -179,7 +179,7 @@ struct SZConnectionStrokeView: View, Equatable {
     private var flowingLine: some View {
         let z = max(zoom, 0.1)
         let dash: [CGFloat] = [max(4, 6 / z), max(3, 5 / z)]
-        // Full-length (no end-trim) so dashes flow INTO the socket dots rather than popping into
+        // Full-length (no end-trim) so dashes flow into the socket dots rather than popping into
         // existence in mid-air. `animated: false` freezes the dash phase (a static dashed line) on
         // very dense graphs. Motion runs on the render server — see SZEdgeMotionView.
         return SZEdgeMotionView(from: from, to: to,

@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Trackpad/mouse scroll → canvas pan (and ⌘+scroll → zoom).
-// SwiftUI has no scroll-wheel gesture, so this is an NSEvent LOCAL monitor behind an
-// NSViewRepresentable background whose frame equals the canvas coordinate space — the
-// SZCanvasRightClickCatcher pattern, and the only other AppKit/`NSEvent` bit of the canvas
-// (pinch-zoom is a SwiftUI gesture in the panel).
+// Trackpad/mouse scroll → canvas pan (and ⌘+scroll → zoom). SwiftUI has no scroll-wheel gesture, so
+// this is an NSEvent local monitor behind an NSViewRepresentable background whose frame equals the
+// canvas coordinate space — the SZCanvasRightClickCatcher pattern, and the only other AppKit/`NSEvent`
+// bit of the canvas (pinch-zoom is a SwiftUI gesture in the panel).
 //
-// THE FRAME IS THE ROUTING. Every open canvas installs its own monitor and each sees every scroll
-// in the app, so something has to decide which canvas a scroll was meant for. That decision is the
-// event's own location, hit-tested against this view's bounds at event time — stateless, and true
-// whatever the panel is doing. It must NOT be derived from SwiftUI hover: a two-finger scroll does
-// not move the pointer, so a canvas whose `.onContinuousHover` had gone stale (the HUD taking
-// hover, the window deactivating, a neighbour panel opening under a still cursor) would never pan
-// again until the mouse was physically moved.
+// The frame is the routing. Every open canvas installs its own monitor and each sees every scroll, so
+// which canvas a scroll was meant for is decided by the event's own location, hit-tested against this
+// view's bounds at event time — stateless, and true whatever the panel is doing. It must not be derived
+// from SwiftUI hover: a two-finger scroll does not move the pointer, so a canvas whose
+// `.onContinuousHover` had gone stale (the HUD taking hover, the window deactivating, a neighbour panel
+// opening under a still cursor) would never pan again until the mouse was physically moved.
 import AppKit
 import SwiftUI
 

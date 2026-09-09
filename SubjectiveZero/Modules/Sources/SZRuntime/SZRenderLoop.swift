@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SZRenderLoop — the runtime's one render clock: a dedicated thread whose run loop hosts a single
-// pacing CADisplayLink; each fire is one `SZRuntime.tick()`. The host decides WHEN it runs by handing
+// pacing CADisplayLink; each fire is one `SZRuntime.tick()`. The host decides when it runs by handing
 // over a link (or nil to idle) — no liveness heuristics here.
 //
 // The thread starts on first pacing and lives for the runtime (pacing edges only swap links); with no

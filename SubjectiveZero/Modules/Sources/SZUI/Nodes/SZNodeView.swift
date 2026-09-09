@@ -25,7 +25,7 @@ struct SZNodeView: View, Equatable {
     let previewsEnabled: Bool
     /// How much chrome to render (`SZNodeLayout.tier(of:zoomedOut:)`). Render-only for the `.tile` step —
     /// the card frame and socket geometry are identical at every zoom; `.picture` is the folded card,
-    /// whose SHORTER frame comes from the layout, not from here.
+    /// whose shorter frame comes from the layout, not from here.
     var tier: SZCardTier = .full
     /// Input port names currently fed by a data edge — their inline control is hidden (the wire's value
     /// wins at runtime, so an editable default would lie). The contract keeps the default untouched, so
@@ -53,7 +53,7 @@ struct SZNodeView: View, Equatable {
     /// capture only stable refs, so a kept older closure still lands on the live host/store). Wrapped in
     /// `.equatable()` at the panel's construction site, this is what lets a drag tick skip every card
     /// whose content didn't change. `position` is deliberately ignored: the panel places the card via
-    /// `.position()` OUTSIDE this view, so even the dragged card's body never depends on it.
+    /// `.position()` outside this view, so even the dragged card's body never depends on it.
     nonisolated static func == (lhs: SZNodeView, rhs: SZNodeView) -> Bool {
         var rnode = rhs.node
         rnode.position = lhs.node.position
@@ -87,7 +87,7 @@ struct SZNodeView: View, Equatable {
                 header
                 // The body region sits between header and rows — the preview thumb (exactly
                 // `previewHeight` tall) or the node's custom card (`customInset` tall). One slot;
-                // SZNodeLayout.bodyInset is the ONE term the frame below and rowCenterY share.
+                // SZNodeLayout.bodyInset is the one term the frame below and rowCenterY share.
                 if SZNodeLayout.previewInset(of: node, previewsEnabled: previewsEnabled) > 0 {
                     previewRegion
                 } else if SZNodeLayout.customInset(of: node) > 0 {
@@ -101,13 +101,13 @@ struct SZNodeView: View, Equatable {
                 // The body rows must match SZNodeLayout's geometry exactly (bodyTopPadding above the first
                 // row, rowSpacing between rows) so the overlaid sockets line up with their labels. A
                 // custom card's plumbing inputs (the ports the card itself controls) get no row.
-                // The card-wide numeric-cell width, computed ONCE per body pass (each row reuses it).
                 // Folded (`.picture`), the rows are simply not built — the body above is untouched, so a
                 // custom card keeps its size and stays live. SZNodeLayout.height drops the same band.
                 // Mid-fold the rows keep their full height and the shrinking card clips them (see
                 // the frame below): the card edge wipes across them like a blind. `.identity` is
                 // what holds them intact for that — the default would dissolve them in place.
                 if tier == .full {
+                    // Computed once per body pass; each row reuses it.
                     let fieldWidth = SZNodeLayout.numericFieldWidth(of: node)
                     let pending = node.portsNotInBuild
                     VStack(spacing: SZNodeLayout.rowSpacing) {
@@ -130,7 +130,7 @@ struct SZNodeView: View, Equatable {
         .clipShape(RoundedRectangle(cornerRadius: SZNodeLayout.cornerRadius))
         .background(
             RoundedRectangle(cornerRadius: SZNodeLayout.cornerRadius)
-                // Hover changes fill/stroke only — NOT the shadow: animating shadow(radius:) forces an
+                // Hover changes fill/stroke only — not the shadow: animating shadow(radius:) forces an
                 // offscreen re-rasterization every frame, and .onHover fires per-card as the cursor
                 // sweeps during a drag. Keep the shadow constant so nothing rasterizes on the hot path.
                 .fill(cardHover ? SZNodeCardStyle.cardHoverFill : SZNodeCardStyle.cardFill)
@@ -141,7 +141,7 @@ struct SZNodeView: View, Equatable {
                             : (cardHover ? Color.white.opacity(0.22) : SZNodeCardStyle.cardStroke),
                         lineWidth: isSelected ? 1.6 : (cardHover ? 1 : 0.75)))
         .contentShape(Rectangle())
-        // hover on the CARD FRAME only (attached before the badges/buttons overlays) — hovering the
+        // hover on the card frame only (attached before the badges/buttons overlays) — hovering the
         // buttons below or the status pill above must not light the card; those have their own.
         .trackingHover($cardHover, duration: 0.12)
         .overlay(alignment: .top) {
@@ -186,7 +186,7 @@ struct SZNodeView: View, Equatable {
         }
     }
 
-    /// The card's action buttons, tucked just BELOW the card (offset outside the frame, so they
+    /// The card's action buttons, tucked just below the card (offset outside the frame, so they
     /// don't fight the card's drag/select gestures and don't crowd the header): open the source,
     /// chat with the node's Coding Agent, and the "⋯" for structural actions (split/merge/…).
     private var bottomButtons: some View {
@@ -241,7 +241,7 @@ struct SZNodeView: View, Equatable {
                               fieldWidth: fieldWidth,
                               options: effectiveOptions(port),
                               // Same dynamic-??-static resolution as the snapshot above, re-run at
-                              // menu-open time — the fallback rule lives ONLY in effectiveOptions.
+                              // menu-open time — the fallback rule lives only in effectiveOptions.
                               freshOptions: optionsFor.map { _ in { effectiveOptions(port) } },
                               onSet: onSetInput.map { set in { value, persist in set(port.name, value, persist) } })
             }
@@ -298,7 +298,7 @@ struct SZNodeView: View, Equatable {
         renderEndpoint?.node == node.id && renderEndpoint?.port == port.name
     }
 
-    /// Whether `port` is the one this card's preview effectively shows — graph state only, NOT gated
+    /// Whether `port` is the one this card's preview effectively shows — graph state only, not gated
     /// on the global previews switch: the icon keeps reflecting (and toggling) the persisted choice
     /// while the gate is off, so a click never silently mutates state behind a dead-looking control.
     private func isPreviewPort(_ port: SZPort) -> Bool {

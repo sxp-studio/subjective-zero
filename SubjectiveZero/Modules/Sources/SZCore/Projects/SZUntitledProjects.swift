@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The untitled projects' home — where a File ▸ New project lives until Save As gives it a
 // user-chosen one: `~/Library/Application Support/SubjectiveZero/Projects/<uuid>/<Name>.subz`
-// (a minimal workspace-home pattern — deliberately NOT named "workspace": these projects
-// aren't temporary or a working set, they're merely unplaced). "Untitled" is DERIVED, not stored:
+// (a minimal workspace-home pattern — deliberately not named "workspace": these projects
+// aren't temporary or a working set, they're merely unplaced). "Untitled" is derived, not stored:
 // a project is untitled iff its URL is under this directory (`contains`), so there's no flag to
 // drift. Quit with an untitled project silently keeps it here and reopens it next launch; Save As
 // out of here deletes the source folder (the host's job — this type only answers path questions).

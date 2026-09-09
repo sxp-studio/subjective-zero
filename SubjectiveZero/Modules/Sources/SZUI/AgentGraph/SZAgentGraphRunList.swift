@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Agent Graph panel's RUNS section: every recorded traversal, grouped BY THREAD — one
-// Build press and everything it caused reads as one entry with its traversals nested under
-// it, instead of confetti (a build traversal, N item traversals, and a settled re-entry are
-// one conversation, and the list should say so). Standalone traversals (records carrying no
-// thread) stay plain rows.
+// The Agent Graph panel's RUNS section: every recorded traversal, grouped by thread, so one Build
+// press and everything it caused reads as one entry with its traversals nested under it instead of
+// confetti (a build traversal, N item traversals and a settled re-entry are one conversation).
+// Standalone traversals — records carrying no thread — stay plain rows.
 //
 // Its metrics are the Profiler's session list verbatim, because it is the same idea: an
-// accumulating list of executions beside the detail of the selected one. Deliberately NOT
-// sharing a row primitive with it — the chrome the two have in common is about ten lines
-// against two unrelated bodies.
+// accumulating list of executions beside the detail of the selected one. Deliberately not sharing a
+// row primitive with it — the chrome the two have in common is about ten lines against two
+// unrelated bodies.
 //
-// Content-only on purpose (no ScrollView of its own): the panel's sidebar owns the one
-// scroll, with the agent tree above this section.
+// Content-only on purpose (no ScrollView of its own): the panel's sidebar owns the one scroll, with
+// the agent tree above this section.
 import SwiftUI
 import SZCore
 
@@ -26,13 +25,13 @@ struct SZAgentGraphNaming: Equatable {
         agents.first { $0.id == run.agent }?.title ?? run.agent
     }
 
-    /// The row's second-line context: what the DOOR ruled — the record's own first trace
+    /// The row's second-line context: what the door ruled — the record's own first trace
     /// entry ("build", "answer", "implement"…); "…" while the door still decides.
     static func doorRuling(_ run: SZAgentGraphRun) -> String {
         run.trace.first?.outcome ?? "…"
     }
 
-    /// The row's glyph: the AGENT'S own identity (the director's eyeglasses, the coding
+    /// The row's glyph: the agent's own identity (the director's eyeglasses, the coding
     /// seat's hammer), falling back to the structural glyph for an agent the library
     /// dropped.
     func symbol(_ run: SZAgentGraphRun) -> String {
@@ -50,11 +49,11 @@ struct SZAgentGraphRunList: View {
     let shownID: UUID?
     let onPick: (SZAgentGraphRun) -> Void
 
-    /// Which threads are OPEN — collapsed by default: a thread reads as ONE run (its header
+    /// Which threads are open — collapsed by default: a thread reads as one run (its header
     /// carries the state that matters) until its traversals are asked for.
     @State private var expandedThreads: Set<String> = []
 
-    /// One list entry: a THREAD (≥1 traversals sharing a thread id) or a standalone
+    /// One list entry: a thread (≥1 traversals sharing a thread id) or a standalone
     /// traversal. Grouped by first appearance so the ordering rule (live first, then
     /// newest) keeps deciding placement.
     private struct Entry: Identifiable {
@@ -88,7 +87,7 @@ struct SZAgentGraphRunList: View {
                     threadHeader(entry, expanded: expandedThreads.contains(entry.id),
                                  selected: entry.traversals.contains { $0.id == shownID })
                     if expandedThreads.contains(entry.id) {
-                        // The LEADER reads first — the thread is its story — then the
+                        // The leader reads first — the thread is its story — then the
                         // children in dispatch order, stable like the canvas band.
                         ForEach(members(of: entry)) { traversal in
                             SZAgentGraphRunRow(run: traversal, names: names,
@@ -119,14 +118,14 @@ struct SZAgentGraphRunList: View {
     /// traversal's ending. Clicking it shows that deciding traversal.
     @ViewBuilder private func threadHeader(_ entry: Entry, expanded: Bool,
                                            selected: Bool) -> some View {
-        // The DECIDING traversal: the thread's leader — the parent whose dispatch the
+        // The deciding traversal: the thread's leader — the parent whose dispatch the
         // children answered. Its ending is the thread's ending; a declined or failed
-        // decider must wear its badge HERE, where the collapsed default shows it.
+        // decider must wear its badge here, where the collapsed default shows it.
         let director = entry.traversals.first { $0.work == nil } ?? entry.traversals[0]
         let live = entry.traversals.contains(where: \.isLive)
         let began = entry.traversals.map(\.startedAt).min() ?? director.startedAt
         let ended = entry.traversals.compactMap(\.endedAt).max()
-        // Chevron and row are SIBLINGS (the agent tree's shape) — nested buttons resolve by
+        // Chevron and row are siblings (the agent tree's shape) — nested buttons resolve by
         // SwiftUI-version grace, siblings by construction.
         HStack(alignment: .top, spacing: 0) {
             Button {
@@ -239,7 +238,7 @@ struct SZRunBadge: View {
     }
 
     /// In flight. One word, in the same plain tense as every ending below it — "live" was the odd
-    /// one out, a broadcast word among build words — and ONE colour, because the badge says what
+    /// one out, a broadcast word among build words — and one colour, because the badge says what
     /// state a run is in, never which agent is in it. Whose run it is, the lane says in its own
     /// tint; if the badge borrowed that tint too, the same state wore two colours across surfaces.
     /// The blue is the traversing card's own pulse: badge and card now say "going" the same way.
@@ -252,7 +251,7 @@ struct SZRunBadge: View {
         return SZRunBadge(label: style.label, colour: style.colour)
     }
 
-    /// A RECORD's badge — the same table, plus the one fact the conclusion drops: the outcome
+    /// A record's badge — the same table, plus the one fact the conclusion drops: the outcome
     /// the last visited node answered. Use this wherever the trace is at hand; a receipt, which
     /// has no trace, keeps `forConclusion`.
     static func forRun(_ run: SZAgentGraphRun) -> SZRunBadge {
@@ -260,7 +259,7 @@ struct SZRunBadge: View {
         return SZRunBadge(label: style.label, colour: style.colour)
     }
 
-    /// An ending that came out of an unhandled ERROR port. The engine seals it a clean ending —
+    /// An ending that came out of an unhandled error port. The engine seals it a clean ending —
     /// nothing threw, the traversal simply had nowhere left to go — but the work did not land,
     /// and the canvas has always drawn that capsule in the failure orange while the row beside
     /// it called the same run a clean exit. Read here, so both say one thing.
@@ -269,13 +268,13 @@ struct SZRunBadge: View {
         return outcome.hasPrefix("error") || outcome.hasPrefix("failed")
     }
 
-    /// An ending's words and colour — the ONE vocabulary, pure so the canvas terminal reads
-    /// the same table and so the mapping is testable without a view. The WORD comes from the model
+    /// An ending's words and colour — the one vocabulary, pure so the canvas terminal reads
+    /// the same table and so the mapping is testable without a view. The word comes from the model
     /// (`Conclusion.word`), because the MCP surface and any driver need the same five words and
     /// cannot see this view; what is decided here is the colour it wears.
     ///
     /// `endedOn` is the last visited node's outcome, when the caller has the record to hand. It
-    /// only ever RECLASSIFIES a clean ending into a failed one — everything else is the
+    /// only ever reclassifies a clean ending into a failed one — everything else is the
     /// conclusion's own business, so a refusal off an error port is still a refusal.
     static func style(for conclusion: SZAgentGraphRun.Conclusion?,
                       endedOn outcome: String? = nil) -> (label: String, colour: Color) {
@@ -286,18 +285,18 @@ struct SZRunBadge: View {
         let label = conclusion?.word ?? SZAgentGraphRun.Conclusion.ended.word
         return switch conclusion {
         case .failed, .defect: (label, SZAgentGraphStyle.failed)
-        // Stopped and interrupted are ONE badge: both mean unfinished with nothing broken, and
+        // Stopped and interrupted are one badge: both mean unfinished with nothing broken, and
         // they cannot co-occur — `.interrupted` is only ever stamped when a record is restored
         // from a session that died, so it is never something you watch happen. Which of the two
         // it was stays in the row's tooltip and on the flipped entries' detail, because "the app
         // closed under this run" is a fact nothing else in the record can tell you.
         case .cancelled, .interrupted: (label, SZAgentGraphStyle.neutral)
-        // A DECISION, not an accident — the agents' own violet, the colour a step's ruling wears
+        // A decision, not an accident — the agents' own violet, the colour a step's ruling wears
         // on the canvas. Grey said the same thing here as "the app crashed", which it is not:
         // a refusal is never a failure, and it is never nobody's doing either.
         case .declined:        (label, SZEdgeStyle.intentViolet)
         // A record sealed without a conclusion cannot happen through the host's seal; drawn
-        // as a plain ending rather than left blank. The SAME green the canvas gives a clean
+        // as a plain ending rather than left blank. The same green the canvas gives a clean
         // exit — a list badge and the terminal capsule are two views of one fact.
         case .ended, .none:    (label, SZAgentGraphStyle.ended)
         }
@@ -329,11 +328,11 @@ struct SZAgentGraphRunRow: View {
                 Capsule()
                     .fill(selected ? SZChatPanel.directorColor.opacity(0.8) : .clear)
                     .frame(width: 2)
-                // ONE clock for the row: the relative age and a live run's growing wall
+                // One clock for the row: the relative age and a live run's growing wall
                 // time both read it, so a row re-lays out once a tick rather than twice.
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     VStack(alignment: .leading, spacing: 2) {
-                        // WHAT was traversed, and how long ago it ended.
+                        // What was traversed, and how long ago it ended.
                         HStack(spacing: 5) {
                             Image(systemName: names.symbol(run))
                                 .font(.system(size: 9))
@@ -352,7 +351,7 @@ struct SZAgentGraphRunRow: View {
                             }
                         }
                         HStack(spacing: 5) {
-                            // WHAT the door ruled, demoted off the title line.
+                            // What the door ruled, demoted off the title line.
                             Text(SZAgentGraphNaming.doorRuling(run) + " ·")
                                 .font(.system(size: 9))
                                 .foregroundStyle(.tertiary)

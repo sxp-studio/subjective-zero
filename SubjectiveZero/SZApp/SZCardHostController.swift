@@ -2,12 +2,12 @@
 // Custom-card mounts: one compiled `Card.swift` module + one live instance per `.custom`-bodied
 // node, a source watcher per mount (edit → recompile → remount, the Node.swift motion), the two
 // inbound channels every card sees (the scoped node snapshot, pushed write-on-change; display
-// telemetry at ~30 Hz), and the outbound verbs routed to the host's ONE input write
+// telemetry at ~30 Hz), and the outbound verbs routed to the host's one input write
 // (`setInputDefault(persist:)`). Keep-last-good: a red recompile leaves the previous build mounted
 // and rides its first error line as a warning; only a card that never mounted shows the failed chip.
 //
 // Event-driven like the previews it sits beside: `graphDidChange` (called from the same store hook
-// that refreshes the preview stream) reconciles mounts and re-pushes snapshots; a ticker runs ONLY
+// that refreshes the preview stream) reconciles mounts and re-pushes snapshots; a ticker runs only
 // while an instance is live, for telemetry and the render-aspect follow. Each mount publishes
 // through an observable box (`SZCardMount`) the card region reads directly.
 import AppKit
@@ -198,7 +198,7 @@ final class SZCardHostController: SZCustomCardProvider {
     // MARK: - compile / hot reload
 
     /// Compile the node's Card.swift and swap the result in. A recompile requested while one is in
-    /// flight coalesces into ONE more build after it (latest source wins). Green → fresh instance
+    /// flight coalesces into one more build after it (latest source wins). Green → fresh instance
     /// replaces the old one (spinner only when nothing was mounted before); red → keep the mounted
     /// build and surface the first error line as a warning (or the failed chip if none is mounted).
     private func recompile(node id: SZNodeID) {
@@ -253,7 +253,7 @@ final class SZCardHostController: SZCustomCardProvider {
         let previous = mount.module
         mount.instance = instance
         mount.module = module
-        // The card's root view VALUE, lifted out of the dylib's hosting view — mounted as first-class
+        // The card's root view value, lifted out of the dylib's hosting view — mounted as first-class
         // SwiftUI content so the camera's scaleEffect re-renders it crisp at every zoom (an embedded
         // NSView would raster-scale). NSHostingView<AnyView> is a system-framework generic: its
         // metadata is shared with the dylib, so this cast is exact.
@@ -294,8 +294,8 @@ final class SZCardHostController: SZCustomCardProvider {
     /// The verbs a card may name through `state.call` — the binding-learn vocabulary, nothing else.
     private static let bindingVerbs: Set<String> = ["learn_arm", "learn_cancel", "learn_commit", "remove_binding"]
 
-    /// A card invokes a verb ON ITS OWN NODE only (the closure captured the node — the card never
-    /// names one), only from the allowlist, and only when the node IS a binding source. Commits and
+    /// A card invokes a verb on its own node only (the closure captured the node — the card never
+    /// names one), only from the allowlist, and only when the node is a binding source. Commits and
     /// removals go through the host's fenced binding funnel like the MCP tools; failures land in the
     /// status line rather than propagating — the card reads outcomes back from telemetry/state.
     private func cardCall(node id: SZNodeID, tool: String, argsJSON: String) {
@@ -320,7 +320,7 @@ final class SZCardHostController: SZCustomCardProvider {
         }
     }
 
-    /// The card writes ITS node's inputs, by port name, through the host's one funnel — the same
+    /// The card writes its node's inputs, by port name, through the host's one funnel — the same
     /// call the slider makes (`persist: false` per tick, `true` on release).
     private func cardWrite(node id: SZNodeID, port: String, values: [Float], persist: Bool) {
         guard let contractPort = host.store.project?.graph.node(id: id)?.contract?.inputs.first(where: { $0.name == port }),

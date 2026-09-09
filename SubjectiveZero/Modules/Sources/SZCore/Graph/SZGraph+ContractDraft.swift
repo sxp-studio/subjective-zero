@@ -1,25 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Contract-first drafting — the procedural Director strategy's flow consumer. A freshly DRAWN
-// prompt graph (prompt nodes wired with flow, no contracts/data edges yet) carries its typed I/O only
-// implicitly, in the flow topology. This pure `SZGraph` transform makes it explicit UPFRONT: it gives
-// every contract-less prompt node a texture contract derived from its flow edges and lays the companion
-// data wiring, so the cards show their I/O immediately and the textures bind as the coding fleet fills
-// in `Node.swift` — the graph visibly "comes to life" before any code exists. Sibling to the split/merge
-// transforms (SZGraph+SplitMerge); the drafted boundary is what a promote merges the agent's contract into.
+// Contract-first drafting — the procedural Director strategy's flow consumer. A freshly drawn prompt graph
+// (prompt nodes wired with flow, no contracts or data edges yet) carries its typed I/O only implicitly, in
+// the flow topology. This pure `SZGraph` transform makes it explicit upfront: every contract-less prompt node
+// gets a texture contract derived from its flow edges plus the companion data wiring, so the cards show their
+// I/O immediately and the textures bind as the coding fleet fills in `Node.swift` — the graph visibly comes
+// to life before any code exists. Sibling to SZGraph+SplitMerge; the drafted boundary is what a promote
+// merges the agent's contract into.
 //
-// Texture-output by ASSUMPTION — a deliberate shortcut for this path. Flow edges are type-agnostic
-// ("A feeds B" says nothing about WHAT flows), and the procedural strategy has no oracle to infer types,
-// so it assumes the dominant case: an image pipeline (texture in per upstream, one texture out). That is
-// only acceptable because the procedural strategy is the **transitional** deterministic / offline / CI
-// baseline, expected to be retired in favour of the agentic Director — which, being an LLM, declares each
-// node's REAL typed I/O (texture / float / event / none) upfront with no guess. The assumption is
-// contained here: it does NOT touch the contract model (textures stay optional — a node may have none)
-// nor the Director path. Control knobs + permissions stay the coding agent's to author (the promote merge
-// keeps both; see SZContract+PromoteMerge). Contract *renegotiation* happens later,
-// in the Director's reconcile loop.
+// Texture-output by assumption — a deliberate shortcut for this path. Flow edges are type-agnostic ("A feeds
+// B" says nothing about what flows) and the procedural strategy has no oracle to infer types, so it assumes
+// the dominant case: an image pipeline (texture in per upstream, one texture out). That is only acceptable
+// because the procedural strategy is the **transitional** deterministic / offline / CI baseline, expected to
+// be retired for the agentic Director — an LLM, which declares each node's real typed I/O (texture / float /
+// event / none) upfront with no guess. The assumption is contained here: it touches neither the contract
+// model (textures stay optional — a node may have none) nor the Director path. Control knobs and permissions
+// stay the coding agent's to author (the promote merge keeps both, see SZContract+PromoteMerge); contract
+// *renegotiation* happens later, in the Director's reconcile loop.
 import Foundation
 
-/// The draft port-naming convention — the ONE home for the literal names a drafted or seeded
+/// The draft port-naming convention — the one home for the literal names a drafted or seeded
 /// contract mints. `draftContractsFromFlow` declares them in pass 1 and wires them in pass 2, and
 /// `SZPromptSeed` mints a spawn's one-port contract with them; the coding-agent brief tells the
 /// agent to keep them verbatim.
@@ -41,12 +40,12 @@ extension SZGraph {
         case noCompatiblePort
     }
 
-    /// Draft a texture contract for every contract-less PROMPT node from its FLOW edges, realize each flow
-    /// arrow as a DATA edge (removing the now-resolved intent arrow) so the implemented textures bind, and
+    /// Draft a texture contract for every contract-less prompt node from its flow edges, realize each flow
+    /// arrow as a data edge (removing the now-resolved intent arrow) so the implemented textures bind, and
     /// — if no render endpoint is set yet —
     /// point it at a terminal drafted node so a freshly drawn pipeline renders without a manual display
     /// toggle. Contracts that already exist (generated, library, split/merge pieces, a re-run node, a
-    /// data-spawn seed) are never rewritten, so this is idempotent across repeated runs — but arrows INTO
+    /// data-spawn seed) are never rewritten, so this is idempotent across repeated runs — but arrows into
     /// an already-contracted prompt node are still pass 2's to realize, into its declared unwired texture
     /// inputs. An arrow that can't be realized — it would close a cycle, or no compatible texture port
     /// exists on either end — stays visible as unresolved intent, reported in `skipped` with its reason
@@ -72,7 +71,7 @@ extension SZGraph {
                 inputs: inputs, outputs: [Self.texturePort(SZDraftPortName.output)])
             drafted.append(n.id)
         }
-        // Arrows INTO prompt nodes that already ship a contract (a data-spawn seed, a permission-
+        // Arrows into prompt nodes that already ship a contract (a data-spawn seed, a permission-
         // declaring camera) are realized too — into their declared unwired texture inputs, the
         // declaration respected, never rewritten — or reported, so drafting is never silent about
         // an arrow the user drew.
@@ -94,11 +93,11 @@ extension SZGraph {
             }
         }
 
-        // Pass 2 — realize each flow arrow as a DATA edge into a drafted or contracted target,
+        // Pass 2 — realize each flow arrow as a data edge into a drafted or contracted target,
         // skipping pairs already data-connected. Drafted targets bind their pass-1 names (input,
         // input2, …); contracted targets bind their first unwired declared texture input. This is
         // the flow→data promotion that makes the textures actually bind. As with `SZStore.connect`,
-        // realizing an arrow RESOLVES it: the flow intent edges are removed afterward (snapshot the
+        // realizing an arrow resolves it: the flow intent edges are removed afterward (snapshot the
         // realized pairs first — flow is read here, removed only after the loop).
         var realized: [SZConnection] = []
         var skipped: [(from: SZNodeID, to: SZNodeID, reason: SZFlowSkipReason)] = []
@@ -111,12 +110,12 @@ extension SZGraph {
                         && (arrow.pinnedPort(.to) ?? $0.to.port) == $0.to.port
                 }
                 if alreadyWired { realized.append(arrow); continue }
-                // Both ports resolved against the DRAFTED graph (a pass-1 source's contract lives
+                // Both ports resolved against the drafted graph (a pass-1 source's contract lives
                 // only in `g`). A source with no texture output, or a target with no free texture
                 // input, can't carry this wiring — the arrow stays as intent instead of an edge
                 // pointing at a phantom or mistyped port. Drafted targets keep the k-indexed names
-                // deliberately (arrow k owns input k, so a cycle-skipped arrow leaves ITS slot
-                // unwired); first-unwired would compact later arrows into earlier slots. A PINNED end
+                // deliberately (arrow k owns input k, so a cycle-skipped arrow leaves its slot
+                // unwired); first-unwired would compact later arrows into earlier slots. A pinned end
                 // is honored literally when it names a texture port (an unwired input on the target)
                 // — and never redirected: a bad pin stays as intent.
                 let sourcePort: String?
@@ -159,7 +158,7 @@ extension SZGraph {
 
     // MARK: - Helpers
 
-    /// Distinct flow arrows INTO `id` (one per source node + pin pair), ordered by the source's
+    /// Distinct flow arrows into `id` (one per source node + pin pair), ordered by the source's
     /// declaration index for determinism.
     private func incomingFlowArrows(of id: SZNodeID, order: [SZNodeID: Int]) -> [SZConnection] {
         var arrows: [SZConnection] = []
@@ -183,9 +182,9 @@ extension SZGraph {
             && !connections.contains { $0.kind == .data && $0.to == SZPortRef(node: id, port: port) }
     }
 
-    /// The name of `id`'s first texture output, resolved against THIS graph's contracts — nil when the
+    /// The name of `id`'s first texture output, resolved against this graph's contracts — nil when the
     /// node declares none, in which case a flow arrow out of it has no texture wiring to realize.
-    /// The plain FIRST texture output, not `preferredTextureOutput`'s display-marked pick: the two
+    /// The plain first texture output, not `preferredTextureOutput`'s display-marked pick: the two
     /// disagree on multi-output sources, and drafting wires from the first.
     private func textureOutputPort(of id: SZNodeID) -> String? {
         node(id: id)?.contract?.outputs.first { $0.type == .texture }?.name

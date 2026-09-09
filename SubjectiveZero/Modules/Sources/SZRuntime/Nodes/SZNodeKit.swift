@@ -2,13 +2,10 @@
 // The host-owned kit compiled into every node dylib beside the author's `Node.swift` (ABI v9,
 // `SZNodeABI`). Defines the ergonomic `SZNode` protocol + typed setup/frame contexts over the C-flat
 // context in SZNodeABI.swift, and exports the `@_cdecl` entry points the loader dlsym's. Node authors
-// must NOT redeclare these symbols or touch the raw struct (RUNTIME.md). The mirror of
+// must not redeclare these symbols or touch the raw struct (RUNTIME.md). The mirror of
 // `SZRuntimeContextRaw` inside `source` must stay byte-identical (SZABILayoutTests pins it).
 import Foundation
 
-/// The host-owned Swift source compiled into every node dylib (alongside the author's `Node.swift`). It
-/// defines the `SZNode` protocol + typed contexts and exports the four `@_cdecl` C entry points. Node
-/// authors must NOT redeclare these symbols or touch the raw struct (RUNTIME.md).
 enum SZNodeKit {
     /// Relative path the support file is written to inside a node's build dir.
     static let fileName = "SZNodeKit.swift"

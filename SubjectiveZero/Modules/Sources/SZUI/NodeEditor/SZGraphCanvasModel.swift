@@ -31,10 +31,10 @@ public enum SZGraphCanvasModel {
         return CGPoint(x: CGFloat(node.position.x) + offset.x, y: CGFloat(node.position.y) + offset.y)
     }
 
-    /// Every socket a CONNECTION may target: flow in/out, plus a data socket per declared contract port —
+    /// Every socket a connection may target: flow in/out, plus a data socket per declared contract port —
     /// whatever the node's kind.
     ///
-    /// Distinct from `sockets(of:)`, which is what the canvas DRAWS. A draft prompt node the Director has
+    /// Distinct from `sockets(of:)`, which is what the canvas draws. A draft prompt node the Director has
     /// just given a contract owns those ports and is wirable, even though its card shows only flow dots
     /// until it's implemented. Conflating the two makes a rendering rule reject a legal graph edit.
     public static func connectableSockets(of node: SZNode, previewsEnabled: Bool) -> [SZSocket] {
@@ -53,10 +53,10 @@ public enum SZGraphCanvasModel {
         return result
     }
 
-    /// Every interactive socket of ONE node: flow in/out, plus data sockets per declared port on a
+    /// Every interactive socket of one node: flow in/out, plus data sockets per declared port on a
     /// generated node (prompt cards show only flow sockets, matching the node views). A shown custom
     /// card's plumbing inputs have no row and no dot — the card is their control; they stay
-    /// CONNECTABLE (MCP, or flip to rows to wire by hand).
+    /// connectable (MCP, or flip to rows to wire by hand).
     public static func sockets(of node: SZNode, previewsEnabled: Bool) -> [SZSocket] {
         connectableSockets(of: node, previewsEnabled: previewsEnabled).filter {
             ($0.kind == .flow || node.kind == .generated)
@@ -84,7 +84,7 @@ public enum SZGraphCanvasModel {
         graph.nodes.flatMap { sockets(of: $0, previewsEnabled: previewsEnabled) }
     }
 
-    /// Whether `socket` is visually buried under a card that renders ABOVE the socket's own node —
+    /// Whether `socket` is visually buried under a card that renders above the socket's own node —
     /// mirror of the canvas z-order: `tiers` (higher rides above, missing = 0), ties broken by
     /// `graph.nodes` order; a node never occludes its own dots (they draw just above its card).
     /// Keeps invisible dots from being wire-drop targets: what you see is what you can hit.
@@ -125,7 +125,7 @@ public enum SZGraphCanvasModel {
 
     /// The IDs of every socket wired by at least one connection, in one O(connections) pass — the
     /// socket layer looks its dots up here instead of scanning all connections per socket. A plain
-    /// flow end keys the portless flow socket; a PINNED flow end lights the data socket it targets.
+    /// flow end keys the portless flow socket; a pinned flow end lights the data socket it targets.
     /// `excluding` drops a picked-up wire so its sockets dim.
     public static func connectedSocketIDs(in graph: SZGraph, excluding excluded: SZConnectionID? = nil) -> Set<String> {
         var result = Set<String>()
@@ -172,7 +172,7 @@ public enum SZGraphCanvasModel {
         guard outType == inType else { return false }
         // The graph must stay a DAG. Judged as if the target input's occupied edge were already
         // swapped out (`SZStore.connect`'s input-swap rule) — which also covers dropping a picked-up
-        // wire back on its own port, since that edge IS the occupant.
+        // wire back on its own port, since that edge is the occupant.
         var probe = graph
         probe.connections.removeAll { $0.kind == .data && $0.to == SZPortRef(node: inp.nodeID, port: inp.port) }
         return probe.wouldCloseCycle(from: out.nodeID, to: inp.nodeID) == nil
@@ -182,7 +182,7 @@ public enum SZGraphCanvasModel {
     /// shared by the snap (`snapTarget`) and the compatible-slot highlight (`validTargets`), so a
     /// highlighted dot is always one a drop would really connect. Unlocked, type-legal (`canConnect`),
     /// and visible: a dot buried under a higher card is invisible and un-grabbable — it must not
-    /// silently catch a drop either (`isOccluded`). Connecting to an occupied data input SWAPS its
+    /// silently catch a drop either (`isOccluded`). Connecting to an occupied data input swaps its
     /// edge out, so the displaced edge must touch no locked node (same rule as deleting / picking
     /// that wire up directly); the currently picked-up edge (`pickedConnectionID`) doesn't count —
     /// dropping back restores it.
@@ -193,7 +193,7 @@ public enum SZGraphCanvasModel {
               canConnect(source, socket, in: graph),
               !isOccluded(socket, in: graph, tiers: tiers, previewsEnabled: previewsEnabled)
         else { return false }
-        // A picked-up edge keeps its kind on re-route: a DATA edge can't land on a flow socket
+        // A picked-up edge keeps its kind on re-route: a data edge can't land on a flow socket
         // (a flow edge dropped on a data socket just becomes pinned).
         if let pickedConnectionID, socket.kind == .flow,
            graph.connections.contains(where: { $0.id == pickedConnectionID && $0.kind == .data }) { return false }
@@ -241,8 +241,8 @@ public enum SZGraphCanvasModel {
         }
     }
 
-    /// The socket at the end of `connection` OPPOSITE the detached one — where a pickup drag's preview
-    /// anchors while the detached end is re-routed. Works for data AND flow edges; the socket follows
+    /// The socket at the end of `connection` opposite the detached one — where a pickup drag's preview
+    /// anchors while the detached end is re-routed. Works for data and flow edges; the socket follows
     /// the canvas convention (`endSocket`: portless flow, or the data socket a data/pinned end names).
     /// Nil if the edge's endpoints don't resolve.
     public static func pickupAnchor(detaching end: SZConnectionEnd, of connection: SZConnection,
@@ -271,11 +271,11 @@ public enum SZGraphCanvasModel {
     }
 
     /// Resolve a connection's two endpoints in world space (the output socket of `from`, the input
-    /// socket of `to`). Nil if an endpoint node is missing, OR — for a DATA connection — if either
+    /// socket of `to`). Nil if an endpoint node is missing, or — for a data connection — if either
     /// typed port doesn't exist yet (an endpoint is still a prompt node). A data edge is drawn only once
     /// both real ports exist; before that the relationship is carried by a flow (intent) edge, which the
     /// draft step realizes into this data edge (and resolves) once the contract lands. A flow end
-    /// PINNED to a declared data port lands on that data socket; an unresolvable pin falls back to
+    /// pinned to a declared data port lands on that data socket; an unresolvable pin falls back to
     /// the flow socket.
     public static func endpoints(of connection: SZConnection, in graph: SZGraph,
                                 previewsEnabled: Bool) -> (from: CGPoint, to: CGPoint)? {

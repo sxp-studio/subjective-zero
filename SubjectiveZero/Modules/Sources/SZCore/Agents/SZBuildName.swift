@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The short name the UI gives a build, derived from the ask by one fixed rule so the strip,
-// transcript header, RUNS list and scheduled rows all say the same words. No model turn is
+// transcript header, runs list and scheduled rows all say the same words. No model turn is
 // spent on a title.
 import Foundation
 

@@ -145,7 +145,7 @@ extension SZHost {
         process.standardError = pipe
         do {
             try process.run()
-            // Read BEFORE waiting: a listing longer than the pipe buffer blocks the tool until
+            // Read before waiting: a listing longer than the pipe buffer blocks the tool until
             // someone drains it, and waiting first would wedge on any sizeable archive.
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()

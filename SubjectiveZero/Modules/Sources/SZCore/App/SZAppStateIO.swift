@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Load/save `SZAppState` (docs/STATE.md "App" — panel layout, window size, theme) as
-// `app-state.json` in Application Support. Local, per-machine preferences: this is deliberately NOT
+// `app-state.json` in Application Support. Local, per-machine preferences: this is deliberately not
 // part of a `.subz` project — a project is a portable document and says nothing about how this
 // machine's window is arranged. Sibling of SZProjectIO (same pretty-printed human-diffable JSON),
 // but forgiving where the project loader is strict: app state is a convenience, so a missing or

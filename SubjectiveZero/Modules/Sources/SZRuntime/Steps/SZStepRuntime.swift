@@ -1,26 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The keyed execution tier over `SZStepLoader`: one table of loaded decision steps, keyed by
-// OWNER + STEP. The owner is part of the key on purpose — two agents may each ship a step of
-// the same name, and a bare-name table would let whichever compile finished last answer for
-// both.
+// The keyed execution tier over `SZStepLoader`: one table of loaded decision steps, keyed by owner + step.
+// The owner is part of the key on purpose — two agents may each ship a step of the same name, and a
+// bare-name table would let whichever compile finished last answer for both.
 //
 // What this tier adds over a bare loader:
-// - SCHEDULED COMPILES: `scheduleLoad` runs swiftc off-main and swaps the module in on green;
-//   a red compile keeps the previous module answering (the loader's keep-old-on-red, surfaced
-//   through `onRedCompile` so the failure lands somewhere a user actually looks). Schedules
-//   for a key already compiling COALESCE — the latest source is remembered and compiled once
-//   more after the in-flight build finishes, so the newest source always ends up live.
-// - COMPILE SLOTS: a shared semaphore caps concurrent swiftc invocations app-wide for the
-//   step tier. Without it, parallel schedulers (or parallel test processes) each spawning
-//   their own compiles have wedged a machine before — a swiftc storm is a documented failure,
-//   not a hypothetical.
-// - EVALUATE AWAITS THE COMPILE: `evaluate` waits out any in-flight build for its key before
-//   running, so an evaluation's outcome never depends on launch timing. Putting the wait here
-//   means no caller can forget it.
-// - WATCHDOG: every evaluation runs under a deadline. A step parked forever (an ask that
-//   never settles, an authored infinite loop that still awaits) is cancelled through the
-//   loader's existing task-cancellation plumbing and reported as a timeout failure — the
-//   graph traversal above must always get an answer.
+// - Scheduled compiles: `scheduleLoad` runs swiftc off-main and swaps the module in on green; a red compile
+//   keeps the previous module answering (the loader's keep-old-on-red, surfaced through `onRedCompile` so the
+//   failure lands somewhere a user actually looks). Schedules for a key already compiling coalesce: the latest
+//   source is remembered and compiled once more after the in-flight build, so it always ends up live.
+// - Compile slots: a shared semaphore caps concurrent swiftc invocations app-wide for the step tier. Without
+//   it, parallel schedulers (or parallel test processes) each spawning their own compiles have wedged a
+//   machine before — a swiftc storm is a documented failure, not a hypothetical.
+// - Evaluate awaits the compile: `evaluate` waits out any in-flight build for its key before running, so an
+//   outcome never depends on launch timing, and no caller can forget the wait.
+// - Watchdog: every evaluation runs under a deadline. A step parked forever (an ask that never settles, an
+//   authored infinite loop that still awaits) is cancelled through the loader's existing task-cancellation
+//   plumbing and reported as a timeout failure — the graph traversal above must always get an answer.
 import Foundation
 import Synchronization
 
@@ -48,7 +43,7 @@ public final class SZStepRuntime {
     }
 
     /// One key's slot: the loader that owns its mapped modules, the in-flight compile (if
-    /// any), and at most ONE queued request — a second schedule while one compiles just
+    /// any), and at most one queued request — a second schedule while one compiles just
     /// overwrites the queue slot, which is exactly "latest source wins".
     private final class Entry {
         let loader = SZStepLoader()
@@ -70,9 +65,9 @@ public final class SZStepRuntime {
     /// an evaluation already in flight.
     public var evaluationDeadline: Duration = .seconds(120)
 
-    /// Fired once per failed load (red compile OR an unloadable dylib), AFTER the
-    /// keep-old-on-red decision — the host's chance to surface the failure in the UI instead
-    /// of only the console. Called on the main actor.
+    /// Fired once per failed load (a red compile or an unloadable dylib), after the keep-old-on-red
+    /// decision — the host's chance to surface the failure in the UI instead of only the console.
+    /// Called on the main actor.
     public var onRedCompile: ((SZStepKey, String) -> Void)?
 
     /// `prebuiltStepsDir`: where a release bundle keeps its prebuilt step dylibs. A schedule whose

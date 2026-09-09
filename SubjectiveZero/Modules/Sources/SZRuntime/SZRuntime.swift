@@ -22,22 +22,22 @@ public enum SZLoadError: Error, LocalizedError, CustomStringConvertible {
 }
 
 /// Threading model (why this is not `@MainActor`):
-/// - The runtime owns THE render loop: `SZRenderLoop`'s pacing display link fires `tick()` on its own
+/// - The runtime owns the render loop: `SZRenderLoop`'s pacing display link fires `tick()` on its own
 ///   thread. Viewports are `SZRenderSurface`s the tick fans frames out to — the driver surface
 ///   (sets `renderSize`) presents synchronously on the loop thread, mirrors on their own queues.
 /// - The host alone decides when the loop runs (`setPacing`); the runtime never guesses liveness.
 /// - All engine state lives in `EngineState` behind `engine` (a Mutex).
 ///
 /// Rules:
-/// - LOCK SCOPE: only CPU encode/state work under the lock — never `nextDrawable`, GPU waits, or
-///   readbacks. Backpressure is `framesInFlight`, waited BEFORE the lock. Exception: graph swaps hold
+/// - Lock scope: only CPU encode/state work under the lock — never `nextDrawable`, GPU waits, or
+///   readbacks. Backpressure is `framesInFlight`, waited before the lock. Exception: graph swaps hold
 ///   the lock through teardown+setup so a frame never sees a half-swapped graph.
-/// - COMMIT UNDER LOCK: a schedule buffer is committed in the critical section that encoded it, so
+/// - Commit under lock: a schedule buffer is committed in the critical section that encoded it, so
 ///   commit order == encode order and pool-texture hazard tracking keeps passes consistent.
 ///   Presentation is a separate blit buffer after `nextDrawable()` (a capture landing in between can
 ///   show a one-frame-newer endpoint — whole frames, monotonic).
 /// - The engine lock never calls into the loop or a surface queue.
-/// - COMPILES: `prepareLoad` runs on whatever thread the caller gives it (`prepareProject` gives it a
+/// - Compiles: `prepareLoad` runs on whatever thread the caller gives it (`prepareProject` gives it a
 ///   detached one). Only `commit` must run on the thread that owns the graph.
 ///
 /// `@unchecked Sendable`: `assets`' pool is touched only under the lock; the toolchain is a value type
@@ -58,7 +58,7 @@ public final class SZRuntime: @unchecked Sendable {
         /// The virtual playback clock — owns `frameIndex` + `timeSeconds`, pausable/resettable from the
         /// HUD. Read and advanced only here under the engine lock (see SZTimeline).
         var timeline = SZTimeline()
-        /// Scalar output values emitted during the most recently ENCODED frame, keyed
+        /// Scalar output values emitted during the most recently encoded frame, keyed
         /// `"<nodeID>:<port>"` (the v5 channel, surfaced by the scheduler). Host-side observation only
         /// (`readOutputFloats`) — never fed back into a frame. Paused frames don't encode, so this holds
         /// the pre-pause frame's values, matching the frozen viewport.
@@ -103,7 +103,7 @@ public final class SZRuntime: @unchecked Sendable {
     /// per-launch scratch: a cache in there would miss on every cold open.
     private let buildCache: URL
     /// The aspect-fit scaler behind size-mismatched presents (mirror viewports at their own size,
-    /// resize races). Its own kernel — NOT the preview stream's — and its own mutex: scaleTransform/
+    /// resize races). Its own kernel — not the preview stream's — and its own mutex: scaleTransform/
     /// clipRect are mutated per encode, and mirrors present from independent display-link threads.
     /// The critical section covers only set-transform + encode (CPU-cheap, per the lock-scope rule).
     /// The box exists because MPS kernels aren't Sendable — safe here for the same narrow reason as
@@ -139,7 +139,7 @@ public final class SZRuntime: @unchecked Sendable {
             .appending(path: "SubjectiveZero").appending(path: "NodeBuilds")
     }
 
-    /// Drop build dirs untouched for `days`. Node ids are per INSTANCE, so without this every deleted
+    /// Drop build dirs untouched for `days`. Node ids are per instance, so without this every deleted
     /// node leaves ~190 KB behind forever. Once per launch, off-main; failing is fine, it's a cache.
     public static func pruneBuildCache(_ root: URL? = nil, olderThan days: Int = 30) {
         let fm = FileManager.default
@@ -167,7 +167,7 @@ public final class SZRuntime: @unchecked Sendable {
     }
 
     /// Compiled and dlopened but not installed: no `setup()` has run, so dropping one just frees its
-    /// mappings. `commit` re-derives its own diff and only needs these loaders to COVER it.
+    /// mappings. `commit` re-derives its own diff and only needs these loaders to cover it.
     public struct SZPreparedLoad: Sendable {
         let graph: SZGraph
         let schedule: SZScheduler
@@ -183,12 +183,11 @@ public final class SZRuntime: @unchecked Sendable {
     }
 
     public func loadProject(_ project: SZProject, at url: URL) throws {
-        // Render only IMPLEMENTED nodes: a prompt node has no Node.swift to compile. This is what lets a
-        // graph with un-implemented (dirty) prompt nodes load — the agent loop starts from exactly that,
-        // and the node becomes renderable once its coding agent's source is promoted (kind → generated).
-        // …and resolve every file port against the bundle on the way in: the model holds the PORTABLE
-        // form (`media/<uuid>/<name>`), the runtime is the one place that needs a machine path,
-        // because it is the one place that hands a string to a node that will open it.
+        // Render only implemented nodes: a prompt node has no Node.swift to compile, and becomes
+        // renderable once its coding agent's source is promoted (kind → generated) — which is what lets
+        // a graph with dirty prompt nodes load at all.
+        // Resolve every file port against the bundle on the way in: the model holds the portable form
+        // (`media/<uuid>/<name>`), and the runtime is the one place that hands a node a path to open.
         let graph = project.graph.renderable.resolvingFilePaths(in: url)
         try loadGraph(graph) { SZProjectIO.nodeSourceURL(projectURL: url, nodeID: $0, target: .native) }
     }
@@ -210,13 +209,12 @@ public final class SZRuntime: @unchecked Sendable {
         try loadGraph(SZGraph()) { _ in URL(filePath: "/") }   // no added nodes, so never asked
     }
 
-    /// Compile-check one staged `Node.swift` WITHOUT loading or swapping it — the validation behind
+    /// Compile-check one staged `Node.swift` without loading or swapping it — the validation behind
     /// `agent_compile_node`. The host promotes (copies to the live node folder + reloads) only on `.ok`,
     /// so a broken staged source never clobbers the live one. `.failed` carries the swiftc diagnostics.
     public func compileNodeSource(at source: URL) -> SZBuildResult {
-        // The measured thing measures itself: a `compile.check` fence with the outcome as detail,
-        // attributed via whatever trace context the caller bound (the MCP bridge's tool span) —
-        // off-turn callers have none, and the fence drops.
+        // A `compile.check` fence with the outcome as detail, attributed to whatever trace context the
+        // caller bound (the MCP bridge's tool span); off-turn callers have none and the fence drops.
         let fence = SZTrace.begin(SZTurnStage.compileCheck)
         do {
             _ = try toolchain.compile(
@@ -239,19 +237,18 @@ public final class SZRuntime: @unchecked Sendable {
 
     /// Test hook: object identity of each loaded node's live module. An incremental reload that reuses a
     /// node's loader keeps its identity; a recompile installs a fresh `SZLoader` (new identity). Lets tests
-    /// assert a topology-only edit did ZERO recompiles. Internal — visible only to `@testable` tests.
+    /// assert a topology-only edit did zero recompiles. Internal — visible only to `@testable` tests.
     func loaderIdentities() -> [SZNodeID: ObjectIdentifier] {
         engine.withLock { $0.loaders.mapValues(ObjectIdentifier.init) }
     }
 
-    /// Recompile + hot-swap a SINGLE node's module in place — the fast path for hand-editing one node's
-    /// `Node.swift`. Leaves every other loaded node, the schedule, the live input values (slider
-    /// overrides), and the render endpoint untouched, so only the edited node rebuilds (a much shorter
-    /// compile than the whole-graph `loadProject`). Valid only for a pure source edit: a node's
-    /// contract/wiring lives in the separate `node-contract.json`, so the topology + bindings are
-    /// unchanged by a `Node.swift` save. Throws — leaving the OLD module live and rendering, since
-    /// `SZLoader.load` opens the new module BEFORE tearing the old one down — if the new source fails to
-    /// compile or load; `"\(error)"` carries the swiftc diagnostics. No-op if `id` isn't loaded.
+    /// Recompile + hot-swap a single node's module in place — the fast path for a hand-edited
+    /// `Node.swift`. Every other loaded node, the schedule, the live input values (slider overrides) and
+    /// the render endpoint stay untouched, so only the edited node rebuilds. Valid only for a pure source
+    /// edit: a node's contract/wiring lives in the separate `node-contract.json`, so a `Node.swift` save
+    /// changes neither topology nor bindings. A throw (the new source failing to compile or load;
+    /// `"\(error)"` carries the swiftc diagnostics) leaves the old module live and rendering, because
+    /// `SZLoader.load` opens the new module before tearing the old one down. No-op if `id` isn't loaded.
     public func reloadNode(id: SZNodeID, source: URL) throws {
         guard let loader = engine.withLock({ $0.loaders[id] }) else { return }
         let dylib = try toolchain.compile(
@@ -292,7 +289,7 @@ public final class SZRuntime: @unchecked Sendable {
 
     /// Request every entitlement declared by `project`'s node contracts, prompting once per
     /// still-undetermined one. The in-memory counterpart of `requestDeclaredPermissions(at:)`: a node's
-    /// permission is only known once the Director declares its contract — AFTER the initial load — so the
+    /// permission is only known once the Director declares its contract — after the initial load — so the
     /// host calls this during a run (before the coding fleet dispatches) to grant a newly-introduced
     /// entitlement before the node's `setup()` runs on the promote-reload. No-op for already-granted ones.
     public func requestDeclaredPermissions(for project: SZProject) async {
@@ -302,25 +299,24 @@ public final class SZRuntime: @unchecked Sendable {
         }
     }
 
-    /// Install `graph` as the live graph and rebuild the schedule, compiling only what actually changed.
+    /// Install `graph` as the live graph and rebuild the schedule, compiling only what actually changed;
     /// `sourceURL` resolves each node id to its `Node.swift`.
     ///
-    /// Incremental by node id: a node already loaded (`retained`) is reused in place — no recompile, no
-    /// teardown, no re-`setup()` — since a pure topology edit (connect/disconnect/reconnect/endpoint)
-    /// touches no `Node.swift`. Only `added` ids (new to the graph — the initial load, a promote, or a
-    /// split/merge piece) compile + open + activate; only `removed` ids tear down. A wiring change has no
-    /// `added`/`removed`, so it does ZERO compiles — it just reschedules and rebinds.
+    /// Incremental by node id: a `retained` node is reused in place — no recompile, no teardown, no
+    /// re-`setup()` — since a pure topology edit (connect/disconnect/reconnect/endpoint) touches no
+    /// `Node.swift`. Only `added` ids (new to the graph: the initial load, a promote, a split/merge piece)
+    /// compile + open + activate and only `removed` ids tear down, so a wiring change compiles nothing and
+    /// just reschedules and rebinds. It assumes a retained node's source is unchanged: source-only edits go
+    /// through `reloadNode`, and no `loadProject` caller mutates a retained node's `Node.swift`
+    /// (promote/split/merge introduce new ids). If that ever changes, add a `forceRecompile: Set<SZNodeID>`
+    /// param and fold it into `added`.
     ///
-    /// Assumes a retained node's source is unchanged (source-only edits go through `reloadNode`; no
-    /// `loadProject` caller mutates a retained node's `Node.swift` — promote/split/merge introduce *new*
-    /// ids). If that ever changes, add a `forceRecompile: Set<SZNodeID>` param and fold it into `added`.
-    ///
-    /// Ordering matters: compile + `open` (dlopen, NO `setup()`) the added nodes first — a throw here
-    /// leaves the old graph live (the atomic-failure property) — THEN tear the removed nodes down, THEN
-    /// `activate` (run `setup()`) the added ones. A node that grabs an exclusive device in `setup()` (the
-    /// camera's `AVCaptureSession`) must not start until the previous holder is torn down, or the two
-    /// sessions contend and the new feed freezes (e.g. after a camera merge). Retained nodes are never
-    /// torn down, so an unchanged camera node keeps running across the edit.
+    /// Ordering matters: compile + `open` (dlopen, no `setup()`) the added nodes first, so a throw leaves the
+    /// old graph live (the atomic-failure property); then tear the removed nodes down; then `activate` (run
+    /// `setup()`) the added ones. A node that grabs an exclusive device in `setup()` (the camera's
+    /// `AVCaptureSession`) must not start before the previous holder is torn down, or the two sessions contend
+    /// and the new feed freezes (e.g. after a camera merge). Retained nodes are never torn down, so an
+    /// unchanged camera node keeps running across the edit.
     private func loadGraph(_ graph: SZGraph, sourceURL: (SZNodeID) -> URL) throws {
         try commit(prepareLoad(graph, sourceURL: sourceURL, offMain: false))
     }
@@ -406,7 +402,7 @@ public final class SZRuntime: @unchecked Sendable {
         // already committed; executing recorded GPU work during/after teardown is safe — buffers
         // retain their resources and no dylib CPU code runs on the GPU path.)
         engine.withLock { state in
-            // Phase 2 — tear down ONLY the removed nodes (releasing their exclusive devices). Retained
+            // Phase 2 — tear down only the removed nodes (releasing their exclusive devices). Retained
             // loaders stay live and untouched. Reset the per-frame pool only on a full swap (nothing
             // retained — a cold load or project switch); on an incremental edit it's shared scratch the
             // retained nodes are still using, so resetting would disturb them (matches `reloadNode`).
@@ -434,17 +430,16 @@ public final class SZRuntime: @unchecked Sendable {
                 state.loaderDylibs[id] = prepared.dylibs[id]
             }
             state.scheduler = schedule
-            // Inputs: reconcile each live node's overrides against its (possibly edited) contract, so ANY
+            // Inputs: reconcile each live node's overrides against its (possibly edited) contract, so any
             // contract change — add / remove / rename / retype a port — self-applies with no cold reopen,
             // and the result is a pure function of (contract, prior overrides), identical whether the node
             // was just added or retained. Connected data-edge values never live here (the scheduler merges
-            // those per frame), so this cannot disturb wiring. Keep an override iff the port is still
-            // declared on its matching value channel AND the override still fits the port's arity (so a
-            // retype that changed the element count — float→float3, float3→float — falls back to the new
-            // default rather than feeding the node a wrong-length value); otherwise seed the contract
-            // default; drop entries for ports the contract no longer declares (a removal, or the stale half
-            // of a rename/retype). A node whose contract isn't known yet (nil) has no boundary to reconcile
-            // against, so leave its stored values untouched rather than wiping them.
+            // those per frame), so this cannot disturb wiring. Keep an override only while the port is
+            // still declared on its matching value channel and the override still fits its arity (see
+            // `reconciledFloats`); otherwise seed the contract default; drop entries for ports the contract
+            // no longer declares (a removal, or the stale half of a rename/retype). A node whose contract
+            // isn't known yet (nil) has no boundary to reconcile against, so leave its stored values
+            // untouched rather than wiping them.
             for id in removed { state.inputValues[id] = nil; state.inputStrings[id] = nil }
             for node in graph.nodes {
                 guard let inputs = node.contract?.inputs else { continue }
@@ -529,9 +524,9 @@ public final class SZRuntime: @unchecked Sendable {
     /// camera list etc. Empty for a static/non-enum port. The host throttles + falls back to the contract's
     /// static `options`, so this is called on demand (≈ when the dropdown opens), not per frame.
     ///
-    /// The lock covers only the loader lookup: the enumeration itself can be SLOW (the camera node runs
+    /// The lock covers only the loader lookup: the enumeration itself can be slow (the camera node runs
     /// an AVCaptureDevice discovery, 100s of ms) and must not stall the render thread. That means
-    /// `enumerateOptions` may run CONCURRENTLY with the node's `update` on the render thread — part of
+    /// `enumerateOptions` may run concurrently with the node's `update` on the render thread — part of
     /// the node ABI contract (see the authoring docs). The loader can't be torn down under us:
     /// unload/reload happen on this same (main) thread.
     public func enumerateOptions(node: SZNodeID, port: String) -> [SZEnumOption] {
@@ -583,7 +578,7 @@ public final class SZRuntime: @unchecked Sendable {
     public func setPaused(_ paused: Bool) {
         engine.withLock { state in
             state.timeline.setPaused(paused, now: CACurrentMediaTime())
-            // Stopping the SCHEDULE only freezes what a node computes inside `update()`. Anything running
+            // Stopping the schedule only freezes what a node computes inside `update()`. Anything running
             // on its own — an AVPlayer's audio, a capture session — never hears about it, and can't ask:
             // pause means no more frames. So tell it. Inside the lock, serialized against frames like any
             // other graph mutation (the ABI tells nodes not to block here).
@@ -612,7 +607,7 @@ public final class SZRuntime: @unchecked Sendable {
     }
 
     /// Render one frame through the schedule into the asset pool (synchronously — commits under the
-    /// lock, waits OUTSIDE it, so the render-endpoint texture is ready for readback when this returns).
+    /// lock, waits outside it, so the render-endpoint texture is ready for readback when this returns).
     public func renderFrame() {
         let buffer = engine.withLock { state in
             encodeAndCommitFrame(&state, width: state.renderSize.width, height: state.renderSize.height).buffer
@@ -621,7 +616,7 @@ public final class SZRuntime: @unchecked Sendable {
         buffer?.waitUntilCompleted()
     }
 
-    /// Encode one schedule pass and COMMIT it (commit-under-lock). Caller holds the engine lock.
+    /// Encode one schedule pass and commit it (commit-under-lock). Caller holds the engine lock.
     /// `beforeCommit` adds work to the same buffer pre-commit (capture blit, completion handlers);
     /// its `endpoint` is nil when nothing is routed to the display.
     private func encodeAndCommitFrame(
@@ -646,7 +641,7 @@ public final class SZRuntime: @unchecked Sendable {
         if let endpoint, let recorder = state.recorder {
             recorder.encodeCapture(on: commandBuffer, endpoint: endpoint, engineTime: timing.timeSeconds)
         }
-        // The live thumb pass rides THIS buffer (throttled inside) — after the schedule's writes,
+        // The live thumb pass rides this buffer (throttled inside) — after the schedule's writes,
         // before the commit, so hazard tracking orders the downscales behind the frame's renders.
         encodePreviewPass(state.previews, on: commandBuffer, now: CACurrentMediaTime())
         commandBuffer.commit()
@@ -664,14 +659,14 @@ public final class SZRuntime: @unchecked Sendable {
               now - stream.lastPass >= stream.minInterval,
               !stream.passInFlight.load(ordering: .acquiring) else { return }
         // Burn the throttle window only when something actually encoded: a graph whose watched
-        // pools were never written (nothing rendered yet) must produce a thumb on its FIRST frame,
+        // pools were never written (nothing rendered yet) must produce a thumb on its first frame,
         // not one interval later.
         if encodeThumbScales(stream, on: commandBuffer) { stream.lastPass = now }
     }
 
     /// The shared body of the live pass and the watch-change one-shot fill: encode a downscale for
-    /// every watched port whose pool texture exists into its pair's BACK buffer, then register the
-    /// ONE completion handler that flips fronts, clears the in-flight flag, and publishes. Returns
+    /// every watched port whose pool texture exists into its pair's back buffer, then register the
+    /// one completion handler that flips fronts, clears the in-flight flag, and publishes. Returns
     /// whether anything was encoded (an unwritten pool encodes nothing — callers must not burn the
     /// throttle window on it). The handler runs on Metal's completion thread with no lock held and
     /// touches only atomics + its captured payload — never the runtime (class-header lock rules).
@@ -690,7 +685,7 @@ public final class SZRuntime: @unchecked Sendable {
                 pair = existing
             } else {
                 // First sight of this port, or the source/maxDimension changed size: fresh pair.
-                // An in-flight pass keeps the OLD pair alive via its captured payload.
+                // An in-flight pass keeps the old pair alive via its captured payload.
                 guard let fresh = SZPreviewTargetPair(device: assets.device, width: w, height: h) else { continue }
                 stream.pairs[key] = fresh
                 pair = fresh
@@ -711,7 +706,7 @@ public final class SZRuntime: @unchecked Sendable {
         stream.passInFlight.store(true, ordering: .releasing)
         let callback = stream.onFrames
         commandBuffer.addCompletedHandler { _ in
-            // Metal's completion thread. Touches ONLY the stream's atomics and the captured
+            // Metal's completion thread. Touches only the stream's atomics and the captured
             // payload — never its lock-guarded vars. A late pass for a just-de-watched port flips
             // pair objects the stream may no longer reference — harmless: the host re-validates
             // every publish against the live graph before writing a box.
@@ -722,10 +717,10 @@ public final class SZRuntime: @unchecked Sendable {
         return true
     }
 
-    /// Replace the watched preview set — pushed by the host on WATCH-LIST changes only (never per
+    /// Replace the watched preview set — pushed by the host on watch-list changes only (never per
     /// frame). Prunes target pairs for de-watched ports. When the timeline is paused, or a newly
     /// watched port has no target yet (scrolled into view; viewport closed), a one-shot thumb-only
-    /// buffer fills from the HELD pool textures immediately — a fresh preview must show the held
+    /// buffer fills from the held pool textures immediately — a fresh preview must show the held
     /// frame, not "no signal" until the next live frame.
     public func setWatchedPreviews(_ requests: [(node: SZNodeID, port: String)], maxDimension: Int) {
         engine.withLock { state in
@@ -748,9 +743,9 @@ public final class SZRuntime: @unchecked Sendable {
         }
     }
 
-    /// Install the publish sink for preview frames. CONTRACT: the callback fires on Metal's
-    /// completion thread after each thumb pass completes; it must be fast and non-blocking (hop to
-    /// the main actor immediately) and must not synchronously re-enter runtime APIs.
+    /// Install the publish sink for preview frames. The callback fires on Metal's completion thread
+    /// after each thumb pass completes: it must be fast and non-blocking (hop to the main actor
+    /// immediately) and must not synchronously re-enter runtime APIs.
     public func setPreviewFrameCallback(_ callback: (@Sendable ([SZNodePreviewSurface]) -> Void)?) {
         engine.withLock { $0.previews.onFrames = callback }
     }
@@ -778,7 +773,7 @@ public final class SZRuntime: @unchecked Sendable {
         engine.withLock { $0.surfaces[ObjectIdentifier(layer)] = nil }
     }
 
-    /// The DRIVER surface: its `drawableSize` becomes `renderSize` and it presents synchronously.
+    /// The driver surface: its `drawableSize` becomes `renderSize` and it presents synchronously.
     /// The host's drivership ladder decides this on visibility/size edges. nil keeps the last size.
     public func setDriver(_ layer: CAMetalLayer?) {
         engine.withLock { $0.driverKey = layer.map(ObjectIdentifier.init) }
@@ -786,14 +781,14 @@ public final class SZRuntime: @unchecked Sendable {
 
     /// Pace the loop with the link `make` builds (an NSView/NSWindow/NSScreen display-link factory —
     /// main-thread AppKit the runtime doesn't import), or idle on nil. The loop installs it on its
-    /// thread and drops the previous one. This is the host's ONE "run the renderer" decision.
+    /// thread and drops the previous one. This is the host's one "run the renderer" decision.
     @MainActor
     public func setPacing(_ make: (AnyObject, Selector) -> CADisplayLink?) {
         loop.setPacing(make(loop, #selector(SZRenderLoop.fire(_:))))
     }
 
     /// One beat: encode+commit under the lock, then fan out with no lock held (driver synchronously,
-    /// mirrors on their queues). Paused → no encode; sinks re-present the CURRENT endpoint's held
+    /// mirrors on their queues). Paused → no encode; sinks re-present the current endpoint's held
     /// pool texture every beat (non-allocating read: asking the pool at the driver's size would
     /// destroy the held frame on a paused resize), so the whole graph freezes at the runtime level
     /// and the freeze survives resize/occlusion. Called directly by tests.
@@ -861,7 +856,7 @@ public final class SZRuntime: @unchecked Sendable {
     }
 
     /// Encode the aspect-fit bilinear scale of `source` into `destination`'s letterboxed center.
-    /// The clipRect is essential: without it MPS fills the WHOLE destination with edge-clamped
+    /// The clipRect is essential: without it MPS fills the whole destination with edge-clamped
     /// samples, smearing the image across the letterbox bars.
     private func encodeAspectFitScale(_ source: any MTLTexture, into destination: any MTLTexture,
                                       on commandBuffer: any MTLCommandBuffer) {
@@ -873,8 +868,8 @@ public final class SZRuntime: @unchecked Sendable {
         presentScaler.withLock { slot in
             let box = slot ?? SZPresentScalerBox(device: assets.device)
             slot = box
-            // Placement comes from the clipRect ALONE, translation stays zero: MPS composes the
-            // scale transform's translation RELATIVE to the clipRect origin (verified empirically
+            // Placement comes from the clipRect alone, translation stays zero: MPS composes the
+            // scale transform's translation relative to the clipRect origin (verified empirically
             // — a centering translate + a matching clip origin landed the image at 2× the offset,
             // half in, half clipped: the "black mirror tiles" bug). Zero translate puts the scaled
             // image exactly in the clipped letterbox region; everything outside stays the cleared
@@ -942,17 +937,17 @@ public final class SZRuntime: @unchecked Sendable {
     }
 
     /// Real framebuffer readback of the render-endpoint texture (`agent_view_frame`). Renders a fresh
-    /// frame and blits the endpoint into a fresh `.shared` capture texture INSIDE the same command
-    /// buffer — immune to live frames re-encoding the endpoint — then waits and reads back OUTSIDE the
+    /// frame and blits the endpoint into a fresh `.shared` capture texture inside the same command
+    /// buffer — immune to live frames re-encoding the endpoint — then waits and reads back outside the
     /// lock, so a capture (or an agent polling captures) never stalls the viewport. `nil` if nothing
     /// rendered.
     ///
-    /// Note the capture encode runs the node schedule on the CALLER'S thread (main, in practice):
+    /// Note the capture encode runs the node schedule on the caller's thread (main, in practice):
     /// `update()` is serialized against live frames by the lock — never concurrent — but nodes must not
     /// assume a single render thread identity (documented in the node ABI's threading contract).
     public func captureFrame() -> SZImageBytes? {
         let job = engine.withLock { state -> CaptureJob? in
-            // Paused → capture the HELD endpoint without advancing the schedule, matching the live
+            // Paused → capture the held endpoint without advancing the schedule, matching the live
             // viewport (both freeze the whole graph at the runtime level). The non-allocating read
             // matters here too: renderSize can have moved under a paused hold (viewport resized),
             // and an allocating read at the new size would destroy the held frame — the capture
@@ -975,7 +970,7 @@ public final class SZRuntime: @unchecked Sendable {
         return readBack(job)
     }
 
-    /// Readback of ONE node's texture output straight off the asset pool (`agent_view_frame {node}`) —
+    /// Readback of one node's texture output straight off the asset pool (`agent_view_frame {node}`) —
     /// a look at any rendered port without moving the render endpoint. Reads the last-written pool
     /// texture (at most one frame stale) via its own blit + command buffer, committed under the lock
     /// and read back outside it, like `captureFrame`. `nil` if the port has never rendered (an
@@ -1051,7 +1046,7 @@ public final class SZRuntime: @unchecked Sendable {
 }
 
 /// A captured frame: raw BGRA8 pixels (row-major, 4 bytes/pixel) + dimensions. PNG encoding layers on
-/// when a consumer needs it. (Would move to SZCore if a Metal-free `SZRenderer` seam ever appears.)
+/// when a consumer needs it (SZImageBytes+PNG.swift).
 public struct SZImageBytes: Sendable, Equatable {
     public let width: Int
     public let height: Int

@@ -8,10 +8,10 @@ import Foundation
 import SZCore
 
 extension SZHost {
-    /// The user-facing title for a panel: positional among its kind's LIVE instances (tiles +
+    /// The user-facing title for a panel: positional among its kind's live instances (tiles +
     /// pop-out windows), so visible numbers stay dense — "Viewport" alone, "Viewport 1/2/3" in
     /// company — whatever identity gaps exist underneath (SZPanelID.displayTitles). Reads
-    /// observable state, so SwiftUI surfaces re-title automatically; pop-out WINDOW titles are
+    /// observable state, so SwiftUI surfaces re-title automatically; pop-out window titles are
     /// pushed by syncViewportDriver (same triggers: every live-set change).
     func panelTitle(_ id: SZPanelID) -> String {
         let title = SZPanelID.displayTitles(for: panelLayout.root.leafIDs + poppedOutPanels.keys)[id]
@@ -131,7 +131,7 @@ extension SZHost {
     /// confirmed default provider + project history) to app-state.json (~1 KB, synchronous). The
     /// remaining SZAppState fields (windowSize/theme) are still dormant — nothing reads or writes
     /// them yet, so saving defaults for them loses nothing. Internal: SZHost+ProviderHealth
-    /// persists the Confirm and SZHost+ProjectLifecycle the history through here too — ONE writer,
+    /// persists the Confirm and SZHost+ProjectLifecycle the history through here too — one writer,
     /// so a layout save can never clobber the provider or history fields.
     func persistAppState() {
         do {
