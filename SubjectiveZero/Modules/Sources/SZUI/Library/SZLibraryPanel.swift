@@ -74,7 +74,6 @@ public struct SZLibraryPanel: View {
             if model.showsSourceChips { sourceChips }
             list
             detailSection
-            footer
         }
         .padding(8)
         .onChange(of: items) { _, new in model.items = new }
@@ -288,20 +287,25 @@ public struct SZLibraryPanel: View {
 
     // MARK: detail strip
 
-    /// The description and its grab strip on one darker ground, bled past the panel's padding to
-    /// both edges: a separate surface, not more list.
+    /// The description, its grab strip and the footer on one darker ground, bled past the panel's
+    /// padding to all three edges: everything below the list is one surface, not more list.
     private var detailSection: some View {
         VStack(spacing: 0) {
             detailDivider
             detail
                 .padding(.horizontal, 8)
                 .padding(.top, 6)
+            footer
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
         }
         .background(Color.black.opacity(0.22))
         .overlay(alignment: .top) {
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
         }
         .padding(.horizontal, -8)
+        .padding(.bottom, -8)
     }
 
     /// The grab strip over the description: drag it up for more room, double click to put it back.
