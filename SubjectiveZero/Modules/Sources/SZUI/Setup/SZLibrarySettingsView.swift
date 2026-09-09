@@ -171,8 +171,6 @@ public struct SZLibrarySettingsView: View {
         }
     }
 
-    private func nodes(_ count: Int) -> String { count == 1 ? "1 node" : "\(count) nodes" }
-
     /// Three kinds of library, told apart by their glyph rather than by reading: one ships with the
     /// app, one is yours to write to, one came from somewhere else.
     private static let mine = Color(red: 0.878, green: 0.643, blue: 0.290)

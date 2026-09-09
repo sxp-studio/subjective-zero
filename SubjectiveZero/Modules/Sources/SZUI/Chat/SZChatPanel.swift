@@ -56,16 +56,13 @@ public struct SZChatPanel: View {
     // generation controls' home since the composer pill retired.
     private let onOpenAISettings: () -> Void
 
-    // Composer control hover highlights + the locked-state timer start (view-local UI state).
+    // Composer control hover highlights (view-local UI state).
     @State private var sendHover = false
     @State private var stopHover = false
     @State private var attachHover = false
-    @State private var stopSince: Date?    // stamped when the composer locks → live "in flight" timer
     /// The run strip's jump into the Agent Graph panel; nil where the surface isn't wired (previews).
     @Environment(\.szRevealInAgentGraph) private var revealInAgentGraph
     // One conversation, one draft. (It was per-scope while tabs existed; nothing switches now.)
-    // Empty drafts are
-    // nil'd out so the dot check is a simple presence test.
     @State private var composerDraft = SZComposerDraft()
     @State private var composerHeight: CGFloat = 22     // grows 1…6 lines, driven by the AppKit input
     @State private var pendingAttachments: [URL] = []   // staged-on-send: source URLs picked/dropped/pasted
@@ -91,15 +88,6 @@ public struct SZChatPanel: View {
     // nudged here) — bright, then fades back to normal. 1 = full tint, animates to 0.
     @State private var attentionTint: Double = 0
 
-    /// The active scope's draft — reads/writes the per-scope store, so every existing `draft`
-    /// reference stays unchanged. Writing an empty draft drops the entry (keeps the dot map clean).
-    private var draft: SZComposerDraft {
-        get { composerDraft }
-        nonmutating set { composerDraft = newValue }
-    }
-    private var draftBinding: Binding<SZComposerDraft> {
-        Binding(get: { draft }, set: { draft = $0 })
-    }
     // User = the app's action blue; the coding agent = a warm orange echoing the node card's "coding"
     // state (`SZNodeStatusPill`) and the pulsing-orange working dot; the Director = the violet of
     // the flow/"then" edges it owns (`SZEdgeStyle.intentViolet`). Deliberate reuse of the app's semantic
@@ -254,8 +242,8 @@ public struct SZChatPanel: View {
     private func applyPendingDraft() {
         guard let injection = pendingDraft, injection.scope == scope else { return }
         onConsumePendingDraft(injection.id)   // consumed either way — a skipped nudge must not linger
-        guard injection.replacesNonEmpty || draft.isEmpty else { return }
-        draft = injection.draft
+        guard injection.replacesNonEmpty || composerDraft.isEmpty else { return }
+        composerDraft = injection.draft
         injectedDraft = injection.draft
         flashComposerAttention()
     }
@@ -275,7 +263,7 @@ public struct SZChatPanel: View {
     /// The injected draft still sits verbatim in the composer → the send button pulses "act on me".
     /// Any user edit or the send itself ends it.
     private var sendEmphasized: Bool {
-        injectedDraft != nil && injectedDraft == draft && !draft.isEmpty
+        injectedDraft != nil && injectedDraft == composerDraft && !composerDraft.isEmpty
     }
 
     /// The conversation's own actions, in the composer rather than in a strip above the
@@ -311,11 +299,6 @@ public struct SZChatPanel: View {
         .fixedSize()
         .trackingHover($menuHover)
         .help("Conversation actions")
-    }
-
-    private func nodeFor(_ s: SZChatScope) -> SZNode? {
-        if case .node(let id) = s { return project?.graph.node(id: id) }
-        return nil
     }
 
     /// Placeholders render OUTSIDE the ScrollView so they can centre. A feed that already has messages
@@ -530,15 +513,7 @@ public struct SZChatPanel: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Locked (a run/turn in flight, or the node is agent-owned): the whole input is REPLACED
-            // by a centered Stop + live timer — unambiguous that you can't type, and the Stop reads
-            // as the one live control. (Text can't merely be .disabled(): AppKit's NSTextView ignores
-            // it.) The draft is preserved for when the lock lifts.
-            if inputLocked {
-                lockedComposer
-            } else {
-                normalComposer
-            }
+            normalComposer
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: Self.cardCornerRadius).fill(Self.cardFill))
@@ -568,18 +543,13 @@ public struct SZChatPanel: View {
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { appendAttachments(urls) }
         }
-        // Fallback timer start, stamped when the lock begins (whole run / split-merge, which have no
-        // in-flight message to read a real start from). Streaming turns prefer the message timestamp
-        // (see `runningSince`), so this is only a fallback and stays stable across tab switches.
-        .onChange(of: inputLocked) { _, locked in stopSince = locked ? Date() : nil }
-        .onAppear { if inputLocked, stopSince == nil { stopSince = Date() } }
         // (Panel-wide drop is handled on the whole chat panel in `body`; the composer field also takes
         //  drops directly over itself via SZComposerTextView.)
     }
 
-    /// The everyday composer: pending-attachment tray, the text field, and the bottom bar (attach ·
-    /// recipient hint · model picker · send). Shown only when NOT locked, so the action is always
-    /// send — the Stop lives in `lockedComposer`.
+    /// The composer: pending-attachment tray, the text field, and the bottom bar (attach ·
+    /// recipient hint · model picker · send). It never locks: a run or a streaming turn puts the
+    /// Stop beside send (see `activeStop`), and a send mid-stream queues.
     @ViewBuilder
     private var normalComposer: some View {
         if !pendingAttachments.isEmpty {
@@ -597,7 +567,7 @@ public struct SZChatPanel: View {
             }
         }
         // AppKit-backed so a dropped/pasted FILE attaches instead of inserting its path/name as text.
-        SZComposerTextView(draft: draftBinding, height: $composerHeight,
+        SZComposerTextView(draft: $composerDraft, height: $composerHeight,
                            placeholder: "Message \(scopeName)…",
                            onSubmit: send, onAttach: { appendAttachments($0) },
                            onMentionSession: mentionSessionChanged,
@@ -657,40 +627,6 @@ public struct SZChatPanel: View {
         }
     }
 
-    /// The structurally-locked state (a node mid split/merge — the one case the input still tears
-    /// down): centered status + live timer, plus a Stop when a run is also in flight. Runs and
-    /// streaming turns no longer come through here — their Stop rides the normal composer.
-    private var lockedComposer: some View {
-        HStack(spacing: 12) {
-            if let stop = activeStop {
-                stopButton(stop.action, help: stop.help)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(lockTitle)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                if let since = runningSince {
-                    SZElapsedLabel(since: since)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 46, alignment: .center)
-    }
-
-    /// When the in-flight work started, for the locked composer's live timer. A streaming turn reads
-    /// its own in-flight assistant message's start (accurate, and survives tab switches — the same
-    /// source the transcript's working row uses); a whole run / split-merge (no in-flight message on
-    /// this tab) falls back to `stopSince`, stamped when the lock began.
-    ///
-    /// THIS conversation's turn, like `activeStop`: the feed also carries the builds' turns, and
-    /// the newest of those would otherwise time a composer that is not waiting on it.
-    private var runningSince: Date? {
-        if let live = feed.last(where: { $0.scope == scope && streamingIDs.contains($0.message.id) })?.message {
-            return live.timestamp
-        }
-        return stopSince
-    }
-
     /// The current stoppable action + its tooltip: THIS conversation's streaming turn, and nothing
     /// wider. A build is stopped from its own lane in the strip right above — one build, one ■ —
     /// because a composer button cannot say which of several builds it means.
@@ -699,17 +635,6 @@ public struct SZChatPanel: View {
             return ({ onCancelChatTurn(scope) }, "Stop this turn. The agent keeps its session; the partial reply stays")
         }
         return nil
-    }
-
-    /// A short title for the in-flight state: a whole run reads the same on every tab; an individual
-    /// conversation turn just says the agent is working.
-    private var lockTitle: String {
-        if isRunning { return "Run in flight" }
-        switch scope {
-        case .director: return "Thinking…"
-        case .node: return "Working…"
-        case .debug: return "Replying…"
-        }
     }
 
     // MARK: - Mention autocomplete
@@ -727,9 +652,7 @@ public struct SZChatPanel: View {
     }
 
     private var mentionListVisible: Bool {
-        // Never over a locked composer: the text field (and its coordinator) is torn down when
-        // inputLocked, but a `@mention` session in flight at that instant leaves `mentionQuery` set.
-        !inputLocked && mentionQuery != nil && !mentionDismissed && !filteredMentionCandidates.isEmpty
+        mentionQuery != nil && !mentionDismissed && !filteredMentionCandidates.isEmpty
     }
 
     private func mentionSessionChanged(_ query: String?) {
@@ -754,17 +677,11 @@ public struct SZChatPanel: View {
     }
 
     private var canSend: Bool {
-        !draft.isEmpty || !pendingAttachments.isEmpty
+        !composerDraft.isEmpty || !pendingAttachments.isEmpty
     }
 
-    /// The one composer is never inert. Its recipient is the Director, which no split/merge owns,
-    /// and every busy state queues rather than locking: the Stop for a run or a streaming turn
-    /// renders ALONGSIDE the live composer (`activeStop` in the bottom bar), and a send while
-    /// something streams simply queues with a chip on its bubble.
-    private var inputLocked: Bool { false }
-
-    /// The action slot's Stop — orange, pulsing, and hover-reactive. Stays full-strength while the
-    /// rest of the composer is locked/greyed, so it reads as the one live control.
+    /// The action slot's Stop — orange, pulsing, and hover-reactive, so it reads as the one live
+    /// control beside send.
     private func stopButton(_ action: @escaping () -> Void, help: String) -> some View {
         Button(action: action) {
             Image(systemName: "stop.circle.fill")
@@ -782,7 +699,7 @@ public struct SZChatPanel: View {
     /// The recipient label ONLY when a leading @mention reroutes the draft OFF the current tab —
     /// nil when the message would go to this tab's own agent (showing that is redundant noise).
     private var reroutedRecipientLabel: String? {
-        let recipient = SZChatRouting.resolveRecipient(message: draft.canonicalText)
+        let recipient = SZChatRouting.resolveRecipient(message: composerDraft.canonicalText)
         guard recipient != scope else { return nil }
         switch recipient {
         case .director: return "Director Agent"
@@ -796,10 +713,10 @@ public struct SZChatPanel: View {
     private func send() {
         // The wire form: mention markup inline — the host parses it for routing/expansion and
         // stores it canonically in the transcript.
-        let message = draft.canonicalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = composerDraft.canonicalText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty || !pendingAttachments.isEmpty else { return }
         onSend(message, pendingAttachments)
-        draft = SZComposerDraft()
+        composerDraft = SZComposerDraft()
         injectedDraft = nil
         pendingAttachments = []
     }

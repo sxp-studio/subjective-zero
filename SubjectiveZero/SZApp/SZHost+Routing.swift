@@ -23,9 +23,6 @@ extension SZHost {
         return value?.isEmpty == true ? nil : value
     }()
 
-    /// Whether a profile governs new work right now (the settings sheet's Off is nil).
-    var routingActive: Bool { (try? activeRoutingProfile()) != nil }
-
     /// The profile new deliveries resolve against, honouring the launch pin: a stale
     /// persisted name degrades to off, an unknown ENV name throws. `env` is for tests only.
     func activeRoutingProfile(env: String? = SZHost.modelRoutingEnv) throws -> SZRoutingProfile? {

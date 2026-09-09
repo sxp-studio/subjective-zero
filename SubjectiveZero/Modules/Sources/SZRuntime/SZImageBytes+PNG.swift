@@ -8,12 +8,6 @@ import ImageIO
 import UniformTypeIdentifiers
 
 public extension SZImageBytes {
-    /// Encode the BGRA8 pixels as PNG, or nil on failure.
-    func pngData() -> Data? {
-        guard let cgImage = cgImage() else { return nil }
-        return Self.encodePNG(cgImage)
-    }
-
     /// Fit `width`×`height` so the long edge is at most `maxDimension`: never upscales, preserves
     /// aspect, floors at 1px per side. The ONE sizing rule shared by the CPU downscale here and the
     /// preview stream's GPU thumb targets (`SZRuntime.encodeThumbScales`), so a thumb and an

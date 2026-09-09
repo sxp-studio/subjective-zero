@@ -16,9 +16,8 @@ public struct SZAgentPack: Sendable, Equatable {
     /// defect the loader reports; the pack still loads so its seat and siblings stay
     /// visible).
     public var graph: SZAgentGraph?
-    /// Prompt inventory: pack-relative paths (`prompts/<file>.md.mustache`), sorted — the
-    /// namespace a turn's `brief` stem must resolve in.
-    public var prompts: [String]
+    /// Prompt inventory, sorted — the namespace a turn's `brief` stem must resolve in.
+    public var prompts: [String] { promptSources.keys.sorted() }
     /// Each prompt's template text, keyed by its pack-relative path — read alongside the
     /// inventory so validation can scan a brief's `{{tokens}}` without a second disk pass.
     public var promptSources: [String: String]
@@ -42,13 +41,12 @@ public struct SZAgentPack: Sendable, Equatable {
 
     public init(id: String, seat: SZAgentSeat? = nil,
                 graph: SZAgentGraph? = nil,
-                prompts: [String] = [], promptSources: [String: String] = [:],
+                promptSources: [String: String] = [:],
                 steps: [StepFolder] = [],
                 recommendedRouting: [String: SZRouteEnvelope] = [:]) {
         self.id = id
         self.seat = seat
         self.graph = graph
-        self.prompts = prompts
         self.promptSources = promptSources
         self.steps = steps
         self.recommendedRouting = recommendedRouting

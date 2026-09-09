@@ -152,12 +152,6 @@ final class SZHost {
     /// re-resolve exactly as its cold start did) — see `recordNodeGrade`. Never persisted:
     /// a grade describes one briefing's read of the task, not the node.
     internal(set) var nodeGrades: [SZNodeID: String] = [:]
-    /// The nodes `promoteStagedNode` landed for their LATEST dispatch of the current run — the run's success
-    /// evidence (`surfaceUnresolvedNodes`). Cleared at run start and in the run task's claim-guarded settle
-    /// (a cancelled run's zombie must not clear a newer run's set), and per node at each coding dispatch: a
-    /// redispatch means the previous build didn't settle it, so its promote stops vouching. A promote outside
-    /// a run is dropped at the next start, so it can never vouch for work it did not do.
-    var promotedThisRun: Set<SZNodeID> { activeRuns.values.reduce(into: []) { $0.formUnion($1.promoted) } }
     /// The id of the assistant message currently STREAMING per scope (set/cleared by `deliver`).
     /// Transcript flushes exclude it, so a sidecar only ever contains completed turns — a crash
     /// mid-stream restores up to the last finished message, never a half-reply.
@@ -579,9 +573,6 @@ final class SZHost {
         activeRuns.values.first { $0.workSet.contains(node) }
     }
 
-    /// The longest-running live run — the anchor for surfaces that still speak of "the" run.
-    var oldestRun: SZRunState? { activeRuns.values.min { $0.startedAt < $1.startedAt } }
-
     /// Every live build, oldest first — what the chat strip lists. One row per run, because with
     /// concurrent runs "the" run is not a thing a surface can show.
     var liveThreadIDs: [UUID] {
@@ -956,11 +947,6 @@ final class SZHost {
         try? SZAgentSessionIO.save([:], projectURL: url)
     }
 
-    /// Drop every per-project host cache and per-node state — the teardown half of
-    /// `switchProject`'s point of no return. Lives here (not the lifecycle extension) because it
-    /// touches the private `optionsCache`. `inFlightAssistantIDs` is empty behind the busy guard;
-    /// clearing it anyway keeps the invariant local. The store's chat map is NOT cleared here —
-    /// `restoreTranscripts` replaces it wholesale right after.
     /// HUD Pause/Play toggle: flip the observable state and tell the runtime to freeze/resume the clock.
     func togglePlayback() {
         isPaused.toggle()
@@ -1012,6 +998,11 @@ final class SZHost {
     /// A split/merge is staged and awaiting its run's commit. Only one at a time (see `pendingGraphOp`).
     var hasStagedGraphOp: Bool { pendingGraphOp != nil }
 
+    /// Drop every per-project host cache and per-node state — the teardown half of
+    /// `switchProject`'s point of no return. Lives here (not the lifecycle extension) because it
+    /// touches the private `optionsCache`. `inFlightAssistantIDs` is empty behind the busy guard;
+    /// clearing it anyway keeps the invariant local. The store's chat map is NOT cleared here —
+    /// `restoreTranscripts` replaces it wholesale right after.
     private func clearPerProjectState() {
         resetPreviewStreamForProjectSwitch()   // SZHost+NodePreviews — the one unwatch/teardown home
         cardHostStorage?.unmountAll()          // card mounts + their Card.swift watchers die with the project

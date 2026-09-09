@@ -223,11 +223,7 @@ extension SZGraph {
     }
 
     private func derivedInputs(of id: SZNodeID) -> [SZPort] {
-        var seen = Set<String>(), ports: [SZPort] = []
-        for c in connections where c.kind == .data && c.to.node == id {
-            if seen.insert(c.to.port).inserted { ports.append(Self.boundaryPort(c.to.port)) }
-        }
-        return ports
+        derivedDataInputPorts(of: id).map { Self.boundaryPort($0) }
     }
 
     private func derivedOutputs(of id: SZNodeID) -> [SZPort] {

@@ -17,12 +17,6 @@ public enum SZPortBindingAudit {
         public init(errors: [String], warnings: [String]) { self.errors = errors; self.warnings = warnings }
     }
 
-    // The runtime `ctx` accessors (SZRuntime/Nodes/SZNodeKit.swift), grouped by the port direction they name. The
-    // port name is always the first string-literal argument. `floatArray` I/O rides `inputFloatArray` /
-    // `setOutputFloats`.
-    private static let inputAccessors  = ["inputTexture", "inputFloatArray", "inputFloats", "inputFloat", "inputBool", "inputString"]
-    private static let outputAccessors = ["outputTexture", "setOutputFloats", "setOutputFloat", "setOutputString"]
-
     /// Which runtime WIRE an accessor uses. `SZNodeKit` gives a node three per direction — the scalar
     /// value channel, the texture channel and the string channel — and every numeric accessor shares one
     /// of them (`inputFloat` is `inputFloats(port)?.first`, `inputBool` reads the same floats, and
@@ -74,6 +68,11 @@ public enum SZPortBindingAudit {
                   (.texture, ["outputTexture"]),
                   (.string, ["setOutputString"])],
     ]
+
+    // Every accessor of a direction, whichever channel it uses (SZRuntime/Nodes/SZNodeKit.swift) — the
+    // name half of the audit. The port name is always the first string-literal argument.
+    private static let inputAccessors = (accessorChannels[.input] ?? []).flatMap { $0.1 }
+    private static let outputAccessors = (accessorChannels[.output] ?? []).flatMap { $0.1 }
 
     /// Types that run on their OWN clock — they keep going when `update()` stops being called, so a graph
     /// that looks paused would still be playing audio or holding the mic. Constructing one without

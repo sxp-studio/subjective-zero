@@ -21,19 +21,7 @@ public enum SZProviderHealthStatus: String, Codable, Sendable {
     case healthFailed   // installed but a check failed for a non-auth reason (timeout, nonzero exit)
     case invalidConfig  // reserved (verifier-contract parity; unreachable with Swift providers)
     case unsupported    // provider vends no health check
-
-    /// The coarse severity axis the HUD dot renders (the old green/amber/red, now derived).
-    /// missingCLI/authNeeded are amber — absent or logged-out is a setup task, not a malfunction.
-    public var severity: SZProviderHealthSeverity {
-        switch self {
-        case .ready: .green
-        case .missingCLI, .authNeeded: .amber
-        case .healthFailed, .invalidConfig, .unsupported: .red
-        }
-    }
 }
-
-public enum SZProviderHealthSeverity: String, Codable, Sendable { case green, amber, red }
 
 public enum SZProviderHealthTier: String, Codable, Sendable { case install, auth, probe }
 

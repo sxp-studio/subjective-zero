@@ -56,7 +56,6 @@ enum SZStepABI {
     static let evaluateSymbol = "SZStepEvaluate"
     static let cancelSymbol = "SZStepCancel"
 
-    typealias APIVersionFn = @convention(c) () -> Int32
     /// `(out, capacity) -> fullLength`: the step's declaration JSON, grow-and-retry.
     /// 0 = the step declares nothing.
     typealias DeclareFn = @convention(c) (UnsafeMutablePointer<CChar>?, Int32) -> Int32

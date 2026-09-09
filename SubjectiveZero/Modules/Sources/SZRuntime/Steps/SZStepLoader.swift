@@ -117,8 +117,6 @@ final class SZStepModule: @unchecked Sendable {
 /// `@unchecked Sendable`: load/retire mutate under the lock; evaluation touches only a
 /// module's immutable symbols plus its own per-call state.
 public final class SZStepLoader: @unchecked Sendable {
-    typealias LoadError = SZDylibLoadError
-
     private let lock = NSLock()
     private var current: SZStepModule?
     private var draining: [SZStepModule] = []

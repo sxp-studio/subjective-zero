@@ -78,6 +78,12 @@ public enum SZPanelLayoutGeometry {
         guard rect.width > 0, rect.height > 0 else { return .center }
         let core = rect.insetBy(dx: rect.width / 4, dy: rect.height / 4)
         if core.contains(point) { return .center }
+        return nearestEdge(at: point, in: rect)
+    }
+
+    /// The edge of `rect` nearest `point`, by normalized distance; ties break left, right, top, bottom.
+    static func nearestEdge(at point: CGPoint, in rect: CGRect) -> SZPanelDropZone {
+        guard rect.width > 0, rect.height > 0 else { return .left }
         let toLeft = (point.x - rect.minX) / rect.width
         let toRight = (rect.maxX - point.x) / rect.width
         let toTop = (point.y - rect.minY) / rect.height

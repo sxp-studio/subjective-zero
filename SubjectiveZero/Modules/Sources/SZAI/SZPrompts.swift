@@ -10,14 +10,11 @@ enum SZPrompts {
     /// the decode error + the previous reply, as `{{error}}` / `{{previousReply}}` tokens.
     static let askRepair = load("ask-repair.md.mustache")
 
-    /// Load a prompt by its path under `Resources/Prompts/` (e.g. "coding/node-chat.md.mustache").
-    private static func load(_ relativePath: String) -> String {
-        let parts = relativePath.split(separator: "/")
-        let file = String(parts.last ?? "")
-        let subdirectory = (["Prompts"] + parts.dropLast().map(String.init)).joined(separator: "/")
-        guard let url = Bundle.module.url(forResource: file, withExtension: nil, subdirectory: subdirectory),
+    /// Load a prompt file from `Resources/Prompts/`.
+    private static func load(_ file: String) -> String {
+        guard let url = Bundle.module.url(forResource: file, withExtension: nil, subdirectory: "Prompts"),
               let content = try? String(contentsOf: url, encoding: .utf8) else {
-            fatalError("SZAI: missing bundled prompt \(subdirectory)/\(file)")
+            fatalError("SZAI: missing bundled prompt Prompts/\(file)")
         }
         return content
     }
@@ -42,11 +39,8 @@ public enum SZGraphPrompts {
     static func steerBlock(_ instruction: String?, verb: String) -> String {
         let steer = instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !steer.isEmpty else { return "" }
-        // Defuse `{{…}}` in the steer. This is the only USER-authored value we hand to SZPromptTemplate,
-        // and `render` walks an unordered dictionary: a steer containing a live token (`{{source}}`,
-        // `{{boundary}}`, …) would be expanded, or left literal, depending on Swift's per-process hash
-        // seed — the same instruction rendering two different prompts on two runs.
-        let safe = steer.replacingOccurrences(of: "{{", with: "{ {")
+        // the steer is user prose, so it goes through the defuser before render sees it
+        let safe = SZPromptTemplate.defused(steer)
         return "\nHow the user asked for this \(verb) to be done — follow it:\n\(safe)\n"
     }
 }

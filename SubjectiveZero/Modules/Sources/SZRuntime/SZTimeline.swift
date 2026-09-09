@@ -89,8 +89,9 @@ struct SZTimeline: Sendable {
             return frozen
         }
 
-        if baseTime == nil { baseTime = now }
-        let elapsed = max(0, now - (baseTime ?? now))
+        let base = baseTime ?? now
+        baseTime = base
+        let elapsed = max(0, now - base)
         lastTime = elapsed
         let timing = SZFrameTiming(frameIndex: frameIndex, timeSeconds: elapsed)
         frameIndex &+= 1

@@ -224,7 +224,7 @@ extension SZHostBridge {
         case "ui_remove_node":     return try uiRemoveNode(arguments)
         case "ui_split_node":      return try uiSplitNode(arguments)
         case "ui_merge_nodes":     return try uiMergeNodes(arguments)
-        case "ui_tidy_graph":      return try uiTidyGraph(arguments)
+        case "ui_tidy_graph":      return try uiTidyGraph()
         case "ui_set_provider":    return try uiSetProvider(arguments)
         case "ui_set_routing_profile": return try uiSetRoutingProfile(arguments)
         case "ui_routing_profiles": return uiRoutingProfiles()
@@ -607,7 +607,7 @@ extension SZHostBridge {
         return SZJSONRPC.encode(["removed": host.deleteNode(id: id, origin: .agent)])
     }
 
-    private func uiTidyGraph(_ arguments: [String: Any]) throws -> String {
+    private func uiTidyGraph() throws -> String {
         guard host.store.project != nil else { throw SZMCPError.message("no project loaded") }
         let layout = host.tidyGraph()   // one transaction + persist; returns the applied centers
         let positions = layout.map { ["node": $0.key.uuidString, "x": $0.value.x, "y": $0.value.y] as [String: Any] }
@@ -1134,19 +1134,14 @@ extension SZHostBridge {
         // what happened rather than echoing a layout that silently didn't change (cf.
         // ui_close_chat_tab's Director refusal).
         guard host.panelLayout.contains(id) || host.isPoppedOut(id) else {
-            return refusedPanelClose("the \(id.token) panel isn't open")
+            return refusedPanelOp("closed", "the \(id.token) panel isn't open")
         }
         host.closePanel(id)
         guard !host.panelLayout.contains(id) && !host.isPoppedOut(id) else {
-            return refusedPanelClose("the last panel can't be closed")
+            return refusedPanelOp("closed", "the last panel can't be closed")
         }
         return SZJSONRPC.encode(["closed": true, "layout": panelLayoutObject(),
                                  "popped_out_panels": poppedOutTokens()])
-    }
-
-    private func refusedPanelClose(_ reason: String) -> String {
-        SZJSONRPC.encode(["closed": false, "reason": reason, "layout": panelLayoutObject(),
-                          "popped_out_panels": poppedOutTokens()])
     }
 
     private func uiMovePanel(_ arguments: [String: Any]) throws -> String {

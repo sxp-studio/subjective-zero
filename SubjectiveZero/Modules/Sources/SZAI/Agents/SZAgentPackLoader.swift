@@ -217,7 +217,7 @@ public enum SZAgentPackLoader {
         }
 
         return (SZAgentPack(id: manifest.id, seat: manifest.seat, graph: graph,
-                            prompts: prompts, promptSources: promptSources, steps: steps,
+                            promptSources: promptSources, steps: steps,
                             recommendedRouting: recommendedRouting),
                 defects)
     }

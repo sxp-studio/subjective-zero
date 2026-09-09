@@ -20,8 +20,6 @@ import SZCore
 /// the runtime's engine lock (or single-threaded tests); `enumerateOptions` is the one documented
 /// concurrent READ (UI dropdown vs render thread) and touches only the immutable resolved symbols.
 final class SZLoader: @unchecked Sendable {
-    typealias LoadError = SZDylibLoadError
-
     private var handle: UnsafeMutableRawPointer?
     private var update: SZNodeABI.UpdateFn?
     private var teardownFn: SZNodeABI.TeardownFn?

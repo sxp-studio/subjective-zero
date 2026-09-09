@@ -103,8 +103,6 @@ extension SZHost {
         showPanel(.chat)
     }
 
-    /// How many nodes await the fleet — never built, or built against a contract that has since moved. The HUD
-    /// Build button's count badge.
     /// Nodes still waiting to be kicked off — the HUD Build badge. Nodes a run ALREADY holds are
     /// not pending: they are being built, and counting them made Build offer work it could not take.
     var pendingNodeCount: Int {

@@ -35,7 +35,6 @@ enum SZCardABI {
     static let updateSymbol = "SZCardUpdate"
     static let destroySymbol = "SZCardDestroy"
 
-    typealias APIVersionFn = @convention(c) () -> Int32
     /// Pointer to `SZCardHostRaw` (copied by value inside) → +1 retained opaque instance, nil on
     /// version mismatch.
     typealias CreateFn = @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?

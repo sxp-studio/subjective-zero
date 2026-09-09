@@ -451,7 +451,7 @@ public final class SZRuntime: @unchecked Sendable {
                 var floats: [String: [Float]] = [:]
                 var strings: [String: String] = [:]
                 for port in inputs {
-                    switch Self.valueChannel(port.type) {
+                    switch port.type.valueChannel {
                     case .float:  if let v = Self.reconciledFloats(kept: state.inputValues[node.id]?[port.name], def: port.def?.floats) { floats[port.name] = v }
                     case .string: if let s = state.inputStrings[node.id]?[port.name] ?? port.def?.string { strings[port.name] = s }
                     case .none:   break   // texture / floatArray / event — no seedable by-value state
@@ -490,12 +490,6 @@ public final class SZRuntime: @unchecked Sendable {
         }
         publish?()
     }
-
-    /// Which live-value channel a port's by-value state lives in: numeric kinds + `bool` ride the float
-    /// channel (`inputValues`), `enum`/`string` ride the string channel (`inputStrings`), and
-    /// texture/floatArray/event carry no seedable by-value state. Mirrors the split already implicit in
-    /// `SZPortValue.floats` / `.string`; used by `loadGraph` to reconcile overrides against a contract.
-    private static func valueChannel(_ type: SZPortType) -> SZValueChannel { type.valueChannel }
 
     /// Reconcile one float-channel input against its contract default: keep a live override only while it
     /// still fits the port's arity (the default's element count), else fall back to the default. This is

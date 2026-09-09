@@ -97,30 +97,18 @@ public enum SZRecordFraming {
                                   picture: (width: Int, height: Int)) -> (width: Int, height: Int) {
         let aspect = ratio.aspect ?? cropAspect(crop, picture: picture)
         let short = Double(tier.rawValue)
-        var w = aspect >= 1 ? short * aspect : short
-        var h = aspect >= 1 ? short : short / aspect
-        let long = max(w, h)
-        if long > 4096 {
-            let scale = 4096 / long
-            w *= scale
-            h *= scale
-        }
-        return (even(w), even(h))
+        let w = aspect >= 1 ? short * aspect : short
+        let h = aspect >= 1 ? short : short / aspect
+        return cappedEven(w, h)
     }
 
     /// The full-frame size a take renders at: output size / crop fraction, long side capped
     /// 4K-class, both axes even.
     public static func renderSize(output: (width: Int, height: Int), crop: SZRect)
         -> (width: Int, height: Int) {
-        var w = Double(output.width) / min(max(crop.width, 0.01), 1)
-        var h = Double(output.height) / min(max(crop.height, 0.01), 1)
-        let long = max(w, h)
-        if long > 4096 {
-            let scale = 4096 / long
-            w *= scale
-            h *= scale
-        }
-        return (even(w), even(h))
+        let w = Double(output.width) / min(max(crop.width, 0.01), 1)
+        let h = Double(output.height) / min(max(crop.height, 0.01), 1)
+        return cappedEven(w, h)
     }
 
     /// `crop` re-fitted to `aspect` (picture pixels): centered on the old center, as large as
@@ -167,6 +155,13 @@ public enum SZRecordFraming {
         let x = min(max(crop.x, 0), 1 - w)
         let y = min(max(crop.y, 0), 1 - h)
         return SZRect(x: x, y: y, width: w, height: h)
+    }
+
+    /// Both axes even, with the long side held to 4K-class.
+    private static func cappedEven(_ w: Double, _ h: Double) -> (width: Int, height: Int) {
+        let long = max(w, h)
+        let scale = long > 4096 ? 4096 / long : 1
+        return (even(w * scale), even(h * scale))
     }
 
     private static func even(_ value: Double) -> Int { max(Int(value.rounded()) & ~1, 2) }

@@ -78,7 +78,6 @@ enum SZNodeABI {
     /// Optional (v7): the runtime paused/resumed. Absent on a node that owns nothing running on its own.
     static let setPausedSymbol = "SZNodeSetPaused"
 
-    typealias APIVersionFn = @convention(c) () -> Int32
     typealias SetupFn = @convention(c) (UnsafeMutableRawPointer?) -> Void
     typealias UpdateFn = @convention(c) (UnsafeMutableRawPointer?) -> Int32
     typealias TeardownFn = @convention(c) () -> Void

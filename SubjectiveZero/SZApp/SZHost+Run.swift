@@ -60,12 +60,13 @@ extension SZHost {
             }
         }
         let assistantID = existingAssistantID ?? store.appendChatMessage(SZChatMessage(role: .assistant, text: ""), to: scope)
+        let generation = SZTurnGeneration(providerID: provider.id, model: request.model,
+                                          reasoningEffort: request.reasoningEffort,
+                                          fastMode: request.fastMode, via: via)
         // Before a word is streamed: the run's card reads its activity by this id, and the
         // envelope is already decided, so a card can name its model while it generates. Both
         // would otherwise arrive with the turn's report, when the turn is already over.
-        onOpen?(assistantID, SZTurnGeneration(
-            providerID: provider.id, model: request.model,
-            reasoningEffort: request.reasoningEffort, fastMode: request.fastMode).label)
+        onOpen?(assistantID, generation.label)
         inFlightAssistantIDs[scope.key] = assistantID   // also flips chatInFlight (derived)
         // A turn a RUN dispatched belongs to that run: the stamp is what the chat feed reads to
         // tell the fleet's implementation work from a conversation, and what its task's drill-in
@@ -93,20 +94,14 @@ extension SZHost {
             let wall = (ContinuousClock.now - startedMono).szSeconds
             store.setChatDuration(wall, assistantID, in: scope)
             // The receipt: what this turn actually ran; unconditional, never trace-gated.
-            store.setChatGeneration(SZTurnGeneration(
-                providerID: provider.id, model: request.model,
-                reasoningEffort: request.reasoningEffort, fastMode: request.fastMode,
-                via: via), assistantID, in: scope)
+            store.setChatGeneration(generation, assistantID, in: scope)
             // Breakdown lands before the flush below so it persists with the turn. Run-owned turns
             // (dispatched under the run's claim) also log themselves for the run-complete rollup.
             // (Runs OUTSIDE the context binding below — finalizeTurn keys by explicit turnID.)
             finalizeTurn(assistantID: assistantID, scope: scope, started: started,
                          ended: started.addingTimeInterval(wall), runID: turnRunID,
                          // Provider-led, so a cross-provider run's breakdown reads correctly.
-                         generation: [provider.id, request.model,
-                                      request.reasoningEffort,
-                                      request.fastMode ? "fast" : nil]
-                            .compactMap(\.self).joined(separator: " · "))
+                         generation: generation.label)
             // Turn end = flush point: the just-completed message (no longer in-flight) lands on disk,
             // and whatever this turn did to the session map is persisted machine-locally.
             flushTranscript(scope)

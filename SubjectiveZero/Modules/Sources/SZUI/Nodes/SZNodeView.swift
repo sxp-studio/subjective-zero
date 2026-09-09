@@ -70,7 +70,6 @@ struct SZNodeView: View, Equatable {
             && lhs.connectedInputs == rhs.connectedInputs
     }
 
-    private var inputs: [SZPort] { node.contract?.inputs ?? [] }
     private var outputs: [SZPort] { node.contract?.outputs ?? [] }
 
     /// Ports declared since the running build was compiled (`SZNode.portsNotInBuild`) — their rows read

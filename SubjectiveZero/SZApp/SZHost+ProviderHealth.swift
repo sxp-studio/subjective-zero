@@ -461,11 +461,6 @@ extension SZHost {
         }
     }
 
-    /// The missingCLI remedy's Copy button target (the card shows the command inline too).
-    func providerInstallCommand(_ id: String) -> String? {
-        SZProviderRegistry.shared.provider(id: id)?.installCommand
-    }
-
     // MARK: - SZAI → SZUI mapping (SZUI can't import SZAI; it gets dumb value structs)
 
     /// The sheet's cards, mapped from the merged health truth. Every registry provider appears —

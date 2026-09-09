@@ -164,19 +164,18 @@ final class SZCardVerbBox {
     }
 }
 
-private let szCardLive: SZCardEmitFn = { ctx, port, values, count in
+private func szCardEmit(_ ctx: UnsafeMutableRawPointer?, _ port: UnsafePointer<CChar>?,
+                        _ values: UnsafePointer<Float>?, _ count: Int32, commit: Bool) {
     guard let box = SZCardVerbBox.from(ctx), let port, let values else { return }
     let floats = Array(UnsafeBufferPointer(start: values, count: Int(count)))
     let name = String(cString: port)
-    MainActor.assumeIsolated { box.verbs.live(name, floats) }
+    MainActor.assumeIsolated {
+        if commit { box.verbs.commit(name, floats) } else { box.verbs.live(name, floats) }
+    }
 }
 
-private let szCardCommit: SZCardEmitFn = { ctx, port, values, count in
-    guard let box = SZCardVerbBox.from(ctx), let port, let values else { return }
-    let floats = Array(UnsafeBufferPointer(start: values, count: Int(count)))
-    let name = String(cString: port)
-    MainActor.assumeIsolated { box.verbs.commit(name, floats) }
-}
+private let szCardLive: SZCardEmitFn = { ctx, port, values, count in szCardEmit(ctx, port, values, count, commit: false) }
+private let szCardCommit: SZCardEmitFn = { ctx, port, values, count in szCardEmit(ctx, port, values, count, commit: true) }
 
 private let szCardSize: SZCardSizeFn = { ctx, height in
     guard let box = SZCardVerbBox.from(ctx) else { return }

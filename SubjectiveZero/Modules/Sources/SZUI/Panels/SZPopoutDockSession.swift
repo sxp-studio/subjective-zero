@@ -50,22 +50,12 @@ public enum SZPopoutDockSession {
                          preview: SZPanelLayoutGeometry.dropPreviewRect(zone: zone, in: frame))
     }
 
-    /// `dropZone(at:in:)` with `.center` resolved to the nearest edge (normalized distance; ties
-    /// break in left → right → top → bottom order, matching the geometry's own edge ordering).
+    /// `dropZone(at:in:)` with `.center` resolved to the geometry's `nearestEdge`.
     /// Internal: only `candidate` and the tests exercise it.
     static func nearestEdgeZone(at point: CGPoint, in rect: CGRect) -> SZPanelDropZone {
         let zone = SZPanelLayoutGeometry.dropZone(at: point, in: rect)
         guard zone == .center else { return zone }
-        guard rect.width > 0, rect.height > 0 else { return .left }
-        let toLeft = (point.x - rect.minX) / rect.width
-        let toRight = (rect.maxX - point.x) / rect.width
-        let toTop = (point.y - rect.minY) / rect.height
-        let toBottom = (rect.maxY - point.y) / rect.height
-        let nearest = min(toLeft, toRight, toTop, toBottom)
-        if nearest == toLeft { return .left }
-        if nearest == toRight { return .right }
-        if nearest == toTop { return .top }
-        return .bottom
+        return SZPanelLayoutGeometry.nearestEdge(at: point, in: rect)
     }
 
     // MARK: - Screen ↔ container conversion

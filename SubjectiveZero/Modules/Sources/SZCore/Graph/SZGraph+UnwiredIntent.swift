@@ -31,9 +31,6 @@ extension SZGraph {
         targets(of: unwiredIntent(among: arrows))
     }
 
-    /// Every node carrying an unwired arrow — what a run's admission reads, before work is scoped.
-    public var nodesWithUnwiredIntent: [SZNodeID] { unwiredNodes(in: Set(nodes.map(\.id))) }
-
     /// Whether the wire this arrow asks for would ring, so nothing can ever answer it. Judged over data
     /// alone: that is the wire to be laid, and the other arrows are requests, not obstacles.
     public func isStuckIntent(_ arrow: SZConnection) -> Bool {

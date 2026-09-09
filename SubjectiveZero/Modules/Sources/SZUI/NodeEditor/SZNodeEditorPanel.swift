@@ -638,8 +638,6 @@ public struct SZNodeEditorPanel: View {
         return ids
     }
 
-    private var hasSelection: Bool { !selectedNodeIDs.isEmpty || selectedConnectionID != nil }
-
     /// Whether the current selection has anything the user is actually allowed to delete right now — mirrors
     /// `deleteSelected`'s own guards so the HUD trash button dims (rather than silently no-opping) when an
     /// agent holds the whole selection: a connection is deletable only if neither endpoint is locked; a
