@@ -41,6 +41,13 @@ final class SZAppDelegate: NSObject, NSApplicationDelegate {
     // and keeps the app alive if it's open when the main window closes.)
     nonisolated func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// The app ships one palette, dark. Pinning the whole application's appearance covers every
+    /// surface at once (SwiftUI panels, AppKit pop-outs, sheets, alerts, Sparkle's update windows),
+    /// and it lands before the first window exists so a light-mode Mac never flashes light chrome.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+    }
+
     /// Finder double-click / drag-to-Dock / "Open With" of a project bundle. Before startup finishes:
     /// buffer it (opened by `start`/`appDidFinishStarting`). Already started: open it now, replacing
     /// the single window's project (an untitled current project stays reachable via Open Recent — no
