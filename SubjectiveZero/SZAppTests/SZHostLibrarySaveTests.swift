@@ -47,17 +47,6 @@ struct SZHostLibrarySaveTests {
 
     private static func read(_ url: URL) throws -> String { String(decoding: try Data(contentsOf: url), as: UTF8.self) }
 
-    private static var gitAvailable: Bool {
-        let process = Process()
-        process.executableURL = URL(filePath: "/usr/bin/xcrun")
-        process.arguments = ["--find", "git"]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        guard (try? process.run()) != nil else { return false }
-        process.waitUntilExit()
-        return process.terminationStatus == 0
-    }
-
     @Test func theRunnerKeepsTheDefaultLibraryOnATempHome() {
         #expect(SZAppSupport.directory.path.hasPrefix(FileManager.default.temporaryDirectory.path))
         let host = SZHost()
@@ -85,9 +74,9 @@ struct SZHostLibrarySaveTests {
         let fm = FileManager.default
         #expect(fm.fileExists(atPath: library.appending(path: "library.json").path))
         #expect(try Self.read(library.appending(path: "library.json")).contains("My Library"))
-        if Self.gitAvailable {
-            #expect(fm.fileExists(atPath: library.appending(path: ".git").path))
-        }
+        // Nothing version-controlled is made: a save writes files, and what the user does with
+        // them afterwards is theirs.
+        #expect(!fm.fileExists(atPath: library.appending(path: ".git").path))
 
         let folder = library.appending(path: "soft-blur")
         let contract = try JSONDecoder().decode(SZNodeContract.self,

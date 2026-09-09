@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Saving a node into the user's own library: the folder is created on the first save (library.json,
-// index.json, a git repository); a save writes one node folder and its index entry, commits, and stamps
-// the project node as a copy of the entry. Git trouble is printed and never fails a save.
+// Saving a node into a library the user can write to: the folder is created on the first save
+// (library.json, index.json), a save writes one node folder and its index entry, and the project node
+// is stamped as a copy of that entry. Writing files is all this does; version control is the user's.
 import Foundation
 import SZCore
 
 extension SZHost {
-    /// The library folder, created with its `library.json`, empty `index.json` and a git repository the
-    /// first time. Returns the folder.
+    /// The library folder, created with its `library.json` and an empty `index.json` the first time.
+    /// Returns the folder.
     func ensureMyLibrary() throws -> URL {
         let url = myLibraryURL
         let fm = FileManager.default
@@ -17,9 +17,8 @@ extension SZHost {
         // A real manifest from the start, so publishing it later is a matter of filling in the author
         // and the license rather than learning the file exists.
         try Self.writeManifest(SZLibraryManifest(name: SZLibrarySourceID.mine.displayName,
-                                                 madeWith: Self.appVersion), to: url)
+                                                 madeWith: Self.appVersion, version: "0.1.0"), to: url)
         try SZJSON.encoder().encode(SZLibraryCurationFile(nodes: [])).write(to: url.appending(path: "index.json"))
-        Self.git(["init", "-q"], in: url)
         return url
     }
 
@@ -90,12 +89,6 @@ extension SZHost {
             index.nodes.append(SZLibraryCurationEntry(id: entryID, tags: [], purpose: line))
         }
         try SZJSON.encoder().encode(index).write(to: library.appending(path: "index.json"), options: .atomic)
-        // the files are complete; the commit is bookkeeping and never holds up the save
-        Task.detached {
-            Self.git(["add", "-A"], in: library)
-            Self.git(["commit", "-q", "-m", "Save \(name)"], in: library)
-        }
-
         // the project node is a copy of the entry from here on
         let liveBytes = sources.first { $0.0 == projectTarget }.flatMap { try? Data(contentsOf: $0.1) }
         store.mutate { project in
@@ -177,24 +170,4 @@ extension SZHost {
         status = "Moved \(SZLibrarySourceID.mine.displayName)"
     }
 
-    /// Run one git command in `directory` through xcrun (the command line tools the app already needs
-    /// for swiftc). A failure is printed and swallowed: the library on disk is complete without it.
-    nonisolated static func git(_ arguments: [String], in directory: URL) {
-        let process = Process()
-        process.executableURL = URL(filePath: "/usr/bin/xcrun")
-        process.arguments = ["git"] + arguments
-        process.currentDirectoryURL = directory
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = output
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus != 0 else { return }
-            let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            print("[SZHost] git \(arguments.joined(separator: " ")) failed (\(process.terminationStatus)): \(text)")
-        } catch {
-            print("[SZHost] git \(arguments.joined(separator: " ")) could not run: \(error)")
-        }
-    }
 }

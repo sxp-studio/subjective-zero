@@ -14,12 +14,16 @@ enum SZLibraryTestSupport {
         return dir
     }
 
-    /// Forget the library prefs a previous test left behind. They live in one temp home for the whole
-    /// test process, so a suite that adds a library or moves My Library is otherwise visible to every
-    /// suite after it.
+    /// A host that starts with only the library the app ships with.
+    ///
+    /// The prefs AND the default My Library folder both live in one temp home shared by the whole
+    /// test process, so a suite that adds a library or saves a node is otherwise visible to every
+    /// suite after it. Pointing My Library at a folder that does not exist is what makes "no library
+    /// of your own yet" true per test rather than per process.
     static func withDefaultLibraries(_ host: SZHost) -> SZHost {
         host.addedLibraries = []
-        host.myLibraryPath = nil
+        host.myLibraryPath = FileManager.default.temporaryDirectory
+            .appending(path: "sz-mine-\(UUID().uuidString)").path
         return host
     }
 

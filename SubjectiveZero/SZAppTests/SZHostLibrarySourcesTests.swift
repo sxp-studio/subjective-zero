@@ -117,7 +117,7 @@ struct SZHostLibrarySourcesTests {
         #expect(manifest.license == "MIT")
         #expect(manifest.description == "Glitch effects")
         #expect(manifest.madeWith == SZHost.appVersion)      // which app made it, recorded for us
-        #expect(manifest.missingForSharing.isEmpty)
+        #expect(manifest.version == "0.1.0")   // a new library says which version it is
         #expect(FileManager.default.fileExists(atPath: folder.appending(path: "index.json").path))
     }
 
@@ -236,13 +236,67 @@ struct SZHostLibrarySourcesTests {
 
     // MARK: - what a failure says
 
-    @Test func aFetchFailureIsASentenceNotACommandLog() {
-        #expect(SZHost.reachFailure("fatal: could not resolve host: github.com")
+    @Test func aFailedDownloadIsASentenceAPersonCanActOn() {
+        #expect(SZHost.fetchFailure(URLError(.notConnectedToInternet))
                 == "Couldn't reach the internet. Your libraries still work as they are.")
-        #expect(SZHost.reachFailure("remote: Repository not found.").contains("nothing at that link"))
-        #expect(SZHost.reachFailure("fatal: Authentication failed").contains("private"))
-        // Anything unrecognised keeps the tool's last line, which usually names the real problem.
-        #expect(SZHost.reachFailure("fatal: something odd").contains("something odd"))
-        #expect(SZHost.reachFailure("") == "Couldn't do that.")
+        #expect(SZHost.fetchFailure(URLError(.timedOut)).contains("Couldn't reach the internet"))
+        // A cancelled download is the size cap doing its job, not a network problem.
+        #expect(SZHost.fetchFailure(URLError(.cancelled)) == "That library is too big to add.")
+        // Missing and private are indistinguishable on a forge's archive endpoint, so claim neither.
+        #expect(SZHost.fetchFailure(nil, status: 404) == "There is nothing at that link, or it is private.")
+        #expect(SZHost.fetchFailure(nil, status: 403).contains("private"))
+        #expect(SZHost.fetchFailure(nil, status: 500) == "That link didn't give back a library archive.")
+        #expect(SZHost.fetchFailure(nil).contains("didn't give back a library archive"))
+    }
+
+    // MARK: - what a fetched copy replaces
+
+    @Test func anUpdateSwapsTheFolderAndLeavesTheOldOneAloneWhenItCannot() async throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let host = try Self.host(in: dir)
+        let fm = FileManager.default
+
+        // A fetched library, then a staged copy of it with one node added and one changed.
+        let live = try Self.libraryFolder(in: dir, named: "live")
+        host.addedLibraries.append(SZAddedLibrary(key: "fetched", name: "Fetched", kind: .link,
+                                                  origin: "https://example.com/a/b"))
+        let staging = dir.appending(path: "staging")
+        let staged = staging.appending(path: "unpacked")
+        try fm.createDirectory(at: staged, withIntermediateDirectories: true)
+        try fm.copyItem(at: live.appending(path: "gaussian-blur"), to: staged.appending(path: "gaussian-blur"))
+        try fm.copyItem(at: live.appending(path: "gaussian-blur"), to: staged.appending(path: "brightness"))
+        try Data("// changed\n".utf8).write(to: staged.appending(path: "gaussian-blur/Node.swift"))
+
+        let difference = SZHost.libraryDifference(staged: staged, live: live)
+        #expect(difference.added == ["brightness"])
+        #expect(difference.changed == ["gaussian-blur"])
+        #expect(difference.removed.isEmpty)
+    }
+
+    @Test func aTopLevelFileChangingIsNotANodeChanging() throws {
+        let dir = try Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let live = try Self.libraryFolder(in: dir, named: "live")
+        let staged = try Self.libraryFolder(in: dir, named: "staged")
+        try Data("# read me\n".utf8).write(to: staged.appending(path: "README.md"))
+
+        // A node lives in a folder; a README at the top is not one, and must not arm Update.
+        let difference = SZHost.libraryDifference(staged: staged, live: live)
+        #expect(difference.added.isEmpty && difference.changed.isEmpty && difference.removed.isEmpty)
+    }
+
+    @Test func theExtractArgvNeverPreservesWhatAnArchiveAsksFor() {
+        // -p / --insecure would honour the archive's own permissions and paths. Neither may appear,
+        // and the argv is a fixed literal precisely so this test can be this blunt.
+        let source = try! String(contentsOf: URL(filePath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "SZApp/SZHost+LibraryArchive.swift"), encoding: .utf8)
+        let extract = source.split(separator: "\n").first { $0.contains("\"-x\", \"-f\"") }
+        let argv = try! #require(extract)
+        #expect(!argv.contains("\"-p\""))
+        #expect(!argv.contains("\"-P\""))
+        #expect(source.contains("--strip-components=1"))
+        #expect(source.contains("--no-same-owner"))
     }
 }

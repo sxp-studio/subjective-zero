@@ -68,28 +68,60 @@ struct SZAddedLibraryTests {
         #expect(SZLibraryManifest(name: "N", madeWith: "9.9.9", abi: 99).refusal(appVersion: "0.4.0") == nil)
     }
 
-    @Test func aLibraryIsNotFitToShareWithoutAnAuthorAndALicense() {
-        #expect(SZLibraryManifest(name: "N").missingForSharing == ["an author", "a license"])
-        #expect(SZLibraryManifest(name: "N", author: "Someone").missingForSharing == ["a license"])
-        #expect(SZLibraryManifest(name: "N", author: "", license: "").missingForSharing.count == 2)
-        #expect(SZLibraryManifest(name: "N", author: "Someone", license: "MIT").missingForSharing.isEmpty)
-    }
-
     @Test func provenanceNamesOnlyWhatTheAuthorFilledIn() {
         #expect(SZAddedLibrary(key: "k", name: "N", kind: .folder, origin: "/p").provenance == nil)
         let full = SZAddedLibrary(key: "k", name: "N", kind: .folder, origin: "/p",
                                   manifest: SZLibraryManifest(name: "N", author: "Someone",
                                                               license: "MIT", madeWith: "0.4.0", abi: 9))
         #expect(full.provenance == "by Someone · MIT · made with 0.4.0 · node format v9")
+        // The row says a version, never a commit id: people do not read those.
+        #expect(full.versionNote == nil)
+        let versioned = SZAddedLibrary(key: "k", name: "N", kind: .link, origin: "https://example.com/a/b",
+                                       manifest: SZLibraryManifest(name: "N", version: "1.2.0"))
+        #expect(versioned.versionNote == "Version 1.2.0")
+    }
+
+    @Test func aLibraryVersionIsExactlyThreeNumbersOrNothing() {
+        // Stricter than the app version on purpose: a library version we cannot read must fall back
+        // to comparing files, not guess an order and offer the wrong update.
+        #expect(SZLibraryVersion.parse("1.2.3") != nil)
+        #expect(SZLibraryVersion.parse("v1.2.3") == nil)
+        #expect(SZLibraryVersion.parse("1.2") == nil)
+        #expect(SZLibraryVersion.parse("1.2.3-rc.1") == nil)
+        #expect(SZLibraryVersion.parse("2026-09-09") == nil)
+        #expect(SZLibraryVersion.parse(nil) == nil)
+
+        #expect(SZLibraryVersion.isNewer("1.3.0", than: "1.2.9"))
+        #expect(SZLibraryVersion.isNewer("0.10.0", than: "0.9.9"))     // by field, not by text
+        #expect(!SZLibraryVersion.isNewer("1.2.0", than: "1.2.0"))
+        #expect(!SZLibraryVersion.isNewer("1.1.0", than: "1.2.0"))
+        #expect(!SZLibraryVersion.isNewer("1.3.0", than: nil))          // unreadable: never an update
+        #expect(!SZLibraryVersion.isNewer("v2.0.0", than: "1.0.0"))
+    }
+
+    @Test func aLinkKnowsWhereToDownloadItsArchiveFrom() {
+        func archive(_ text: String) -> String? {
+            SZLibraryLink.parse(text)?.archiveURL?.absoluteString
+        }
+        #expect(archive("https://github.com/someone/their-nodes")
+                == "https://github.com/someone/their-nodes/archive/HEAD.tar.gz")
+        #expect(archive("someone/their-nodes")
+                == "https://github.com/someone/their-nodes/archive/HEAD.tar.gz")
+        #expect(archive("https://codeberg.org/someone/their-nodes")
+                == "https://codeberg.org/someone/their-nodes/archive/HEAD.tar.gz")
+        // GitLab nests its archives, and names the file after the repository.
+        #expect(archive("https://gitlab.com/team/nodes")
+                == "https://gitlab.com/team/nodes/-/archive/HEAD/nodes.tar.gz")
+        // A link that already names an archive is taken as it is.
+        #expect(archive("https://example.com/downloads/nodes.tar.gz")
+                == "https://example.com/downloads/nodes.tar.gz")
     }
 
     @Test func anUpdateSaysOnlyWhatChanged() {
-        #expect(SZLibraryUpdate(revision: "a", note: "", added: [], changed: [], removed: []).isEmpty)
-        #expect(SZLibraryUpdate(revision: "a", note: "", added: [], changed: [], removed: []).summary
-                == "No node changed")
-        #expect(SZLibraryUpdate(revision: "a", note: "", added: ["x"], changed: [], removed: []).summary
-                == "1 node added")
-        #expect(SZLibraryUpdate(revision: "a", note: "", added: ["x", "y"], changed: ["z"], removed: ["w"]).summary
+        #expect(SZLibraryUpdate(note: "", offered: false).isEmpty)
+        #expect(SZLibraryUpdate(note: "", offered: false).summary == "No node changed")
+        #expect(SZLibraryUpdate(note: "", offered: true, added: ["x"]).summary == "1 node added")
+        #expect(SZLibraryUpdate(note: "", offered: true, added: ["x", "y"], changed: ["z"], removed: ["w"]).summary
                 == "2 nodes added, 1 changed, 1 removed")
     }
 }

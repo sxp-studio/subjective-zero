@@ -57,8 +57,9 @@ search for its exact name or `ui_` prefix before assuming it is unavailable.
 - `ui_add_library { "link": "https://github.com/someone/their-nodes" }` (or `{ "folder": "/path" }`) —
   add a whole library of someone else's nodes. Its nodes are code that will run on the user's Mac, so
   add ONLY the library the user named or linked, never one you went looking for, and say what arrived
-  ("Added Their Nodes, 12 nodes"). Updating a library to a newer version, and publishing their own,
-  are done by the user in Settings ▸ Library — point them there rather than offering to do it.
+  ("Added Their Nodes, 12 nodes"). Updating a library to a newer version is done by the user in
+  Settings ▸ Library — point them there rather than offering to do it. There is no publishing from
+  the app: a library is published by its author, wherever they keep it.
 - `ui_toggle_display { "node": "<id>", "port": "<texture output>" }` — point the viewport at the final
   output so the result is visible. Do this once, on the last node's display output, after its contract exists.
   The viewport is the user's live view — never toggle it just to LOOK at a node: `agent_view_frame

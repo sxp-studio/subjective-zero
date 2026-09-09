@@ -97,7 +97,7 @@ extension SZHost {
         persistAppState()
     }
 
-    // MARK: adding, updating and publishing libraries
+    // MARK: adding and updating libraries
 
     /// Settings ▸ Library ▸ Add Library: the folder picker, returning the path it chose.
     func chooseLibraryFolder() -> String? {
@@ -132,13 +132,16 @@ extension SZHost {
     func checkForLibraryUpdate(key: String) async -> (note: String, hasUpdate: Bool) {
         do {
             let update = try await libraryUpdate(key: key)
-            guard !update.isEmpty else {
+            guard update.offered else {
+                discardStagedUpdate(key: key)
                 pendingLibraryUpdates[key] = nil
-                return ("Up to date", false)
+                return (update.note, false)
             }
+            discardStagedUpdate(key: key)
             pendingLibraryUpdates[key] = update
-            return ("\(update.summary). \(update.note)", true)
+            return (update.note, true)
         } catch {
+            discardStagedUpdate(key: key)
             pendingLibraryUpdates[key] = nil
             return (error.localizedDescription, false)
         }
@@ -152,16 +155,8 @@ extension SZHost {
             pendingLibraryUpdates[key] = nil
             return "Updated: \(update.summary)"
         } catch {
-            return error.localizedDescription
-        }
-    }
-
-    /// Settings ▸ Library ▸ Publish, for My Library.
-    func publishMyLibraryFromSettings() async -> String {
-        do {
-            let remote = try await publishMyLibrary()
-            return "Published to \(remote)"
-        } catch {
+            discardStagedUpdate(key: key)
+            pendingLibraryUpdates[key] = nil
             return error.localizedDescription
         }
     }
@@ -175,8 +170,6 @@ extension SZHost {
     func presentLibrarySettings() {
         requestedSetupSection = .library
         presentProviderSetup()
-        // Whether Publish has anywhere to go is a question for the folder, asked once as the pane opens.
-        Task { @MainActor in myLibraryPublishable = await myLibraryHasRemote() }
     }
 
     /// The Save to Library sheet's Save: a failure lands in the status line, the sheet closes either way.

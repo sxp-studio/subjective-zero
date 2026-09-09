@@ -31,24 +31,37 @@ the same nodes.
   inputs cleared, each source file the node has, `Card.swift` if any, `CARD.md` with the description
   and prompt) and one `index.json` entry, then commits; git is never required and never shown.
   Saving the same node again updates its entry, and the project's node is stamped as a copy of it.
-- **Added libraries** - a folder on this Mac, or a repository fetched from a link
-  (`SZAddedLibrary`, remembered in the prefs). A folder is read where it lives and never written to.
-  A link is cloned under `Application Support/libraries/<key>/` and pinned to the commit it arrived
-  on. Both are added from Settings ▸ Library ▸ Add Library, or by an agent with `ui_add_library`.
-  A library that is not there right now (an unplugged disk, a folder someone moved) is skipped, not
-  forgotten, so it comes back when the folder does.
+- **Added libraries** - a folder on this Mac, or a copy downloaded from a link (`SZAddedLibrary`,
+  remembered in the prefs). A folder is read where it lives and never written to. A link is fetched
+  as an archive and unpacked under `Application Support/libraries/<key>/`, read-only. Both are added
+  from Settings ▸ Library ▸ Add Library, or by an agent with `ui_add_library`. A library that is not
+  there right now (an unplugged disk, a folder someone moved) is skipped, not forgotten, so it comes
+  back when the folder does.
 
-**Updating is always asked for.** `ui_update_library` and the settings row's Check for Updates
-fetch, then say what would change (nodes added, changed, removed) and move nothing until told. A
-library never changes under a project that is open, and nodes already on a canvas are copies, so an
-update never rewrites anyone's graph. **Publishing** (`ui_publish_library`) sends My Library where
-its remote points, and says plainly when the user has not set one up.
+**The app never runs anybody's version control.** A link is somewhere to download a copy from, not a
+repository the app maintains: no clone, no commit, no push, and a saved node is a file write and
+nothing more. Whoever maintains a library does that in their own repository with their own tools.
+This is deliberate, and it is why saving into a library that happens to live inside someone's own
+repository cannot touch their work.
 
-**Trust.** A library's nodes are compiled and loaded into the app, so they run with everything the
-app can reach. No scan of ours would honestly change that, so the model is identity and consent
-rather than inspection: the Add sheet says it once, in those words, at the moment the person
-decides, and an agent is told to add only the library the user named. Commit pinning is what keeps
-an added library from changing under them afterwards.
+**Updating is always asked for.** The settings row's Check for Updates downloads a fresh copy and
+says what would change, then moves nothing until told. `library.json`'s `version` is the signal when
+both copies have a readable one; without that, the node folders are compared. A library never
+changes under a project that is open, and nodes already on a canvas are copies, so an update never
+rewrites anyone's graph.
+
+**Trust.** Two different things, both worth naming.
+
+The archive is checked before a single file is written: `SZArchiveListing.refusal` reads `tar -tv`
+and refuses the whole download on anything that is not a plain file or folder, any path that climbs
+out or starts at the root, a silly depth, and sizes or counts past the caps. The download itself is
+https on every hop, capped, and assembled in a staging folder deleted on every path. All of that
+runs before the person has agreed to anything, which is exactly why it must not be exploitable.
+
+The nodes are a different matter: they are compiled and loaded into the app, so they run with
+everything the app can reach, and no scan of ours would honestly change that. That part is identity
+and consent, not inspection. The Add sheet says so once, in those words, at the moment the person
+decides, and an agent is told to add only the library the user named.
 
 Ids may repeat across libraries, so rows are keyed by library and id, and the agents' tools take an
 optional `library` argument when two libraries carry the same id (built in wins when omitted).
@@ -80,8 +93,9 @@ MIT, by me"**, then **"save the blur into it"**. That runs `ui_create_library` a
 `ui_save_to_library { library }`, which writes the manifest, the node folder and the index entry
 correctly the first time. Doing it by hand is the same three files.
 
-Put the folder under version control and it is shareable as-is: **Add Library** takes a link to it,
-and everyone who adds it gets the nodes pinned to the commit you published.
+Put the folder in a repository on GitHub, GitLab or Codeberg and it is shareable as-is: **Add
+Library** takes a link to it and downloads the current copy. Bump `version` in `library.json` when
+you want people's Check for Updates to offer the new one.
 
 ### `library.json`
 
@@ -91,6 +105,7 @@ fill it in before you publish:
 ```json
 {
   "name": "Their Nodes",
+  "version": "1.2.0",
   "description": "Feedback and glitch effects for live visuals.",
   "author": "Their Name",
   "license": "MIT",
@@ -111,6 +126,7 @@ fill it in before you publish:
 | `madeWith` | The SubjectiveZero this was written and last tested against. Advisory, and the first thing to read when a node misbehaves on a much later build. |
 | `minAppVersion` | The earliest SubjectiveZero that can run these nodes. **The one field that is enforced**: an older app refuses the library outright, rather than failing every node one at a time. |
 | `abi` | The node ABI you wrote against ([RUNTIME.md](RUNTIME.md)). Shown, never checked: the app has no ABI number of its own to compare with. |
+| `version` | Which version this library is, as `MAJOR.MINOR.PATCH`. What Check for Updates compares, and the only thing that makes an update a decision rather than a diff. Bump it when you publish; saving a node never bumps it for you. |
 
 Publishing a library with no `author` or `license` still works, and says so: whoever receives it
 cannot tell who wrote it or whether they may use it.
@@ -130,10 +146,10 @@ Three tools, in the order they are usually needed:
 Plus `agent_library_index` to find nodes and `ui_add_library_node` to place one, which is what an
 agent reaches for far more often than any of the above.
 
-**Updating a library and publishing your own are not agent tools.** Both are in Settings ▸ Library,
-because both are deliberate acts with consequences outside the project: one changes which nodes
-exist on this Mac, the other sends code somewhere public. An agent asked to do either should point
-at that screen.
+**Updating a library is not an agent tool.** It is in Settings ▸ Library, because it is a deliberate
+act with a consequence outside the project: it changes which nodes exist on this Mac. An agent asked
+to update should point at that screen. There is no publishing from the app at all: a library is
+published the way any repository is, by its author.
 
 A library fetched from a link **cannot be saved into**: the next update would overwrite whatever was
 written there. Save to My Library, or to a library the user created.

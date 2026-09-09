@@ -27,10 +27,13 @@ public struct SZLibraryManifest: Codable, Equatable, Sendable {
     /// The node ABI the author wrote against, if they tracked it (RUNTIME.md numbers these). Shown,
     /// never checked: the app has no ABI number of its own to compare with.
     public var abi: Int?
+    /// Which version of the library this is, as MAJOR.MINOR.PATCH. What Check for Updates compares,
+    /// and the only thing that makes an update a decision rather than a diff.
+    public var version: String?
 
     public init(name: String, description: String? = nil, author: String? = nil, license: String? = nil,
                 homepage: String? = nil, madeWith: String? = nil, minAppVersion: String? = nil,
-                abi: Int? = nil) {
+                abi: Int? = nil, version: String? = nil) {
         self.name = name
         self.description = description
         self.author = author
@@ -39,6 +42,7 @@ public struct SZLibraryManifest: Codable, Equatable, Sendable {
         self.madeWith = madeWith
         self.minAppVersion = minAppVersion
         self.abi = abi
+        self.version = version
     }
 }
 
@@ -61,6 +65,29 @@ public enum SZAppVersionOrder {
     }
 }
 
+/// A library's own version: exactly MAJOR.MINOR.PATCH, all digits, nothing else. Stricter than
+/// `SZAppVersionOrder`, deliberately: an app version is read leniently so a garbled one never blocks
+/// a library, while a library version that we cannot read must fall back to comparing files rather
+/// than guess an order and offer the wrong update.
+public enum SZLibraryVersion {
+    public static func parse(_ text: String?) -> (Int, Int, Int)? {
+        guard let text, !text.isEmpty else { return nil }
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 3 else { return nil }
+        let numbers = parts.compactMap { part -> Int? in
+            part.allSatisfy(\.isNumber) && !part.isEmpty ? Int(part) : nil
+        }
+        guard numbers.count == 3 else { return nil }
+        return (numbers[0], numbers[1], numbers[2])
+    }
+
+    /// True only when both versions read cleanly and `candidate` is the later one.
+    public static func isNewer(_ candidate: String?, than installed: String?) -> Bool {
+        guard let a = parse(candidate), let b = parse(installed) else { return false }
+        return (a.0, a.1, a.2) > (b.0, b.1, b.2)
+    }
+}
+
 public extension SZLibraryManifest {
     /// Why this app cannot run the library, in a sentence for the person. nil when it can.
     /// Only `minAppVersion` refuses: it is the one claim whose failure means nothing would work.
@@ -70,14 +97,6 @@ public extension SZLibraryManifest {
         guard appVersion != "dev", !SZAppVersionOrder.atLeast(appVersion, required) else { return nil }
         return "\(name) needs SubjectiveZero \(required) or newer, and this is \(appVersion)."
     }
-
-    /// What is missing before this library is fit to hand to someone else, for the Publish path.
-    var missingForSharing: [String] {
-        var missing: [String] = []
-        if (author ?? "").isEmpty { missing.append("an author") }
-        if (license ?? "").isEmpty { missing.append("a license") }
-        return missing
-    }
 }
 
 /// One library the user added, as remembered in the prefs.
@@ -85,7 +104,7 @@ public struct SZAddedLibrary: Codable, Equatable, Sendable, Identifiable {
     public enum Kind: String, Codable, Sendable {
         /// A folder on this Mac, read where it is and never written to.
         case folder
-        /// A git repository cloned under Application Support, pinned to `revision`.
+        /// An archive downloaded from a link and unpacked under Application Support.
         case link
     }
 
@@ -97,10 +116,9 @@ public struct SZAddedLibrary: Codable, Equatable, Sendable, Identifiable {
     public var kind: Kind
     /// The folder path, or the link it was fetched from.
     public var origin: String
-    /// The commit it sits on. Updating moves it; nothing moves it on its own.
-    public var revision: String?
-    /// Short commit + subject of the revision, for the settings row.
-    public var revisionNote: String?
+    /// What the host last downloaded, so a check can ask whether anything changed before pulling the
+    /// whole archive again.
+    public var etag: String?
     /// What the library's own `library.json` said when it was added or last updated.
     public var manifest: SZLibraryManifest?
 
@@ -108,16 +126,17 @@ public struct SZAddedLibrary: Codable, Equatable, Sendable, Identifiable {
     public var source: SZLibrarySourceID { SZLibrarySourceID(rawValue: key) }
 
     public init(key: String, name: String, kind: Kind, origin: String,
-                revision: String? = nil, revisionNote: String? = nil,
-                manifest: SZLibraryManifest? = nil) {
+                etag: String? = nil, manifest: SZLibraryManifest? = nil) {
         self.key = key
         self.name = name
         self.kind = kind
         self.origin = origin
-        self.revision = revision
-        self.revisionNote = revisionNote
+        self.etag = etag
         self.manifest = manifest
     }
+
+    /// The version line under a settings row. Never a commit id: people do not read those.
+    public var versionNote: String? { manifest?.version.map { "Version \($0)" } }
 
     /// "by Someone · MIT · made with 0.4.0" — the provenance line under a settings row, only the
     /// parts the author actually filled in.
@@ -131,8 +150,9 @@ public struct SZAddedLibrary: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// What a link points at, once it is recognised. Only https git remotes are accepted: an ssh remote
-/// would need the user's key, and a bare path is the folder case.
+/// What a link points at, once it is recognised: somewhere to download a copy of a library from.
+/// Only https is accepted, since an ssh remote would need the user's key and a bare path is the
+/// folder case.
 public struct SZLibraryLink: Equatable, Sendable {
     public var url: String
     /// "owner/repo" when the link is a recognisable forge URL, else the last path component.
@@ -161,6 +181,20 @@ public struct SZLibraryLink: Equatable, Sendable {
         return SZLibraryLink(url: raw, shortName: short)
     }
 
+    /// Where to download this library's archive. A link that already names a tarball is taken as it
+    /// is; otherwise the host's own archive path for the default branch, which needs no branch guess
+    /// and no API call. Verified against GitHub, GitLab and Codeberg.
+    public var archiveURL: URL? {
+        let lower = url.lowercased()
+        if lower.hasSuffix(".tar.gz") || lower.hasSuffix(".tgz") { return URL(string: url) }
+        let repo = url.split(separator: "/").last.map(String.init) ?? "library"
+        let host = URL(string: url)?.host()?.lowercased() ?? ""
+        let path = host == "gitlab.com" || host.hasPrefix("gitlab.")
+            ? "\(url)/-/archive/HEAD/\(repo).tar.gz"
+            : "\(url)/archive/HEAD.tar.gz"
+        return URL(string: path)
+    }
+
     /// One path segment: letters, digits and the few punctuation marks forge names use.
     private static func isSegment(_ s: String) -> Bool {
         !s.isEmpty && s != "." && s != ".."
@@ -180,19 +214,30 @@ public enum SZLibraryKey {
     }
 }
 
-/// What changed between the revision a library sits on and the one it would move to.
+/// What a freshly downloaded copy of a library would change, and whether that is worth offering.
 public struct SZLibraryUpdate: Equatable, Sendable {
-    public var revision: String
+    /// What the fetched copy calls itself; nil when it says nothing.
+    public var version: String?
+    /// The sentence the settings row shows.
     public var note: String
+    /// Where the fetched copy is unpacked, so applying it does not download again. Empty when there
+    /// was nothing to fetch.
+    public var staged: String
+    /// Whether the row should offer Update. Not the same as "something changed": a version bump with
+    /// no node change is still an update, and equal versions are not one even if bytes differ.
+    public var offered: Bool
     public var added: [String]
     public var changed: [String]
     public var removed: [String]
 
     public var isEmpty: Bool { added.isEmpty && changed.isEmpty && removed.isEmpty }
 
-    public init(revision: String, note: String, added: [String], changed: [String], removed: [String]) {
-        self.revision = revision
+    public init(version: String? = nil, note: String, staged: String = "", offered: Bool,
+                added: [String] = [], changed: [String] = [], removed: [String] = []) {
+        self.version = version
         self.note = note
+        self.staged = staged
+        self.offered = offered
         self.added = added
         self.changed = changed
         self.removed = removed

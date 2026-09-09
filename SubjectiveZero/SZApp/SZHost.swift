@@ -377,8 +377,6 @@ final class SZHost {
     var addLibraryPresented = false
     /// What the last Check for Updates found per library, so Update applies exactly that revision.
     var pendingLibraryUpdates: [String: SZLibraryUpdate] = [:]
-    /// Whether My Library has somewhere to publish to; filled in when Settings opens.
-    internal(set) var myLibraryPublishable = false
     /// Library panel sections the user shut, by section id (a group, or a library key). A browsing
     /// habit, so it is remembered with the prefs rather than the project: opening someone else's
     /// project never rearranges the panel.
@@ -822,7 +820,8 @@ final class SZHost {
         // cards show WHY, not just that. After clearPerProjectState, so the details survive.
         classifyRebuildsAfterLoad()
         watchNodeSources(in: newURL)
-        refreshLibraryItems()   // the panel offers what this project's platform can run
+        Self.clearLibraryStaging()   // anything a previous run left mid-download
+        refreshLibraryItems()        // the panel offers what this project's platform can run
         // Fresh graph, fresh thumbs: blank every box (old-project frames must not flash on the new
         // canvas) and re-point the runtime's watch set — the refresh also prunes dead boxes.
         previewFrames.clear()

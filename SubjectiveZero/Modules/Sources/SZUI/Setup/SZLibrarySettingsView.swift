@@ -11,14 +11,12 @@ public struct SZLibrarySettingsView: View {
     /// nil until the first save creates the library.
     private let myLibraryCount: Int?
     private let myLibraryPath: String?
-    private let myLibraryCanPublish: Bool
     private let added: [SZAddedLibrary]
     private let addedCounts: [String: Int]
     /// Added libraries whose folder is not there right now.
     private let missing: Set<String>
     private let onShowInFinder: () -> Void
     private let onMove: () -> Void
-    private let onPublish: () async -> String
     private let onAdd: () -> Void
     private let onReveal: (SZAddedLibrary) -> Void
     /// The sentence to show, and whether there is actually something to move to. Two values, because
@@ -32,16 +30,12 @@ public struct SZLibrarySettingsView: View {
     @State private var busy: Set<String> = []
     /// Libraries whose check found something, so the row offers Update.
     @State private var updatable: Set<String> = []
-    @State private var publishNote: String?
-    @State private var publishing = false
     @State private var confirmingRemoval: String?
 
     public init(builtInCount: Int, myLibraryCount: Int?, myLibraryPath: String?,
-                myLibraryCanPublish: Bool = false,
                 added: [SZAddedLibrary] = [], addedCounts: [String: Int] = [:],
                 missing: Set<String> = [],
                 onShowInFinder: @escaping () -> Void, onMove: @escaping () -> Void,
-                onPublish: @escaping () async -> String = { "" },
                 onAdd: @escaping () -> Void = {},
                 onReveal: @escaping (SZAddedLibrary) -> Void = { _ in },
                 onCheckForUpdate: @escaping (String) async -> (note: String, hasUpdate: Bool) = { _ in ("", false) },
@@ -50,13 +44,11 @@ public struct SZLibrarySettingsView: View {
         self.builtInCount = builtInCount
         self.myLibraryCount = myLibraryCount
         self.myLibraryPath = myLibraryPath
-        self.myLibraryCanPublish = myLibraryCanPublish
         self.added = added
         self.addedCounts = addedCounts
         self.missing = missing
         self.onShowInFinder = onShowInFinder
         self.onMove = onMove
-        self.onPublish = onPublish
         self.onAdd = onAdd
         self.onReveal = onReveal
         self.onCheckForUpdate = onCheckForUpdate
@@ -103,19 +95,9 @@ public struct SZLibrarySettingsView: View {
         row(title: SZLibrarySourceID.mine.displayName,
             detail: myLibraryCount.map(nodes) ?? "Created the first time you save a node",
             path: myLibraryCount == nil ? nil : myLibraryPath,
-            note: publishNote) {
+            note: nil) {
             Button("Show in Finder") { onShowInFinder() }
             Button("Move…") { onMove() }
-            if myLibraryCanPublish {
-                Button(publishing ? "Publishing…" : "Publish") {
-                    publishing = true
-                    Task {
-                        publishNote = await onPublish()
-                        publishing = false
-                    }
-                }
-                .disabled(publishing)
-            }
         }
         .disabled(myLibraryCount == nil)
     }
@@ -130,7 +112,7 @@ public struct SZLibrarySettingsView: View {
         return row(title: library.name,
                    detail: [detail, library.provenance].compactMap { $0 }.joined(separator: " · "),
                    path: library.origin,
-                   note: notes[key] ?? library.revisionNote) {
+                   note: notes[key] ?? library.versionNote) {
             if library.kind == .folder {
                 Button("Show in Finder") { onReveal(library) }
             } else if updatable.contains(key) {
