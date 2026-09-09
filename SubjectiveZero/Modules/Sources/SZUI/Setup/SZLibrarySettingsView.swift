@@ -64,25 +64,26 @@ public struct SZLibrarySettingsView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Library").font(.system(size: 17, weight: .semibold))
-                Spacer()
-                Button("Add Library…") { onAdd() }
-                    .controlSize(.small)
-            }
+            Text("Library").font(.system(size: 17, weight: .semibold))
 
-            Text("The nodes the Library panel offers. Save a node from its menu on the canvas to keep it in your own library, or add someone else's.")
+            Text("Where the nodes you place come from. Save a node from its menu on the canvas to keep it, add someone else's from a link or a folder, or ask your agent to do any of it.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
 
             ScrollView {
-                VStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 10) {
                     builtInRow
                     myLibraryRow
                     ForEach(added) { library in
                         addedRow(library)
                     }
+                    // Under the rows, where it reads as "and one more", rather than up in the title.
+                    Button { onAdd() } label: {
+                        Label("Add Library…", systemImage: "plus")
+                    }
+                    .controlSize(.small)
+                    .padding(.top, 2)
                 }
             }
             Spacer(minLength: 0)
