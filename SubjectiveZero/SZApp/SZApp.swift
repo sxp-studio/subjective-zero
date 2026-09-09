@@ -1059,8 +1059,10 @@ struct SZApp: App {
                            offPlatformCount: host.libraryOffPlatformCount,
                            collapsed: host.libraryCollapsedGroups,
                            focusRequest: host.libraryFocusRequest,
+                           detailHeight: CGFloat(host.libraryDetailHeight),
                            onPlace: { host.placeFromLibrary($0) },
                            onToggleGroup: { host.toggleLibraryGroup($0) },
+                           onDetailHeightChanged: { host.setLibraryDetailHeight($0) },
                            onOpenLibrarySettings: { host.presentLibrarySettings() })
         case .chat:
             // One pass over the (small) live queue per body evaluation, not a scan per bubble row —

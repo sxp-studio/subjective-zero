@@ -23,6 +23,7 @@ public struct SZLibraryPanel: View {
     private let focusRequest: Int
     private let onPlace: (SZLibraryRef) -> Void
     private let onToggleGroup: (SZLibraryGroup) -> Void
+    private let onDetailHeightChanged: (CGFloat) -> Void
     private let onOpenLibrarySettings: () -> Void
 
     @State private var model: SZLibraryPanelModel
@@ -31,13 +32,23 @@ public struct SZLibraryPanel: View {
     /// clear it, so nothing flickers to empty on the way to the canvas.
     @State private var described: SZLibraryItem?
     @FocusState private var searchFocused: Bool
+    /// How tall the description strip is. It is the list that grows with the window; the strip
+    /// stays where the person put it.
+    @State private var detailHeight: CGFloat
+    /// The height the current drag measures from.
+    @State private var detailHeightAtDragStart: CGFloat = 0
 
     private static let rowHeight: CGFloat = 26
+    /// Two lines of summary under the title, which is what most nodes need.
+    public static let defaultDetailHeight: CGFloat = 58
+    private static let detailRange: ClosedRange<CGFloat> = 34...260
 
     public init(items: [SZLibraryItem], target: SZProjectTarget, offPlatformCount: Int = 0,
                 collapsed: Set<SZLibraryGroup> = [], focusRequest: Int,
+                detailHeight: CGFloat = SZLibraryPanel.defaultDetailHeight,
                 onPlace: @escaping (SZLibraryRef) -> Void,
                 onToggleGroup: @escaping (SZLibraryGroup) -> Void = { _ in },
+                onDetailHeightChanged: @escaping (CGFloat) -> Void = { _ in },
                 onOpenLibrarySettings: @escaping () -> Void) {
         self.items = items
         self.target = target
@@ -46,7 +57,9 @@ public struct SZLibraryPanel: View {
         self.focusRequest = focusRequest
         self.onPlace = onPlace
         self.onToggleGroup = onToggleGroup
+        self.onDetailHeightChanged = onDetailHeightChanged
         self.onOpenLibrarySettings = onOpenLibrarySettings
+        _detailHeight = State(initialValue: detailHeight.clamped(to: SZLibraryPanel.detailRange))
         _model = State(initialValue: SZLibraryPanelModel(items: items, target: target,
                                                          offPlatformCount: offPlatformCount,
                                                          collapsed: collapsed))
@@ -58,6 +71,7 @@ public struct SZLibraryPanel: View {
             if let note = model.offPlatformNote { offPlatformNote(note) }
             if model.showsSourceChips { sourceChips }
             list
+            detailDivider
             detail
             footer
         }
@@ -270,8 +284,23 @@ public struct SZLibraryPanel: View {
 
     // MARK: detail strip
 
+    /// The grab strip over the description: drag it up for more room, double click to put it back.
+    private var detailDivider: some View {
+        SZSidebarDivider(axis: .horizontal,
+                         onDragBegan: { detailHeightAtDragStart = detailHeight },
+                         onDrag: { travel in
+                             // Up is positive, and up is the direction that grows the strip.
+                             detailHeight = (detailHeightAtDragStart + travel).clamped(to: Self.detailRange)
+                         },
+                         onDoubleClick: { detailHeight = Self.defaultDetailHeight })
+            .frame(height: 7)
+            .overlay(Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1))
+            .onChange(of: detailHeight) { _, new in onDetailHeightChanged(new) }
+    }
+
     /// What the pointer is on, in full. A read-out, never a control: the moment it holds a button,
-    /// reaching that button means crossing rows that would repaint this.
+    /// reaching that button means crossing rows that would repaint this. Fixed height, so the list
+    /// takes every point the window gives and this stays as small as it was left.
     private var detail: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let item = described {
@@ -286,7 +315,6 @@ public struct SZLibraryPanel: View {
                 Text(item.summary)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                 let needs = Self.needs(item)
                 if !needs.isEmpty {
@@ -306,13 +334,12 @@ public struct SZLibraryPanel: View {
                     .font(.system(size: 11).italic())
                     .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 62, alignment: .topLeading)
-        .padding(.top, 7)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
-        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        // A long summary in a short strip is reachable rather than clipped away.
+        .modifier(SZScrollIfTaller())
+        .frame(height: detailHeight, alignment: .topLeading)
+        .clipped()
     }
 
     /// What the node asks for, in words rather than a glyph nobody can decode.
@@ -354,6 +381,21 @@ public struct SZLibraryPanel: View {
         guard let ref = model.activate() else { return false }
         onPlace(ref)
         return true
+    }
+}
+
+/// Lets the description scroll when it is taller than the strip the person left it, without
+/// making the strip itself scrollable-looking when it is not.
+private struct SZScrollIfTaller: ViewModifier {
+    func body(content: Content) -> some View {
+        ScrollView(.vertical, showsIndicators: false) { content }
+            .scrollBounceBehavior(.basedOnSize)
+    }
+}
+
+private extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }
 

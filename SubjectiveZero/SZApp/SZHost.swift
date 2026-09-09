@@ -372,6 +372,9 @@ final class SZHost {
     /// Libraries the user added: folders on this Mac and ones fetched from a link. Persisted with
     /// the prefs; `libraryRoots` reads them in this order after the two built-in ones.
     internal(set) var addedLibraries: [SZAddedLibrary] = SZAppStateIO.load()?.libraries ?? []
+    /// How tall the Library panel's description strip is, as the user left it.
+    internal(set) var libraryDetailHeight: Double = SZAppStateIO.load()?.libraryDetailHeight
+        ?? Double(SZLibraryPanel.defaultDetailHeight)
     /// The Add Library sheet, opened from Settings ▸ Library.
     var addLibraryPresented = false
     /// What the last Check for Updates found per library, so Update applies exactly that revision.

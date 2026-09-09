@@ -171,7 +171,8 @@ extension SZHost {
                                              myLibraryPath: myLibraryPath,
                                              libraryCollapsedGroups: libraryCollapsedGroups.isEmpty
                                                  ? nil : libraryCollapsedGroups.map(\.rawValue).sorted(),
-                                             libraries: addedLibraries.isEmpty ? nil : addedLibraries))
+                                             libraries: addedLibraries.isEmpty ? nil : addedLibraries,
+                                             libraryDetailHeight: libraryDetailHeight))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

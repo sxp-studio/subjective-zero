@@ -80,6 +80,13 @@ extension SZHost {
         }
     }
 
+    /// The description strip was dragged. A panel preference, so it rides with the prefs.
+    func setLibraryDetailHeight(_ height: CGFloat) {
+        guard abs(libraryDetailHeight - Double(height)) > 0.5 else { return }
+        libraryDetailHeight = Double(height)
+        persistAppState()
+    }
+
     // MARK: adding, updating and publishing libraries
 
     /// Settings ▸ Library ▸ Add Library: the folder picker, returning the path it chose.
