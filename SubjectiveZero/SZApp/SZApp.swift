@@ -441,13 +441,6 @@ struct SZApp: App {
                                      // afterwards the Providers pane closes with a plain Done.
                                      isFirstRun: host.defaultProviderID == nil,
                                      library: librarySettingsView)
-                // A menu item asked for a section: land there once, then the sheet remembers as usual.
-                .onAppear {
-                    if let requested = host.requestedSetupSection {
-                        setupSection = requested
-                        host.requestedSetupSection = nil
-                    }
-                }
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)

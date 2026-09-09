@@ -194,7 +194,7 @@ extension SZHost {
 
     /// Open Settings on the Library section.
     func presentLibrarySettings() {
-        requestedSetupSection = .library
+        setupSection = .library
         presentProviderSetup()
     }
 
