@@ -85,17 +85,21 @@ public struct SZLibrarySettingsView: View {
     }
 
     private var builtInRow: some View {
-        row(title: SZLibrarySourceID.builtIn.displayName,
-            detail: "\(nodes(builtInCount)), ships with the app", path: nil, note: nil) {
+        row(symbol: "shippingbox.fill", tint: .secondary,
+            title: SZLibrarySourceID.builtIn.displayName,
+            count: builtInCount,
+            detail: "Ships with the app", path: nil, note: nil, updateReady: false) {
             EmptyView()
         }
     }
 
     private var myLibraryRow: some View {
-        row(title: SZLibrarySourceID.mine.displayName,
-            detail: myLibraryCount.map(nodes) ?? "Created the first time you save a node",
+        row(symbol: "square.and.pencil", tint: Self.mine,
+            title: SZLibrarySourceID.mine.displayName,
+            count: myLibraryCount,
+            detail: myLibraryCount == nil ? "Created the first time you save a node" : "Yours to write to",
             path: myLibraryCount == nil ? nil : myLibraryPath,
-            note: nil) {
+            note: nil, updateReady: false) {
             Button("Show in Finder") { onShowInFinder() }
             Button("Move…") { onMove() }
         }
@@ -106,16 +110,22 @@ public struct SZLibrarySettingsView: View {
         let key = library.key
         let working = busy.contains(key)
         let gone = missing.contains(key)
-        // Who made it, under what license, and which app it was made with: what a person needs to
-        // decide whether to keep running someone else's code.
-        let detail = gone ? "This library isn't where it was" : nodes(addedCounts[key] ?? 0)
-        return row(title: library.name,
-                   detail: [detail, library.provenance].compactMap { $0 }.joined(separator: " · "),
+        let ready = updatable.contains(key)
+        // A folder is read where it lives; a link was downloaded. Different things, different glyph.
+        let fromFolder = library.kind == .folder
+        return row(symbol: fromFolder ? "folder.fill" : "arrow.down.circle.fill",
+                   tint: fromFolder ? Self.folder : Self.fetched,
+                   title: library.name,
+                   count: gone ? nil : addedCounts[key],
+                   // Who made it, under what license, and which app it was made with: what a person
+                   // needs to decide whether to keep running someone else's code.
+                   detail: gone ? "This library isn't where it was" : (library.provenance ?? "Added by you"),
                    path: library.origin,
-                   note: notes[key] ?? library.versionNote) {
-            if library.kind == .folder {
+                   note: notes[key] ?? library.versionNote,
+                   updateReady: ready) {
+            if fromFolder {
                 Button("Show in Finder") { onReveal(library) }
-            } else if updatable.contains(key) {
+            } else if ready {
                 Button(working ? "Updating…" : "Update") {
                     // Disarmed when the work finishes, not when the click lands: doing it here would
                     // flip the row to the check branch and label the update "Checking…".
@@ -125,6 +135,7 @@ public struct SZLibrarySettingsView: View {
                         return note
                     }
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(working)
             } else {
                 Button(working ? "Checking…" : "Check for Updates") {
@@ -162,28 +173,59 @@ public struct SZLibrarySettingsView: View {
 
     private func nodes(_ count: Int) -> String { count == 1 ? "1 node" : "\(count) nodes" }
 
-    private func row(title: String, detail: String, path: String?, note: String?,
+    /// Three kinds of library, told apart by their glyph rather than by reading: one ships with the
+    /// app, one is yours to write to, one came from somewhere else.
+    private static let mine = Color(red: 0.878, green: 0.643, blue: 0.290)
+    private static let folder = Color(red: 0.635, green: 0.518, blue: 0.851)
+    private static let fetched = Color(red: 0.349, green: 0.663, blue: 0.867)
+    private static let ready = Color(red: 0.408, green: 0.741, blue: 0.510)
+
+    private func row(symbol: String, tint: Color, title: String, count: Int?, detail: String,
+                     path: String?, note: String?, updateReady: Bool,
                      @ViewBuilder actions: () -> some View) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "books.vertical")
-                .font(.system(size: 18))
-                .foregroundStyle(.secondary)
-                .frame(width: 24)
+            VStack(spacing: 3) {
+                Image(systemName: symbol)
+                    .font(.system(size: 15))
+                    .foregroundStyle(tint)
+                if let count {
+                    // The one number that says what is in here, where the eye lands first.
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 34)
+            .padding(.top, 1)
+
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 6) {
+                    Text(title).font(.system(size: 13, weight: .semibold))
+                    if updateReady {
+                        // A state, not a note: the row has something waiting and says so where the
+                        // name is, rather than in the dimmest line on the card.
+                        Text("Update available")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(Self.ready)
+                            .padding(.horizontal, 6)
+                            .frame(height: 15)
+                            .background(Capsule().fill(Self.ready.opacity(0.16)))
+                    }
+                }
                 Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
                 if let path {
                     Text(path)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
                         .textSelection(.enabled)
-                        .lineLimit(2)
+                        .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 if let note, !note.isEmpty {
                     Text(note)
                         .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(updateReady ? AnyShapeStyle(Self.ready) : AnyShapeStyle(.tertiary))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -194,5 +236,9 @@ public struct SZLibrarySettingsView: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.05)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(updateReady ? Self.ready.opacity(0.35) : .clear)
+        )
     }
 }
