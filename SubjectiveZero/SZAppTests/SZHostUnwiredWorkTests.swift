@@ -192,6 +192,33 @@ struct SZHostUnwiredWorkTests {
         #expect(host.owedArrows(of: run).nodes == [other.id])
     }
 
+    @Test func anotherRunsStagedSplitDoesNotSilenceThisRunsArrow() {
+        // `graphOpStatus` is host-wide, and runs are concurrent. Read unscoped, a split staged by one
+        // run muted the arrow another run was admitted to wire — dropped from the brief and from
+        // `hasWorkLeft`, so that run settled complete with the arrow still standing.
+        let (graph, _, cloud) = pointCloudGraph()
+        let host = SZHost()
+        host.store.setProject(SZProject(name: "t", graph: graph))
+        let wiring = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "wiring"), instruction: "",
+                                ownsGraphOp: false, workSet: [cloud],
+                                unwiredIntent: [graph.connections[0].id], wiringOnly: [cloud])
+        let splitter = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "splitter"), instruction: "",
+                                  ownsGraphOp: true, workSet: [cloud],
+                                  unwiredIntent: [graph.connections[0].id], wiringOnly: [cloud])
+        host.activeRuns[wiring.taskID] = wiring
+        host.activeRuns[splitter.taskID] = splitter
+
+        host.graphOpStatus[cloud] = "Splitting"
+        #expect(host.owedArrows(of: wiring).nodes == [cloud])    // still the wiring run's to lay
+        #expect(host.owedArrows(of: wiring).arrows.count == 1)   // and still in its brief
+        #expect(host.owedArrows(of: splitter).nodes.isEmpty)     // the owner's own arrow still goes quiet
+
+        // The `work-left` step's read: the wiring run must not be told it is finished.
+        let owed = host.owedArrows(of: wiring).nodes
+        #expect(SZFacts(message: "", run: SZRun(workSet: [], round: 1, roundCap: 3, steers: [],
+                                                instruction: "", unwired: owed)).hasWorkLeft)
+    }
+
     @Test func aFullyWiredGraphOffersNothing() {
         var (graph, depth, cloud) = pointCloudGraph()
         graph.connections = [SZConnection(from: SZPortRef(node: depth, port: "depth"),

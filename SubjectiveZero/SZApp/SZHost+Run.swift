@@ -233,15 +233,20 @@ extension SZHost {
     /// a live read, which would race the user's own drag; not scoped to `owedWork` either, since a
     /// node leaves the dirty list at promote, exactly when its arrows still need noticing.
     ///
-    /// An arrow with an end a staged split/merge holds is left out. The fence refuses a data edge
-    /// there until the op settles, and the op rewires that end itself at commit, so briefing one
-    /// buys a reconcile round whose only possible answer is to restate the refusal. Only that end
+    /// An arrow with an end this run's own staged split/merge holds is left out. The fence refuses a
+    /// data edge there until the op settles, and the op rewires that end itself at commit, so briefing
+    /// one buys a reconcile round whose only possible answer is to restate the refusal. Only that end
     /// goes quiet: an unbuilt node or a wrong contract is still owed work and still reported.
+    ///
+    /// `graphOpStatus` is host-wide, so only the run that owns the op (`ownsGraphOp`) reads it. A
+    /// sibling run is not refused by the op, and muting its arrow would settle it complete over
+    /// wiring it was admitted to lay, with nobody left to notice.
     func owedArrows(of run: SZRunState) -> (arrows: [SZConnection], nodes: [SZNodeID]) {
         guard let graph = store.project?.graph else { return ([], []) }
+        let held = run.ownsGraphOp ? graphOpStatus : [:]
         let owed = run.unwiredIntent.subtracting(
             graph.connections
-                .filter { graphOpStatus[$0.from.node] != nil || graphOpStatus[$0.to.node] != nil }
+                .filter { held[$0.from.node] != nil || held[$0.to.node] != nil }
                 .map(\.id))
         return (graph.unwiredIntent(among: owed), graph.unwiredNodes(among: owed))
     }
