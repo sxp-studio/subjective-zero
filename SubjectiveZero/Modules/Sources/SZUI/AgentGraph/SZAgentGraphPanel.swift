@@ -55,6 +55,8 @@ public struct SZAgentGraphPanel: View {
     /// Every agent and its graphs — the Plan view browses all of them, director first.
     private let planAgents: [SZAgentGraphPlanAgent]
     /// The recorded runs, live first then newest — the host keeps the order, this draws it.
+    /// Routing passes are dropped on the way in (`SZAgentGraphRunList.lanes`), so the canvas
+    /// and the follow-the-head rule see the same records the sidebar lists.
     private let runs: [SZAgentGraphRun]
     /// Open a card's authored source in the user's editor, agent-qualified — the host
     /// resolves the materialized file. nil = the affordance is absent (tests, previews).
@@ -157,7 +159,7 @@ public struct SZAgentGraphPanel: View {
                 onConsumePlanFocus: @escaping () -> Void = {},
                 store: SZStore? = nil) {
         self.planAgents = planAgents
-        self.runs = runs
+        self.runs = SZAgentGraphRunList.lanes(runs)
         self.resolveGraph = resolveGraph
         self.nodeTitle = nodeTitle
         self.openStepSource = openStepSource

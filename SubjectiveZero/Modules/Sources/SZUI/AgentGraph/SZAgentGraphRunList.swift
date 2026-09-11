@@ -62,6 +62,21 @@ struct SZAgentGraphRunList: View {
         var isThread: Bool { traversals.count > 1 || traversals.first?.thread != nil }
     }
 
+    /// What the history lists: every record except a door-only routing pass. A delivery whose
+    /// graph ruled the words a build stops at its door, having minted the build as its whole
+    /// effect — one settled visit, no work, no thread of its own. The build it routed to is the
+    /// run, and a lane for the ruling beside it doubles the list. Structural, not by outcome
+    /// name: a traversal that visited only its door did nothing else, whatever the pack calls it.
+    /// Still listed: a door that failed, was declined or was stopped (the only record of a
+    /// message that got nothing), and any record that went on to a second node — a conversation
+    /// carries no ask either, and it is a real run.
+    nonisolated static func lanes(_ runs: [SZAgentGraphRun]) -> [SZAgentGraphRun] {
+        runs.filter { run in
+            !(run.conclusion == .ended && run.thread == nil && run.work == nil
+              && run.trace.count == 1 && run.trace[0].phase == .done)
+        }
+    }
+
     private var entries: [Entry] {
         var out: [Entry] = []
         var index: [UUID: Int] = [:]
@@ -183,7 +198,11 @@ struct SZAgentGraphRunList: View {
                                     : SZTurnBreakdown.format(ended!.timeIntervalSince(began)))
                                     .font(.system(size: 9, design: .monospaced))
                                     .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
                                     .contentTransition(.identity)
+                                // Same right edge as the member rows below it: the badge
+                                // trails the spacer, so headers and rows share one column.
+                                Spacer(minLength: 4)
                                 if live {
                                     SZPulsingOpacity(range: 0.35...1, halfPeriod: SZPulse.period / 2) {
                                         SZRunBadge.running()
@@ -193,7 +212,6 @@ struct SZAgentGraphRunList: View {
                                     // declined and stopped stay visible at thread level.
                                     SZRunBadge.forRun(director)
                                 }
-                                Spacer(minLength: 0)
                             }
                         }
                     }
@@ -235,6 +253,8 @@ struct SZRunBadge: View {
             .padding(.horizontal, 3)
             .padding(.vertical, 0.5)
             .background(Capsule().fill(colour))
+            // The state word never truncates: a squeezed row eats the text beside the badge.
+            .fixedSize()
     }
 
     /// In flight. One word, in the same plain tense as every ending below it — "live" was the odd
@@ -362,12 +382,18 @@ struct SZAgentGraphRunRow: View {
                                 ?? SZAgentGraphClock.stopwatch(context.date.timeIntervalSince(run.startedAt)))
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundStyle(.tertiary)
+                                .lineLimit(1)
                                 // Beside a pulsing badge — same cross-fade hazard as the
                                 // card's clock: swap the string, don't dissolve it.
                                 .contentTransition(.identity)
-                            badge
+                            // The endings sit on the panel's right edge, one column down the
+                            // list however long the words to their left run. The badge is
+                            // fixed-size and the texts truncate, so a narrow panel eats the
+                            // ruling, never the pill; the grade stays inboard of it so the
+                            // badge is always the rightmost thing on the line.
+                            Spacer(minLength: 4)
                             gradeTag
-                            Spacer(minLength: 0)
+                            badge
                         }
                     }
                 }
@@ -403,6 +429,7 @@ struct SZAgentGraphRunRow: View {
                 .padding(.horizontal, 4)
                 .padding(.vertical, 0.5)
                 .background(Capsule().fill(SZEdgeStyle.intentViolet.opacity(0.14)))
+                .fixedSize()
         }
     }
 
