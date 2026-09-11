@@ -218,12 +218,31 @@ extension SZHost {
             return false
         }
         let titles = ids.compactMap { store.project?.graph.node(id: $0)?.title }
+        // Read before the edges go: who held the viewport, and what fed the nodes leaving.
+        let endpointNode = store.project?.graph.renderEndpoint?.node
+        let feeders = Set((store.project?.graph.connections ?? [])
+            .filter { $0.kind == .data && ids.contains($0.to.node) }
+            .map(\.from.node))
         let removed = ids.filter { store.removeNode(id: $0) }
         guard !removed.isEmpty else { return false }
+        if let endpointNode, removed.contains(endpointNode) { adoptEndpointAfterDelete(fedBy: feeders) }
         noteMutation("removed node", titles.isEmpty ? ["\(removed.count) node(s)"] : titles, origin: origin)
         purgeChatArtifacts(for: removed)
         persistGraphEditAndReload(action: "deleted \(titles.isEmpty ? "\(removed.count) node(s)" : titles.joined(separator: ", "))")
         return true
+    }
+
+    /// The deleted node took the viewport with it: show what fed it, else the newest surviving sink,
+    /// rather than a black viewport with nothing selected. `runRenderEndpoint` is the run's own
+    /// adoption rule, so the same two refusals hold — generated sinks only (a timed-out node can
+    /// declare a texture it cannot render), and never a staged piece. The caller persists and reloads,
+    /// and the scheduler seeds its endpoint from the graph, so no live push is needed here.
+    private func adoptEndpointAfterDelete(fedBy feeders: Set<SZNodeID>) {
+        guard let graph = store.project?.graph else { return }
+        let surviving = Set(graph.nodes.map(\.id)).subtracting(hiddenPieces)
+        guard let ref = graph.runRenderEndpoint(workSet: feeders.intersection(surviving))
+                ?? graph.runRenderEndpoint(workSet: surviving) else { return }
+        store.setRenderEndpoint(ref)
     }
 
     /// Reset one scope's durable chat state — the shared teardown for the clear button and the node
