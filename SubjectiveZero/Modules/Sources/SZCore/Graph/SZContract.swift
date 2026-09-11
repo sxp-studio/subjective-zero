@@ -196,7 +196,7 @@ public extension SZPort {
 
 /// The editor control hint shown for an unconnected input (docs/GRAPH_AND_NODES.md). `filePicker` is how
 /// a `string` port marks itself as a path — there is no separate `file` type.
-public enum SZPortUIKind: String, Codable, Sendable {
+public enum SZPortUIKind: String, Codable, Sendable, CaseIterable {
     case slider, field, colorWell, toggle, dropdown, filePicker
 }
 

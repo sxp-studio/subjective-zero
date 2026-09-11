@@ -80,11 +80,11 @@ extension SZHostBridge {
                     "permissions": ["type": "array", "items": ["type": "string"],
                                     "description": "entitlements the node needs (camera, microphone, screenRecording)"],
                  ]),
-            tool("ui_edit_ports", "Change a node's typed I/O. The ONLY way to add, retype, or remove a port — `ui_update_node` cannot touch the port surface. Omitted ports are left alone; removal is explicit, so you can never drop a control by forgetting to re-send it. `upsert` matches by name: re-sending a port rewrites its declaration (that is how you retype it, or move a slider's range) and keeps the value the port already holds, along with any control hint you leave out. `ui_set_input_default` is the only way to change a value. A retype, or withdrawing an `enum` option that is in use, drops the value and the reply lists it in `droppedValues`. Editing the surface of an already-implemented node marks it for rebuild (`needsRebuild`) and joins it to any run in flight — it keeps rendering its old build until its Coding Agent regenerates it. Data edges and the render endpoint that name a removed or retyped port are dropped.",
+            tool("ui_edit_ports", "Change a node's typed I/O. The ONLY way to add, retype, or remove a port — `ui_update_node` cannot touch the port surface. Omitted ports are left alone; removal is explicit, so you can never drop a control by forgetting to re-send it. `upsert` matches by name: re-sending a port rewrites its declaration (that is how you retype it, or move a slider's range) and keeps the value the port already holds, along with any control hint you leave out. `ui_set_input_default` is the only way to change a value. A retype, or withdrawing an `enum` option that is in use, drops the value and the reply lists it in `droppedValues`. Editing the surface of an already-implemented node marks it for rebuild (`needsRebuild`) and joins it to any run in flight — it keeps rendering its old build until its Coding Agent regenerates it. Data edges and the render endpoint that name a removed or retyped port are dropped. Every `upsert` entry is a whole port declaration, per the schema below: `default` is an object naming its type ({ \"type\": \"float\", \"value\": 0.5 }), never a bare value, and a slider's `min`/`max`/`step` live inside `ui`.",
                  properties: [
                     "node": ["type": "string"],
-                    "inputs": ["type": "object", "description": "{ upsert: [Port], remove: [String] }"],
-                    "outputs": ["type": "object", "description": "{ upsert: [Port], remove: [String] }"],
+                    "inputs": portEditProperty("input"),
+                    "outputs": portEditProperty("output"),
                  ]),
             tool("ui_move_node", "Move a node to a new canvas position; returns the applied x/y (while snap-to-grid is on, the card's edges snap to the \(Int(SZNodeLayout.gridPitch))pt canvas grid — the echoed x/y center is the applied truth).",
                  properties: [
@@ -205,6 +205,62 @@ extension SZHostBridge {
     private nonisolated static var panelProperty: [String: Any] {
         ["type": "string", "enum": panelTokens,
          "description": "a panel — clones are instance-qualified (\"viewport:2\" = the tile titled Viewport 2)"]
+    }
+
+    /// One side of `ui_edit_ports`, with the port shape written out: this schema is the only
+    /// documentation a caller gets, and `default` (a tagged object, not a bare value) and `ui`
+    /// (where min/max/step live) are the two an agent guesses wrong.
+    private nonisolated static func portEditProperty(_ side: String) -> [String: Any] {
+        ["type": "object",
+         "description": "the \(side) ports to change; omitted ports are left alone",
+         "properties": [
+            "upsert": ["type": "array", "items": portSchema,
+                       "description": "ports to add or redeclare, matched by name"],
+            "remove": ["type": "array", "items": ["type": "string"],
+                       "description": "names of \(side) ports to drop"],
+         ]]
+    }
+
+    /// A port declaration as `ui_edit_ports` reads it (`SZPort`). `default` is the value an
+    /// unconnected input holds, tagged with its type so the JSON says what it carries.
+    private nonisolated static var portSchema: [String: Any] {
+        ["type": "object",
+         "required": ["name", "type"],
+         "properties": [
+            "name": ["type": "string", "description": "the name the node's code reads this port by"],
+            "type": ["type": "string", "enum": SZPortType.allCases.map(\.rawValue)],
+            "default": [
+                "type": "object",
+                "required": ["type", "value"],
+                "description": "the unconnected value, tagged with its type: { \"type\": \"float\", \"value\": 0.5 }. Never a bare number. `value` is a number for float and bool, a flat array of numbers for float2/3/4, colorRGB/colorRGBA and the matrices, a string for enum and string. texture, floatArray and event carry no default.",
+                "properties": [
+                    "type": ["type": "string", "enum": SZPortType.allCases.map(\.rawValue)],
+                    "value": ["type": ["number", "boolean", "array", "string"],
+                              "items": ["type": "number"],
+                              "description": "the value itself, in the form the `type` above takes"],
+                ],
+            ],
+            "ui": [
+                "type": "object",
+                "required": ["kind"],
+                "description": "the control to show for an unconnected input, and where a slider's range lives: { \"kind\": \"slider\", \"min\": 0, \"max\": 1, \"step\": 0.01 }",
+                "properties": [
+                    "kind": ["type": "string", "enum": SZPortUIKind.allCases.map(\.rawValue)],
+                    "min": ["type": "number"], "max": ["type": "number"], "step": ["type": "number"],
+                    "fileTypes": ["type": "array", "items": ["type": "string"],
+                                  "description": "filePicker only: accepted filename extensions, lower-case and without a dot"],
+                ],
+            ],
+            "options": [
+                "type": "array",
+                "description": "enum ports only: the choices the dropdown offers",
+                "items": ["type": "object", "required": ["label", "value"],
+                          "properties": ["value": ["type": "string", "description": "what the node's code switches on"],
+                                         "label": ["type": "string", "description": "what the dropdown shows"]]],
+            ],
+            "display": ["type": "boolean",
+                        "description": "texture outputs only: offer this port as the viewport's render endpoint"],
+         ]]
     }
 
     func handleUITool(name: String, arguments: [String: Any]) throws -> String? {
@@ -532,13 +588,31 @@ extension SZHostBridge {
     private func uiEditPorts(_ arguments: [String: Any]) throws -> String {
         guard let id = arguments.uuid("node") else { throw SZMCPError.message("ui_edit_ports needs `node` id") }
 
+        // A mis-shaped entry is answered in the app's own words: the decoder's text names Swift types
+        // and a coding path, which is not the vocabulary the caller wrote the JSON in.
         func ports(_ side: String) throws -> (upsert: [SZPort], remove: [String]) {
             guard let obj = arguments.object(side) else { return ([], []) }
-            let upsert = try (obj["upsert"] as? [[String: Any]] ?? []).map { raw -> SZPort in
-                let data = try JSONSerialization.data(withJSONObject: raw)
-                return try JSONDecoder().decode(SZPort.self, from: data)
+            var entries: [[String: Any]] = []
+            if let raw = obj["upsert"] {
+                guard let list = raw as? [[String: Any]] else {
+                    throw SZMCPError.message(Self.portShapeRefusal("`\(side).upsert` is a list of port objects"))
+                }
+                entries = list
             }
-            return (upsert, obj["remove"] as? [String] ?? [])
+            let upsert = try entries.enumerated().map { index, raw -> SZPort in
+                let data = try JSONSerialization.data(withJSONObject: raw)
+                do {
+                    return try JSONDecoder().decode(SZPort.self, from: data)
+                } catch {
+                    throw SZMCPError.message(Self.portShapeRefusal(
+                        Self.portProblem(error, entry: raw, side: side, index: index)))
+                }
+            }
+            guard let rawRemove = obj["remove"] else { return (upsert, []) }
+            guard let remove = rawRemove as? [String] else {
+                throw SZMCPError.message(Self.portShapeRefusal("`\(side).remove` is a list of port names"))
+            }
+            return (upsert, remove)
         }
         // This tool declares a port surface; `ui_set_input_default` is how an agent sets a value. A
         // file-port `def` that does change a value here rides the same import tail as any committed
@@ -581,6 +655,54 @@ extension SZHostBridge {
         // What the edit could not carry, said out loud: the agent can put the user's setting back, or say so.
         if !result.droppedValues.isEmpty { response["droppedValues"] = result.droppedValues }
         return SZJSONRPC.encode(response)
+    }
+
+    /// The one sentence a mis-shaped `ui_edit_ports` argument comes back as: what was wrong, then the
+    /// shape a port takes, so the caller can send the call again without reading the schema twice.
+    private static func portShapeRefusal(_ problem: String) -> String {
+        """
+        ui_edit_ports: \(problem). Nothing was changed.
+        A port looks like:
+          { "name": "mix", "type": "float",
+            "ui": { "kind": "slider", "min": 0, "max": 1, "step": 0.01 },
+            "default": { "type": "float", "value": 0.5 } }
+        `default` is an object naming its type, never a bare value, and `min`, `max` and `step` live inside `ui`.
+        """
+    }
+
+    /// What was wrong with one `upsert` entry, named by the port and the key the caller wrote.
+    private static func portProblem(_ error: Error, entry: [String: Any], side: String, index: Int) -> String {
+        let at = (entry["name"] as? String).map { "port `\($0)` in `\(side).upsert`" }
+            ?? "`\(side).upsert[\(index)]`"
+        guard let path = decodingKeyPath(error), let key = path.first else {
+            return "could not read \(at)"
+        }
+        let expected: String
+        switch key {
+        case "default":
+            expected = "`default` is an object naming the value's type, like { \"type\": \"float\", \"value\": 0.5 }"
+        case "ui":
+            expected = "`ui` is an object, like { \"kind\": \"slider\", \"min\": 0, \"max\": 1 }"
+        case "type":
+            expected = "`type` is one of " + SZPortType.allCases.map(\.rawValue).joined(separator: ", ")
+        case "name":
+            expected = "`name` is the string the node's code reads the port by"
+        case "options":
+            expected = "`options` is a list of { \"label\", \"value\" } objects, on an `enum` port"
+        default:
+            expected = "`\(path.joined(separator: "."))` is not part of a port"
+        }
+        return "could not read \(at): \(expected)"
+    }
+
+    /// The keys a `DecodingError` names, outermost first (`["default"]`, `["default", "value"]`).
+    private static func decodingKeyPath(_ error: Error) -> [String]? {
+        switch error as? DecodingError {
+        case .keyNotFound(let key, let context): context.codingPath.map(\.stringValue) + [key.stringValue]
+        case .typeMismatch(_, let context), .valueNotFound(_, let context), .dataCorrupted(let context):
+            context.codingPath.map(\.stringValue)
+        default: nil
+        }
     }
 
     private func uiMoveNode(_ arguments: [String: Any]) throws -> String {

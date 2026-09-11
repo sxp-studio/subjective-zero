@@ -112,6 +112,81 @@ private func arguments(_ json: String) throws -> [String: Any] {
     }
 }
 
+// MARK: - the port shape `ui_edit_ports` reads
+
+@Test @MainActor func aPortDefaultSentAsABareNumberIsRefusedInTheAppsOwnWords() throws {
+    // The shape an agent guesses: `default: 0.5`, with the range beside it instead of inside `ui`.
+    // The answer used to be the decoder's own — a Swift type name and a coding path — which is not
+    // the vocabulary the caller wrote the JSON in.
+    let host = SZHost()   // held: the bridge keeps it `unowned`
+    let bridge = SZHostBridge(host: host)
+    let args = try arguments("""
+        {"node": "\(UUID().uuidString)",
+         "inputs": {"upsert": [{"name": "mix", "type": "float", "default": 0.5, "min": 0, "max": 1}]}}
+        """)
+    #expect {
+        _ = try bridge.callTool(name: "ui_edit_ports", arguments: args)
+    } throws: { error in
+        let said = "\(error)"
+        return said.contains("ui_edit_ports")
+            && said.contains("port `mix`")                                  // which port
+            && said.contains("`default`")                                   // and which key
+            && said.contains(#"{ "type": "float", "value": 0.5 }"#)         // and the shape it takes
+            && said.contains("Nothing was changed.")
+            && !said.contains("DecodingError") && !said.contains("Dictionary<String, Any>")
+    }
+}
+
+@Test @MainActor func aPortControlSentAsAStringNamesTheKeyAndNotTheSwiftType() throws {
+    // `"ui": "slider"` — the other guess. Same channel, named by the key the caller wrote.
+    let host = SZHost()
+    let bridge = SZHostBridge(host: host)
+    let args = try arguments("""
+        {"node": "\(UUID().uuidString)",
+         "outputs": {"upsert": [{"name": "amount", "type": "float", "ui": "slider"}]}}
+        """)
+    #expect {
+        _ = try bridge.callTool(name: "ui_edit_ports", arguments: args)
+    } throws: { error in
+        let said = "\(error)"
+        return said.contains("port `amount` in `outputs.upsert`")
+            && said.contains("`ui` is an object")
+            && !said.contains("DecodingError")
+    }
+}
+
+@Test @MainActor func anUpsertThatIsNotAListOfPortsSaysSoRatherThanDroppingIt() throws {
+    // A non-list `upsert` used to read as "no ports sent" and come back as "needs at least one
+    // upsert or remove", which sends the caller looking in the wrong place.
+    let host = SZHost()
+    let bridge = SZHostBridge(host: host)
+    let args = try arguments(#"{"node": "\#(UUID().uuidString)", "inputs": {"upsert": "mix"}}"#)
+    #expect {
+        _ = try bridge.callTool(name: "ui_edit_ports", arguments: args)
+    } throws: { error in
+        "\(error)".contains("`inputs.upsert` is a list of port objects")
+    }
+}
+
+@Test @MainActor func theEditPortsSchemaSpellsOutThePortShape() {
+    // The schema is the documentation an agent calls this tool from: it used to say `[Port]` and
+    // define `Port` nowhere, so the two keys below were a guess.
+    let definition = SZHostBridge.toolDefinitions(for: .agent)
+        .first { $0["name"] as? String == "ui_edit_ports" }
+    let properties = (definition?["inputSchema"] as? [String: Any])?["properties"] as? [String: Any]
+    let port = ((properties?["inputs"] as? [String: Any])?["properties"] as? [String: Any])
+        .flatMap { ($0["upsert"] as? [String: Any])?["items"] as? [String: Any] }
+    let keys = port?["properties"] as? [String: Any]
+    #expect(port?["required"] as? [String] == ["name", "type"])
+    #expect(keys?["name"] != nil && keys?["type"] != nil && keys?["options"] != nil)
+    // `default` is an object of {type, value}, not a bare value, and a slider's range is in `ui`.
+    #expect((keys?["default"] as? [String: Any])?["type"] as? String == "object")
+    let ui = keys?["ui"] as? [String: Any]
+    #expect((ui?["properties"] as? [String: Any])?["min"] != nil)
+    #expect(((ui?["properties"] as? [String: Any])?["kind"] as? [String: Any])?["enum"] as? [String]
+            == SZPortUIKind.allCases.map(\.rawValue))
+}
+
 // MARK: - one JSON shape
 
 @Test @MainActor func annotatedAndPlainPayloadsAreEncodedIdentically() throws {

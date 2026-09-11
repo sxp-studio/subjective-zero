@@ -552,12 +552,13 @@ extension SZHost {
     /// build over disjoint nodes starts alongside; one that overlaps waits for the holder.
     /// `narrateContention` quiets only the transient claim-contention line — the admission
     /// path auto-retries that case, so per-attempt narration would be advice to a user who
-    /// has nothing to do.
+    /// has nothing to do. `title` names a run the instruction can't: a split or a merge carries
+    /// no words, so without one the strip, header and receipt fall back to a bare "Build".
     @discardableResult
-    func startRun(instruction: String = "", nodes: Set<SZNodeID> = [],
+    func startRun(instruction: String = "", title: String? = nil, nodes: Set<SZNodeID> = [],
                   narrateContention: Bool = true,
                   adoptStagedGraphOp: Bool = false) -> RunStart {
-        startRun(task: SZTask(title: SZTask.title(fromInstruction: instruction, nodeCount: 0),
+        startRun(task: SZTask(title: title ?? SZTask.title(fromInstruction: instruction, nodeCount: 0),
                               instruction: instruction, workSet: nodes),
                  narrateContention: narrateContention,
                  adoptStagedGraphOp: adoptStagedGraphOp)

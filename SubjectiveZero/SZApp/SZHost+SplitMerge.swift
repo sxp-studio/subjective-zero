@@ -49,10 +49,12 @@ extension SZHost {
         seedSplitPrompts(pieceIDs, original: title, intent: intent, source: source, instruction: instruction)
         _ = firstPiece
 
+        // Made once: it is staged below, and it names the run that implements it.
+        let op = SZPendingGraphOp.split(original: id, pieces: pieceIDs, title: title)
         if run {
             graphOpStatus[id] = "Splitting"                 // the original stays, flagged
             hiddenPieces.formUnion(pieceIDs)                // the stages stay hidden until commit
-            pendingGraphOp = .split(original: id, pieces: pieceIDs, title: title)
+            pendingGraphOp = op
             claimGraphOpSlot(label: "split of '\(title)'")
             persistGraphEditAndReload(action: "splitting \(title)…")
             narrateDirector("Splitting \(title) into \(pieceIDs.count) stages…")
@@ -64,7 +66,8 @@ extension SZHost {
         if run {
             // Start a run, or join the one already in flight. Staging begins no run of its own, so a
             // Director splitting mid-turn does not nest a run — the run it is already inside drains this op.
-            guard startOrJoinRun(rollbackReason: "split of \(title) cancelled") else { return nil }
+            guard startOrJoinRun(title: op.runTitle,
+                                 rollbackReason: "split of \(title) cancelled") else { return nil }
         } else {
             purgeChatArtifacts(for: [id])   // the structural split removed the original immediately
             persistGraphEditAndReload(action: "split \(title) into \(pieceIDs.count)")
@@ -119,10 +122,12 @@ extension SZHost {
             store.updateNode(id: mergedID, prompt: prompt)
         }
 
+        // Made once: it is staged below, and it names the run that implements it.
+        let op = SZPendingGraphOp.merge(constituents: ids, merged: mergedID)
         if run {
             for cid in ids { graphOpStatus[cid] = "Merging" }   // the constituents stay, flagged
             hiddenPieces.insert(mergedID)                        // the merged node stays hidden until commit
-            pendingGraphOp = .merge(constituents: ids, merged: mergedID)
+            pendingGraphOp = op
             claimGraphOpSlot(label: "merge of \(ids.count) nodes")
             persistGraphEditAndReload(action: "merging \(constituents.count) nodes…")
             narrateDirector("Merging \(constituents.map(\.title).joined(separator: " + ")) into one node…")
@@ -130,7 +135,7 @@ extension SZHost {
         noteRunCreatedWork([mergedID])   // the merged node is the fleet's work (no-op off-run)
 
         if run {
-            guard startOrJoinRun(rollbackReason: "merge cancelled") else { return nil }
+            guard startOrJoinRun(title: op.runTitle, rollbackReason: "merge cancelled") else { return nil }
         } else {
             purgeChatArtifacts(for: ids)   // the structural merge removed the constituents immediately
             persistGraphEditAndReload(action: "merged \(constituents.count) nodes")
@@ -163,7 +168,9 @@ extension SZHost {
     /// strand the op: staged pieces nobody implements, a "Splitting" pill that never clears, and — because
     /// `graphOpStatus` locks the card (`SZNodeCanvasContentView.isLocked`) — a node locked for good.
     /// Roll back instead. Returns false when the op was rolled back and the caller should report failure.
-    private func startOrJoinRun(rollbackReason: String) -> Bool {
+    /// `title` names the run it starts: an op carries no instruction, so the strip lane, chat header
+    /// and receipt would otherwise read as a nameless build.
+    private func startOrJoinRun(title: String, rollbackReason: String) -> Bool {
         // Join the caller's run — the Director restructuring inside its own turn — whose tail
         // drains `pendingGraphOp`. Another run being live says nothing about ours, and the run
         // that joins is the one that owns the op: without this the ownership flag stays with
@@ -172,7 +179,7 @@ extension SZHost {
             caller.ownsGraphOp = true
             return true
         }
-        guard startRun(adoptStagedGraphOp: true) == .started else {
+        guard startRun(title: title, adoptStagedGraphOp: true) == .started else {
             rollbackGraphOp(reason: "\(rollbackReason) — the run could not start"); return false
         }
         return true

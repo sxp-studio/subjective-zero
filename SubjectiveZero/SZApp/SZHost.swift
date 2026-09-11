@@ -22,6 +22,15 @@ import SZUI
 enum SZPendingGraphOp {
     case split(original: SZNodeID, pieces: [SZNodeID], title: String)
     case merge(constituents: [SZNodeID], merged: SZNodeID)
+
+    /// What the run strip, the chat header and the receipt call the run that implements this op. An op
+    /// is staged by a menu item or a tool call and carries no instruction, so nothing else names it.
+    var runTitle: String {
+        switch self {
+        case .split(_, let pieces, let title): "Split \(title) into \(pieces.count) stages"
+        case .merge(let constituents, _): "Merge \(constituents.count) nodes into one"
+        }
+    }
 }
 
 @MainActor

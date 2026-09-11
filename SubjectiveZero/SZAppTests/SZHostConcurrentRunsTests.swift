@@ -127,6 +127,30 @@ struct SZHostConcurrentRunsTests {
         #expect(SZTask.title(fromInstruction: "warmer\nand slower", nodeCount: 0) == "warmer")
         #expect(SZTask.title(fromInstruction: String(repeating: "x", count: 80), nodeCount: 0).count == 60)
     }
+
+    @Test func anUncountedBuildIsNamedForItselfAndNeverForZeroNodes() {
+        // Most callers pass 0 because they never counted (a split, the Build press over wiring-only
+        // work, a bare requestBuild). "Implement 0 nodes" reached the strip, the header and the receipt.
+        #expect(SZTask.title(fromInstruction: "", nodeCount: 0) == "Build")
+        #expect(SZTask.title(fromInstruction: "", nodeCount: -1) == "Build")
+        #expect(!SZTask.title(fromInstruction: "", nodeCount: 0).contains("0"))
+        // And the name survives the rule the strip and the receipt put it through.
+        #expect(SZBuildName.short(SZTask.title(fromInstruction: "", nodeCount: 0)) == "Build")
+    }
+
+    @Test func aStagedOpNamesItsOwnRun() {
+        // A split or merge carries no instruction, so these words are the only ones the strip lane,
+        // the chat header and the receipt have. They read as what happened, and they survive the
+        // naming rule those three surfaces put every title through.
+        let split = SZPendingGraphOp.split(original: UUID(), pieces: [UUID(), UUID()],
+                                           title: "Kaleidoscope")
+        #expect(split.runTitle == "Split Kaleidoscope into 2 stages")
+        #expect(SZBuildName.short(split.runTitle) == "Split Kaleidoscope into 2 stages")
+
+        let merge = SZPendingGraphOp.merge(constituents: [UUID(), UUID(), UUID()], merged: UUID())
+        #expect(merge.runTitle == "Merge 3 nodes into one")
+        #expect(SZBuildName.short(merge.runTitle) == "Merge 3 nodes into one")
+    }
 }
 
 /// Amending work that has not started — the scheduler's other half. A pending task can still be
