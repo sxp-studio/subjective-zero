@@ -154,6 +154,44 @@ struct SZHostUnwiredWorkTests {
         #expect(backwards.unwiredNodes(in: [depth, cloud]) == [depth])
     }
 
+    @Test func anArrowAStagedSplitHoldsIsNotAnOpenItem() {
+        // The fence refuses a data edge on a node mid-split, and the op rewires that end itself at
+        // commit. Left in the brief, the Director reported the refusal, reconciled, was refused
+        // again, and paid a full turn per round to restate it.
+        let (graph, depth, cloud) = pointCloudGraph()
+        let host = SZHost()
+        host.store.setProject(SZProject(name: "t", graph: graph))
+        let run = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "run"), instruction: "",
+                             ownsGraphOp: true, workSet: [cloud],
+                             unwiredIntent: [graph.connections[0].id], wiringOnly: [cloud])
+
+        #expect(host.owedArrows(of: run).nodes == [cloud])      // owed while nothing holds it
+        host.graphOpStatus[cloud] = "Splitting"
+        #expect(host.owedArrows(of: run).arrows.isEmpty)        // the brief's list
+        #expect(host.owedArrows(of: run).nodes.isEmpty)         // `hasWorkLeft`'s evidence
+        // The source end too: `ui_connect` fences both.
+        host.graphOpStatus = [depth: "Splitting"]
+        #expect(host.owedArrows(of: run).nodes.isEmpty)
+    }
+
+    @Test func aStagedSplitSilencesOnlyItsOwnArrow() {
+        // The over-correction to avoid: a held end must not mute the rest of the round. Another
+        // arrow the Director can still lay stays owed, so the run keeps reconciling for it.
+        let (graph, depth, cloud) = pointCloudGraph()
+        let other = built("Bloom", inputs: [SZPort(name: "in", type: .texture)])
+        var wider = graph
+        wider.nodes.append(other)
+        wider.connections.append(flow(depth, other.id))
+        let host = SZHost()
+        host.store.setProject(SZProject(name: "t", graph: wider))
+        let run = SZRunState(taskID: UUID(), claim: SZClaimToken(label: "run"), instruction: "",
+                             ownsGraphOp: true, workSet: [cloud, other.id],
+                             unwiredIntent: Set(wider.connections.map(\.id)))
+
+        host.graphOpStatus[cloud] = "Splitting"
+        #expect(host.owedArrows(of: run).nodes == [other.id])
+    }
+
     @Test func aFullyWiredGraphOffersNothing() {
         var (graph, depth, cloud) = pointCloudGraph()
         graph.connections = [SZConnection(from: SZPortRef(node: depth, port: "depth"),

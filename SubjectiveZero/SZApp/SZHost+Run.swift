@@ -228,6 +228,24 @@ extension SZHost {
         return owed
     }
 
+    /// The arrows a run still owes and the nodes they land on — the Director brief's `{{unwired}}`
+    /// and flow list, and `hasWorkLeft`'s other evidence. Captured at admission, still standing: not
+    /// a live read, which would race the user's own drag; not scoped to `owedWork` either, since a
+    /// node leaves the dirty list at promote, exactly when its arrows still need noticing.
+    ///
+    /// An arrow with an end a staged split/merge holds is left out. The fence refuses a data edge
+    /// there until the op settles, and the op rewires that end itself at commit, so briefing one
+    /// buys a reconcile round whose only possible answer is to restate the refusal. Only that end
+    /// goes quiet: an unbuilt node or a wrong contract is still owed work and still reported.
+    func owedArrows(of run: SZRunState) -> (arrows: [SZConnection], nodes: [SZNodeID]) {
+        guard let graph = store.project?.graph else { return ([], []) }
+        let owed = run.unwiredIntent.subtracting(
+            graph.connections
+                .filter { graphOpStatus[$0.from.node] != nil || graphOpStatus[$0.to.node] != nil }
+                .map(\.id))
+        return (graph.unwiredIntent(among: owed), graph.unwiredNodes(among: owed))
+    }
+
     /// Whether a node that needs no rebuild is still this run's to answer: it promoted under this
     /// run and faults at render, or its agent reported a blocker no later promote has cleared
     /// (`clearTransientAgentStateAfterPromote`), with the round cap bounding the retries either way.
@@ -898,11 +916,7 @@ extension SZHost {
                 guard let self else { return SZWorld() }
                 let graph = self.store.project?.graph
                 let scoped = self.owedWork(of: run)
-                // The arrows this run owes: captured at admission, still standing. Not a live read,
-                // which would race the user's own drag; not scoped to `scoped` either, since a node
-                // leaves the dirty list at promote, exactly when its arrows still need noticing.
-                let arrows = graph?.unwiredIntent(among: run.unwiredIntent) ?? []
-                let unwired = graph?.unwiredNodes(among: run.unwiredIntent) ?? []
+                let owed = self.owedArrows(of: run)
                 // The chat that led here, minus the delivery that scheduled this run (its words
                 // are the instruction), one mid-delivery now, and whatever is queued behind it.
                 let director = SZChatScope.director.key
@@ -914,11 +928,11 @@ extension SZHost {
                     resuming: directorGraph.resumes(run.directorSession, agent: directorID,
                                                     router: router),
                     run: SZRun(workSet: scoped, round: state.round, roundCap: roundCap,
-                               steers: state.steers, instruction: instruction, unwired: unwired,
+                               steers: state.steers, instruction: instruction, unwired: owed.nodes,
                                intent: run.intent?.rawValue),
                     mutations: self.mutationJournal.entries(since: state.mutationCursor),
                     conversation: self.conversation(for: .director, excluding: notPrior),
-                    unwiredArrows: arrows)
+                    unwiredArrows: owed.arrows)
             },
             turn: { [weak self] order, opened in
                 guard let self else { return SZTurnReport(failed: true, detail: "the host is gone") }
