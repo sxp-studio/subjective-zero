@@ -405,10 +405,12 @@ public struct SZNodeEditorPanel: View {
             // Decoration + pinch pivot only — deliberately not an input router: hover is not
             // delivered while a button is held and needs pointer motion to resume, so anything
             // gated on it (scroll pan, once) dies silently until the mouse is moved.
+            // Only write on a real move: SwiftUI re-dispatches hover after every layout change, so an
+            // unconditional write re-dirties the view graph inside the same flush during a relayout storm.
             .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
                 switch phase {
-                case .active(let p): cursor = p
-                case .ended: cursor = nil
+                case .active(let p): if cursor != p { cursor = p }
+                case .ended: if cursor != nil { cursor = nil }
                 }
             }
             .simultaneousGesture(zoomGesture)

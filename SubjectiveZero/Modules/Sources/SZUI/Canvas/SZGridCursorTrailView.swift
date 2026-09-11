@@ -40,6 +40,8 @@ struct SZGridCursorTrailView: View {
     // Tuning. Base grid dots are 1pt-radius, white @ 0.16.
     private static let fadeWindow: TimeInterval = 0.8   // how long a passed-over cell takes to settle back ("slow")
     private static let sampleGap: CGFloat = 7           // min pointer travel before a new trail sample
+    private static let pruneTick: TimeInterval = 0.25   // how often the drain check runs; the fade itself is
+                                                        // real-time, so this only delays the dismount
     private static let trailCap = 128                   // safety bound; the real bound is age (fadeWindow), so a
                                                         // long swipe still fades evenly instead of being truncated
     private static let baseReach: CGFloat = 72          // constant on-screen reach (px) at normal / zoomed-out levels
@@ -69,10 +71,12 @@ struct SZGridCursorTrailView: View {
                 TimelineView(.animation) { timeline in
                     let now = timeline.date.timeIntervalSinceReferenceDate
                     Canvas { context, _ in drawField(context, now: now) }
-                        // Drop settled samples so the trail empties and this timeline can dismount. Runs in
-                        // an action handler (not during body eval) and only mutates on the rare frame where
-                        // a sample crosses the fade threshold — not a per-frame write.
-                        .onChange(of: timeline.date) { _, _ in prune(now: now) }
+                        // Drop settled samples so the trail empties and this timeline can dismount.
+                        // Keyed on a coarse tick, not on `timeline.date`: the date is new on every
+                        // evaluation, so anything that evaluates the graph twice inside one flush (hover
+                        // re-dispatch during a relayout) runs this action twice in the same frame, writing
+                        // `trail` from inside that flush.
+                        .onChange(of: Int(now / Self.pruneTick)) { _, _ in prune(now: now) }
                 }
             }
         }
