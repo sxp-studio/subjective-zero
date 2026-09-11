@@ -235,14 +235,16 @@ extension SZHost {
     /// The deleted node took the viewport with it: show what fed it, else the newest surviving sink,
     /// rather than a black viewport with nothing selected. `runRenderEndpoint` is the run's own
     /// adoption rule, so the same two refusals hold — generated sinks only (a timed-out node can
-    /// declare a texture it cannot render), and never a staged piece. The caller persists and reloads,
-    /// and the scheduler seeds its endpoint from the graph, so no live push is needed here.
+    /// declare a texture it cannot render), and never a staged piece. Pushes it live like every other
+    /// endpoint move: the caller's reload reseeds the scheduler, but it bails when the project has no
+    /// file yet or a save throws, and the store would then point at an endpoint the runtime never heard.
     private func adoptEndpointAfterDelete(fedBy feeders: Set<SZNodeID>) {
         guard let graph = store.project?.graph else { return }
         let surviving = Set(graph.nodes.map(\.id)).subtracting(hiddenPieces)
         guard let ref = graph.runRenderEndpoint(workSet: feeders.intersection(surviving))
-                ?? graph.runRenderEndpoint(workSet: surviving) else { return }
-        store.setRenderEndpoint(ref)
+                ?? graph.runRenderEndpoint(workSet: surviving),
+              store.setRenderEndpoint(ref) else { return }
+        backend?.setRenderEndpoint(ref)
     }
 
     /// Reset one scope's durable chat state — the shared teardown for the clear button and the node

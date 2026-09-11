@@ -168,6 +168,87 @@ private func arguments(_ json: String) throws -> [String: Any] {
     }
 }
 
+@Test @MainActor func anEnumPortDeclaredAsPositionalPairsIsAccepted() throws {
+    // `SZEnumOption` decodes an unkeyed pair, so the documented `[label, value]` form has to be the
+    // one the tool takes.
+    let id = SZNodeID()
+    let node = SZNode(id: id, kind: .generated, title: "Effect",
+                      contract: SZNodeContract(title: "Effect", sfSymbol: "s", summary: "",
+                                               inputs: [], outputs: []),
+                      position: SZPoint(x: 0, y: 0))
+    let host = SZHost()
+    host.store.setProject(SZProject(name: "t", graph: SZGraph(nodes: [node])))
+    let bridge = SZHostBridge(host: host)
+    let args = try arguments("""
+        {"node": "\(id.uuidString)",
+         "inputs": {"upsert": [{"name": "mode", "type": "enum",
+                                "options": [["Warm", "warm"], ["Cool", "cool"]],
+                                "default": {"type": "enum", "value": "warm"}}]}}
+        """)
+    _ = try bridge.callTool(name: "ui_edit_ports", arguments: args)
+    let port = host.store.project?.graph.node(id: id)?.contract?.inputs.first
+    #expect(port?.options == [SZEnumOption(label: "Warm", value: "warm"),
+                              SZEnumOption(label: "Cool", value: "cool")])
+    #expect(port?.def == .enumeration("warm"))
+}
+
+@Test @MainActor func enumOptionsSentAsObjectsAreAnsweredWithThePairForm() throws {
+    // The wrong guess is the object form; answering with it again loops the caller through the same
+    // refusal.
+    let host = SZHost()
+    let bridge = SZHostBridge(host: host)
+    let args = try arguments("""
+        {"node": "\(UUID().uuidString)",
+         "inputs": {"upsert": [{"name": "mode", "type": "enum",
+                                "options": [{"label": "Warm", "value": "warm"}]}]}}
+        """)
+    #expect {
+        _ = try bridge.callTool(name: "ui_edit_ports", arguments: args)
+    } throws: { error in
+        let said = "\(error)"
+        return said.contains("port `mode`")
+            && said.contains("[label, value] string pairs")
+            && said.contains(#"[["Warm", "warm"]"#)
+            && !said.contains(#"{ "label", "value" }"#)
+    }
+}
+
+@Test @MainActor func aTextureDefaultIsToldTheTypeCarriesNoDefault() throws {
+    // The tagged object is the right shape here; the type is what has no by-value default, so the
+    // "tag your default" answer would describe what the caller already sent.
+    let host = SZHost()
+    let bridge = SZHostBridge(host: host)
+    let args = try arguments("""
+        {"node": "\(UUID().uuidString)",
+         "inputs": {"upsert": [{"name": "src", "type": "texture",
+                                "default": {"type": "texture", "value": 0}}]}}
+        """)
+    #expect {
+        _ = try bridge.callTool(name: "ui_edit_ports", arguments: args)
+    } throws: { error in
+        let said = "\(error)"
+        return said.contains("takes no default")
+            && !said.contains("naming the value's type")
+    }
+}
+
+@Test @MainActor func theSchemaSaysEnumOptionsArePositionalPairs() throws {
+    // The schema is what an agent copies the call from, so its item shape has to be one
+    // `SZEnumOption` decodes: an object shape documented a call that always came back refused.
+    let definition = SZHostBridge.toolDefinitions(for: .agent)
+        .first { $0["name"] as? String == "ui_edit_ports" }
+    let properties = (definition?["inputSchema"] as? [String: Any])?["properties"] as? [String: Any]
+    let port = ((properties?["inputs"] as? [String: Any])?["properties"] as? [String: Any])
+        .flatMap { ($0["upsert"] as? [String: Any])?["items"] as? [String: Any] }
+    let options = try #require((port?["properties"] as? [String: Any])?["options"] as? [String: Any])
+    let item = try #require(options["items"] as? [String: Any])
+    #expect(item["type"] as? String == "array")
+    #expect((item["items"] as? [String: Any])?["type"] as? String == "string")
+    // and the example it shows is one the decoder takes
+    #expect(try JSONDecoder().decode([SZEnumOption].self, from: Data(#"[["Warm", "warm"]]"#.utf8))
+            == [SZEnumOption(label: "Warm", value: "warm")])
+}
+
 @Test @MainActor func theEditPortsSchemaSpellsOutThePortShape() {
     // The schema is the documentation an agent calls this tool from: it used to say `[Port]` and
     // define `Port` nowhere, so the two keys below were a guess.

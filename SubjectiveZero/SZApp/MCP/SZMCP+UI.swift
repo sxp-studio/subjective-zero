@@ -253,10 +253,11 @@ extension SZHostBridge {
             ],
             "options": [
                 "type": "array",
-                "description": "enum ports only: the choices the dropdown offers",
-                "items": ["type": "object", "required": ["label", "value"],
-                          "properties": ["value": ["type": "string", "description": "what the node's code switches on"],
-                                         "label": ["type": "string", "description": "what the dropdown shows"]]],
+                "description": "enum ports only: the choices the dropdown offers, each a two-string pair "
+                    + "[label, value]: [[\"Warm\", \"warm\"], [\"Cool\", \"cool\"]]. Never an object.",
+                "items": ["type": "array", "minItems": 2, "maxItems": 2,
+                          "items": ["type": "string"],
+                          "description": "[what the dropdown shows, what the node's code switches on]"],
             ],
             "display": ["type": "boolean",
                         "description": "texture outputs only: offer this port as the viewport's render endpoint"],
@@ -678,7 +679,13 @@ extension SZHostBridge {
             return "could not read \(at)"
         }
         let expected: String
+        // a texture or floatArray default faults on `default.type`, so the plain "tag your default" answer
+        // would hand back the object shape the caller already wrote. Read the tag to tell the two apart.
+        let defaultType = (entry["default"] as? [String: Any])?["type"] as? String
         switch key {
+        case "default" where defaultType == "texture" || defaultType == "floatArray":
+            expected = "a texture or floatArray port takes no default: it only ever carries a connection, "
+                + "so leave `default` off"
         case "default":
             expected = "`default` is an object naming the value's type, like { \"type\": \"float\", \"value\": 0.5 }"
         case "ui":
@@ -688,7 +695,8 @@ extension SZHostBridge {
         case "name":
             expected = "`name` is the string the node's code reads the port by"
         case "options":
-            expected = "`options` is a list of { \"label\", \"value\" } objects, on an `enum` port"
+            expected = "`options` is a list of [label, value] string pairs on an `enum` port, "
+                + "like [[\"Warm\", \"warm\"], [\"Cool\", \"cool\"]]"
         default:
             expected = "`\(path.joined(separator: "."))` is not part of a port"
         }
