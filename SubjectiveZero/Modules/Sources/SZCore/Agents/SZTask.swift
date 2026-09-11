@@ -72,9 +72,8 @@ public extension SZTask {
     /// A title from the words that scheduled it: the first line, clipped. Falls back for an
     /// instruction-less Build press, which is scheduled by a button, not a sentence.
     ///
-    /// `nodeCount` 0 means uncounted, not "no nodes" — most callers never count. A count is only
-    /// shown when there is one, so the fallback never reads "Implement 0 nodes"; a caller that
-    /// knows what its run is for passes its own title instead.
+    /// `nodeCount` 0 means uncounted, not "no nodes": a count is shown only when there is one, so
+    /// this never reads "Implement 0 nodes". A caller that knows its run passes its own title.
     static func title(fromInstruction instruction: String, nodeCount: Int) -> String {
         let firstLine = instruction
             .split(separator: "\n", omittingEmptySubsequences: true).first

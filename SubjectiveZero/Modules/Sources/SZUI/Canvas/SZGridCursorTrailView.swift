@@ -73,9 +73,8 @@ struct SZGridCursorTrailView: View {
                     Canvas { context, _ in drawField(context, now: now) }
                         // Drop settled samples so the trail empties and this timeline can dismount.
                         // Keyed on a coarse tick, not on `timeline.date`: the date is new on every
-                        // evaluation, so anything that evaluates the graph twice inside one flush (hover
-                        // re-dispatch during a relayout) runs this action twice in the same frame, writing
-                        // `trail` from inside that flush.
+                        // evaluation, so anything evaluating the graph twice in one flush (hover
+                        // re-dispatch during a relayout) runs this action twice in the same frame.
                         .onChange(of: Int(now / Self.pruneTick)) { _, _ in prune(now: now) }
                 }
             }

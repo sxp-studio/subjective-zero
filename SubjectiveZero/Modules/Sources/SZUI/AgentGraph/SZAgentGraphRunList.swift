@@ -62,14 +62,10 @@ struct SZAgentGraphRunList: View {
         var isThread: Bool { traversals.count > 1 || traversals.first?.thread != nil }
     }
 
-    /// What the history lists: every record except a door-only routing pass. A delivery whose
-    /// graph ruled the words a build stops at its door, having minted the build as its whole
-    /// effect — one settled visit, no work, no thread of its own. The build it routed to is the
-    /// run, and a lane for the ruling beside it doubles the list. Structural, not by outcome
-    /// name: a traversal that visited only its door did nothing else, whatever the pack calls it.
-    /// Still listed: a door that failed, was declined or was stopped (the only record of a
-    /// message that got nothing), and any record that went on to a second node — a conversation
-    /// carries no ask either, and it is a real run.
+    /// Every record except a door-only routing pass: a delivery that ruled "build" stops at its
+    /// door having minted the build, so listing both doubles the list. The test is structural, not
+    /// the outcome name: one settled visit, no work, no thread. A door that failed or was stopped
+    /// still lists (the only record of a message that got nothing), as does any second node.
     nonisolated static func lanes(_ runs: [SZAgentGraphRun]) -> [SZAgentGraphRun] {
         runs.filter { run in
             !(run.conclusion == .ended && run.thread == nil && run.work == nil
@@ -386,11 +382,9 @@ struct SZAgentGraphRunRow: View {
                                 // Beside a pulsing badge — same cross-fade hazard as the
                                 // card's clock: swap the string, don't dissolve it.
                                 .contentTransition(.identity)
-                            // The endings sit on the panel's right edge, one column down the
-                            // list however long the words to their left run. The badge is
-                            // fixed-size and the texts truncate, so a narrow panel eats the
-                            // ruling, never the pill; the grade stays inboard of it so the
-                            // badge is always the rightmost thing on the line.
+                            // Endings sit on the panel's right edge, one column down the list.
+                            // The badge is fixed-size and the texts truncate, so a narrow panel
+                            // eats the ruling, never the pill; the grade stays inboard of it.
                             Spacer(minLength: 4)
                             gradeTag
                             badge

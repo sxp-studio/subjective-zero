@@ -19,7 +19,7 @@ private func record(trace: [SZAgentGraphRun.Entry],
 }
 
 @Test func aDoorOnlyRoutingPassGetsNoLane() {
-    // The door ruled the words a build and stopped: the build it minted is the run.
+    // The door ruled "build" and stopped: the build it minted is the run.
     let routing = record(trace: [entry(1, "door", "implement")])
     #expect(SZAgentGraphRunList.lanes([routing]).isEmpty)
 }
@@ -31,8 +31,7 @@ private func record(trace: [SZAgentGraphRun.Entry],
 }
 
 @Test func aBuildAndItsRoutingPassLeaveOneLane() {
-    // The pair a single user message writes: six of these made the list twice as long as the
-    // work it described.
+    // The pair a single user message writes.
     let thread = UUID()
     var build = record(trace: [entry(1, "door", "build"), entry(2, "decompose", "ok")], thread: thread)
     build.id = thread

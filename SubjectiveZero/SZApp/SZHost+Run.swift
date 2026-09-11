@@ -228,19 +228,14 @@ extension SZHost {
         return owed
     }
 
-    /// The arrows a run still owes and the nodes they land on — the Director brief's `{{unwired}}`
-    /// and flow list, and `hasWorkLeft`'s other evidence. Captured at admission, still standing: not
-    /// a live read, which would race the user's own drag; not scoped to `owedWork` either, since a
-    /// node leaves the dirty list at promote, exactly when its arrows still need noticing.
+    /// The arrows a run still owes and the nodes they land on: the Director brief's `{{unwired}}`
+    /// and flow list, and `hasWorkLeft`'s other evidence. Captured at admission, not read live.
     ///
-    /// An arrow with an end this run's own staged split/merge holds is left out. The fence refuses a
-    /// data edge there until the op settles, and the op rewires that end itself at commit, so briefing
-    /// one buys a reconcile round whose only possible answer is to restate the refusal. Only that end
-    /// goes quiet: an unbuilt node or a wrong contract is still owed work and still reported.
-    ///
-    /// `graphOpStatus` is host-wide, so only the run that owns the op (`ownsGraphOp`) reads it. A
-    /// sibling run is not refused by the op, and muting its arrow would settle it complete over
-    /// wiring it was admitted to lay, with nobody left to notice.
+    /// An arrow held by this run's own staged split or merge is left out: the fence refuses a data
+    /// edge there until the op settles, and the op lays that end itself at commit, so briefing it
+    /// buys a reconcile round that can only restate the refusal. Nothing else goes quiet.
+    /// `graphOpStatus` is host-wide, so only the owning run (`ownsGraphOp`) reads it; muting a
+    /// sibling's arrow would settle that run complete over wiring it was admitted to lay.
     func owedArrows(of run: SZRunState) -> (arrows: [SZConnection], nodes: [SZNodeID]) {
         guard let graph = store.project?.graph else { return ([], []) }
         let held = run.ownsGraphOp ? graphOpStatus : [:]
