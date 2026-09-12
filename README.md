@@ -16,7 +16,7 @@
   <a href="https://discord.gg/Y3JZxpXExs"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&amp;logoColor=white" alt="Discord"></a>
 </p>
 
-https://github.com/user-attachments/assets/bbcd7fae-9686-4333-9023-b8c8d8d950a4
+https://github.com/user-attachments/assets/db6c58b0-0864-45d5-bf1e-583e37def3c3
 
 SubjectiveZero is a new take on effect creation tools like TouchDesigner and Notch.
 
