@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SZHost+Links — community/support links opened from the HUD gear menu (Website, Discord, Feedback).
 // Plain NSWorkspace.open calls; the destinations live in one private enum so they're easy to retarget.
-// The website base mirrors the existing setup-guide URL (SZHost+ProviderHealth) — sxp.studio/apps/subjectivezero.
+// The website base mirrors the existing setup-guide URL (SZHost+ProviderHealth) — sxp.studio/subjective-zero.
 import AppKit
 
 @MainActor
 extension SZHost {
     private enum SZLinks {
-        static let website = URL(string: "https://sxp.studio/apps/subjectivezero")!
+        static let website = URL(string: "https://sxp.studio/subjective-zero")!
         static let github = URL(string: "https://github.com/sxp-studio/subjective-zero")!
         static let discord = URL(string: "https://discord.gg/Y3JZxpXExs")!
         static let feedbackEmail = "subz@sxp.studio"
         // The download page carries the telemetry disclaimer (what's sent, with a sample payload).
-        static let privacyInfo = URL(string: "https://sxp.studio/apps/subjectivezero/download")!
+        static let privacyInfo = URL(string: "https://sxp.studio/subjective-zero/download")!
     }
 
     /// Open the SubjectiveZero website in the default browser.

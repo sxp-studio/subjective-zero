@@ -38,7 +38,7 @@ It is free and open source, and it runs on the coding agent subscription you alr
 Claude Code, Codex, Grok, Pi, OpenCode or Muse Code. No model shipped, no tokens resold.
 
 **[Download the latest build](https://github.com/sxp-studio/subjective-zero/releases/latest)**, or
-read the product page at [sxp.studio](https://sxp.studio/apps/subjectivezero).
+read the product page at [sxp.studio](https://sxp.studio/subjective-zero).
 
 ## What makes it different
 
@@ -61,7 +61,7 @@ read the product page at [sxp.studio](https://sxp.studio/apps/subjectivezero).
 
 Live visuals for a set, projection on a wall, a reactive piece driven by sound, MIDI or OSC, a
 camera effect, or a sketch that ends up as a single web page. See what it looks like in the
-[showcase](https://sxp.studio/apps/subjectivezero#showcase), or watch
+[showcase](https://sxp.studio/subjective-zero#showcase), or watch
 [thirteen minutes from an empty project to a running effect](https://www.youtube.com/watch?v=DcI1tsPJ8eM).
 
 SubZ is in beta and shipping real releases, but interfaces, the project format and the node ABI

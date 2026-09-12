@@ -2,7 +2,7 @@
 
 This document is written for an **LLM setup agent** (Claude Code, Codex, or similar) helping a
 user install and verify SubjectiveZero and its agent-provider CLIs. It will be published at
-`https://sxp.studio/apps/subjectivezero/app-setup.md`; the in-app **Agent Providers ▸ Setup
+`https://sxp.studio/subjective-zero/app-setup.md`; the in-app **Agent Providers ▸ Setup
 Guide** button opens that URL. Humans are welcome too - every step is copy-pasteable.
 
 ## Safety rules for setup agents

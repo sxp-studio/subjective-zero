@@ -70,7 +70,7 @@
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://sxp.studio/apps/subjectivezero/appcast.xml</string>
+	<string>https://sxp.studio/subjective-zero/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>ZMDip9D96ja+zfJM+QRiLh7O3jDIWgMXCLWVvruxM4U=</string>
 	<key>SUVerifyUpdateBeforeExtraction</key>

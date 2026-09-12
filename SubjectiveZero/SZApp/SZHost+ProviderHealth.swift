@@ -555,6 +555,6 @@ extension SZHost {
     /// The sheet's Setup Guide button — the canonical agent-readable guide, published from
     /// docs/APP_SETUP.md to the website by the release pipeline.
     func openProviderSetupGuide() {
-        NSWorkspace.shared.open(URL(string: "https://sxp.studio/apps/subjectivezero/app-setup.md")!)
+        NSWorkspace.shared.open(URL(string: "https://sxp.studio/subjective-zero/app-setup.md")!)
     }
 }
