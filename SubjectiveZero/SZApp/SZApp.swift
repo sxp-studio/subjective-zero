@@ -860,11 +860,13 @@ struct SZApp: App {
         SZWelcomeOverlay(
             versionText: Self.appVersionText,
             taglines: [
-                "An agentic harness for creative coding.",
+                // Index 0 is what every cold launch shows first, so it is the
+                // line the site leads with too.
+                "An agentic node editor for live visual effects.",
                 "Explore at the speed of prompts. Refine with the precision of code.",
-                "An agentic node editor for creative coding.",
+                "An idea should cost almost nothing to try.",
                 "A node editor that adapts to your context.",
-                "Creative coding POWERED BY AI™ OMG",   // the wink — never index 0, so never shown first
+                "Live visuals POWERED BY AI™ OMG",   // the wink — never index 0, so never shown first
             ],
             recents: Array(host.existingRecentProjectPaths.prefix(6)).map { path in
                 SZWelcomeRecent(id: path,

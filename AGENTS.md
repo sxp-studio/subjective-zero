@@ -3,8 +3,9 @@
 Guidelines for any agent or human working in this repo. Covers **how we work here**; the spec covers
 **what to build**.
 
-SubZ is a native-macOS (SwiftUI + AppKit + Metal), open-source creative-coding / realtime-VFX
-harness, split into 5 SwiftPM packages: `SZApp` · `SZCore` · `SZAI` · `SZRuntime` · `SZUI`.
+SubZ is a native-macOS (SwiftUI + AppKit + Metal), open-source harness for live visual effects.
+`SZApp` is the Xcode app target; `Modules` is one SwiftPM package with four libraries:
+`SZCore` · `SZAI` · `SZRuntime` · `SZUI`.
 
 **The spec is the source of truth — read it before building.** Start with `README.md` and `docs/`,
 especially `docs/ARCHITECTURE.md` (incl. the host seam) and `docs/BUILD_SPEC.md`.
