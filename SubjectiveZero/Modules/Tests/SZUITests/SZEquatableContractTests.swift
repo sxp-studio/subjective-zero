@@ -46,7 +46,8 @@ private func storedProperties(of subject: Any) -> Set<String> {
         // closures — deliberately excluded from == (capture only stable refs). The card's
         // bottom-left buttons: file (onOpenSource), speech (onOpenChat), and "⋯" (onOpenMenu).
         "onOpenSource", "onOpenChat", "onOpenMenu",
-        "onSetInput", "onToggleDisplay", "onTogglePreview", "onTogglePlugs", "optionsFor",
+        "onSetInput", "onFieldEditingChanged", "onToggleDisplay", "onTogglePreview", "onTogglePlugs",
+        "optionsFor",
         // the Outdated/Error pill's one-click repair request
         "onFix",
         // the live-preview box — a stable per-node ref like the closures; only the thumb leaf
@@ -92,7 +93,7 @@ private func storedProperties(of subject: Any) -> Set<String> {
         "onSelectNode", "onSelectConnection", "onNodeDragChanged", "onNodeDragEnded",
         "onSocketDragChanged", "onSocketDragEnded", "onEdgeDragChanged", "onEdgeDragEnded",
         "autoEditNodeID",
-        "onOpenNodeMenu", "onMentionNodeInChat", "onOpenNodeSource", "onFixNode", "onSetInputDefault",
+        "onOpenNodeMenu", "onMentionNodeInChat", "onOpenNodeSource", "onFixNode", "onSetInputDefault", "onFieldEditingChanged",
         "onToggleDisplay", "onTogglePreview", "onTogglePlugs", "optionsFor", "onCommitPrompt", "onPromptEditingChanged",
         "onLivePrompt",
         // the preview-box registry — stable host-owned ref; per-node boxes are observed by the

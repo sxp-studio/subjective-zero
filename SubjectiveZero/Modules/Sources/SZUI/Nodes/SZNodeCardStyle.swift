@@ -39,4 +39,8 @@ enum SZNodeCardStyle {
     static let fieldFill = Color.black.opacity(0.28)
     static let fieldStroke = Color.white.opacity(0.14)
     static let fieldCornerRadius: CGFloat = 5
+    /// The well holding the keyboard wears the system accent, the way every other Mac app's focused
+    /// field does — `.textFieldStyle(.plain)` draws no focus ring of its own. Weight only: the stroke
+    /// is an overlay, so a thicker one moves nothing in the row.
+    static let focusedFieldStrokeWidth: CGFloat = 1.5
 }

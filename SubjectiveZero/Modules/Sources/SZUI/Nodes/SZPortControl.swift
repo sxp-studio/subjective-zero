@@ -34,6 +34,10 @@ struct SZPortControl: View {
     /// just-connected device" working. `nil` → the menu lists the snapshot in `options`.
     var freshOptions: (() -> [SZEnumOption])? = nil
     var onSet: ((SZPortValue, _ persist: Bool) -> Void)? = nil
+    /// Reports whether a field of this control holds the keyboard. The canvas selects a card on every
+    /// tap and claims keyboard focus with it, which would take the keyboard straight back off the
+    /// field the same click just landed in — the panel skips that claim while this says true.
+    var onFieldEditingChanged: ((Bool) -> Void)? = nil
 
     private var editable: Bool { Self.isEditable(hasSetter: onSet != nil, locked: locked, notInBuild: notInBuild) }
 
@@ -55,7 +59,17 @@ struct SZPortControl: View {
     /// through the captured struct, so it answers live no matter which snapshot the callback holds.
     @State private var sliderDrag: Double? = nil
 
+    /// Which cell of this control holds the keyboard, so its well can say so. A control is a row of
+    /// numeric cells or one string field, never both, so one index answers for either (the string
+    /// field is 0).
+    @FocusState private var focusedCell: Int?
+
     var body: some View {
+        control.onChange(of: focusedCell) { _, cell in onFieldEditingChanged?(cell != nil) }
+    }
+
+    @ViewBuilder
+    private var control: some View {
         switch port.type {
         case .bool:
             Toggle("", isOn: Binding(get: { boolValue }, set: { onSet?(.bool($0), true) }))
@@ -108,8 +122,9 @@ struct SZPortControl: View {
                     .textFieldStyle(.plain).font(SZNodeCardStyle.valueFont)
                     .multilineTextAlignment(.trailing).frame(width: SZNodeLayout.stringFieldWidth)
                     .onSubmit { onSet?(.string(stringValue), true) }
+                    .focused($focusedCell, equals: 0)
                     .padding(.horizontal, SZNodeLayout.fieldHorizontalPadding).padding(.vertical, 2)
-                    .background(fieldWell)
+                    .background(fieldWell(focused: focusedCell == 0))
             } else {
                 chip(stringValue.isEmpty ? "—" : stringValue, chevron: false)
             }
@@ -143,8 +158,9 @@ struct SZPortControl: View {
                 numericCell(TextField("", value: Binding(get: { component(i) },
                                                          set: { setComponent(i, to: $0, count: count) }),
                                       format: .number.precision(.fractionLength(0...3)).grouping(.never))
-                    .textFieldStyle(.plain))
-                    .background(fieldWell)
+                    .textFieldStyle(.plain)
+                    .focused($focusedCell, equals: i))
+                    .background(fieldWell(focused: focusedCell == i))
             }
         }
     }
@@ -319,11 +335,12 @@ struct SZPortControl: View {
 
     /// The inset-well background shared by the keyboard-editable text/number fields — visually distinct
     /// from the raised `chip` capsules so "type here" and "pick from a list" read differently.
-    private var fieldWell: some View {
+    private func fieldWell(focused: Bool) -> some View {
         RoundedRectangle(cornerRadius: SZNodeCardStyle.fieldCornerRadius)
             .fill(SZNodeCardStyle.fieldFill)
             .overlay(RoundedRectangle(cornerRadius: SZNodeCardStyle.fieldCornerRadius)
-                .stroke(SZNodeCardStyle.fieldStroke, lineWidth: 0.75))
+                .stroke(focused ? Color.accentColor : SZNodeCardStyle.fieldStroke,
+                        lineWidth: focused ? SZNodeCardStyle.focusedFieldStrokeWidth : 0.75))
     }
 
     private func chip(_ text: String, chevron: Bool) -> some View {
