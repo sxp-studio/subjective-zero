@@ -47,6 +47,14 @@ struct SZPortControl: View {
     /// Debounced ColorPicker disk commit — see `colorWell`.
     @State private var pendingColorCommit: Task<Void, Never>? = nil
 
+    /// The value the slider drag last produced, nil when no drag is in flight — what the release
+    /// commits. It cannot re-read `port.def`: SwiftUI hands `onEditingChanged` the `self` captured
+    /// when tracking began, so the value read back through it is the one from before the drag, and
+    /// committing that wrote the whole drag away (measured: the live ticks land, then the release
+    /// puts the pre-drag value back 70ms later). `@State` is read through its storage rather than
+    /// through the captured struct, so it answers live no matter which snapshot the callback holds.
+    @State private var sliderDrag: Double? = nil
+
     var body: some View {
         switch port.type {
         case .bool:
@@ -57,10 +65,20 @@ struct SZPortControl: View {
             HStack(spacing: SZNodeLayout.sliderValueSpacing) {
                 // Continuous track, quantized in the setter — a stepped macOS Slider grows tick marks
                 // (dense dot row) and shifts its track above the row's vertical center.
-                Slider(value: Binding(get: { floatValue },
-                                      set: { onSet?(.float(SZPort.stepped($0, in: sliderRange!, step: port.ui?.step)), false) }),
+                Slider(value: Binding(get: { sliderDrag ?? floatValue },
+                                      set: { value in
+                                          let stepped = SZPort.stepped(value, in: sliderRange!, step: port.ui?.step)
+                                          sliderDrag = stepped
+                                          onSet?(.float(stepped), false)
+                                      }),
                        in: sliderRange!,
-                       onEditingChanged: { editing in if !editing { onSet?(.float(floatValue), true) } })
+                       // Commit what the drag produced, never what this view last read — see `sliderDrag`.
+                       // No drag ticks means nothing was previewed, so there is nothing to commit.
+                       onEditingChanged: { editing in
+                           guard !editing, let dragged = sliderDrag else { return }
+                           sliderDrag = nil
+                           onSet?(.float(dragged), true)
+                       })
                     .controlSize(.mini).frame(width: SZNodeLayout.sliderTrackWidth)
                     .disabled(!editable)
                 Text(String(format: "%.2f", floatValue))
