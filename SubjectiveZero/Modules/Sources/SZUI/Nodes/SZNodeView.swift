@@ -41,7 +41,7 @@ struct SZNodeView: View, Equatable {
     var onOpenChat: (() -> Void)? = nil     // speech button → this node's Coding Agent chat
     var onOpenMenu: (() -> Void)? = nil     // "⋯" → the node's context menu (split/merge/implement/…)
     var onSetInput: ((String, SZPortValue, Bool) -> Void)? = nil   // (port, value, persist) → ui_set_input_default
-    var onFieldEditingChanged: ((Bool) -> Void)? = nil   // a value field took/lost the keyboard → the panel
+    var onFieldEditingChanged: ((String, Bool) -> Void)? = nil   // (port, editing): a value field took/lost the keyboard
     var onToggleDisplay: ((String) -> Void)? = nil   // texture output monitor icon → ui_toggle_display (port)
     var onTogglePreview: ((String) -> Void)? = nil   // texture output photo icon → toggle the card's live preview (port)
     var onTogglePlugs: (() -> Void)? = nil   // chevron pill → fold the port rows away, leaving the body
@@ -245,7 +245,7 @@ struct SZNodeView: View, Equatable {
                               // menu-open time — the fallback rule lives only in effectiveOptions.
                               freshOptions: optionsFor.map { _ in { effectiveOptions(port) } },
                               onSet: onSetInput.map { set in { value, persist in set(port.name, value, persist) } },
-                              onFieldEditingChanged: onFieldEditingChanged)
+                              onFieldEditingChanged: onFieldEditingChanged.map { report in { editing in report(port.name, editing) } })
             }
         }
         .padding(.horizontal, 12)

@@ -65,7 +65,16 @@ struct SZPortControl: View {
     @FocusState private var focusedCell: Int?
 
     var body: some View {
-        control.onChange(of: focusedCell) { _, cell in onFieldEditingChanged?(cell != nil) }
+        control
+            .onChange(of: focusedCell) { _, cell in onFieldEditingChanged?(cell != nil) }
+            // A control that leaves the tree while it holds the keyboard (the card folds its plugs,
+            // the zoom crosses the tile threshold, a wire lands on this port) never gets to report
+            // the blur any other way. Reporting false for a field that wasn't focused is a no-op.
+            .onDisappear { onFieldEditingChanged?(false) }
+            // A lock swaps the field for a read-only chip in place, which is not a disappearance
+            // and may leave the focus binding set; dropping it here reports the loss through the
+            // reporter above.
+            .onChange(of: editable) { _, ok in if !ok { focusedCell = nil } }
     }
 
     @ViewBuilder
@@ -89,12 +98,17 @@ struct SZPortControl: View {
                        // Commit what the drag produced, never what this view last read — see `sliderDrag`.
                        // No drag ticks means nothing was previewed, so there is nothing to commit.
                        onEditingChanged: { editing in
-                           guard !editing, let dragged = sliderDrag else { return }
+                           // Every tracking session starts clean, whatever ended the last one.
+                           if editing { sliderDrag = nil; return }
+                           guard let dragged = sliderDrag else { return }
                            sliderDrag = nil
                            onSet?(.float(dragged), true)
                        })
                     .controlSize(.mini).frame(width: SZNodeLayout.sliderTrackWidth)
                     .disabled(!editable)
+                    // Disabling ends AppKit's tracking without the release callback: drop the
+                    // in-flight drag or the knob stays pinned to it while the number moves on.
+                    .onChange(of: editable) { _, ok in if !ok { sliderDrag = nil } }
                 Text(String(format: "%.2f", floatValue))
                     .font(SZNodeCardStyle.valueFont).foregroundStyle(SZNodeCardStyle.valueColor)
                     // Fixed value column (tracks align across rows), sized to the widest value the

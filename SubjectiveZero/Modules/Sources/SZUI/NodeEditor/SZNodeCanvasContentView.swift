@@ -73,7 +73,7 @@ struct SZNodeCanvasContentView: View, Equatable {
     var onSetInputDefault: (SZNodeID, String, SZPortValue, Bool) -> Void = { _, _, _, _ in }
     /// A card's value field took or lost the keyboard. The panel needs it because this view
     /// selects a card on every tap, and selecting claims keyboard focus.
-    var onFieldEditingChanged: (SZNodeID, Bool) -> Void = { _, _ in }
+    var onFieldEditingChanged: (SZPortRef, Bool) -> Void = { _, _ in }
     var onToggleDisplay: (SZNodeID, String) -> Void = { _, _ in }
     var onTogglePreview: (SZNodeID, String) -> Void = { _, _ in }
     var onTogglePlugs: (SZNodeID) -> Void = { _ in }
@@ -201,7 +201,7 @@ struct SZNodeCanvasContentView: View, Equatable {
             onOpenChat: { onMentionNodeInChat(node.id) },
             onOpenMenu: { onOpenNodeMenu(node.id) },
             onSetInput: { port, value, persist in onSetInputDefault(node.id, port, value, persist) },
-            onFieldEditingChanged: { editing in onFieldEditingChanged(node.id, editing) },
+            onFieldEditingChanged: { port, editing in onFieldEditingChanged(SZPortRef(node: node.id, port: port), editing) },
             onToggleDisplay: { port in onToggleDisplay(node.id, port) },
             onTogglePreview: { port in onTogglePreview(node.id, port) },
             onTogglePlugs: { onTogglePlugs(node.id) },
@@ -236,7 +236,7 @@ struct SZNodeCanvasContentView: View, Equatable {
         onOpenChat: (() -> Void)? = nil,
         onOpenMenu: (() -> Void)? = nil,
         onSetInput: @escaping (String, SZPortValue, Bool) -> Void = { _, _, _ in },
-        onFieldEditingChanged: @escaping (Bool) -> Void = { _ in },
+        onFieldEditingChanged: @escaping (String, Bool) -> Void = { _, _ in },
         onToggleDisplay: @escaping (String) -> Void = { _ in },
         onTogglePreview: @escaping (String) -> Void = { _ in },
         onTogglePlugs: (() -> Void)? = nil,

@@ -127,12 +127,12 @@ public struct SZNodeEditorPanel: View {
     @State private var multiSelection: Set<SZNodeID> = []   // marquee / shift-click set, for Merge
     @State private var marquee: (start: CGPoint, current: CGPoint)?   // rubber-band rect, panel space
     @State private var selectedConnectionID: SZConnectionID?
+    /// The prompt field being edited. Also decides whether a scroll pans the canvas or scrolls the
+    /// prompt text (`handleScroll`), which is why the value fields below are kept apart from it.
     @State private var editingNodeID: SZNodeID?
-    /// The card whose value field holds the keyboard. Separate from `editingNodeID`, which is the
-    /// prompt field and also decides whether a scroll pans the canvas or scrolls the text — a one-line
-    /// number cell has nothing to scroll, so it must not swallow the pan. This one answers a single
-    /// question: whether selecting a card may claim keyboard focus (see `selectNode`).
-    @State private var fieldEditingNodeID: SZNodeID?
+    /// The value field holding the keyboard, so selecting its card does not claim canvas focus
+    /// (`selectNode`). By port, not node: a loss must not clear another field's gain.
+    @State private var fieldWithKeyboard: SZPortRef?
     @State private var autoEditNodeID: SZNodeID?   // a just-added prompt node → its card opens straight into editing
     @State private var drag: NodeDrag?
     @State private var wire: SZWireDragSession?
@@ -692,7 +692,7 @@ public struct SZNodeEditorPanel: View {
         // down and this tap ends on mouse up, so claiming here would take it straight back — the ring
         // appeared and vanished, and nothing could be typed. Selecting any other card still claims it,
         // so Delete keeps reaching the canvas.
-        if fieldEditingNodeID != id { canvasFocused = true }
+        if fieldWithKeyboard?.node != id { canvasFocused = true }
     }
 
     private func clearSelection() {
@@ -794,9 +794,8 @@ public struct SZNodeEditorPanel: View {
         guard let graph = project?.graph else { return }
         let present = { (id: SZNodeID) in graph.nodes.contains { $0.id == id } }
         if let editing = editingNodeID, !present(editing) { editingNodeID = nil }
-        // Same signal for the value fields: a stuck id there keeps that card from ever claiming
-        // keyboard focus again.
-        if let editing = fieldEditingNodeID, !present(editing) { fieldEditingNodeID = nil }
+        // Backstop for the value field: its control reports the loss itself on leaving the tree.
+        if let field = fieldWithKeyboard, !present(field.node) { fieldWithKeyboard = nil }
     }
 
     /// What the thing under the pointer is, for the top of its menu. Only a node has one: a placed
@@ -1017,9 +1016,8 @@ public struct SZNodeEditorPanel: View {
             onOpenNodeSource: onOpenNodeSource,
             onFixNode: onFixNode,
             onSetInputDefault: onSetInputDefault,
-            onFieldEditingChanged: { id, editing in
-                if editing { fieldEditingNodeID = id }
-                else if fieldEditingNodeID == id { fieldEditingNodeID = nil }
+            onFieldEditingChanged: { ref, editing in
+                if editing { fieldWithKeyboard = ref } else if fieldWithKeyboard == ref { fieldWithKeyboard = nil }
             },
             onToggleDisplay: onToggleDisplay,
             onTogglePreview: onTogglePreview,
