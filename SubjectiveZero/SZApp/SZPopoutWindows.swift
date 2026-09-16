@@ -310,7 +310,11 @@ final class SZPopoutWindowManager {
     private func animateThenDock(id: SZPanelID, toScreenRect target: NSRect?, commit: @escaping () -> Void) {
         guard let controller = controllers[id] else { return }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let dock = { [weak self] in
+        // AppKit calls the completion handler below on the main thread — which is what the
+        // `assumeIsolated` there states — but the handler is `@Sendable` under the macOS 27 SDK, so
+        // capturing this main-actor closure now reads as a race. Saying so here keeps `commit` an
+        // ordinary closure for every caller.
+        nonisolated(unsafe) let dock = { [weak self] in
             commit()
             self?.dockAnimatingIDs.remove(id)
             self?.closePopout(id: id, reason: .docked)

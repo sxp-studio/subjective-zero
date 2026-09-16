@@ -18,7 +18,10 @@ public enum SZToolchainAvailability: Equatable, Sendable {
     case missing
 }
 
-public struct SZToolchain {
+/// Sendable because it is stateless — one `URL?` and pure functions over it. Declared rather than
+/// inferred: a public struct gets no implicit conformance outside its module, so the step runtime's
+/// detached compile could not capture it (Swift 6.4 reads that capture as a data race).
+public struct SZToolchain: Sendable {
     /// Where a release bundle keeps its prebuilt step dylibs (Contents/PlugIns). nil, or a
     /// directory that does not exist, means every step compiles.
     public let prebuiltStepsDir: URL?
