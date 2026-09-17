@@ -78,7 +78,9 @@ enum SZNodeMain { static func make() -> SZNode { Node() } }
     let frame = try #require(runtime.captureFrame())
 
     // (0.55, 0.40, 0.30) → 0.299·0.55 + 0.587·0.40 + 0.114·0.30 ≈ 0.4335 → ~111/255.
-    let expectedByte = Int(((0.299 * 0.55 + 0.587 * 0.40 + 0.114 * 0.30) * 255).rounded())
+    // Typed, or Swift 6.4 gives up type-checking the literal arithmetic.
+    let luminance: Double = 0.299 * 0.55 + 0.587 * 0.40 + 0.114 * 0.30
+    let expectedByte = Int((luminance * 255).rounded())
     for (x, y) in [(4, 4), (24, 24), (43, 43)] {
         let p = try #require(frame.pixel(x: x, y: y))
         #expect(abs(Int(p.r) - Int(p.g)) <= 2, "R≈G at (\(x),\(y)): \(p)")

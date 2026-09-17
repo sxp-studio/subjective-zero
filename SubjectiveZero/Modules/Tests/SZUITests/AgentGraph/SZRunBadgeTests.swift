@@ -4,24 +4,34 @@
 // broken — and cannot co-occur), and which one must NOT (a refusal is a decision, not an accident,
 // so it leaves the neutral capsule the other two share).
 import Foundation
+import SwiftUI
 import Testing
 import SZCore
 @testable import SZUI
 
+// Named reads: Swift 6.4 cannot type-check `label(.x) == "…"` inside #expect
+// in reasonable time, and a plain String or Color comparison it can.
+private func label(_ conclusion: SZAgentGraphRun.Conclusion?, endedOn: String? = nil) -> String {
+    label(conclusion, endedOn: endedOn)
+}
+private func colour(_ conclusion: SZAgentGraphRun.Conclusion?, endedOn: String? = nil) -> Color {
+    colour(conclusion, endedOn: endedOn)
+}
+
 @Test func everyConclusionClassGetsItsOwnWord() {
-    #expect(SZRunBadge.style(for: .ended).label == "complete")
-    #expect(SZRunBadge.style(for: .failed(reason: "the turn threw")).label == "failed")
-    #expect(SZRunBadge.style(for: .defect(detail: "unknown node")).label == "failed")
-    #expect(SZRunBadge.style(for: .cancelled).label == "stopped")
-    #expect(SZRunBadge.style(for: .declined(reason: "no camera")).label == "declined")
+    #expect(label(.ended) == "complete")
+    #expect(label(.failed(reason: "the turn threw")) == "failed")
+    #expect(label(.defect(detail: "unknown node")) == "failed")
+    #expect(label(.cancelled) == "stopped")
+    #expect(label(.declined(reason: "no camera")) == "declined")
     // A record with no conclusion cannot come out of the host's seal; drawn, not blank.
-    #expect(SZRunBadge.style(for: nil).label == "complete")
+    #expect(label(nil) == "complete")
 }
 
 @Test func inFlightIsSpokenInTheSameTenseAsTheEndings() {
     // "live" was a broadcast word among build words; every other badge is a plain outcome.
     #expect(SZRunBadge.running().label == "running")
-    #expect(!SZRunBadge.style(for: .ended).label.contains("live"))
+    #expect(!label(.ended).contains("live"))
 }
 
 @Test func stillGoingAndFinishedWearTheCardsOwnColours() {
@@ -30,11 +40,11 @@ import SZCore
     // checkmark. The badges used to say orange and blue for those two, which left the same
     // fact wearing different colours a few points apart on screen.
     #expect(SZRunBadge.running().colour == SZAgentGraphStyle.running)
-    #expect(SZRunBadge.style(for: .ended).colour == SZAgentGraphStyle.done)
-    #expect(SZRunBadge.running().colour != SZRunBadge.style(for: .ended).colour)
+    #expect(colour(.ended) == SZAgentGraphStyle.done)
+    #expect(SZRunBadge.running().colour != colour(.ended))
     // Green means an ending that worked, so no other ending may borrow it.
-    #expect(SZRunBadge.style(for: .failed(reason: "the turn threw")).colour != SZAgentGraphStyle.done)
-    #expect(SZRunBadge.style(for: .cancelled).colour != SZAgentGraphStyle.done)
+    #expect(colour(.failed(reason: "the turn threw")) != SZAgentGraphStyle.done)
+    #expect(colour(.cancelled) != SZAgentGraphStyle.done)
 }
 
 @Test func anEndingOffAnUnhandledErrorPortIsNotDrawnAsSuccess() {
@@ -42,16 +52,16 @@ import SZCore
     // an error port. The canvas already drew that capsule orange while the row called the same run
     // a clean exit — a split the rename made loud, since the row now says "complete" in green.
     // One table classifies it now, so both surfaces say the same word in the same colour.
-    #expect(SZRunBadge.style(for: .ended, endedOn: "error").label == "failed")
-    #expect(SZRunBadge.style(for: .ended, endedOn: "error").colour == SZAgentGraphStyle.failed)
-    #expect(SZRunBadge.style(for: .ended, endedOn: "error: no camera").label == "failed")
+    #expect(label(.ended, endedOn: "error") == "failed")
+    #expect(colour(.ended, endedOn: "error") == SZAgentGraphStyle.failed)
+    #expect(label(.ended, endedOn: "error: no camera") == "failed")
     // Only a CLEAN ending is reclassified: every other conclusion is its own verdict, whatever
     // port the last node happened to answer.
-    #expect(SZRunBadge.style(for: .declined(reason: "x"), endedOn: "error").colour == SZEdgeStyle.intentViolet)
-    #expect(SZRunBadge.style(for: .cancelled, endedOn: "error").label == "stopped")
+    #expect(colour(.declined(reason: "x"), endedOn: "error") == SZEdgeStyle.intentViolet)
+    #expect(label(.cancelled, endedOn: "error") == "stopped")
     // And an ordinary ending is untouched, with or without a port to read.
-    #expect(SZRunBadge.style(for: .ended, endedOn: "ok").label == "complete")
-    #expect(SZRunBadge.style(for: .ended, endedOn: nil).colour == SZAgentGraphStyle.done)
+    #expect(label(.ended, endedOn: "ok") == "complete")
+    #expect(colour(.ended, endedOn: nil) == SZAgentGraphStyle.done)
 }
 
 @Test func aRecordsBadgeReadsItsOwnLastOutcome() {
@@ -68,18 +78,18 @@ import SZCore
 @Test func anInterruptedRunSharesTheUserStopsBadge() {
     // Folded deliberately: both mean unfinished with nothing to fix, and `.interrupted` is only
     // ever stamped restoring a session that died — so it is never something you watch happen.
-    #expect(SZRunBadge.style(for: .interrupted).label == "stopped")
-    #expect(SZRunBadge.style(for: .interrupted).label == SZRunBadge.style(for: .cancelled).label)
-    #expect(SZRunBadge.style(for: .interrupted).colour == SZAgentGraphStyle.neutral)
+    #expect(label(.interrupted) == "stopped")
+    #expect(label(.interrupted) == label(.cancelled))
+    #expect(colour(.interrupted) == SZAgentGraphStyle.neutral)
 }
 
 @Test func aRefusalIsNotDrawnLikeAnAccident() {
     // `declined` used to wear the same grey as "the app crashed under this". It is a DECISION —
     // the agents' own violet, the colour a step's ruling wears on the canvas.
-    #expect(SZRunBadge.style(for: .declined(reason: "no camera")).colour == SZEdgeStyle.intentViolet)
-    #expect(SZRunBadge.style(for: .declined(reason: "x")).colour != SZRunBadge.style(for: .cancelled).colour)
+    #expect(colour(.declined(reason: "no camera")) == SZEdgeStyle.intentViolet)
+    #expect(colour(.declined(reason: "x")) != colour(.cancelled))
     // And still not a failure, which is the distinction the whole vocabulary exists to keep.
-    #expect(SZRunBadge.style(for: .declined(reason: "x")).colour != SZAgentGraphStyle.failed)
+    #expect(colour(.declined(reason: "x")) != SZAgentGraphStyle.failed)
 }
 
 @Test func theRestorePolicysRecordStillCarriesItsReason() {
@@ -91,6 +101,6 @@ import SZCore
                 at: Date(timeIntervalSinceReferenceDate: 101))
     record.sealInterrupted()
     #expect(record.conclusion == .interrupted)
-    #expect(SZRunBadge.style(for: record.conclusion).label == "stopped")
+    #expect(label(record.conclusion) == "stopped")
     #expect(record.trace.contains { $0.detail == SZAgentGraphRun.interruptedDetail })
 }
