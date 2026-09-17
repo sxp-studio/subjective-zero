@@ -11,8 +11,22 @@ import AppKit
 import SwiftUI
 import SZCore
 
+/// One keyboard-editable cell on a card: the port, and which cell of a multi-component row.
+struct SZFieldRef: Hashable {
+    let port: SZPortRef
+    let cell: Int
+}
+
 struct SZPortControl: View {
     let port: SZPort
+    /// The node this port is on; with the port name and a cell index it is the key a field binds under.
+    let node: SZNodeID
+    /// The panel's one record of which field holds the keyboard; the cells bind to it, and the panel
+    /// reads it live when a tap lands. Not what the ring reads: that is `focusedCell`, a value.
+    @FocusState.Binding var focus: SZFieldRef?
+    /// Which of this control's cells has the keyboard, for the ring. Passed as a value so drawing
+    /// depends on plain data the card compares, never on what a kept struct's binding happens to hold.
+    let focusedCell: Int?
     var locked: Bool = false
     /// The port is declared but the running build was never compiled against it, so nothing reads it yet
     /// and the control is read-only until the node is rebuilt. Card width is unaffected:
@@ -34,10 +48,6 @@ struct SZPortControl: View {
     /// just-connected device" working. `nil` → the menu lists the snapshot in `options`.
     var freshOptions: (() -> [SZEnumOption])? = nil
     var onSet: ((SZPortValue, _ persist: Bool) -> Void)? = nil
-    /// Reports whether a field of this control holds the keyboard. The canvas selects a card on every
-    /// tap and claims keyboard focus with it, which would take the keyboard straight back off the
-    /// field the same click just landed in — the panel skips that claim while this says true.
-    var onFieldEditingChanged: ((Bool) -> Void)? = nil
 
     private var editable: Bool { Self.isEditable(hasSetter: onSet != nil, locked: locked, notInBuild: notInBuild) }
 
@@ -59,22 +69,19 @@ struct SZPortControl: View {
     /// through the captured struct, so it answers live no matter which snapshot the callback holds.
     @State private var sliderDrag: Double? = nil
 
-    /// Which cell of this control holds the keyboard, so its well can say so. A control is a row of
-    /// numeric cells or one string field, never both, so one index answers for either (the string
-    /// field is 0).
-    @FocusState private var focusedCell: Int?
+    private var fieldRef: SZPortRef { SZPortRef(node: node, port: port.name) }
+
+    /// The key cell `i` binds to `focus` under. A control is a row of numeric cells or one string
+    /// field, never both, so one index answers for either (the string field is 0).
+    private func key(_ i: Int) -> SZFieldRef { SZFieldRef(port: fieldRef, cell: i) }
 
     var body: some View {
         control
-            .onChange(of: focusedCell) { _, cell in onFieldEditingChanged?(cell != nil) }
-            // A control that leaves the tree while it holds the keyboard (the card folds its plugs,
-            // the zoom crosses the tile threshold, a wire lands on this port) never gets to report
-            // the blur any other way. Reporting false for a field that wasn't focused is a no-op.
-            .onDisappear { onFieldEditingChanged?(false) }
-            // A lock swaps the field for a read-only chip in place, which is not a disappearance
-            // and may leave the focus binding set; dropping it here reports the loss through the
-            // reporter above.
-            .onChange(of: editable) { _, ok in if !ok { focusedCell = nil } }
+            // SwiftUI documents the reset when focus moves, not when the focused view is removed. A
+            // cell that leaves the tree (the card folds, the zoom crosses the tile threshold, a wire
+            // lands on this port) or turns into a read-only chip (a lock) lets go here instead.
+            .onDisappear { if focus?.port == fieldRef { focus = nil } }
+            .onChange(of: editable) { _, ok in if !ok, focus?.port == fieldRef { focus = nil } }
     }
 
     @ViewBuilder
@@ -136,7 +143,7 @@ struct SZPortControl: View {
                     .textFieldStyle(.plain).font(SZNodeCardStyle.valueFont)
                     .multilineTextAlignment(.trailing).frame(width: SZNodeLayout.stringFieldWidth)
                     .onSubmit { onSet?(.string(stringValue), true) }
-                    .focused($focusedCell, equals: 0)
+                    .focused($focus, equals: key(0))
                     .padding(.horizontal, SZNodeLayout.fieldHorizontalPadding).padding(.vertical, 2)
                     .background(fieldWell(focused: focusedCell == 0))
             } else {
@@ -173,7 +180,7 @@ struct SZPortControl: View {
                                                          set: { setComponent(i, to: $0, count: count) }),
                                       format: .number.precision(.fractionLength(0...3)).grouping(.never))
                     .textFieldStyle(.plain)
-                    .focused($focusedCell, equals: i))
+                    .focused($focus, equals: key(i)))
                     .background(fieldWell(focused: focusedCell == i))
             }
         }

@@ -131,8 +131,11 @@ public struct SZNodeEditorPanel: View {
     /// prompt text (`handleScroll`), which is why the value fields below are kept apart from it.
     @State private var editingNodeID: SZNodeID?
     /// The value field holding the keyboard, so selecting its card does not claim canvas focus
-    /// (`selectNode`). By port, not node: a loss must not clear another field's gain.
-    @State private var fieldWithKeyboard: SZPortRef?
+    /// (`selectNode`). Focus state, not a mirror of it.
+    @FocusState private var fieldWithKeyboard: SZFieldRef?
+    /// What the drag ghost's cells bind to: never the live record, or the ghost and the hidden
+    /// original would both claim the same field for the length of a drag.
+    @FocusState private var ghostFieldFocus: SZFieldRef?
     @State private var autoEditNodeID: SZNodeID?   // a just-added prompt node → its card opens straight into editing
     @State private var drag: NodeDrag?
     @State private var wire: SZWireDragSession?
@@ -692,7 +695,7 @@ public struct SZNodeEditorPanel: View {
         // down and this tap ends on mouse up, so claiming here would take it straight back — the ring
         // appeared and vanished, and nothing could be typed. Selecting any other card still claims it,
         // so Delete keeps reaching the canvas.
-        if fieldWithKeyboard?.node != id { canvasFocused = true }
+        if fieldWithKeyboard?.port.node != id { canvasFocused = true }
     }
 
     private func clearSelection() {
@@ -794,8 +797,6 @@ public struct SZNodeEditorPanel: View {
         guard let graph = project?.graph else { return }
         let present = { (id: SZNodeID) in graph.nodes.contains { $0.id == id } }
         if let editing = editingNodeID, !present(editing) { editingNodeID = nil }
-        // Backstop for the value field: its control reports the loss itself on leaving the tree.
-        if let field = fieldWithKeyboard, !present(field.node) { fieldWithKeyboard = nil }
     }
 
     /// What the thing under the pointer is, for the top of its menu. Only a node has one: a placed
@@ -992,6 +993,8 @@ public struct SZNodeEditorPanel: View {
             lockedNodes: lockedNodes,
             deleteHeldNodes: deleteHeldNodes,
             previewsEnabled: livePreviews,
+            fieldFocus: $fieldWithKeyboard,
+            focusedField: fieldWithKeyboard,
             // Compared as a Bool, so pinch ticks keep skipping the subtree — it flips only when the
             // zoom crosses the LOD threshold, re-rendering the cards once per crossing.
             zoomedOut: zoomedOut,
@@ -1016,9 +1019,6 @@ public struct SZNodeEditorPanel: View {
             onOpenNodeSource: onOpenNodeSource,
             onFixNode: onFixNode,
             onSetInputDefault: onSetInputDefault,
-            onFieldEditingChanged: { ref, editing in
-                if editing { fieldWithKeyboard = ref } else if fieldWithKeyboard == ref { fieldWithKeyboard = nil }
-            },
             onToggleDisplay: onToggleDisplay,
             onTogglePreview: onTogglePreview,
             // The fold's one animation: the card's frame and centre, its dots, and the wires on
@@ -1099,6 +1099,7 @@ public struct SZNodeEditorPanel: View {
                 inFlight: isRunning && runWorkSet.contains(node.id)),
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputs,
+            fieldFocus: $ghostFieldFocus,
             previewsEnabled: livePreviews,
             tier: SZNodeLayout.tier(of: node, zoomedOut: zoomedOut, previewsEnabled: livePreviews),
             // The same stable box as the resting card — a dragged card keeps its live thumb (and

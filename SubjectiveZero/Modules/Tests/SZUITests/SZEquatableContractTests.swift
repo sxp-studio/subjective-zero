@@ -35,19 +35,21 @@ private func storedProperties(of subject: Any) -> Set<String> {
 }
 
 @Test func nodeViewStoredPropertiesMatchItsEquatableContract() {
-    let view = SZNodeView(node: node, status: .ready, renderEndpoint: nil, previewsEnabled: true)
+    let view = SZNodeView(node: node, status: .ready, renderEndpoint: nil,
+                          fieldFocus: FocusState<SZFieldRef?>().projectedValue, previewsEnabled: true)
     #expect(storedProperties(of: view) == [
         // compared in ==
         "node", "status", "isSelected", "locked", "deleteHeld", "showPill", "errorDetail", "errorTitle",
-        "renderEndpoint", "connectedInputs", "previewsEnabled", "tier",
+        "renderEndpoint", "focusedField", "connectedInputs", "previewsEnabled", "tier",
         // the app's card host — a stable ref like previewFrame, excluded from == (the card region
         // observes its per-node mount box directly)
         "cardProvider",
         // closures — deliberately excluded from == (capture only stable refs). The card's
         // bottom-left buttons: file (onOpenSource), speech (onOpenChat), and "⋯" (onOpenMenu).
         "onOpenSource", "onOpenChat", "onOpenMenu",
-        "onSetInput", "onFieldEditingChanged", "onToggleDisplay", "onTogglePreview", "onTogglePlugs",
-        "optionsFor",
+        "onSetInput", "onToggleDisplay", "onTogglePreview", "onTogglePlugs", "optionsFor",
+        // the panel's focus binding — the cells bind to it; what the card draws is `focusedField`
+        "fieldFocus",
         // the Outdated/Error pill's one-click repair request
         "onFix",
         // the live-preview box — a stable per-node ref like the closures; only the thumb leaf
@@ -77,13 +79,14 @@ private func storedProperties(of subject: Any) -> Set<String> {
         graph: SZGraph(), strokeZoom: 1, space: "s", selectedNodeID: nil, multiSelection: [],
         selectedConnectionID: nil, hiddenConnectionID: nil, ghostedNodeIDs: [], raisedTiers: [:],
         connectedSockets: [], connectedInputsByNode: [:], nodeAgentState: [:], graphOpStatus: [:],
-        isRunning: false, runWorkSet: [], lockedNodes: [], deleteHeldNodes: [], previewsEnabled: true)
+        isRunning: false, runWorkSet: [], lockedNodes: [], deleteHeldNodes: [], previewsEnabled: true,
+        fieldFocus: FocusState<SZFieldRef?>().projectedValue)
     #expect(storedProperties(of: view) == [
         // compared in ==
         "graph", "strokeZoom", "space", "selectedNodeID", "multiSelection", "selectedConnectionID",
         "hiddenConnectionID", "ghostedNodeIDs", "raisedTiers", "connectedSockets", "connectedInputsByNode",
         "nodeAgentState", "nodeRuntimeErrors", "graphOpStatus", "isRunning", "runWorkSet", "lockedNodes",
-        "deleteHeldNodes", "previewsEnabled", "zoomedOut",
+        "deleteHeldNodes", "previewsEnabled", "focusedField", "zoomedOut",
         "wireRevealNodeIDs",
         // the app's card host — stable ref, excluded like previewFrames
         "cardProvider",
@@ -93,12 +96,14 @@ private func storedProperties(of subject: Any) -> Set<String> {
         "onSelectNode", "onSelectConnection", "onNodeDragChanged", "onNodeDragEnded",
         "onSocketDragChanged", "onSocketDragEnded", "onEdgeDragChanged", "onEdgeDragEnded",
         "autoEditNodeID",
-        "onOpenNodeMenu", "onMentionNodeInChat", "onOpenNodeSource", "onFixNode", "onSetInputDefault", "onFieldEditingChanged",
+        "onOpenNodeMenu", "onMentionNodeInChat", "onOpenNodeSource", "onFixNode", "onSetInputDefault",
         "onToggleDisplay", "onTogglePreview", "onTogglePlugs", "optionsFor", "onCommitPrompt", "onPromptEditingChanged",
         "onLivePrompt",
         // the preview-box registry — stable host-owned ref; per-node boxes are observed by the
         // thumb leaves, never compared here
         "previewFrames",
+        // the panel's focus binding — excluded like the closures; `focusedField` is its compared value
+        "fieldFocus",
     ])
 }
 
@@ -116,7 +121,7 @@ private let portRef = SZPortRef(node: node.id, port: "output")
 private func nodeView(
     node n: SZNode = node, status: SZNodeStatus = .ready, isSelected: Bool = false, locked: Bool = false,
     deleteHeld: Bool = false, showPill: Bool = true, errorDetail: String? = nil, errorTitle: String = "",
-    renderEndpoint: SZPortRef? = nil,
+    renderEndpoint: SZPortRef? = nil, focusedField: SZFieldRef? = nil,
     previewsEnabled: Bool = true, tier: SZCardTier = .full,
     connectedInputs: Set<String> = [], previewFrame: SZNodePreviewFrame? = nil,
     cardProvider: (any SZCustomCardProvider)? = nil
@@ -124,6 +129,7 @@ private func nodeView(
     SZNodeView(node: n, status: status, isSelected: isSelected, locked: locked,
                deleteHeld: deleteHeld, showPill: showPill,
                errorDetail: errorDetail, errorTitle: errorTitle, renderEndpoint: renderEndpoint,
+               fieldFocus: FocusState<SZFieldRef?>().projectedValue, focusedField: focusedField,
                previewsEnabled: previewsEnabled, tier: tier,
                connectedInputs: connectedInputs, previewFrame: previewFrame,
                cardProvider: cardProvider)
@@ -160,6 +166,11 @@ private final class StubCardProvider: SZCustomCardProvider {
     #expect(nodeView(tier: .picture) != nodeView())                            // folding the plugs re-renders once
     #expect(nodeView(tier: .picture) != nodeView(tier: .tile))                 // the two quiet tiers differ
     #expect(nodeView(connectedInputs: ["input"]) != nodeView())                // the clause at SZNodeView.swift:46
+    // the keyboard landing on one of this card's cells, or hopping between two, re-renders it
+    let cell0 = SZFieldRef(port: SZPortRef(node: node.id, port: "input"), cell: 0)
+    let cell1 = SZFieldRef(port: SZPortRef(node: node.id, port: "input"), cell: 1)
+    #expect(nodeView(focusedField: cell0) != nodeView())
+    #expect(nodeView(focusedField: cell0) != nodeView(focusedField: cell1))
     var previewing = node; previewing.body = SZNodeBody(mode: .preview)        // body rides node ==
     #expect(nodeView(node: previewing) != nodeView())
 }
@@ -179,7 +190,8 @@ private final class StubCardProvider: SZCustomCardProvider {
 
     // Closures capture only stable refs; a fresh closure identity each render must not invalidate.
     let withClosures = SZNodeView(
-        node: node, status: .ready, renderEndpoint: nil, previewsEnabled: true,
+        node: node, status: .ready, renderEndpoint: nil,
+        fieldFocus: FocusState<SZFieldRef?>().projectedValue, previewsEnabled: true,
         onOpenSource: {}, onOpenChat: {}, onOpenMenu: {},
         onSetInput: { _, _, _ in }, onToggleDisplay: { _ in }, onTogglePreview: { _ in },
         optionsFor: { _ in [] })
@@ -227,7 +239,7 @@ private func canvasView(
     isRunning: Bool = false, runWorkSet: Set<SZNodeID> = [], lockedNodes: Set<SZNodeID> = [],
     autoEditNodeID: SZNodeID? = nil,
     deleteHeldNodes: Set<SZNodeID> = [],
-    previewsEnabled: Bool = true, zoomedOut: Bool = false,
+    previewsEnabled: Bool = true, focusedField: SZFieldRef? = nil, zoomedOut: Bool = false,
     wireRevealNodeIDs: Set<SZNodeID> = [], previewFrames: SZNodePreviewFrames? = nil,
     cardProvider: (any SZCustomCardProvider)? = nil
 ) -> SZNodeCanvasContentView {
@@ -238,8 +250,8 @@ private func canvasView(
         connectedSockets: connectedSockets, connectedInputsByNode: connectedInputsByNode,
         nodeAgentState: nodeAgentState, graphOpStatus: graphOpStatus, isRunning: isRunning,
         runWorkSet: runWorkSet, lockedNodes: lockedNodes, deleteHeldNodes: deleteHeldNodes,
-        previewsEnabled: previewsEnabled, zoomedOut: zoomedOut,
-        wireRevealNodeIDs: wireRevealNodeIDs,
+        previewsEnabled: previewsEnabled, fieldFocus: FocusState<SZFieldRef?>().projectedValue,
+        focusedField: focusedField, zoomedOut: zoomedOut, wireRevealNodeIDs: wireRevealNodeIDs,
         previewFrames: previewFrames, cardProvider: cardProvider)
     v.autoEditNodeID = autoEditNodeID
     return v
@@ -262,6 +274,7 @@ private func canvasView(
     #expect(canvasView(ghostedNodeIDs: [id]) != canvasView())
     #expect(canvasView(raisedTiers: [id: 1]) != canvasView())
     #expect(canvasView(connectedSockets: ["s"]) != canvasView())
+    #expect(canvasView(focusedField: SZFieldRef(port: SZPortRef(node: id, port: "p"), cell: 0)) != canvasView())
     #expect(canvasView(connectedInputsByNode: [id: ["input"]]) != canvasView())
     #expect(canvasView(nodeAgentState: [id: SZNodeAgentState(phase: .coding)]) != canvasView())
     #expect(canvasView(graphOpStatus: [id: "splitting"]) != canvasView())

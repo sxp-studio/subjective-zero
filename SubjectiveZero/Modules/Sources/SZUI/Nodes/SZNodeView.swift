@@ -20,6 +20,12 @@ struct SZNodeView: View, Equatable {
     var errorDetail: String? = nil   // full diagnostic → clickable error pill
     var errorTitle: String = ""      // what that pill's popover calls it (SZNodeCanvasContentView.nodeDiagnostic)
     let renderEndpoint: SZPortRef?
+    /// The panel's record of which value field holds the keyboard; the cells bind to it. Excluded
+    /// from `==` like the closures: what the ring draws is `focusedField`, a value.
+    @FocusState.Binding var fieldFocus: SZFieldRef?
+    /// The field with the keyboard when it is one of this card's, nil otherwise — narrowed by the
+    /// content view, compared in `==`, so a focus hop re-renders the card it happens on and no other.
+    var focusedField: SZFieldRef? = nil
     /// Graph ▸ Live Previews, the host's pref. Card geometry derives from it, so it has no default:
     /// a card laid out against the wrong value is 144pt too tall and every socket in it is displaced.
     let previewsEnabled: Bool
@@ -41,7 +47,6 @@ struct SZNodeView: View, Equatable {
     var onOpenChat: (() -> Void)? = nil     // speech button → this node's Coding Agent chat
     var onOpenMenu: (() -> Void)? = nil     // "⋯" → the node's context menu (split/merge/implement/…)
     var onSetInput: ((String, SZPortValue, Bool) -> Void)? = nil   // (port, value, persist) → ui_set_input_default
-    var onFieldEditingChanged: ((String, Bool) -> Void)? = nil   // (port, editing): a value field took/lost the keyboard
     var onToggleDisplay: ((String) -> Void)? = nil   // texture output monitor icon → ui_toggle_display (port)
     var onTogglePreview: ((String) -> Void)? = nil   // texture output photo icon → toggle the card's live preview (port)
     var onTogglePlugs: (() -> Void)? = nil   // chevron pill → fold the port rows away, leaving the body
@@ -69,6 +74,7 @@ struct SZNodeView: View, Equatable {
             && lhs.previewsEnabled == rhs.previewsEnabled
             && lhs.tier == rhs.tier
             && lhs.connectedInputs == rhs.connectedInputs
+            && lhs.focusedField == rhs.focusedField
     }
 
     private var outputs: [SZPort] { node.contract?.outputs ?? [] }
@@ -235,7 +241,9 @@ struct SZNodeView: View, Equatable {
                 .lineLimit(1)
             Spacer(minLength: 0)
             if !connectedInputs.contains(port.name) {
-                SZPortControl(port: port, locked: locked, notInBuild: notInBuild,
+                SZPortControl(port: port, node: node.id, focus: $fieldFocus,
+                              focusedCell: focusedField?.port.port == port.name ? focusedField?.cell : nil,
+                              locked: locked, notInBuild: notInBuild,
                               // Why this port's file can't be used, if it can't — the chip says which
                               // port is at fault, so a node with two file inputs isn't a guessing game.
                               fault: node.unreadableInputs[port.name],
@@ -244,8 +252,7 @@ struct SZNodeView: View, Equatable {
                               // Same dynamic-??-static resolution as the snapshot above, re-run at
                               // menu-open time — the fallback rule lives only in effectiveOptions.
                               freshOptions: optionsFor.map { _ in { effectiveOptions(port) } },
-                              onSet: onSetInput.map { set in { value, persist in set(port.name, value, persist) } },
-                              onFieldEditingChanged: onFieldEditingChanged.map { report in { editing in report(port.name, editing) } })
+                              onSet: onSetInput.map { set in { value, persist in set(port.name, value, persist) } })
             }
         }
         .padding(.horizontal, 12)

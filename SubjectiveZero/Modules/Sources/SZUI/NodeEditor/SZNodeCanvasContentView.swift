@@ -46,6 +46,12 @@ struct SZNodeCanvasContentView: View, Equatable {
     /// that also holds a node the fleet is rebuilding. Drives the padlock badge and the delete guards.
     let deleteHeldNodes: Set<SZNodeID>
     let previewsEnabled: Bool         // Graph ▸ Live Previews — no default: card geometry derives from it
+    /// The panel's record of which value field holds the keyboard, handed to every card's cells.
+    /// Excluded from `==` like the closures; `focusedField` is the value the compare sees.
+    @FocusState.Binding var fieldFocus: SZFieldRef?
+    /// The same, as a value. Compared first in `==`: a focus hop re-emits the cards, and each card
+    /// gets only its own slice, so the one it lands on re-renders and the rest compare equal.
+    var focusedField: SZFieldRef? = nil
     var zoomedOut: Bool = false       // semantic-zoom tier: cards render as preview-only tiles, socket dots hide
     /// Nodes holding a legal target for the in-flight wire — their folded cards show their dots so you
     /// can see where a drop lands. Flips at most twice per drag (the source can't change mid-drag), so
@@ -71,9 +77,6 @@ struct SZNodeCanvasContentView: View, Equatable {
     var onOpenNodeSource: (SZNodeID) -> Void = { _ in }   // a card's file button → the node's Node.swift
     var onFixNode: (SZNodeID) -> Void = { _ in }          // Outdated/Error pill → compose a rebuild request
     var onSetInputDefault: (SZNodeID, String, SZPortValue, Bool) -> Void = { _, _, _, _ in }
-    /// A card's value field took or lost the keyboard. The panel needs it because this view
-    /// selects a card on every tap, and selecting claims keyboard focus.
-    var onFieldEditingChanged: (SZPortRef, Bool) -> Void = { _, _ in }
     var onToggleDisplay: (SZNodeID, String) -> Void = { _, _ in }
     var onTogglePreview: (SZNodeID, String) -> Void = { _, _ in }
     var onTogglePlugs: (SZNodeID) -> Void = { _ in }
@@ -83,7 +86,8 @@ struct SZNodeCanvasContentView: View, Equatable {
     var onLivePrompt: (SZNodeID, String) -> Void = { _, _ in }   // live keystrokes → host pending edit (no persist)
 
     nonisolated static func == (lhs: SZNodeCanvasContentView, rhs: SZNodeCanvasContentView) -> Bool {
-        lhs.graph == rhs.graph
+        lhs.focusedField == rhs.focusedField
+            && lhs.graph == rhs.graph
             && lhs.strokeZoom == rhs.strokeZoom
             && lhs.space == rhs.space
             && lhs.selectedNodeID == rhs.selectedNodeID
@@ -193,6 +197,8 @@ struct SZNodeCanvasContentView: View, Equatable {
                                             inFlight: isRunning && runWorkSet.contains(node.id)),
             renderEndpoint: graph.renderEndpoint,
             connectedInputs: connectedInputsByNode[node.id] ?? [],
+            fieldFocus: $fieldFocus,
+            focusedField: focusedField?.port.node == node.id ? focusedField : nil,
             previewsEnabled: previewsEnabled,
             tier: tier(for: node),
             previewFrame: previewFrames?.frame(for: node.id),
@@ -201,7 +207,6 @@ struct SZNodeCanvasContentView: View, Equatable {
             onOpenChat: { onMentionNodeInChat(node.id) },
             onOpenMenu: { onOpenNodeMenu(node.id) },
             onSetInput: { port, value, persist in onSetInputDefault(node.id, port, value, persist) },
-            onFieldEditingChanged: { port, editing in onFieldEditingChanged(SZPortRef(node: node.id, port: port), editing) },
             onToggleDisplay: { port in onToggleDisplay(node.id, port) },
             onTogglePreview: { port in onTogglePreview(node.id, port) },
             onTogglePlugs: { onTogglePlugs(node.id) },
@@ -228,6 +233,8 @@ struct SZNodeCanvasContentView: View, Equatable {
         for node: SZNode, status: SZNodeStatus, isSelected: Bool, locked: Bool,
         deleteHeld: Bool, isRunning: Bool,
         diagnostic: (detail: String, title: String)?, renderEndpoint: SZPortRef?, connectedInputs: Set<String>,
+        fieldFocus: FocusState<SZFieldRef?>.Binding,
+        focusedField: SZFieldRef? = nil,
         previewsEnabled: Bool,
         tier: SZCardTier = .full,
         previewFrame: SZNodePreviewFrame? = nil,
@@ -236,7 +243,6 @@ struct SZNodeCanvasContentView: View, Equatable {
         onOpenChat: (() -> Void)? = nil,
         onOpenMenu: (() -> Void)? = nil,
         onSetInput: @escaping (String, SZPortValue, Bool) -> Void = { _, _, _ in },
-        onFieldEditingChanged: @escaping (String, Bool) -> Void = { _, _ in },
         onToggleDisplay: @escaping (String) -> Void = { _ in },
         onTogglePreview: @escaping (String) -> Void = { _ in },
         onTogglePlugs: (() -> Void)? = nil,
@@ -262,6 +268,8 @@ struct SZNodeCanvasContentView: View, Equatable {
                        showPill: showPill(status, isRunning: isRunning),
                        errorDetail: diagnostic?.detail, errorTitle: diagnostic?.title ?? "",
                        renderEndpoint: renderEndpoint,
+                       fieldFocus: fieldFocus,
+                       focusedField: focusedField,
                        previewsEnabled: previewsEnabled,
                        tier: tier,
                        connectedInputs: connectedInputs,
@@ -271,7 +279,6 @@ struct SZNodeCanvasContentView: View, Equatable {
                        onOpenChat: onOpenChat,
                        onOpenMenu: onOpenMenu,
                        onSetInput: onSetInput,
-                       onFieldEditingChanged: onFieldEditingChanged,
                        onToggleDisplay: onToggleDisplay,
                        onTogglePreview: onTogglePreview,
                        onTogglePlugs: onTogglePlugs,
