@@ -25,12 +25,11 @@ import SZCore
 
 private let node = SZNode(kind: .generated, title: "T", position: SZPoint(x: 0, y: 0))
 
-/// Stored-property names, as a SET (declaration order is not part of the contract) and with
-/// property-wrapper backing prefixes stripped (`_text` → `text` — the `_` spelling is a SwiftUI
-/// internal we don't want to pin).
+/// Stored-property names, as a set, with property-wrapper backing prefixes stripped: `_text` and
+/// `__editing` (an inline-initialized `@State`, stored lazily) both read as the declared name.
 private func storedProperties(of subject: Any) -> Set<String> {
-    Set(Mirror(reflecting: subject).children.compactMap { label in
-        label.label.map { $0.hasPrefix("_") ? String($0.dropFirst()) : $0 }
+    Set(Mirror(reflecting: subject).children.compactMap { child in
+        child.label.map { String($0.drop(while: { $0 == "_" })) }
     })
 }
 
