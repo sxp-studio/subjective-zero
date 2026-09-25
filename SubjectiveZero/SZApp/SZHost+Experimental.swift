@@ -45,9 +45,9 @@ extension SZHost {
                 try await SZJevClient(key: key).verify()
                 jevCheck = .verified
             } catch SZJevError.noBalance {
-                jevCheck = .problem(label: "No balance", detail: "The key works, but its balance is empty. Add tokens at jevtypesafe.org.")
+                jevCheck = .problem(label: "No balance", detail: "The key works, but its balance is empty. Add tokens at console.typesafe.ai.")
             } catch SZJevError.keyRejected {
-                jevCheck = .problem(label: "Key not recognized", detail: "Jev did not accept this key. Check it at jevtypesafe.org.")
+                jevCheck = .problem(label: "Key not recognized", detail: "Jev did not accept this key. Check it at console.typesafe.ai.")
             } catch SZJevError.rateLimited {
                 jevCheck = .problem(label: "Too many requests", detail: "Jev is limiting this key right now. Try again in a minute.")
             } catch {

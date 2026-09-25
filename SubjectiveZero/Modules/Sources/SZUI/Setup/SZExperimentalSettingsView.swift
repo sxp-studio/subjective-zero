@@ -23,7 +23,7 @@ public struct SZExperimentalSettingsView: View {
 
     @State private var draftKey = ""
 
-    private static let explainer = "Jev is a hosted service that answers quick either-or questions in well under a second. When it's on, Jev sorts each message you send (is it a question, something new to build, or a change to work under way?) instead of your AI provider. If Jev can't answer, your provider sorts the message as before. Jev charges a small amount per message from the balance on your key."
+    private static let explainer = "Jev, from TypeSafe, is a hosted service that answers quick either-or questions in well under a second. When it's on, Jev sorts each message you send (is it a question, something new to build, or a change to work under way?) instead of your AI provider. If Jev can't answer, your provider sorts the message as before. Jev charges a small amount per message from the balance on your key."
 
     public init(jevEnabled: Bool, keyHint: String?, check: Check,
                 onSetJevEnabled: @escaping (Bool) -> Void,
@@ -59,7 +59,7 @@ public struct SZExperimentalSettingsView: View {
                     .controlSize(.small)
                     .disabled(keyHint == nil)
                 if keyHint == nil {
-                    Text("Add a key from jevtypesafe.org to turn this on.")
+                    Text("Add a key from console.typesafe.ai to turn this on.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Jev (jevtypesafe.org), a hosted decision model: a short state plus typed questions in,
+// Jev, TypeSafe's hosted decision model (docs.typesafe.ai): a short state plus typed questions in,
 // typed answers out, billed per input token. Experimental, turned on from Settings ▸
 // Experimental. This file is everything Jev-specific: the wire shapes, the error statuses,
 // and the decider that answers a pack's declared decisions.
@@ -8,7 +8,7 @@ import Foundation
 public enum SZJevError: Error, Equatable, CustomStringConvertible {
     case keyRejected                    // 401
     case noBalance                      // 402
-    case rateLimited                    // 429
+    case rateLimited                    // 429, or 529 overloaded
     case http(status: Int, body: String)
     case unreadable(String)
     /// The reply carried no answer for the question asked.
@@ -18,7 +18,7 @@ public enum SZJevError: Error, Equatable, CustomStringConvertible {
         switch self {
         case .keyRejected: "Jev did not recognize the key"
         case .noBalance: "the Jev balance is empty"
-        case .rateLimited: "Jev is rate limiting this key"
+        case .rateLimited: "Jev is busy or rate limiting this key"
         case .http(let status, let body): "Jev answered HTTP \(status): \(body.prefix(300))"
         case .unreadable(let detail): "unreadable Jev reply: \(detail)"
         case .noAnswer(let name): "Jev returned no answer for '\(name)'"
@@ -27,9 +27,8 @@ public enum SZJevError: Error, Equatable, CustomStringConvertible {
 }
 
 public struct SZJevClient: Sendable {
-    public static let endpoint = URL(string: "https://jevtypesafe.org/api/v1/decide")!
-    /// The API refuses a longer state.
-    public static let stateLimit = 4000
+    public static let endpoint = URL(string: "https://api.typesafe.ai/v1/systemone")!
+    public static let model = "jev-latest"
 
     public struct Answer: Decodable, Sendable, Equatable {
         public var choice: String?
@@ -99,8 +98,7 @@ public struct SZJevClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        request.httpBody = try encoder.encode(Body(state: String(state.prefix(Self.stateLimit)),
-                                                   questions: questions))
+        request.httpBody = try encoder.encode(Body(state: state, model: Self.model, questions: questions))
 
         let start = Date()
         let (data, response) = try await session.data(for: request)
@@ -110,7 +108,7 @@ public struct SZJevClient: Sendable {
         case 200..<300: break
         case 401: throw SZJevError.keyRejected
         case 402: throw SZJevError.noBalance
-        case 429: throw SZJevError.rateLimited
+        case 429, 529: throw SZJevError.rateLimited
         default: throw SZJevError.http(status: status, body: String(decoding: data, as: UTF8.self))
         }
         do {
@@ -154,6 +152,7 @@ public struct SZJevClient: Sendable {
 
     private struct Body: Encodable {
         var state: String
+        var model: String
         var questions: [String: Question]
     }
 
