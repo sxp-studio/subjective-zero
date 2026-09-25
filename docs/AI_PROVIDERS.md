@@ -81,16 +81,16 @@ codex's manifest is a fair first gate). The in-app live gate is the setup sheet'
 the run's own failure path; composer, routing, and MCP picks are not probed.
 
 - **`models`** — pinned version ids with display labels (`"claude-opus-4-8"` → "Opus 4.8"),
-  never floating aliases, so a label can't silently re-point. claude (eight ids at 2.1.259,
-  Fable 5.1 first) and muse ship new models via app updates; a type-any-model override stays
+  never floating aliases, so a label can't silently re-point. claude (nine ids at 2.1.282,
+  Fable 5.1 first, Opus 5.5 the default) and muse ship new models via app updates; a type-any-model override stays
   deferred. codex reads its list from the CLI's own manifest (`codex debug models`, see
   Capability discovery): visible rows in priority order, retiring rows (`upgrade`) kept under a
   "(retiring)" label until the vendor hides them.
   grok's ids come from `grok models` (`grok-build` is unversioned; no versioned alternative
   exists).
 - **`supportedReasoningEfforts`** — `[]` means no effort menu (no CLI effort concept, or
-  per-model menus only). claude: low/medium/high/xhigh/max, uniform across its eight models
-  (recorded at 2.1.206, re-confirmed at 2.1.220; Fable 5.1 at 2.1.259). codex: each model's
+  per-model menus only). claude: low/medium/high/xhigh/max, uniform across its nine models
+  (recorded at 2.1.206, re-confirmed at 2.1.220; Fable 5.1 at 2.1.259; Opus 5.5 at 2.1.282). codex: each model's
   menu and default come from the manifest row (`supported_reasoning_levels`,
   `default_reasoning_level`) — Sol and Terra reach ultra, Luna stops at max, 5.5 at xhigh, Sol
   alone defaults to low; the provider-level low/medium/high/xhigh is the stale-id fallback.
@@ -100,7 +100,7 @@ the run's own failure path; composer, routing, and MCP picks are not probed.
   showed no effect, so argv never carries it.
 - **`supportsFastMode`** — the provider flag says the CLI can express fast mode in argv;
   `supportsFastMode(for: model)` says the CLI will enable it for that model. claude reports
-  it on only for Opus 5 and Opus 4.8, so the other models declare false and the toggle
+  it on only for Opus 5.5, Opus 5 and Opus 4.8, so the other models declare false and the toggle
   hides (on Opus 4.7 the gate prevents a real 400; Fable 5.1 reads `off`). "Enabled" is not
   "served fast": the account entitlement is reported per turn as `usage.speed` and is not
   modeled. codex's per-model flag is the manifest's `additional_speed_tiers` (every listed

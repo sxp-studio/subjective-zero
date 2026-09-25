@@ -5,14 +5,14 @@
       "name": "Claude Routing (sxp.studio)",
       "agents": {
         "director": {
-          "planner": { "providerID": "claude", "model": "claude-opus-5" },
+          "planner": { "providerID": "claude", "model": "claude-opus-5-5" },
           "assistant": { "providerID": "claude", "model": "claude-sonnet-5" },
           "sorter": { "providerID": "claude", "model": "claude-haiku-4-5" }
         },
         "coding": {
           "builder-default": { "providerID": "claude", "model": "claude-sonnet-5" },
           "builder-light": { "providerID": "claude", "model": "claude-haiku-4-5" },
-          "builder-heavy": { "providerID": "claude", "model": "claude-opus-5" },
+          "builder-heavy": { "providerID": "claude", "model": "claude-opus-5-5" },
           "editor": { "providerID": "claude", "model": "claude-haiku-4-5" },
           "assistant": { "providerID": "claude", "model": "claude-sonnet-5" },
           "sorter": { "providerID": "claude", "model": "claude-haiku-4-5" }

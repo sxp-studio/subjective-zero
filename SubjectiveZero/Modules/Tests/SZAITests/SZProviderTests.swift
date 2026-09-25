@@ -67,7 +67,7 @@ private extension Array where Element == String {
     let reg = SZProviderRegistry.shared
     #expect(reg.providers.map(\.id).sorted() == ["claude", "codex", "grok", "muse", "opencode", "pi"])
     #expect(reg.defaultProvider.id == "claude")
-    #expect(reg.provider(id: "claude")?.defaultModel == "claude-opus-5")
+    #expect(reg.provider(id: "claude")?.defaultModel == "claude-opus-5-5")
     #expect(reg.provider(id: "codex")?.defaultModel == "gpt-5.6-terra")
     #expect(reg.provider(id: "muse")?.defaultModel == "muse-spark-1.3")
     // grok's, pi's and opencode's catalogs are runtime-enumerated (grok's backend re-points
@@ -105,7 +105,7 @@ private extension Array where Element == String {
 
     let call = try #require(stub.lastCall)
     #expect(call.launchPath == "/usr/bin/env")
-    #expect(call.arguments.value(after: "--model") == "claude-opus-5")
+    #expect(call.arguments.value(after: "--model") == "claude-opus-5-5")
     #expect(call.arguments.contains("--mcp-config"))
     // The silence budget's working bound: without this the CLI is mute for the whole of a
     // generation, and writing a large node reads as a wedge.
@@ -406,9 +406,8 @@ private let grokModelsLoggedOut =
     let resolved = claude.resolvedGenerationSettings(
         from: SZProviderGenerationSettings(reasoningEffort: "max", fastMode: true))
     #expect(resolved.reasoningEffort == "max")
-    // Survives only because the model this falls back to — the default, Opus 5 — honours fast mode.
-    // Were the default ever a model that doesn't, this would clamp to false; see claudeFastModeIsOpus5AndOpus48Only.
-    #expect(resolved.model == "claude-opus-5")
+    // Survives because the default (Opus 5.5) supports fast mode; see claudeFastModeIsOpusOnly.
+    #expect(resolved.model == "claude-opus-5-5")
     #expect(resolved.fastMode == true)
 
     // nil stored = provider defaults across the board.
@@ -416,23 +415,18 @@ private let grokModelsLoggedOut =
     #expect(defaults == SZProviderGenerationSettings(model: "gpt-5.6-terra", reasoningEffort: "medium", fastMode: false))
 }
 
-/// claude's eight models are live-verified (seven against claude 2.1.220, Fable 5.1 against 2.1.259)
-/// and grouped in the CLI's own frontier-first alias order (fable, opus, sonnet), newest first within
-/// each family, haiku last.
-/// Their EFFORT surface is uniform — no model overrides it, each one completing a turn at `max` —
-/// which is the half that stays true even as fast mode diverges (see
-/// `claudeFastModeIsOpus5AndOpus48Only`). An added model that does diverge on effort has to say so
-/// with an override, not inherit a list the CLI never advertised for it.
+/// claude's models in menu order, with a uniform effort surface: none overrides it. A model that
+/// diverges on effort must say so with an override.
 @Test func claudeModelEffortSurfaceIsUniformAndDefaultsToOpus() {
     let claude = SZClaudeProvider()
 
     #expect(claude.models.map(\.id) == [
         "claude-fable-5-1", "claude-fable-5",
-        "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7",
+        "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7",
         "claude-sonnet-5", "claude-sonnet-4-6",
         "claude-haiku-4-5",
     ])
-    #expect(claude.defaultModel == "claude-opus-5")
+    #expect(claude.defaultModel == "claude-opus-5-5")
     // Fable is the frontier model and heads the menu, but the default is deliberately NOT it.
     #expect(claude.models.first?.id != claude.defaultModel)
 
@@ -444,35 +438,26 @@ private let grokModelsLoggedOut =
         #expect(claude.defaultReasoningEffort(for: model.id) == "high")
     }
 
-    // nil stored = Opus 5 at high, fast off. The end-to-end statement of "Opus 5 is the default".
+    // nil stored = the default model at high, fast off.
     #expect(claude.resolvedGenerationSettings(from: nil)
-        == SZProviderGenerationSettings(model: "claude-opus-5", reasoningEffort: "high", fastMode: false))
+        == SZProviderGenerationSettings(model: "claude-opus-5-5", reasoningEffort: "high", fastMode: false))
 
     // A selection stored for a generation the menu no longer carries still resolves to one it does.
     let stale = claude.resolvedGenerationSettings(
         from: SZProviderGenerationSettings(model: "claude-opus-4-6", reasoningEffort: "max", fastMode: false))
-    #expect(stale.model == "claude-opus-5")
+    #expect(stale.model == "claude-opus-5-5")
     #expect(stale.reasoningEffort == "max")
 }
 
-/// Fast mode is per MODEL, not per provider. claude accepts `--settings {"fastMode":true}` for all
-/// eight — it swallows unknown settings keys silently — but its own `result.fast_mode_state` reads
-/// `on` only for Opus 5 and Opus 4.8 (2.1.220; Fable 5.1 read `off` on 2.1.259). Every model the CLI won't
-/// enable it for declares it, so the composer stops offering the toggle there.
-///
-/// Opus 4.7 is why "inert" understates the stakes: there the CLI reports `fast_mode_state: on` and
-/// the API then FAILS the turn ("400 'claude-opus-4-7' does not support the `speed` parameter"). An
-/// offered toggle would break runs, not merely not speed them up — so the flag is the run's gate,
-/// not a cosmetic one.
-///
-/// What's asserted here is "can the CLI enable it", not "was the turn served fast" — the latter is an
-/// account entitlement reported per turn as `usage.speed`, and is deliberately not modeled.
-@Test func claudeFastModeIsOpus5AndOpus48Only() {
+/// Fast mode is per model: the CLI's `fast_mode_state` reads `on` only for the three newest Opus
+/// models, so every other one declares false and the toggle hides. On Opus 4.7 a fast turn is a 400.
+@Test func claudeFastModeIsOpusOnly() {
     let claude = SZClaudeProvider()
 
     // The CLI has the flag, so the provider-level fallback stays true…
     #expect(claude.supportsFastMode)
     // …and every model that can't take it says so, rather than inheriting a capability it lacks.
+    #expect(claude.model(id: "claude-opus-5-5")?.supportsFastMode == nil)   // inherits
     #expect(claude.model(id: "claude-opus-5")?.supportsFastMode == nil)     // inherits
     #expect(claude.model(id: "claude-opus-4-8")?.supportsFastMode == nil)   // inherits
     for id in ["claude-fable-5-1", "claude-fable-5", "claude-opus-4-7", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"] {
@@ -480,16 +465,18 @@ private let grokModelsLoggedOut =
         #expect(!claude.supportsFastMode(for: id))
     }
 
+    #expect(claude.supportsFastMode(for: "claude-opus-5-5"))
     #expect(claude.supportsFastMode(for: "claude-opus-5"))
     #expect(claude.supportsFastMode(for: "claude-opus-4-8"))
     // A stale stored id falls back to the provider rather than an empty answer.
     #expect(claude.supportsFastMode(for: "claude-opus-4-6") == claude.supportsFastMode)
 
-    // The resolver is the clamp: fast survives on the two opuses, and is forced off everywhere else.
+    // The resolver is the clamp: fast survives on the three opuses, and is forced off everywhere else.
     func resolvedFast(_ model: String) -> Bool? {
         claude.resolvedGenerationSettings(
             from: SZProviderGenerationSettings(model: model, reasoningEffort: nil, fastMode: true)).fastMode
     }
+    #expect(resolvedFast("claude-opus-5-5") == true)
     #expect(resolvedFast("claude-opus-5") == true)
     #expect(resolvedFast("claude-opus-4-8") == true)
     #expect(resolvedFast("claude-opus-4-7") == false)   // the one that would 400
