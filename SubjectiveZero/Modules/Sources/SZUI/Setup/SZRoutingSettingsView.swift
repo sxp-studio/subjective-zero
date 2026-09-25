@@ -613,7 +613,7 @@ private struct SZListGadget: View {
 
 /// A quiet (?) carrying a surface's teaching: hover for the tooltip, click for a popover
 /// with the same words readable at leisure.
-private struct SZHelpBubble: View {
+struct SZHelpBubble: View {
     let text: String
     @State private var shown = false
     @State private var hovered = false

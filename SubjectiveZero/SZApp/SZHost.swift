@@ -343,6 +343,13 @@ final class SZHost {
     internal(set) var showTurnBreakdown: Bool =
         SZPanelKind.profilerPanelAvailable && (SZAppStateIO.load()?.showTurnBreakdown ?? false)
 
+    /// Settings ▸ Experimental ▸ Jev (SZHost+Experimental). Off by default; needs a saved key.
+    internal(set) var jevEnabled: Bool = SZAppStateIO.load()?.jevEnabled ?? false
+    /// The saved key's masked tail for the pane; nil = no key saved.
+    internal(set) var jevKeyHint: String? = SZKeychain.jev.read().map(SZHost.maskedKey)
+    /// The pane's key check, kept here so it survives switching sections.
+    internal(set) var jevCheck: SZExperimentalSettingsView.Check = .idle
+
     // Anonymous-telemetry opt-out — same app-state.json + restore story, mutated via
     // setTelemetryEnabled (SZHost+Telemetry). Defaults on (nil/absent in app-state.json means on);
     // SZTelemetry consults this live per send, so a mid-session toggle takes effect immediately,

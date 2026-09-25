@@ -781,6 +781,9 @@ public struct SZAppState: Codable, Equatable, Sendable {
     /// Whether the Library panel sections by what a node does or by which library it came from
     /// (`SZLibraryGrouping`). Optional for the same decode-compatibility reason; nil means category.
     public var libraryGrouping: String?
+    /// Settings ▸ Experimental ▸ Jev: sort messages with Jev instead of the provider. The key
+    /// itself lives in the Keychain. nil means OFF.
+    public var jevEnabled: Bool?
     /// Open Recent's cap — recents beyond this fall off the end.
     public static let maxRecentProjects = 10
 
@@ -813,7 +816,8 @@ public struct SZAppState: Codable, Equatable, Sendable {
         libraryCollapsedGroups: [String]? = nil,
         libraries: [SZAddedLibrary]? = nil,
         libraryDetailHeight: Double? = nil,
-        libraryGrouping: String? = nil
+        libraryGrouping: String? = nil,
+        jevEnabled: Bool? = nil
     ) {
         self.windowSize = windowSize
         self.theme = theme
@@ -844,6 +848,7 @@ public struct SZAppState: Codable, Equatable, Sendable {
         self.libraries = libraries
         self.libraryDetailHeight = libraryDetailHeight
         self.libraryGrouping = libraryGrouping
+        self.jevEnabled = jevEnabled
     }
 
     /// Fold a just-opened project into the MRU list: dedupe (an existing entry moves to the front,

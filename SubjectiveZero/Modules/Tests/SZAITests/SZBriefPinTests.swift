@@ -338,6 +338,15 @@ struct SZBriefPinTests {
             agent: "coding", template: "triage",
             message: "add a strength slider",
             world: SZWorld(graph: base, node: grayID))
+        // — the declared-decision state the same asks send a decider (Settings ▸ Experimental) —
+        out["director-triage-state.md"] = try renderer.render(
+            agent: "director", template: "triage-state",
+            message: "make it warmer and add a soft glow",
+            world: SZWorld(graph: base, pendingTasks: scheduled, runningTasks: building))
+        out["coding-triage-state.md"] = try renderer.render(
+            agent: "coding", template: "triage-state",
+            message: "add a strength slider",
+            world: SZWorld(graph: base, node: grayID))
 
         // — the edit lane's work order (re-grounded on the node's live files every turn) —
         out["coding-edit.md"] = try renderer.render(

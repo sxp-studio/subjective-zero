@@ -16,6 +16,10 @@ public enum SZAppSupport {
         return home
     }()
 
+    /// Whether this process is a test runner (either suite).
+    public static let isTestProcess = isTestRunner(env: ProcessInfo.processInfo.environment,
+                                                   arguments: CommandLine.arguments)
+
     static let testHomePrefix = "SubjectiveZero-tests-"
 
     /// Takes env and arguments so tests can pass their own: an absolute override wins, a test

@@ -1,0 +1,9 @@
+{
+  "key": "outcome",
+  "state": "triage-state",
+  "instructions": "You sort messages sent to the coding agent for one node in a visual-effects graph. Classify what the user is asking for, so the host can route it.",
+  "choices": {
+    "edit": "The user wants this node changed: its behavior, its ports or controls, its look, its name. \"Add a toggle\", \"make it slower\", \"rename this\": a change request, however casually phrased.",
+    "chat": "A question or a discussion: how the node works, why it looks wrong, what an approach would be. Anything answered with words, changing nothing."
+  }
+}

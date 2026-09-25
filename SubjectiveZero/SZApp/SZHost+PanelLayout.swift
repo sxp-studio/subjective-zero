@@ -173,7 +173,8 @@ extension SZHost {
                                                  ? nil : libraryCollapsedGroups.sorted(),
                                              libraries: addedLibraries.isEmpty ? nil : addedLibraries,
                                              libraryDetailHeight: libraryDetailHeight,
-                                             libraryGrouping: libraryGrouping.rawValue))
+                                             libraryGrouping: libraryGrouping.rawValue,
+                                             jevEnabled: jevEnabled ? true : nil))
         } catch {
             print("[SZHost] app-state save failed: \(error)")   // a pref, not project data — log & move on
         }

@@ -2,7 +2,7 @@
 // The Settings sheet (the Xcode-Settings shape): a sidebar toggles focused panes —
 // Target Platform (where the project runs, SZTargetPlatformPane), Providers (provider cards with
 // live status badges, inline remedies, and Confirm for the default; also the first-run surface)
-// and Routing (named profiles, SZRoutingSettingsView).
+// Routing (named profiles, SZRoutingSettingsView), Library, and Experimental (SZExperimentalSettingsView).
 // SZUI can't import SZAI: everything arrives as host-mapped values + closures.
 import AppKit
 import SwiftUI
@@ -26,6 +26,7 @@ public enum SZProviderSetupSection: String, CaseIterable, Sendable {
     case providers
     case routing
     case library
+    case experimental
 }
 
 /// One provider's card — a pure view-model the host maps from its merged health truth.
@@ -109,6 +110,8 @@ public struct SZProviderSetupSheet: View {
     private let routing: SZRoutingSettingsView?
     /// The Library pane, built by the presenter. nil = no such section (previews/tests).
     private let library: SZLibrarySettingsView?
+    /// The Experimental pane. nil = no such section (previews/tests).
+    private let experimental: SZExperimentalSettingsView?
     private let onSelect: (String) -> Void
     private let onRefresh: () -> Void
     private let onTest: (String) -> Void
@@ -149,13 +152,15 @@ public struct SZProviderSetupSheet: View {
                 onJoinDiscord: @escaping () -> Void,
                 onSectionChange: @escaping (SZProviderSetupSection) -> Void = { _ in },
                 isFirstRun: Bool = true,
-                library: SZLibrarySettingsView? = nil) {
+                library: SZLibrarySettingsView? = nil,
+                experimental: SZExperimentalSettingsView? = nil) {
         self.cards = cards
         self.selectedID = selectedID
         self.activeID = activeID
         self.targetPlatform = targetPlatform
         self.routing = routing
         self.library = library
+        self.experimental = experimental
         self.isFirstRun = isFirstRun
         _section = section
         self.onSelect = onSelect
@@ -184,6 +189,7 @@ public struct SZProviderSetupSheet: View {
                 case .providers: providersPane
                 case .routing: routingPane
                 case .library: libraryPane
+                case .experimental: experimentalPane
                 }
             }
             .padding(24)
@@ -209,6 +215,9 @@ public struct SZProviderSetupSheet: View {
             }
             if library != nil {
                 sidebarItem(.library, label: "Library", systemImage: "books.vertical")
+            }
+            if experimental != nil {
+                sidebarItem(.experimental, label: "Experimental", systemImage: "flask")
             }
             Spacer()
         }
@@ -334,6 +343,21 @@ public struct SZProviderSetupSheet: View {
         if let library {
             VStack(alignment: .leading, spacing: 10) {
                 library
+                HStack {
+                    Spacer()
+                    Button("Done") { onSkip() }
+                }
+            }
+        }
+    }
+
+    // MARK: - Experimental pane
+
+    @ViewBuilder
+    private var experimentalPane: some View {
+        if let experimental {
+            VStack(alignment: .leading, spacing: 10) {
+                experimental
                 HStack {
                     Spacer()
                     Button("Done") { onSkip() }

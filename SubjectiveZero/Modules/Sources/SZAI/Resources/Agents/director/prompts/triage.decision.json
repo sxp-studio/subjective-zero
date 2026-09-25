@@ -1,0 +1,10 @@
+{
+  "key": "outcome",
+  "state": "triage-state",
+  "instructions": "Classify what the user's message asks for, so the host can route it. \"amend\" beats \"implement\" whenever the message touches work listed under Work in hand, even when it reads like a build instruction: listed work is changed by steering it, not by asking for it a second time. Only a fresh ask, over work that is not listed, is \"implement\".",
+  "choices": {
+    "answer": "A question, a conversation, or shaping/planning work: anything served with words or plan edits, without running the coding fleet.",
+    "implement": "The user wants something built now that is not already listed under Work in hand: implement it, run it, make it real.",
+    "amend": "The message concerns work listed under Work in hand, whether scheduled or already building: a correction, a refinement, a change of mind about it, or a repeat of an ask that is under way right now."
+  }
+}

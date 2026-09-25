@@ -889,7 +889,7 @@ extension SZHost {
         }
         // One query service per run: every delivery's asks funnel through it.
         let queries = SZQueryService(renderer: renderer, router: router,
-                                    cacheDirectory: cacheDirectory)
+                                    cacheDirectory: cacheDirectory, decider: queryDecider)
 
         // The run's live pieces the world closures and the fleet share.
         let state = BuildState()

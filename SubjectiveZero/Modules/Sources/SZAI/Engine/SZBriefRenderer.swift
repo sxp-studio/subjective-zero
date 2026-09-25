@@ -140,6 +140,11 @@ public struct SZBriefRenderer: Sendable {
         }
     }
 
+    /// A pack file's raw text, read through the same source as templates.
+    public func file(agent: String, path: String) throws -> String {
+        try template(agent, path)
+    }
+
     /// The pack-relative path a template stem resolves to. A name that already carries a
     /// path is taken as written.
     public static func templatePath(_ name: String) -> String {

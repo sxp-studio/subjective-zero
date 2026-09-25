@@ -393,7 +393,8 @@ extension SZHost {
         // One query service per delivery (the door's triage ask); production executor.
         let queries = SZQueryService(
             renderer: renderer, router: router,
-            cacheDirectory: FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache"))
+            cacheDirectory: FileManager.default.temporaryDirectory.appending(path: "sz-agent-cache"),
+            decider: queryDecider)
         // The turn's result crosses the seam in a box: the graph speaks SZTurnReport
         // (process truth only), while performChatTurn needs the full run result back.
         final class Capture { var result: SZAgentRunResult?; var error: Error?; var mintedTasks: [UUID] = [] }

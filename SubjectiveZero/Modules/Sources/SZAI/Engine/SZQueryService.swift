@@ -52,6 +52,9 @@ public final class SZQueryService {
     private let registry: SZProviderRegistry
     private let cacheDirectory: URL
     private let executor: SZQueryExecutor
+    /// Answers asks that declare their decision (`SZDeclaredDecision`); nil = every ask is a
+    /// completion.
+    private let decider: SZQueryDecider?
     private let onRecord: @MainActor @Sendable (SZQueryRecord) -> Void
     /// Every exchange this service ran, in order. Test observability today (the effects/
     /// query suites assert what a step asked); nothing in the app reads it back yet.
@@ -63,12 +66,14 @@ public final class SZQueryService {
                 cacheDirectory: URL,
                 runner: any SZProcessRunning = SZSystemProcessRunner(),
                 executor: SZQueryExecutor? = nil,
+                decider: SZQueryDecider? = nil,
                 onRecord: @escaping @MainActor @Sendable (SZQueryRecord) -> Void = { _ in }) {
         self.renderer = renderer
         self.router = router
         self.registry = registry
         self.cacheDirectory = cacheDirectory
         self.executor = executor ?? Self.providerRunExecutor(runner: runner)
+        self.decider = decider
         self.onRecord = onRecord
     }
 
@@ -99,6 +104,33 @@ public final class SZQueryService {
             request = try JSONDecoder().decode(AskRequest.self, from: Data(requestJSON.utf8))
         } catch {
             throw SZQueryError.unreadableRequest(detail: String(describing: error))
+        }
+
+        // A declared decision goes to the decider first; any failure there falls through to
+        // the completion below, quietly (the record carries why).
+        var declinedBecause: String?
+        if request.attempt == 0, let decider,
+           let text = try? renderer.file(agent: agent, path: SZDeclaredDecision.path(for: request.template)) {
+            do {
+                let decision = try JSONDecoder().decode(SZDeclaredDecision.self, from: Data(text.utf8))
+                let state = try renderer.render(agent: agent, template: decision.state, message: message,
+                                                world: world, extras: extras)
+                let answer = try await decider(decision, state)
+                let reply = Self.reply(key: decision.key, value: answer.value)
+                var record = SZQueryRecord(step: step, attempt: 0, template: request.template,
+                                           promptHash: Self.hash(state), reply: reply,
+                                           providerID: answer.deciderID)
+                record.latency = answer.latency
+                record.inputTokens = answer.inputTokens
+                record.confidence = answer.confidence
+                journal.append(record)
+                onRecord(record)
+                return reply
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                declinedBecause = String(describing: error)
+            }
         }
 
         // The named template, rendered exactly like a brief — one resolution, one token
@@ -134,18 +166,27 @@ public final class SZQueryService {
             reasoningEffort: choice.reasoningEffort,
             timeout: SZQueryBudgets.timeout,
             inactivityTimeout: SZQueryBudgets.inactivityTimeout)
+        let started = Date()
         let reply = try await executor(run, provider)
 
-        let record = SZQueryRecord(step: step, attempt: request.attempt,
+        var record = SZQueryRecord(step: step, attempt: request.attempt,
                                    template: request.template,
                                    promptHash: Self.hash(prompt), reply: reply,
                                    providerID: choice.providerID, model: choice.model)
+        record.latency = Date().timeIntervalSince(started)
+        record.deciderFailure = declinedBecause
         journal.append(record)
         onRecord(record)
         return reply
     }
 
     // MARK: - Pieces
+
+    /// A decider's answer as the reply a step decodes: `{"<key>":"<value>"}`.
+    static func reply(key: String, value: String) -> String {
+        let data = (try? JSONSerialization.data(withJSONObject: [key: value], options: .sortedKeys)) ?? Data()
+        return String(decoding: data, as: UTF8.self)
+    }
 
     /// A stable short digest of the rendered prompt bytes.
     static func hash(_ prompt: String) -> String {

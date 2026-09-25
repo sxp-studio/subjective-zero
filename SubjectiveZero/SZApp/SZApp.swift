@@ -439,7 +439,14 @@ struct SZApp: App {
                                      // First run = the default provider is still unconfirmed;
                                      // afterwards the Providers pane closes with a plain Done.
                                      isFirstRun: host.defaultProviderID == nil,
-                                     library: librarySettingsView)
+                                     library: librarySettingsView,
+                                     experimental: SZExperimentalSettingsView(
+                                        jevEnabled: host.jevEnabled, keyHint: host.jevKeyHint,
+                                        check: host.jevCheck,
+                                        onSetJevEnabled: { host.setJevEnabled($0) },
+                                        onSaveKey: { host.saveJevKey($0) },
+                                        onRemoveKey: { host.removeJevKey() },
+                                        onVerify: { host.verifyJevKey() }))
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)

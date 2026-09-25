@@ -21,6 +21,14 @@ public struct SZQueryRecord: Sendable, Equatable {
     /// The routed provider/model that served the completion — query-lane attribution.
     public var providerID: String?
     public var model: String?
+    /// Wall time of the exchange, seconds.
+    public var latency: TimeInterval?
+    /// Input tokens the decider billed; nil for a completion (its provider accounts elsewhere).
+    public var inputTokens: Int?
+    /// The decider's confidence in its answer, 0...1.
+    public var confidence: Double?
+    /// Why a declared decision fell back to this completion; nil when it didn't.
+    public var deciderFailure: String?
 
     public init(step: String, attempt: Int, template: String, promptHash: String, reply: String,
                 providerID: String? = nil, model: String? = nil) {
