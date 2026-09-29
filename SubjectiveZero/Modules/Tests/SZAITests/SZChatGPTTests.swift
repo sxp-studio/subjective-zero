@@ -35,6 +35,37 @@ struct SZChatGPTTests {
         #expect(standard.models.first?.supportsFastMode == false)
     }
 
+    @Test func catalogRequestsAdvertiseManagedHarnessVersion() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var profile = SZChatGPTAccounts.Profile(id: "account", clientID: "oaiapp_test")
+        profile.accessToken = "test-token"
+        profile.scopes = ["chatgpt.tokens.use.direct"]
+        profile.expiresAt = Date().addingTimeInterval(3600)
+        try JSONEncoder().encode(SZChatGPTAccounts.Database(activeID: profile.id, profiles: [profile]))
+            .write(to: root.appending(path: "accounts.json"))
+        SZChatGPTTestHTTP.handler.withLock { $0 = { request in
+            let url = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            #expect(url?.host == "api.openai.com")
+            #expect(url?.path == "/v1/models")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
+            #expect(request.cachePolicy == .reloadIgnoringLocalCacheData)
+            let current = url?.queryItems?.first(where: { $0.name == "client_version" })?.value == SZChatGPTEngine.version
+            #expect(current)
+            let model = current ? "newly-available" : "older-model"
+            return (200, Data("{\"models\":[{\"slug\":\"\(model)\",\"visibility\":\"list\"}]}".utf8))
+        } }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SZChatGPTTestHTTP.self]
+        let session = URLSession(configuration: config)
+        let accounts = SZChatGPTAccounts(directory: root, session: session, useKeychain: false)
+        let provider = SZChatGPTProvider(accounts: accounts, session: session)
+        let snapshot = try await provider.refreshModelCatalog(runner: SZSystemProcessRunner())
+        #expect(snapshot?.models.map(\.id) == ["newly-available"])
+        #expect(provider.defaultModel == "newly-available")
+    }
+
     @Test func registrationUsesPKCEAndReauthorizationPreservesClient() throws {
         let callback = URL(string: "http://127.0.0.1:15432/auth/callback")!
         let first = try SZChatGPTOAuth.Attempt(redirect: callback, clientID: nil)

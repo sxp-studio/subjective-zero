@@ -65,8 +65,10 @@ public final class SZChatGPTProvider: SZProvider, Sendable {
         let generation = catalog.withLock { $0.generation }
         guard let accountID = try await accounts.activeAccountID() else { throw SZChatGPTError("Connect a ChatGPT account first.") }
         let token = try await accounts.accessToken(for: accountID)
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!,
-                                 cachePolicy: .reloadIgnoringLocalCacheData)
+        // the catalog gates newer models on the harness version, including for plan tokens.
+        var url = URLComponents(string: "https://api.openai.com/v1/models")!
+        url.queryItems = [.init(name: "client_version", value: SZChatGPTEngine.version)]
+        var request = URLRequest(url: url.url!, cachePolicy: .reloadIgnoringLocalCacheData)
         request.timeoutInterval = 30
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
