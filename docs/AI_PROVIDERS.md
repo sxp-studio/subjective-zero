@@ -364,3 +364,20 @@ hidden entries (`gpt-reserve`, `codex-auto-review`); GPT-6.1 Sol and GPT-6 Luna 
 This rules out SubZ's visibility filter and a stale local catalog as causes of that result. The
 upstream reason for their absence remains unknown. The signed Debug build passed strict signature
 verification and launched successfully; it is not a notarized release or a signed-upgrade test.
+
+### Missing models resolved
+
+`13666c05` corrects the earlier diagnosis: SubZ omitted the `client_version` query parameter from
+`GET /v1/models`. A controlled comparison with the same ChatGPT plan credential returned five
+visible models without it, seven with `client_version=0.155.0` (adding GPT-6 Sol and GPT-6 Luna),
+and eight with the managed harness's actual `0.159.0` version (also adding GPT-6.1 Sol). Requesting
+a fresh token did not change those results. The missing request parameter, rather than account
+entitlement or the picker filter, caused the omissions.
+
+Catalog requests now advertise `SZChatGPTEngine.version`; model names remain entirely supplied by
+the server. A transport regression covers the version-dependent catalog. Independent review
+approved the change, `swift build` and all 13 focused ChatGPT tests passed, and all 421 app-hosted
+tests passed. The signed app's live verifier fetched all eight visible models and completed its
+real inference probe using the server's new default, GPT-6.1 Sol (verified response in five seconds).
+The updated test app was relaunched with the user's account and saved settings preserved.
+User UI acceptance remains pending before merge.
