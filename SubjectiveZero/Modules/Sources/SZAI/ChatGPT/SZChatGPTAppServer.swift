@@ -5,6 +5,7 @@ import SZCore
 
 @MainActor
 final class SZChatGPTAppServer {
+    nonisolated static let defaultTimeout: TimeInterval = 1800
     private let process = Process()
     private let input = Pipe()
     private let output = Pipe()
@@ -70,7 +71,7 @@ final class SZChatGPTAppServer {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled { return }
-                if Date().timeIntervalSince(started) >= (request.timeout ?? 1800) { self.timedOut = .wallClock }
+                if Date().timeIntervalSince(started) >= (request.timeout ?? Self.defaultTimeout) { self.timedOut = .wallClock }
                 if let silence = request.inactivityTimeout, Date().timeIntervalSince(self.lastActivity) >= silence { self.timedOut = .silence }
                 if self.timedOut != nil { self.stop(); return }
             }

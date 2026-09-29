@@ -149,6 +149,83 @@ struct SZChatGPTTests {
         #expect(saved.profiles[0].refreshToken == "rotated")
     }
 
+    @Test func longTurnsRenewNearExpiryAndRejectInsufficientLifetime() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var profile = SZChatGPTAccounts.Profile(id: "account", clientID: "oaiapp_test")
+        profile.accessToken = "three-minutes-left"; profile.refreshToken = "refresh"
+        profile.scopes = ["chatgpt.tokens.use.direct"]; profile.expiresAt = Date().addingTimeInterval(180)
+        try JSONEncoder().encode(SZChatGPTAccounts.Database(activeID: profile.id, profiles: [profile]))
+            .write(to: root.appending(path: "accounts.json"))
+        let lifetimes = Mutex([3600, 60])
+        SZChatGPTTestHTTP.handler.withLock { $0 = { _ in
+            let lifetime = lifetimes.withLock { $0.removeFirst() }
+            return (200, Data("{\"access_token\":\"renewed\",\"refresh_token\":\"rotated\",\"expires_in\":\(lifetime)}".utf8))
+        } }
+        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [SZChatGPTTestHTTP.self]
+        let accounts = SZChatGPTAccounts(directory: root, session: URLSession(configuration: config), useKeychain: false)
+        #expect(try await accounts.accessToken(for: profile.id) == "three-minutes-left")
+        #expect(try await accounts.accessToken(for: profile.id,
+            minimumValidity: SZChatGPTAppServer.defaultTimeout + 120) == "renewed")
+        await #expect(throws: SZChatGPTError.self) {
+            try await accounts.accessToken(for: profile.id, minimumValidity: 4000)
+        }
+        #expect(lifetimes.withLock { $0.isEmpty })
+    }
+
+    @Test func duplicateEmailsHaveDistinctStableRegistrationLabels() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var first = SZChatGPTAccounts.Profile(id: "shared-first", clientID: "oaiapp_one")
+        var second = SZChatGPTAccounts.Profile(id: "shared-second", clientID: "oaiapp_two")
+        var third = SZChatGPTAccounts.Profile(id: "unique", clientID: "oaiapp_three")
+        first.email = "same@example.com"; second.email = first.email; third.email = "other@example.com"
+        try JSONEncoder().encode(SZChatGPTAccounts.Database(profiles: [first, second, third]))
+            .write(to: root.appending(path: "accounts.json"))
+        let accounts = SZChatGPTAccounts(directory: root, useKeychain: false)
+        let before = try await accounts.accounts()
+        #expect(Set(before.map(\.label)).count == 3)
+        #expect(before[0].label.hasPrefix("same@example.com · "))
+        #expect(before[2].label == "other@example.com")
+        try await accounts.select(second.id)
+        #expect(try await accounts.accounts().map(\.label) == before.map(\.label))
+    }
+
+    @Test func accountSwitchDiscardsPendingCatalogEvenAfterSwitchingBack() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var first = SZChatGPTAccounts.Profile(id: "first", clientID: "oaiapp_one")
+        first.accessToken = "test-token"; first.scopes = ["chatgpt.tokens.use.direct"]
+        first.expiresAt = Date().addingTimeInterval(3600)
+        let second = SZChatGPTAccounts.Profile(id: "second", clientID: "oaiapp_two")
+        try JSONEncoder().encode(SZChatGPTAccounts.Database(activeID: first.id, profiles: [first, second]))
+            .write(to: root.appending(path: "accounts.json"))
+        let started = Mutex(false)
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        SZChatGPTTestHTTP.handler.withLock { $0 = { _ in
+            started.withLock { $0 = true }
+            _ = release.wait(timeout: .now() + 5)
+            return (200, Data(#"{"models":[{"slug":"stale","visibility":"list"}]}"#.utf8))
+        } }
+        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [SZChatGPTTestHTTP.self]
+        let session = URLSession(configuration: config)
+        let accounts = SZChatGPTAccounts(directory: root, session: session, useKeychain: false)
+        let provider = SZChatGPTProvider(accounts: accounts, session: session)
+        let task = Task { try await provider.refreshModelCatalog(runner: SZSystemProcessRunner()) }
+        let deadline = Date().addingTimeInterval(3)
+        while !started.withLock({ $0 }), Date() < deadline { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(started.withLock { $0 })
+        try await accounts.select(second.id); provider.clearCatalog()
+        try await accounts.select(first.id); provider.clearCatalog()
+        release.signal()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(provider.models.isEmpty)
+    }
+
     @Test func archiveMismatchNeverRunsAnUnverifiedEngine() throws {
         let file = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }

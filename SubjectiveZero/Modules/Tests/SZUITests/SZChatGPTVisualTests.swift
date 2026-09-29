@@ -10,21 +10,24 @@ func renderChatGPTConnectionPreviews() throws {
     let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SZ_CONNECTION_PREVIEWS"]!)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     _ = NSApplication.shared
-    for connected in [false, true] {
+    for state in ["sign-in", "connected", "failed"] {
+        let connected = state != "sign-in"
+        let failed = state == "failed"
         let connection = SZChatGPTConnectionView(
             accounts: connected ? [.init(id: "preview", label: "hello@example.com")] : [],
             activeID: connected ? "preview" : nil, connected: connected, usesPlan: connected,
             busy: false, message: nil, onConnect: {}, onAddAccount: {}, onSelect: { _ in },
             onSignOut: {}, onCancel: {}, onManageUsage: {})
         let card = SZProviderSetupCard(id: "chatgpt", displayName: "ChatGPT", statusLabel: connected ? "Ready" : "Sign in",
-            message: "", readiness: connected ? .ready : .needsLogin, models: connected ? [.init(id: "one", label: "Model One"), .init(id: "two", label: "Model Two")] : [], selectedModel: "one",
-            isConfirmable: connected, directSignIn: true)
+            message: failed ? "Connection test failed. Try again or choose another model." : "",
+            readiness: failed ? .failed : (connected ? .ready : .needsLogin), models: connected ? [.init(id: "one", label: "Model One"), .init(id: "two", label: "Model Two")] : [], selectedModel: "one",
+            isConfirmable: connected && !failed, directSignIn: true)
         let view = SZProviderSetupSheet(cards: [card], chatGPT: connection, selectedID: "chatgpt",
             onSelect: { _ in }, onRefresh: {}, onTest: { _ in }, onSetModel: { _, _ in },
             onOpenLogin: { _ in }, onUseFallback: { _ in }, onSetEnabled: { _, _ in },
             onConfirm: {}, onSkip: {}, onOpenSetupGuide: {}, onJoinDiscord: {})
-        try render(view.directConnectionCard(card), size: NSSize(width: 594, height: connected ? 250 : 230),
-                   to: directory.appending(path: connected ? "connected.png" : "sign-in.png"))
+        try render(view.directConnectionCard(card), size: NSSize(width: 594, height: failed ? 290 : (connected ? 250 : 230)),
+                   to: directory.appending(path: state + ".png"))
     }
     try render(SZChatGPTWelcomeView(onContinue: {}, onManageUsage: {}),
                size: NSSize(width: 416, height: 310), to: directory.appending(path: "welcome.png"))

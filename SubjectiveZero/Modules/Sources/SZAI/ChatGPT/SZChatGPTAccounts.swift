@@ -112,9 +112,20 @@ public actor SZChatGPTAccounts {
     }
 
     public func accounts() throws -> [SZChatGPTAccount] {
-        try load().profiles.map {
-            SZChatGPTAccount(id: $0.id,
-                label: ($0.email.isEmpty ? ($0.name.isEmpty ? "ChatGPT account" : $0.name) : $0.email), connected: $0.accessToken != nil, usesPlan: $0.usesPlan)
+        let profiles = try load().profiles
+        func label(_ profile: Profile) -> String {
+            profile.email.isEmpty ? (profile.name.isEmpty ? "ChatGPT account" : profile.name) : profile.email
+        }
+        return profiles.map { profile in
+            var name = label(profile)
+            let duplicates = profiles.filter { label($0) == name && $0.id != profile.id }
+            if !duplicates.isEmpty {
+                var length = 6
+                while duplicates.contains(where: { $0.id.prefix(length) == profile.id.prefix(length) }) { length += 1 }
+                name += " · " + profile.id.prefix(length)
+            }
+            return SZChatGPTAccount(id: profile.id, label: name,
+                connected: profile.accessToken != nil, usesPlan: profile.usesPlan)
         }
     }
 
@@ -209,20 +220,29 @@ public actor SZChatGPTAccounts {
         }
     }
 
-    public func accessToken(for id: String) async throws -> String {
+    public func accessToken(for id: String, minimumValidity: TimeInterval = 120) async throws -> String {
         let db = try load()
         guard let profile = db.profiles.first(where: { $0.id == id }), profile.usesPlan else {
             throw SZChatGPTError("Continue with ChatGPT and enable ChatGPT plan usage to run an agent.")
         }
-        if let token = profile.accessToken, let expiry = profile.expiresAt, expiry.timeIntervalSinceNow > 120 { return token }
-        if let task = refreshes[id] { return try await task.value }
-        let task = Task { try await self.refresh(profile) }
-        refreshes[id] = task
-        defer { refreshes[id] = nil }
-        return try await task.value
+        if let token = profile.accessToken, let expiry = profile.expiresAt, expiry.timeIntervalSinceNow > minimumValidity { return token }
+        if let task = refreshes[id] {
+            _ = try await task.value
+        } else {
+            let task = Task { try await self.refresh(profile, minimumValidity: minimumValidity) }
+            refreshes[id] = task
+            defer { refreshes[id] = nil }
+            _ = try await task.value
+        }
+        guard let renewed = try load().profiles.first(where: { $0.id == id }), renewed.usesPlan,
+              let token = renewed.accessToken, let expiry = renewed.expiresAt,
+              expiry.timeIntervalSinceNow > minimumValidity else {
+            throw SZChatGPTError("The ChatGPT session cannot cover this run's time limit. Try a shorter run or reconnect.")
+        }
+        return token
     }
 
-    private func refresh(_ original: Profile) async throws -> String {
+    private func refresh(_ original: Profile, minimumValidity: TimeInterval) async throws -> String {
         let lock = open(directory.appending(path: "refresh.lock").path, O_CREAT | O_RDWR, 0o600)
         guard lock >= 0 else { throw SZChatGPTError("Could not lock the ChatGPT session for renewal.") }
         defer { close(lock) }
@@ -234,7 +254,7 @@ public actor SZChatGPTAccounts {
         guard let profile = try load().profiles.first(where: { $0.id == original.id }), profile.usesPlan else {
             throw SZChatGPTError("Please reconnect your ChatGPT account.")
         }
-        if let token = profile.accessToken, let expiry = profile.expiresAt, expiry.timeIntervalSinceNow > 120 { return token }
+        if let token = profile.accessToken, let expiry = profile.expiresAt, expiry.timeIntervalSinceNow > minimumValidity { return token }
         guard let token = profile.refreshToken else { throw SZChatGPTError("Please reconnect your ChatGPT account.") }
         do {
             let tokens = try await tokenRequest(["grant_type": "refresh_token", "client_id": profile.clientID,

@@ -59,7 +59,7 @@ extension SZHost {
                 resetAgentSessions(ownedBy: SZChatGPTProvider.providerID)
                 chatGPTProvider?.clearCatalog()
                 providerProbes[SZChatGPTProvider.providerID] = nil
-                providerModelCatalogs[SZChatGPTProvider.providerID] = nil
+                invalidateProviderModelCatalog(SZChatGPTProvider.providerID)
                 chatGPTSetupMessage = nil
                 await refreshChatGPTAccounts()
                 chatGPTWelcomePresented = try await SZChatGPTAccounts.shared.needsWelcome()
@@ -81,7 +81,7 @@ extension SZHost {
                 resetAgentSessions(ownedBy: SZChatGPTProvider.providerID)
                 chatGPTProvider?.clearCatalog()
                 providerProbes[SZChatGPTProvider.providerID] = nil
-                providerModelCatalogs[SZChatGPTProvider.providerID] = nil
+                invalidateProviderModelCatalog(SZChatGPTProvider.providerID)
                 chatGPTSetupMessage = nil
                 await refreshChatGPTAccounts()
                 await refreshProviderHealthOnce()
@@ -99,6 +99,7 @@ extension SZHost {
             } catch { chatGPTSetupMessage = error.localizedDescription }
             resetAgentSessions(ownedBy: SZChatGPTProvider.providerID)
             chatGPTProvider?.clearCatalog()
+            invalidateProviderModelCatalog(SZChatGPTProvider.providerID)
             providerProbes[SZChatGPTProvider.providerID] = nil
             await refreshChatGPTAccounts()
             await refreshProviderHealthOnce()

@@ -526,7 +526,7 @@ final class SZHost {
     /// on cheap-status ready transitions (SZHost+ProviderHealth), persisted to provider-catalogs.json.
     internal(set) var providerModelCatalogs: [String: SZProviderModelCatalog] = SZProviderCatalogIO.load()
     /// Providers with a catalog fetch in flight — collapses the sheet poll's 3s ticks.
-    internal(set) var catalogRefreshesInFlight: Set<String> = []
+    internal(set) var catalogRefreshesInFlight: [String: UUID] = [:]
     /// When each provider's catalog fetch was last started, fetched or not — the retry cool-down.
     internal(set) var catalogRefreshAttemptedAt: [String: Date] = [:]
     /// The Agent Providers sheet. Auto-presents on a first-run launch; reopened any time via the

@@ -430,15 +430,15 @@ public struct SZProviderSetupSheet: View {
                 Text(card.message).font(.system(size: 12)).foregroundStyle(.secondary).textSelection(.enabled)
                 if let detail = card.detail { SZCopyableDetailDisclosure(detail: detail) }
             }
-            if card.isConfirmable {
+            if card.isConfirmable || card.readiness == .failed {
                 Divider()
                 HStack {
                     modelMenu(card)
                     testButton(card)
                     Spacer()
-                    if card.id == activeID && !isFirstRun {
+                    if card.isConfirmable && card.id == activeID && !isFirstRun {
                         Text("Default connection").font(.system(size: 11)).foregroundStyle(.secondary)
-                    } else if card.id != selectedID {
+                    } else if card.isConfirmable && card.id != selectedID {
                         Button("Use ChatGPT") { onSelect(card.id) }
                     }
                 }

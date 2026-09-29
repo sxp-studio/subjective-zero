@@ -14,9 +14,13 @@ public final class SZChatGPTProvider: SZProvider, Sendable {
     public let healthArgs: [String] = []
     public let installCommand = ""
     public let loginCommand = ""
-    private let catalog = Mutex<SZProviderModelCatalog?>(nil)
-    public var models: [SZProviderModel] { catalog.withLock { $0?.models ?? [] } }
-    public var defaultModel: String { catalog.withLock { $0?.defaultModelID ?? "" } }
+    private struct CatalogState {
+        var generation = UUID()
+        var snapshot: SZProviderModelCatalog?
+    }
+    private let catalog = Mutex(CatalogState())
+    public var models: [SZProviderModel] { catalog.withLock { $0.snapshot?.models ?? [] } }
+    public var defaultModel: String { catalog.withLock { $0.snapshot?.defaultModelID ?? "" } }
     public let accounts: SZChatGPTAccounts
     public let engine: SZChatGPTEngine
     private let session: URLSession
@@ -32,7 +36,7 @@ public final class SZChatGPTProvider: SZProvider, Sendable {
     }
 
     // account-specific catalogs are fetched after account selection, never seeded across accounts.
-    public func clearCatalog() { catalog.withLock { $0 = nil } }
+    public func clearCatalog() { catalog.withLock { $0 = CatalogState() } }
 
     public func healthReport(runner: any SZProcessRunning) async -> SZProviderHealthReport {
         do {
@@ -58,6 +62,7 @@ public final class SZChatGPTProvider: SZProvider, Sendable {
     }
 
     public func refreshModelCatalog(runner: any SZProcessRunning) async throws -> SZProviderModelCatalog? {
+        let generation = catalog.withLock { $0.generation }
         guard let accountID = try await accounts.activeAccountID() else { throw SZChatGPTError("Connect a ChatGPT account first.") }
         let token = try await accounts.accessToken(for: accountID)
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
@@ -69,7 +74,10 @@ public final class SZChatGPTProvider: SZProvider, Sendable {
             throw SZChatGPTError("No ChatGPT models are available for this account.")
         }
         guard try await accounts.activeAccountID() == accountID else { throw CancellationError() }
-        catalog.withLock { $0 = snapshot }
+        try catalog.withLock {
+            guard $0.generation == generation else { throw CancellationError() }
+            $0.snapshot = snapshot
+        }
         return snapshot
     }
 
@@ -91,13 +99,14 @@ public final class SZChatGPTProvider: SZProvider, Sendable {
     public func run(_ request: SZAgentRunRequest, runner: any SZProcessRunning) async throws -> SZAgentRunResult {
         guard await engine.installed else { throw SZChatGPTError("Complete ChatGPT setup in Settings first.") }
         guard let accountID = try await accounts.activeAccountID() else { throw SZChatGPTError("Continue with ChatGPT in Settings first.") }
-        let token = try await accounts.accessToken(for: accountID)
         var resolved = request
         if resolved.model == nil || resolved.model?.isEmpty == true {
             if models.isEmpty { _ = try await refreshModelCatalog(runner: runner) }
             resolved.model = defaultModel
         }
         let executable = await engine.executable
+        let token = try await accounts.accessToken(for: accountID,
+            minimumValidity: (resolved.timeout ?? SZChatGPTAppServer.defaultTimeout) + 120)
         return try await SZChatGPTAppServer().run(resolved, executable: executable, accessToken: token,
                                                  accountID: accountID, directory: threadsDirectory)
     }
