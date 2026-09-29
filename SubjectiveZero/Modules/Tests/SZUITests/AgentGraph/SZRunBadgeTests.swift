@@ -12,10 +12,10 @@ import SZCore
 // Named reads: Swift 6.4 cannot type-check `label(.x) == "…"` inside #expect
 // in reasonable time, and a plain String or Color comparison it can.
 private func label(_ conclusion: SZAgentGraphRun.Conclusion?, endedOn: String? = nil) -> String {
-    label(conclusion, endedOn: endedOn)
+    SZRunBadge.style(for: conclusion, endedOn: endedOn).label
 }
 private func colour(_ conclusion: SZAgentGraphRun.Conclusion?, endedOn: String? = nil) -> Color {
-    colour(conclusion, endedOn: endedOn)
+    SZRunBadge.style(for: conclusion, endedOn: endedOn).colour
 }
 
 @Test func everyConclusionClassGetsItsOwnWord() {
