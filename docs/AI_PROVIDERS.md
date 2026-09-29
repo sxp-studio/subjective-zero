@@ -307,6 +307,21 @@ Verified on macOS arm64:
   account model discovery, and failed/resumed transport behavior have regression coverage.
 
 The Intel archive is pinned to its official checksum but has not been executed on this arm64 Mac.
-The worktree stays at `.claude/worktrees/chatgpt-sign-in` for the UI review checkpoint; this branch
-has not been merged into main. The isolated development build retains its test connection through
-`SZ_CHATGPT_TEST_FILE_CREDENTIALS=1` (Debug only); normal builds store credentials in Keychain.
+The worktree stays at `.claude/worktrees/chatgpt-sign-in` pending the user's fresh-onboarding
+sign-off; this branch has not been merged into main. The isolated test home and its credentials
+were reset for that review, and the fresh onboarding uses normal Keychain storage. The earlier
+live integration tests used `SZ_CHATGPT_TEST_FILE_CREDENTIALS=1` (Debug only).
+
+Independent code review requested four fixes, now in `874f8869`:
+
+- Keep model selection and Test available after a failed connection probe.
+- Invalidate account catalog cooldowns and discard stale in-flight results when switching accounts.
+- Renew credentials before a run when the remaining lifetime cannot cover its timeout plus margin.
+- Distinguish same-email registrations with stable suffixes while leaving unique emails uncluttered.
+
+The reviewer rechecked and approved the fixes with no remaining actionable findings. Verification
+on the reviewed code passed: `swift build`, all 1,406 package tests, the Xcode app build, and all
+418 app-hosted tests. New regressions cover near-expiry renewal, insufficient renewed lifetime,
+duplicate account labels, rapid account switches and stale catalog completions, and probe recovery.
+A native failed-connection preview verifies that the model picker and Test button remain visible.
+Merge remains gated on the user's onboarding approval.
