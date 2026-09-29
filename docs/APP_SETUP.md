@@ -45,7 +45,8 @@ the latest release *is* the source of truth.
 2. Verify before opening — stop and report if either check fails:
    `codesign --verify --deep --strict --verbose=2 /Volumes/SubjectiveZero/SubjectiveZero.app`
    and `spctl -a -t exec -vv /Volumes/SubjectiveZero/SubjectiveZero.app`. Expect the signer
-   `Developer ID Application: SXP Studio` and `source=Notarized Developer ID`.
+   `Developer ID Application: Clement Boissiere (7U852S3789)` and
+   `source=Notarized Developer ID`.
 3. Ask the user, then copy the app to `/Applications` and launch it.
 
 After the first install the app updates itself — **SubjectiveZero ▸ Check for Updates…** reads a
