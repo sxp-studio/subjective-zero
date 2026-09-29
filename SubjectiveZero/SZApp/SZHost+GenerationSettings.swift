@@ -58,13 +58,19 @@ extension SZHost {
     /// provider's supported list — which is also every token when the CLI has no effort concept.
     @discardableResult
     func setActiveReasoningEffort(_ effort: String) -> Bool {
-        guard let provider = SZProviderRegistry.shared.provider(id: activeProviderID) else { return false }
-        let selected = provider.resolvedGenerationSettings(from: providerGenerationSettings[activeProviderID])
+        setReasoningEffort(effort, for: activeProviderID)
+    }
+
+    @discardableResult
+    func setReasoningEffort(_ effort: String, for providerID: String) -> Bool {
+        guard let provider = SZProviderRegistry.shared.provider(id: providerID) else { return false }
+        let selected = provider.resolvedGenerationSettings(from: providerGenerationSettings[providerID])
         let model = selected.model ?? provider.defaultModel
         guard provider.supportedReasoningEfforts(for: model).contains(effort) else { return false }
-        providerGenerationSettings[activeProviderID, default: SZProviderGenerationSettings()].reasoningEffort = effort
+        providerGenerationSettings[providerID, default: SZProviderGenerationSettings()].reasoningEffort = effort
         persistAppState()
-        trackProviderDefaultTelemetry()
+        if selected.reasoningEffort != effort { providerProbes[providerID] = nil }
+        if providerID == activeProviderID { trackProviderDefaultTelemetry() }
         return true
     }
 
@@ -73,13 +79,19 @@ extension SZHost {
     /// depends on the model, exactly as it does for effort above.
     @discardableResult
     func setActiveFastMode(_ enabled: Bool) -> Bool {
-        guard let provider = SZProviderRegistry.shared.provider(id: activeProviderID) else { return false }
-        let selected = provider.resolvedGenerationSettings(from: providerGenerationSettings[activeProviderID])
+        setFastMode(enabled, for: activeProviderID)
+    }
+
+    @discardableResult
+    func setFastMode(_ enabled: Bool, for providerID: String) -> Bool {
+        guard let provider = SZProviderRegistry.shared.provider(id: providerID) else { return false }
+        let selected = provider.resolvedGenerationSettings(from: providerGenerationSettings[providerID])
         let model = selected.model ?? provider.defaultModel
         guard provider.supportsFastMode(for: model) else { return false }
-        providerGenerationSettings[activeProviderID, default: SZProviderGenerationSettings()].fastMode = enabled
+        providerGenerationSettings[providerID, default: SZProviderGenerationSettings()].fastMode = enabled
         persistAppState()
-        trackProviderDefaultTelemetry()
+        if (selected.fastMode ?? false) != enabled { providerProbes[providerID] = nil }
+        if providerID == activeProviderID { trackProviderDefaultTelemetry() }
         return true
     }
 

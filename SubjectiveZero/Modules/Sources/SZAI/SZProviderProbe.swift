@@ -12,7 +12,7 @@ public extension SZProvider {
     /// knows the user's resolved selection passes it so Test verifies the model a real run will use.
     /// Mirrors `run()`'s spawn (mint → launch → run → parse) inline so the diagnostic can carry
     /// the exact argv that ran.
-    func healthProbe(model: String? = nil, reasoningEffort: String? = nil,
+    func healthProbe(model: String? = nil, reasoningEffort: String? = nil, fastMode: Bool = false,
                      runner: any SZProcessRunning = SZSystemProcessRunner()) async -> SZProviderHealthReport {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appending(path: "sz-provider-probe-\(id)-\(UUID().uuidString)")
@@ -25,7 +25,7 @@ public extension SZProvider {
         // mcpServerPort nil → both providers omit their MCP wiring; model/effort nil → provider default.
         let request = SZAgentRunRequest(prompt: "Reply with exactly: OK",
                                         workingDirectory: work, cacheDirectory: cache,
-                                        model: model, reasoningEffort: reasoningEffort,
+                                        model: model, reasoningEffort: reasoningEffort, fastMode: fastMode,
                                         timeout: 90)
         let cli = self as? any SZCLIProvider
         let preallocated = cli?.usesPreallocatedSessionID == true ? UUID().uuidString : nil

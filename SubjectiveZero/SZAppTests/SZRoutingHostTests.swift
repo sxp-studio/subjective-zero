@@ -45,6 +45,43 @@ struct SZRoutingHostTests {
 
     // MARK: - Selection
 
+    @Test func freshInstallCanEnableRoutingAndRestoreItsProfile() {
+        let host = bareHost()
+        host.routingLastProfileName = nil
+        host.setRoutingEnabled(true)
+        let name = host.activeRoutingProfileName
+        #expect(name != nil)
+        #expect(host.routingProfiles.count == 1)
+        #expect(host.routingAgentCards(editedName: name).flatMap(\.rows).allSatisfy { !$0.options.isEmpty })
+        host.setRoutingEnabled(false)
+        #expect(host.activeRoutingProfileName == nil)
+        host.setRoutingEnabled(true)
+        #expect(host.activeRoutingProfileName == name)
+        #expect(host.routingProfiles.count == 1)
+    }
+
+    @Test func providerDefaultsExposeAndPersistSupportedEffortAndSpeed() throws {
+        let host = bareHost()
+        let provider = try #require(SZProviderRegistry.shared.provider(id: "claude"))
+        host.providerHealth[provider.id] = .init(providerID: provider.id, status: .ready, message: "Ready")
+        let model = try #require(provider.models.first { provider.supportsFastMode(for: $0.id) })
+        #expect(host.setModel(model.id, for: provider.id))
+        let effort = try #require(provider.supportedReasoningEfforts(for: model.id).last)
+        #expect(host.setReasoningEffort(effort, for: provider.id))
+        #expect(host.setFastMode(true, for: provider.id))
+        let card = try #require(host.providerSetupCards.first { $0.id == provider.id })
+        #expect(card.selectedEffort == effort)
+        #expect(card.effortOptions == provider.supportedReasoningEfforts(for: model.id))
+        #expect(card.supportsFastMode && card.fastModeEnabled)
+        #expect(!host.setReasoningEffort("unsupported", for: provider.id))
+        let failure = SZProviderHealthReport(providerID: provider.id, status: .healthFailed, message: "Try again")
+        host.providerProbes[provider.id] = failure
+        host.pickSetupEffort(effort, for: provider.id)
+        host.pickSetupFastMode(true, for: provider.id)
+        #expect(host.providerProbes[provider.id] == failure)
+        #expect(!host.probingProviders.contains(provider.id))
+    }
+
     @Test func noActiveProfileMeansRoutingOff() throws {
         let host = bareHost(profiles: [fastFleet], active: nil)
         #expect(try host.activeRoutingProfile(env: nil) == nil)

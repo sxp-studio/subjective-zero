@@ -21,14 +21,19 @@ func renderChatGPTConnectionPreviews() throws {
         let card = SZProviderSetupCard(id: "chatgpt", displayName: "ChatGPT", statusLabel: connected ? "Ready" : "Sign in",
             message: failed ? "Connection test failed. Try again or choose another model." : "",
             readiness: failed ? .failed : (connected ? .ready : .needsLogin), models: connected ? [.init(id: "one", label: "Model One"), .init(id: "two", label: "Model Two")] : [], selectedModel: "one",
+            effortOptions: connected ? ["low", "medium", "high", "ultra"] : [], selectedEffort: "medium",
+            supportsFastMode: connected, fastModeEnabled: connected,
             isConfirmable: connected && !failed, directSignIn: true)
         let view = SZProviderSetupSheet(cards: [card], chatGPT: connection, selectedID: "chatgpt",
             onSelect: { _ in }, onRefresh: {}, onTest: { _ in }, onSetModel: { _, _ in },
             onOpenLogin: { _ in }, onUseFallback: { _ in }, onSetEnabled: { _, _ in },
             onConfirm: {}, onSkip: {}, onOpenSetupGuide: {}, onJoinDiscord: {})
-        try render(view.directConnectionCard(card), size: NSSize(width: 594, height: failed ? 290 : (connected ? 250 : 230)),
+        try render(view.directConnectionCard(card), size: NSSize(width: 594, height: failed ? 330 : (connected ? 285 : 230)),
                    to: directory.appending(path: state + ".png"))
     }
+    try render(SZRoutingSettingsView(profiles: [], selectedProfileName: nil, agents: [],
+                   activeProviderSummary: "ChatGPT · Model One · Medium · Fast"),
+               size: NSSize(width: 594, height: 350), to: directory.appending(path: "routing-off.png"))
     try render(SZChatGPTWelcomeView(onContinue: {}, onManageUsage: {}),
                size: NSSize(width: 416, height: 310), to: directory.appending(path: "welcome.png"))
 }

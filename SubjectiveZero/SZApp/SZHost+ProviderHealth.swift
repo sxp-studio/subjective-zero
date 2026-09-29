@@ -346,6 +346,18 @@ extension SZHost {
         if isProviderReadyForNewWork(providerID) { runProviderProbe(providerID) }
     }
 
+    func pickSetupEffort(_ effort: String, for providerID: String) {
+        let changed = effort != resolvedGenerationSettings(for: providerID).reasoningEffort
+        guard setReasoningEffort(effort, for: providerID), changed else { return }
+        if isProviderReadyForNewWork(providerID) { runProviderProbe(providerID) }
+    }
+
+    func pickSetupFastMode(_ enabled: Bool, for providerID: String) {
+        let changed = enabled != (resolvedGenerationSettings(for: providerID).fastMode ?? false)
+        guard setFastMode(enabled, for: providerID), changed else { return }
+        if isProviderReadyForNewWork(providerID) { runProviderProbe(providerID) }
+    }
+
     func runProviderProbe(_ id: String) {
         guard let provider = SZProviderRegistry.shared.provider(id: id),
               !disabledProviderIDs.contains(id),
@@ -358,7 +370,8 @@ extension SZHost {
         let resolved = resolvedGenerationSettings(for: id)
         let model = resolved.model.flatMap { $0.isEmpty ? nil : $0 }
         Task { @MainActor in
-            let report = await provider.healthProbe(model: model, reasoningEffort: resolved.reasoningEffort)
+            let report = await provider.healthProbe(model: model, reasoningEffort: resolved.reasoningEffort,
+                                                    fastMode: resolved.fastMode ?? false)
             probingProviders.remove(id)
             providerProbes[id] = report
         }
@@ -516,6 +529,8 @@ extension SZHost {
             if needsNode {
                 message += "  ·  Installs through npm, which needs Node.js. Node.js was not found."
             }
+            let generation = resolvedGenerationSettings(for: provider.id)
+            let model = generation.model ?? provider.defaultModel
             return SZProviderSetupCard(
                 id: provider.id,
                 displayName: provider.displayName,
@@ -527,7 +542,11 @@ extension SZHost {
                 installCommand: provider.installCommand,
                 installNeedsNode: needsNode,
                 models: models,
-                selectedModel: resolvedGenerationSettings(for: provider.id).model ?? "",
+                selectedModel: model,
+                effortOptions: provider.supportedReasoningEfforts(for: model),
+                selectedEffort: generation.reasoningEffort,
+                supportsFastMode: provider.supportsFastMode(for: model),
+                fastModeEnabled: generation.fastMode ?? false,
                 isTesting: probingProviders.contains(provider.id),
                 isSelectable: readiness != .unavailable,
                 isConfirmable: readiness == .ready || readiness == .verified,

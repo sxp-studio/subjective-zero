@@ -90,7 +90,8 @@ public final class SZChatGPTProvider: SZProvider, Sendable {
                 .compactMap { $0["effort"] as? String }.filter { $0 != "none" }
             let defaultEffort = (row["default_reasoning_level"] as? String).flatMap { efforts.contains($0) ? $0 : nil }
             return SZProviderModel(id: id, displayName: row["display_name"] as? String ?? id,
-                supportedReasoningEfforts: efforts, defaultReasoningEffort: defaultEffort, supportsFastMode: false)
+                supportedReasoningEfforts: efforts, defaultReasoningEffort: defaultEffort,
+                supportsFastMode: (row["additional_speed_tiers"] as? [String] ?? []).contains("fast"))
         }
         guard !models.isEmpty else { return nil }
         return SZProviderModelCatalog(models: models, defaultModelID: models.first?.id)

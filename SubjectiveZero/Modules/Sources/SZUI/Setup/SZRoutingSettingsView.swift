@@ -233,12 +233,25 @@ public struct SZRoutingSettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
-                    Toggle("Enable Model Routing",
-                           isOn: Binding(get: { routingEnabled }, set: { onSetRoutingEnabled($0) }))
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .font(.system(size: 13, weight: .medium))
-                        .disabled(envLocked)
+                    Button { onSetRoutingEnabled(!routingEnabled) } label: {
+                        HStack(spacing: 8) {
+                            Text("Enable Model Routing")
+                                .font(.system(size: 13, weight: .medium))
+                            Capsule()
+                                .fill(routingEnabled ? Color.accentColor : Color.secondary.opacity(0.3))
+                                .frame(width: 32, height: 20)
+                                .overlay(alignment: routingEnabled ? .trailing : .leading) {
+                                    Circle().fill(.white).frame(width: 16, height: 16).padding(2)
+                                }
+                                .accessibilityHidden(true)
+                        }
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Enable Model Routing")
+                    .accessibilityValue(routingEnabled ? "On" : "Off")
+                    .disabled(envLocked)
                     SZHelpBubble(text: Self.explainer)
                 }
                 toggleHelper

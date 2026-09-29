@@ -254,7 +254,7 @@ public protocol SZProvider: Sendable {
 
     func run(_ request: SZAgentRunRequest, runner: any SZProcessRunning) async throws -> SZAgentRunResult
     func healthReport(runner: any SZProcessRunning) async -> SZProviderHealthReport
-    func healthProbe(model: String?, reasoningEffort: String?, runner: any SZProcessRunning) async -> SZProviderHealthReport
+    func healthProbe(model: String?, reasoningEffort: String?, fastMode: Bool, runner: any SZProcessRunning) async -> SZProviderHealthReport
 
     /// A fresh stream consumer for one chat turn — parses this provider's output into chat events
     /// (`.reply` / `.thinking` / `.toolCall` / `.usage`). Provider-specific parsing, common API.

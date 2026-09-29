@@ -24,12 +24,15 @@ struct SZChatGPTTests {
     }
 
     @Test func modelsComeOnlyFromAccountCatalog() throws {
-        let data = Data(#"{"models":[{"slug":"account-model","display_name":"Account Model","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}],"default_reasoning_level":"high"},{"slug":"hidden","visibility":"hide"}]}"#.utf8)
+        let data = Data(#"{"models":[{"slug":"account-model","display_name":"Account Model","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}],"default_reasoning_level":"high","additional_speed_tiers":["fast"]},{"slug":"hidden","visibility":"hide"}]}"#.utf8)
         let catalog = try #require(SZChatGPTProvider.catalogSnapshot(data))
         #expect(catalog.models.map(\.id) == ["account-model"])
         #expect(catalog.models.first?.displayName == "Account Model")
         #expect(catalog.defaultModelID == "account-model")
         #expect(catalog.models.first?.defaultReasoningEffort == "high")
+        #expect(catalog.models.first?.supportsFastMode == true)
+        let standard = try #require(SZChatGPTProvider.catalogSnapshot(Data(#"{"models":[{"slug":"standard","visibility":"list","additional_speed_tiers":[]}]}"#.utf8)))
+        #expect(standard.models.first?.supportsFastMode == false)
     }
 
     @Test func registrationUsesPKCEAndReauthorizationPreservesClient() throws {
@@ -233,7 +236,8 @@ struct SZChatGPTTests {
         #expect(throws: SZChatGPTError.self) { try SZChatGPTEngine.verifyArchive(at: file, digest: String(repeating: "0", count: 64)) }
     }
 
-    @Test @MainActor func transportRequiresCompletedTurnAndResumesSavedThread() async throws {
+    @Test(arguments: [false, true]) @MainActor
+    func transportRequiresCompletedTurnAndResumesSavedThread(fast: Bool) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -241,6 +245,8 @@ struct SZChatGPTTests {
         let source = #"""
         #!/usr/bin/python3
         import sys,json,os
+        assert ('service_tier="fast"' in sys.argv) != ('service_tier="default"' in sys.argv)
+        with open('tier.json','w') as f: json.dump('fast' if 'service_tier="fast"' in sys.argv else 'default',f)
         for line in sys.stdin:
             message=json.loads(line)
             method=message.get('method')
@@ -251,6 +257,7 @@ struct SZChatGPTTests {
                 assert message['params']['threadId']=='saved-thread'
                 print(json.dumps({'id':2,'result':{'thread':{'id':'saved-thread'}}}),flush=True)
             elif method=='turn/start':
+                assert message['params']['effort']=='high'
                 print(json.dumps({'id':3,'result':{'turn':{'id':'turn'}}}),flush=True)
                 print(json.dumps({'method':'item/completed','params':{'item':{'type':'agentMessage','text':'partial '+os.environ['SZ_CHATGPT_ACCESS_TOKEN']}}}),flush=True)
                 print(json.dumps({'method':'turn/completed','params':{'turn':{'status':'failed','error':{'message':'usage limit'}}}}),flush=True)
@@ -258,9 +265,10 @@ struct SZChatGPTTests {
         try Data(source.utf8).write(to: script)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
         let request = SZAgentRunRequest(prompt: "hello", workingDirectory: root, cacheDirectory: root,
-                                        resumeSessionID: "account/saved-thread", timeout: 10)
+                                        resumeSessionID: "account/saved-thread", reasoningEffort: "high", fastMode: fast, timeout: 10)
         let result = try await SZChatGPTAppServer().run(request, executable: script, accessToken: "secret-sentinel",
                                                        accountID: "account", directory: root.appending(path: "threads"))
+        #expect(try JSONDecoder().decode(String.self, from: Data(contentsOf: root.appending(path: "tier.json"))) == (fast ? "fast" : "default"))
         #expect(result.outcome.failed)
         #expect(result.outcome.sessionID == "account/saved-thread")
         #expect(result.outcome.message == "usage limit")

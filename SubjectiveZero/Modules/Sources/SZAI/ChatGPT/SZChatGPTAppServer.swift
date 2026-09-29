@@ -37,6 +37,7 @@ final class SZChatGPTAppServer {
             "model_providers.openai_chatgpt_plan.supports_websockets=false",
             "shell_environment_policy.filters.SZ_CHATGPT_ACCESS_TOKEN=\"exclude\"",
         ]
+        config.append(request.fastMode ? "service_tier=\"fast\"" : "service_tier=\"default\"")
         if let port = request.mcpServerPort {
             config += ["mcp_servers.subz.command=\"/usr/bin/nc\"",
                        "mcp_servers.subz.args=[\"127.0.0.1\",\"\(port)\"]",

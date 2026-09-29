@@ -428,6 +428,8 @@ struct SZApp: App {
                                      onRefresh: { Task { await host.refreshProviderHealthOnce() } },
                                      onTest: { host.runProviderProbe($0) },
                                      onSetModel: { host.pickSetupModel($1, for: $0) },
+                                     onSetEffort: { host.pickSetupEffort($1, for: $0) },
+                                     onSetFastMode: { host.pickSetupFastMode($1, for: $0) },
                                      onOpenLogin: { host.openProviderLoginTerminal($0) },
                                      onInstall: { host.openProviderInstallTerminal($0) },
                                      onGetNode: { host.openNodeDownload() },

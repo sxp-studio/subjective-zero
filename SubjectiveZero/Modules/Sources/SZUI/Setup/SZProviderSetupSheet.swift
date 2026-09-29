@@ -61,6 +61,10 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
     /// provider → no picker.
     public var models: [SZProviderGenerationPickerModelItem]
     public var selectedModel: String    // resolved model id, checkmarked in the picker
+    public var effortOptions: [String]
+    public var selectedEffort: String?
+    public var supportsFastMode: Bool
+    public var fastModeEnabled: Bool
     public var isTesting: Bool          // probe in flight → Test button spins
     public var isSelectable: Bool
     public var isConfirmable: Bool      // Confirm gates on the selected card's readiness
@@ -75,6 +79,8 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
                 readiness: Readiness, detail: String? = nil, cliPath: String? = nil,
                 installCommand: String? = nil, installNeedsNode: Bool = false,
                 models: [SZProviderGenerationPickerModelItem] = [], selectedModel: String = "",
+                effortOptions: [String] = [], selectedEffort: String? = nil,
+                supportsFastMode: Bool = false, fastModeEnabled: Bool = false,
                 isTesting: Bool = false,
                 isSelectable: Bool = true, isConfirmable: Bool = false,
                 fallbackName: String? = nil, canDisable: Bool = false, directSignIn: Bool = false) {
@@ -89,6 +95,10 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
         self.installNeedsNode = installNeedsNode
         self.models = models
         self.selectedModel = selectedModel
+        self.effortOptions = effortOptions
+        self.selectedEffort = selectedEffort
+        self.supportsFastMode = supportsFastMode
+        self.fastModeEnabled = fastModeEnabled
         self.isTesting = isTesting
         self.isSelectable = isSelectable
         self.isConfirmable = isConfirmable
@@ -116,6 +126,8 @@ public struct SZProviderSetupSheet: View {
     private let onSelect: (String) -> Void
     private let onRefresh: () -> Void
     private let onTest: (String) -> Void
+    private let onSetEffort: (String, String) -> Void
+    private let onSetFastMode: (String, Bool) -> Void
     private let onSetModel: (String, String) -> Void   // (providerID, modelID)
     private let onOpenLogin: (String) -> Void
     /// Install in Terminal: the host runs the card's install command, shown beside the button.
@@ -144,6 +156,8 @@ public struct SZProviderSetupSheet: View {
                 onSelect: @escaping (String) -> Void, onRefresh: @escaping () -> Void,
                 onTest: @escaping (String) -> Void,
                 onSetModel: @escaping (String, String) -> Void,
+                onSetEffort: @escaping (String, String) -> Void = { _, _ in },
+                onSetFastMode: @escaping (String, Bool) -> Void = { _, _ in },
                 onOpenLogin: @escaping (String) -> Void,
                 onInstall: @escaping (String) -> Void = { _ in },
                 onGetNode: @escaping () -> Void = {},
@@ -168,6 +182,8 @@ public struct SZProviderSetupSheet: View {
         self.onRefresh = onRefresh
         self.onTest = onTest
         self.onSetModel = onSetModel
+        self.onSetEffort = onSetEffort
+        self.onSetFastMode = onSetFastMode
         self.onOpenLogin = onOpenLogin
         self.onInstall = onInstall
         self.onGetNode = onGetNode
@@ -380,6 +396,8 @@ public struct SZProviderSetupSheet: View {
                     testButton(card)
                 }
 
+                generationControls(card)
+
                 Text(card.message)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -442,6 +460,7 @@ public struct SZProviderSetupSheet: View {
                         Button("Use ChatGPT") { onSelect(card.id) }
                     }
                 }
+                generationControls(card)
             } else if card.readiness == .needsLogin {
                 Text("Sign in securely in your browser. Setup takes care of the rest.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -451,6 +470,41 @@ public struct SZProviderSetupSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.12), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func generationControls(_ card: SZProviderSetupCard) -> some View {
+        if card.isConfirmable || card.readiness == .failed {
+            HStack(spacing: 12) {
+                if !card.effortOptions.isEmpty {
+                    HStack(spacing: 6) {
+                        Text("Reasoning").foregroundStyle(.secondary)
+                        Menu {
+                            ForEach(card.effortOptions, id: \.self) { effort in
+                                Button { onSetEffort(card.id, effort) } label: {
+                                    if effort == card.selectedEffort {
+                                        Label(SZGenerationLabels.effort(effort), systemImage: "checkmark")
+                                    } else { Text(SZGenerationLabels.effort(effort)) }
+                                }
+                            }
+                        } label: {
+                            Text(card.selectedEffort.map(SZGenerationLabels.effort) ?? "Default")
+                        }
+                        .accessibilityLabel("Reasoning effort")
+                    }
+                }
+                if card.supportsFastMode {
+                    Toggle("Fast", isOn: Binding(get: { card.fastModeEnabled },
+                                                 set: { onSetFastMode(card.id, $0) }))
+                        .toggleStyle(.checkbox)
+                        .help("Request the provider's faster processing tier. This may use more of your plan.")
+                }
+                Spacer()
+            }
+            .font(.system(size: 11))
+            .controlSize(.small)
+            .disabled(card.isTesting)
+        }
     }
 
     private func statusBadge(_ card: SZProviderSetupCard) -> some View {
