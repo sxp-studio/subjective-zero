@@ -1,16 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The provider seam: one small protocol, one plain-Swift struct per agent CLI (see Providers/).
-//
-// Why code, not a JSON manifest: our providers are heterogeneous *agentic CLIs* (claude, codex)
-// that share no common wire protocol — different argv, MCP-attach, output stream, and session
-// semantics. A config DSL would just be encoding behaviour as data.
-// opencode/AI-SDK make the same call: provider behaviour lives in per-provider adapter code,
-// only metadata is data. So each provider builds its own argv in `launch()` and parses its own
-// output in `parse()`; `run()` is a shared default below and the health tiers live in
-// SZProviderHealth.swift.
-//
-// Every provider is a subprocess wrapper around its CLI via SZProcess: no HTTP APIs,
-// no API keys. See docs/AI_PROVIDERS.md (the "static capability manifest" = these static values).
+// provider capabilities and agent turns, shared by direct connections and coding tools.
 import Foundation
 import SZCore
 
@@ -263,23 +252,9 @@ public protocol SZProvider: Sendable {
     /// remedy (auth is interactive by design; the app never attempts it headless).
     var loginCommand: String { get }
 
-    /// True if the host mints a session UUID up front and passes it on the CLI (claude); false if
-    /// the id is parsed back out of the run's output (codex).
-    var usesPreallocatedSessionID: Bool { get }
-
-    /// Stage per-run files for a CLI that reads run configuration from files it discovers in the
-    /// working directory rather than from argv. Runs before every `launch()` — in `run()` and in the
-    /// probe tier — so a stale file from a previous run is rewritten or removed each turn. Throwing
-    /// aborts the turn loudly: a run whose staged config failed to land would look alive while
-    /// silently missing its tools. Default: nothing.
-    func prepare(_ request: SZAgentRunRequest) throws
-
-    /// Build the launch command for one turn. `preallocatedSessionID` is non-nil only when
-    /// `usesPreallocatedSessionID` is true.
-    func launch(_ request: SZAgentRunRequest, preallocatedSessionID: String?) -> SZLaunch
-
-    /// Resolve session id + success from a finished run.
-    func parse(output: String, exitCode: Int32, preallocatedSessionID: String?) -> SZAgentOutcome
+    func run(_ request: SZAgentRunRequest, runner: any SZProcessRunning) async throws -> SZAgentRunResult
+    func healthReport(runner: any SZProcessRunning) async -> SZProviderHealthReport
+    func healthProbe(model: String?, reasoningEffort: String?, runner: any SZProcessRunning) async -> SZProviderHealthReport
 
     /// A fresh stream consumer for one chat turn — parses this provider's output into chat events
     /// (`.reply` / `.thinking` / `.toolCall` / `.usage`). Provider-specific parsing, common API.
@@ -298,14 +273,39 @@ public protocol SZProvider: Sendable {
     func seedModelCatalog(_ catalog: SZProviderModelCatalog)
 }
 
+/// subprocess adapters share command construction; connected providers own their transport.
+public protocol SZCLIProvider: SZProvider {
+    /// True if the host mints a session UUID up front and passes it on the CLI (claude); false if
+    /// the id is parsed back out of the run's output (codex).
+    var usesPreallocatedSessionID: Bool { get }
+
+    /// Stage per-run files for a CLI that reads run configuration from files it discovers in the
+    /// working directory rather than from argv. Runs before every `launch()` — in `run()` and in the
+    /// probe tier — so a stale file from a previous run is rewritten or removed each turn. Throwing
+    /// aborts the turn loudly: a run whose staged config failed to land would look alive while
+    /// silently missing its tools. Default: nothing.
+    func prepare(_ request: SZAgentRunRequest) throws
+
+    /// Build the launch command for one turn. `preallocatedSessionID` is non-nil only when
+    /// `usesPreallocatedSessionID` is true.
+    func launch(_ request: SZAgentRunRequest, preallocatedSessionID: String?) -> SZLaunch
+
+    /// Resolve session id + success from a finished run.
+    func parse(output: String, exitCode: Int32, preallocatedSessionID: String?) -> SZAgentOutcome
+
+}
+
+public extension SZCLIProvider {
+    var usesPreallocatedSessionID: Bool { false }
+    func prepare(_ request: SZAgentRunRequest) throws {}
+}
+
 public extension SZProvider {
     var displayName: String { id }
-    var usesPreallocatedSessionID: Bool { false }
     var authStatusArgs: [String] { [] }
     var authFailureMarkers: [String] { [] }
     var supportedReasoningEfforts: [String] { [] }   // the honest default: no menu until a provider declares one
     var supportsFastMode: Bool { false }
-    func prepare(_ request: SZAgentRunRequest) throws {}
     func makeStreamConsumer() -> any SZAgentStreamConsumer { SZNullStreamConsumer() }
     func refreshModelCatalog(runner: any SZProcessRunning) async throws -> SZProviderModelCatalog? { nil }
     func seedModelCatalog(_ catalog: SZProviderModelCatalog) {}
@@ -372,17 +372,22 @@ public extension SZProvider {
     /// then parse. On a resume turn the session id is carried by `request.resumeSessionID`, so we don't
     /// mint a new one; if the provider's parse can't recover an id (a resumed run may not re-announce
     /// it), we fall back to the resume id so the host's session mapping stays stable.
-    func run(_ request: SZAgentRunRequest, runner: any SZProcessRunning = SZSystemProcessRunner()) async throws -> SZAgentRunResult {
-        let preallocated = (request.resumeSessionID == nil && usesPreallocatedSessionID) ? UUID().uuidString : nil
-        try prepare(request)
-        let launch = launch(request, preallocatedSessionID: preallocated)
+    func run(_ request: SZAgentRunRequest) async throws -> SZAgentRunResult {
+        try await run(request, runner: SZSystemProcessRunner())
+    }
+
+    func run(_ request: SZAgentRunRequest, runner: any SZProcessRunning) async throws -> SZAgentRunResult {
+        guard let cli = self as? any SZCLIProvider else { throw SZChatGPTError("This provider requires a connected transport.") }
+        let preallocated = (request.resumeSessionID == nil && cli.usesPreallocatedSessionID) ? UUID().uuidString : nil
+        try cli.prepare(request)
+        let launch = cli.launch(request, preallocatedSessionID: preallocated)
         let result = try await runner.run(
             launch.executable, launch.arguments,
             environment: launch.environment, currentDirectoryURL: request.workingDirectory,
             input: nil, timeout: request.timeout, inactivityTimeout: request.inactivityTimeout,
             onOutput: request.onOutput
         )
-        var outcome = parse(output: result.output, exitCode: result.exitCode, preallocatedSessionID: preallocated)
+        var outcome = cli.parse(output: result.output, exitCode: result.exitCode, preallocatedSessionID: preallocated)
         if outcome.sessionID == nil { outcome.sessionID = request.resumeSessionID }
         return SZAgentRunResult(process: result, outcome: outcome)
     }

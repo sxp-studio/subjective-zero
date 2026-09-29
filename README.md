@@ -34,8 +34,10 @@ actual code that can hot-reload).
 SubjectiveZero is designed with performance in mind: every change reloads into a render that is
 already running. The intent is to have a tool you play with rather than operate.
 
-It is free and open source, and it runs on the coding agent subscription you already pay for:
-Claude Code, Codex, Grok, Pi, OpenCode or Muse Code. No model shipped, no tokens resold.
+It is free and open source. Connect your eligible ChatGPT Plus or Pro plan directly from SubZ,
+or use Claude Code, Grok, Pi, OpenCode or Muse Code. ChatGPT setup downloads its agent
+engine from OpenAI automatically; no separate Codex installation, Terminal, or API key is needed.
+No model shipped, no tokens resold.
 
 **[Download the latest build](https://github.com/sxp-studio/subjective-zero/releases/latest)**, or
 read the product page at [sxp.studio](https://sxp.studio/subjective-zero).

@@ -77,7 +77,7 @@ i.e. File ▸ Open Recent, newest first, capped at 10 (`SZAppState.noteRecentPro
 reasoning effort / fast mode) keyed by provider id, written immediately from Settings and
 `ui_set_provider`; rows are stored raw and clamped against the provider's real capabilities at read
 (`resolvedGenerationSettings`), so a stale model id degrades to the default instead of failing.
-Per-provider keying = switching codex→claude→codex keeps each provider's choices. Also live:
+Per-provider keying = switching ChatGPT→Claude→ChatGPT keeps each provider's choices. Also live:
 `routingProfiles` + `activeRoutingProfileName` - the named model-routing profiles and which one
 governs new work ([AI_PROVIDERS.md](AI_PROVIDERS.md#model-routing)); profiles are stored
 raw and resolved at delivery time, and a stale active name (its profile deleted elsewhere) reads

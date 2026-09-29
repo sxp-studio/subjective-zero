@@ -31,7 +31,7 @@
 //     turns carry no `.thinking` prose and no `.usage` event.
 import Foundation
 
-public struct SZMuseCodeProvider: SZProvider {
+public struct SZMuseCodeProvider: SZCLIProvider {
     public init() {}
 
     /// The provider's registry id — the one place the string is written (see SZClaudeProvider).

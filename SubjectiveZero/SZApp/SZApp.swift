@@ -418,6 +418,7 @@ struct SZApp: App {
             .sheet(isPresented: Binding(get: { host.providerSetupPresented },
                                         set: { if !$0 { host.skipProviderSetup() } })) {
                 SZProviderSetupSheet(cards: host.providerSetupCards,
+                                     chatGPT: host.chatGPTConnectionView,
                                      selectedID: host.selectedSetupProviderID,
                                      activeID: host.activeProviderID,
                                      targetPlatform: targetPlatformPane,
@@ -440,6 +441,11 @@ struct SZApp: App {
                                      // afterwards the Providers pane closes with a plain Done.
                                      isFirstRun: host.defaultProviderID == nil,
                                      library: librarySettingsView)
+                    .sheet(isPresented: Binding(
+                        get: { host.chatGPTWelcomePresented }, set: { host.chatGPTWelcomePresented = $0 })) {
+                        SZChatGPTWelcomeView(onContinue: { host.acknowledgeChatGPTWelcome() },
+                            onManageUsage: { NSWorkspace.shared.open(SZChatGPTAccounts.usageURL) })
+                    }
             }
             .task {
                 appDelegate.host = host   // wire the quit-path flush + Finder-open (see SZAppDelegate)
@@ -1086,7 +1092,10 @@ struct SZApp: App {
                         onConsumePendingDraft: { host.consumeComposerDraft($0) },
                         pendingMention: host.pendingComposerMention,
                         onConsumePendingMention: { host.consumeComposerMention($0) },
-                        onOpenAISettings: { host.presentProviderSetup() })
+                        onOpenAISettings: { host.presentProviderSetup() },
+                        chatGPTUsageURL: host.activeProviderID == SZChatGPTProvider.providerID
+                            && host.chatGPTAccounts.contains(where: { $0.id == host.chatGPTActiveAccountID && $0.usesPlan })
+                            ? SZChatGPTAccounts.usageURL : nil)
                 // The transcript's "open in Profiler" link — set only where the surface exists,
                 // so the button simply doesn't render in builds without the panel.
                 .environment(\.szRevealInProfiler, revealInProfilerAction)

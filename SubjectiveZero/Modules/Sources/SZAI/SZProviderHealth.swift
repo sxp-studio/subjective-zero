@@ -80,7 +80,11 @@ public struct SZProviderHealthReport: Codable, Sendable, Equatable {
 public extension SZProvider {
     /// Tiers 1–2: install (`--version`) then auth status. Subprocess-cheap, token-free — safe for
     /// the sheet's poll loop and the launch check. Never runs the provider's agent loop.
-    func healthReport(runner: any SZProcessRunning = SZSystemProcessRunner()) async -> SZProviderHealthReport {
+    func healthReport() async -> SZProviderHealthReport {
+        await healthReport(runner: SZSystemProcessRunner())
+    }
+
+    func healthReport(runner: any SZProcessRunning) async -> SZProviderHealthReport {
         guard let cli = healthArgs.first else {
             return SZProviderHealthReport(providerID: id, status: .unsupported,
                                           message: "No health check for this provider.")

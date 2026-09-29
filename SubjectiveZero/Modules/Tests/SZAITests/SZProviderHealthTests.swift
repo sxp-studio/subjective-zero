@@ -46,9 +46,6 @@ private let claudeAuthLoggedIn = SZProcessResult(
 private let claudeAuthLoggedOut = SZProcessResult(
     exitCode: 1,
     output: #"{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}"#)
-private let codexVersionOK = SZProcessResult(exitCode: 0, output: "codex-cli 0.141.0")
-private let codexAuthLoggedIn = SZProcessResult(exitCode: 0, output: "Logged in using ChatGPT")
-private let codexAuthLoggedOut = SZProcessResult(exitCode: 1, output: "Not logged in")
 private let grokVersionOK = SZProcessResult(exitCode: 0, output: "grok 0.2.93 (f00f96316d4b)")
 private let grokModelsLoggedIn = SZProcessResult(
     exitCode: 0,
@@ -121,12 +118,6 @@ private let museMissing = SZProcessResult(
     #expect(claude.diagnostics.map(\.tier) == [.install, .auth])
     #expect(claude.diagnostics.allSatisfy { $0.outputExcerpt == nil })   // successes carry no excerpt
 
-    let codex = await SZCodexProvider().healthReport(runner: ScriptedStubRunner([
-        .init(argvPrefix: ["codex", "--version"], result: codexVersionOK),
-        .init(argvPrefix: ["codex", "login", "status"], result: codexAuthLoggedIn),
-    ]))
-    #expect(codex.status == .ready)
-    #expect(codex.version == "codex-cli 0.141.0")
 
     let grok = await SZGrokProvider().healthReport(runner: ScriptedStubRunner([
         .init(argvPrefix: ["grok", "--version"], result: grokVersionOK),
@@ -204,17 +195,10 @@ private let museMissing = SZProcessResult(
     #expect(report.version == "2.1.200 (Claude Code)")   // install tier's finding survives
 }
 
-@Test func authNeededWhenCodexLoggedOut() async {
-    let report = await SZCodexProvider().healthReport(runner: ScriptedStubRunner([
-        .init(argvPrefix: ["codex", "--version"], result: codexVersionOK),
-        .init(argvPrefix: ["codex", "login", "status"], result: codexAuthLoggedOut),
-    ]))
-    #expect(report.status == .authNeeded)
-}
 
 @Test func healthFailedOnVersionTimeout() async {
-    let report = await SZCodexProvider().healthReport(runner: ScriptedStubRunner([
-        .init(argvPrefix: ["codex", "--version"],
+    let report = await SZClaudeProvider().healthReport(runner: ScriptedStubRunner([
+        .init(argvPrefix: ["claude", "--version"],
               result: SZProcessResult(exitCode: 124, output: "", timeout: .wallClock)),
     ]))
     #expect(report.status == .healthFailed)
@@ -272,15 +256,12 @@ private let museMissing = SZProcessResult(
     #expect(claude.status == .authNeeded)
     #expect(claude.probeVerified == false)
 
-    let codex = await SZCodexProvider().healthProbe(runner: ScriptedStubRunner([
-        .init(argvPrefix: ["codex"], result: SZProcessResult(exitCode: 1, output: "Not logged in")),
-    ]))
-    #expect(codex.status == .authNeeded)
+
 }
 
 @Test func probeHealthFailedOnUnrecognizedFailure() async {
-    let report = await SZCodexProvider().healthProbe(runner: ScriptedStubRunner([
-        .init(argvPrefix: ["codex"], result: SZProcessResult(exitCode: 2, output: "segfault or whatever")),
+    let report = await SZClaudeProvider().healthProbe(runner: ScriptedStubRunner([
+        .init(argvPrefix: ["claude"], result: SZProcessResult(exitCode: 2, output: "segfault or whatever")),
     ]))
     #expect(report.status == .healthFailed)
     #expect(report.diagnostics[0].outputExcerpt == "segfault or whatever")
@@ -349,19 +330,19 @@ private let museMissing = SZProcessResult(
 /// provider default. Omitting them (nil) falls back to the default, the bare-probe behavior.
 @Test func probeArgvCarriesPassedModelAndEffort() async {
     let picked = ScriptedStubRunner([
-        .init(argvPrefix: ["codex"], result: SZProcessResult(exitCode: 0, output: "")),
+        .init(argvPrefix: ["claude"], result: SZProcessResult(exitCode: 0, output: "")),
     ])
-    _ = await SZCodexProvider().healthProbe(model: "gpt-5.6-sol", reasoningEffort: "high", runner: picked)
+    _ = await SZClaudeProvider().healthProbe(model: "claude-sonnet-5", reasoningEffort: "high", runner: picked)
     let argv = try! #require(picked.recordedCalls.first)
-    #expect(argv[argv.firstIndex(of: "-m")! + 1] == "gpt-5.6-sol")   // the picked model, not the default
-    #expect(argv.contains(#"model_reasoning_effort="high""#))
+    #expect(argv[argv.firstIndex(of: "--model")! + 1] == "claude-sonnet-5")   // the picked model, not the default
+    #expect(argv[argv.firstIndex(of: "--effort")! + 1] == "high")
 
     let bare = ScriptedStubRunner([
-        .init(argvPrefix: ["codex"], result: SZProcessResult(exitCode: 0, output: "")),
+        .init(argvPrefix: ["claude"], result: SZProcessResult(exitCode: 0, output: "")),
     ])
-    _ = await SZCodexProvider().healthProbe(runner: bare)
+    _ = await SZClaudeProvider().healthProbe(runner: bare)
     let bareArgv = try! #require(bare.recordedCalls.first)
-    #expect(bareArgv[bareArgv.firstIndex(of: "-m")! + 1] == SZCodexProvider().defaultModel)
+    #expect(bareArgv[bareArgv.firstIndex(of: "--model")! + 1] == SZClaudeProvider().defaultModel)
 }
 
 /// The probe must stay tiny and self-contained: no MCP wiring, the provider's default model, and
@@ -375,15 +356,6 @@ private let museMissing = SZProcessResult(
     #expect(!claudeArgv.contains("--mcp-config"))
     #expect(claudeArgv.contains("Reply with exactly: OK"))
     #expect(claudeArgv[claudeArgv.firstIndex(of: "--model")! + 1] == SZClaudeProvider().defaultModel)
-
-    let codexStub = ScriptedStubRunner([
-        .init(argvPrefix: ["codex"], result: SZProcessResult(exitCode: 0, output: "")),
-    ])
-    _ = await SZCodexProvider().healthProbe(runner: codexStub)
-    let codexArgv = try! #require(codexStub.recordedCalls.first)
-    #expect(!codexArgv.joined().contains("mcp_servers"))
-    #expect(codexArgv.last == "Reply with exactly: OK")
-    #expect(codexArgv[codexArgv.firstIndex(of: "-m")! + 1] == SZCodexProvider().defaultModel)
 
     let grokStub = ScriptedStubRunner([
         .init(argvPrefix: ["grok"], result: SZProcessResult(exitCode: 0, output: "")),
@@ -416,8 +388,6 @@ private let museMissing = SZProcessResult(
     let runner = ScriptedStubRunner([
         .init(argvPrefix: ["claude", "--version"], result: claudeVersionOK),
         .init(argvPrefix: ["claude", "auth", "status"], result: claudeAuthLoggedIn),
-        .init(argvPrefix: ["codex", "--version"],
-              result: SZProcessResult(exitCode: 127, output: "env: codex: No such file or directory")),
         .init(argvPrefix: ["grok", "--version"], result: grokVersionOK),
         .init(argvPrefix: ["grok", "models"], result: grokModelsLoggedIn),
         .init(argvPrefix: ["pi", "--version"], result: piVersionOK),
@@ -429,7 +399,7 @@ private let museMissing = SZProcessResult(
     let report = await SZProviderVerifier.run(defaultProviderID: "claude", appVersion: "0.2.1",
                                               appBuild: "42", probe: false, runner: runner)
     #expect(report.ok)
-    #expect(report.providers.map(\.status) == [.ready, .missingCLI, .ready, .ready, .ready, .ready])
+    #expect(report.providers.map(\.status) == [.authNeeded, .ready, .ready, .ready, .ready, .ready])
 
     // The printed JSON must round-trip: it's a machine contract (APP_SETUP.md), not a log line.
     let decoder = JSONDecoder()
@@ -439,15 +409,13 @@ private let museMissing = SZProcessResult(
     #expect(decoded.ok && decoded.appVersion == "0.2.1" && decoded.defaultProviderID == "claude")
     #expect(decoded.providers.count == 6)
     // Failure receipts survive the round-trip (the excerpt is what a setup agent acts on).
-    #expect(decoded.providers[1].diagnostics.first?.outputExcerpt?.contains("No such file") == true)
+    #expect(decoded.providers[0].status == .authNeeded)
 }
 
 @Test func verifierNotOkWhenNoProviderReady() async {
     let runner = ScriptedStubRunner([
         .init(argvPrefix: ["claude", "--version"], result: claudeVersionOK),
         .init(argvPrefix: ["claude", "auth", "status"], result: claudeAuthLoggedOut),
-        .init(argvPrefix: ["codex", "--version"],
-              result: SZProcessResult(exitCode: 127, output: "env: codex: No such file or directory")),
         .init(argvPrefix: ["grok", "--version"], result: grokVersionOK),
         .init(argvPrefix: ["grok", "models"], result: grokModelsLoggedOut),
         .init(argvPrefix: ["pi", "--version"], result: piVersionOK),
@@ -462,7 +430,7 @@ private let museMissing = SZProcessResult(
                                               appBuild: "dev", probe: false, runner: runner)
     #expect(!report.ok)
     #expect(report.providers.map(\.status) ==
-            [.authNeeded, .missingCLI, .authNeeded, .authNeeded, .authNeeded, .missingCLI])
+            [.authNeeded, .authNeeded, .authNeeded, .authNeeded, .authNeeded, .missingCLI])
 }
 
 /// --probe upgrades a cheap-ready provider with the real prompt probe, keeping both tiers'
@@ -472,8 +440,6 @@ private let museMissing = SZProcessResult(
         .init(argvPrefix: ["claude", "--version"], result: claudeVersionOK),
         .init(argvPrefix: ["claude", "auth", "status"], result: claudeAuthLoggedIn),
         .init(argvPrefix: ["claude", "-p"], result: SZProcessResult(exitCode: 0, output: "OK")),
-        .init(argvPrefix: ["codex", "--version"],
-              result: SZProcessResult(exitCode: 127, output: "env: codex: No such file or directory")),
         .init(argvPrefix: ["grok", "--version"],
               result: SZProcessResult(exitCode: 127, output: "env: grok: No such file or directory")),
         .init(argvPrefix: ["pi", "--version"],
@@ -483,10 +449,10 @@ private let museMissing = SZProcessResult(
     ])
     let report = await SZProviderVerifier.run(defaultProviderID: nil, appVersion: "dev",
                                               appBuild: "dev", probe: true, runner: runner)
-    let claude = report.providers[0]
+    let claude = report.providers[1]
     #expect(claude.probeVerified)
     #expect(claude.diagnostics.map(\.tier) == [.install, .auth, .probe])
-    #expect(report.providers[1].diagnostics.map(\.tier) == [.install])   // missing → never probed
+    #expect(report.providers[2].diagnostics.map(\.tier) == [.install])   // missing → never probed
     #expect(report.providers[2].diagnostics.map(\.tier) == [.install])   // missing → never probed
     #expect(report.providers[3].diagnostics.map(\.tier) == [.install])   // missing → never probed
     #expect(report.providers[4].diagnostics.map(\.tier) == [.install])   // missing → never probed
@@ -499,7 +465,7 @@ private let museMissing = SZProcessResult(
 /// documented "auth not checked" lane, muse today) — but then its markers are its ONLY
 /// logged-out detection, so they stay mandatory.
 @Test func allProvidersVendSetupRemedies() {
-    for provider in SZProviderRegistry.shared.providers {
+    for provider in SZProviderRegistry.shared.providers.compactMap({ $0 as? any SZCLIProvider }) {
         #expect(!provider.installCommand.isEmpty, "\(provider.id) needs installCommand")
         #expect(!provider.loginCommand.isEmpty, "\(provider.id) needs loginCommand")
         #expect(!provider.authFailureMarkers.isEmpty, "\(provider.id) needs authFailureMarkers")

@@ -22,29 +22,5 @@
         }
       }
     }
-  },
-  {
-    "requiresProvider": "codex",
-    "profile": {
-      "name": "Codex Routing (sxp.studio)",
-      "agents": {
-        "director": {
-          "planner": { "providerID": "codex", "model": "gpt-5.6-sol" },
-          "assistant": { "providerID": "codex", "model": "gpt-5.6-terra" },
-          "sorter": { "providerID": "codex", "model": "gpt-5.6-luna" }
-        },
-        "coding": {
-          "builder-default": { "providerID": "codex", "model": "gpt-5.6-terra" },
-          "builder-light": { "providerID": "codex", "model": "gpt-5.6-luna" },
-          "builder-heavy": { "providerID": "codex", "model": "gpt-5.6-sol" },
-          "editor": { "providerID": "codex", "model": "gpt-5.6-luna" },
-          "assistant": { "providerID": "codex", "model": "gpt-5.6-terra" },
-          "sorter": { "providerID": "codex", "model": "gpt-5.6-luna" }
-        },
-        "debug": {
-          "assistant": { "providerID": "codex", "model": "gpt-5.6-terra" }
-        }
-      }
-    }
   }
 ]

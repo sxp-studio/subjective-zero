@@ -40,7 +40,7 @@ struct SZRoutingHostTests {
         SZRoutingProfile(
             name: "fast-fleet",
             agents: ["director": ["planner": SZRouteEnvelope(providerID: "claude")],
-                     "coding": ["builder-default": SZRouteEnvelope(providerID: "codex")]])
+                     "coding": ["builder-default": SZRouteEnvelope(providerID: "muse")]])
     }
 
     // MARK: - Selection
@@ -96,7 +96,7 @@ struct SZRoutingHostTests {
         let (router, notes) = try host.makeRouter(providerID: "claude")
         #expect(notes.isEmpty)
         let coding = router.resolve(SZModelCall(class: .turn, agent: "coding", slot: "builder-default"))
-        #expect(coding.providerID == "codex")
+        #expect(coding.providerID == "muse")
         #expect(coding.via == "fast-fleet · coding · builder-default")
         // A slot the profile doesn't fill — and any slotless turn — rides the fallback.
         let debug = router.resolve(SZModelCall(class: .turn, agent: "debug", slot: "assistant"))
@@ -119,12 +119,12 @@ struct SZRoutingHostTests {
 
     @Test func anOffCatalogModelRunsTheClampWithASentence() throws {
         var profile = fastFleet
-        profile.agents["coding"] = ["builder-default": SZRouteEnvelope(providerID: "codex", model: "gpt-imaginary")]
+        profile.agents["coding"] = ["builder-default": SZRouteEnvelope(providerID: "muse", model: "gpt-imaginary")]
         let host = bareHost(profiles: [profile], active: "fast-fleet")
         let (router, notes) = try host.makeRouter(providerID: "claude")
         // The provider still serves the turn — on a model it actually lists.
         let coding = router.resolve(SZModelCall(class: .turn, agent: "coding", slot: "builder-default"))
-        #expect(coding.providerID == "codex")
+        #expect(coding.providerID == "muse")
         #expect(coding.model != "gpt-imaginary")
         let note = try #require(notes.first)
         #expect(note.contains("gpt-imaginary"))
@@ -238,23 +238,8 @@ struct SZRoutingHostTests {
         }
     }
 
-    @Test func codexStarterUsesOnlyItsShippedCatalog() throws {
-        let profile = try #require(SZHost.routingStarters
-            .first { $0.requiresProvider == "codex" }?.profile)
-        let catalog = Set(SZCodexProvider().models.map(\.id))
-        #expect(profile.name == "Codex Routing (sxp.studio)")
-        #expect(profile.agents.values.flatMap(\.values).allSatisfy {
-            $0.providerID == "codex" && $0.model.map(catalog.contains) == true
-        })
-        #expect(profile.envelope(agent: "director", slot: "planner")?.model == "gpt-5.6-sol")
-        #expect(profile.envelope(agent: "coding", slot: "builder-heavy")?.model == "gpt-5.6-sol")
-        #expect(profile.envelope(agent: "director", slot: "assistant")?.model == "gpt-5.6-terra")
-        #expect(profile.envelope(agent: "coding", slot: "builder-default")?.model == "gpt-5.6-terra")
-        #expect(profile.envelope(agent: "director", slot: "sorter")?.model == "gpt-5.6-luna")
-        #expect(profile.envelope(agent: "coding", slot: "sorter")?.model == "gpt-5.6-luna")
-        // Light gets the SMALL tier explicitly — the slot's caption promises a fast model.
-        #expect(profile.envelope(agent: "coding", slot: "builder-light")?.model == "gpt-5.6-luna")
-
+    @Test func chatGPTDoesNotShipAnInventedAccountCatalog() {
+        #expect(!SZHost.routingStarters.contains { $0.requiresProvider == "codex" || $0.requiresProvider == "chatgpt" })
         let host = bareHost(profiles: SZHost.routingStarterNames.map { SZRoutingProfile(name: $0) })
         #expect(host.routingProfileRows.allSatisfy { $0.isProtected })
     }

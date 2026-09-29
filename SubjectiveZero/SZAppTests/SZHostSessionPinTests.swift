@@ -67,9 +67,9 @@ struct SZHostSessionPinTests {
 
     @Test func disablingAProviderDropsItsPinsOnly() {
         let host = host()
-        host.agentSessions[director] = pin("codex", "c")
+        host.agentSessions[director] = pin("muse", "c")
         host.agentSessions["n"] = pin("claude", "k")
-        #expect(host.setProviderEnabled("codex", false))
+        #expect(host.setProviderEnabled("muse", false))
         #expect(host.agentSessions[director] == nil)
         #expect(host.agentSessions["n"]?.sessionID == "k")
     }
@@ -79,18 +79,18 @@ struct SZHostSessionPinTests {
         host.agentSessions[director] = pin("claude", "c")
         let claim = SZClaimToken(label: "delivery")
         #expect(host.ledger.tryAcquire(SZHost.turnResources(for: .director), as: claim))
-        #expect(!host.setProviderEnabled("codex", false))
-        #expect(!host.setActiveProvider("codex"))
+        #expect(!host.setProviderEnabled("muse", false))
+        #expect(!host.setActiveProvider("muse"))
         #expect(host.agentSessions[director]?.sessionID == "c")
         host.ledger.releaseAll(of: claim)
-        #expect(host.setActiveProvider("codex"))
+        #expect(host.setActiveProvider("muse"))
         #expect(host.agentSessions[director] == nil)
     }
 
     @Test func aPinToADisabledProviderFallsBackToAFreshSession() {
         let host = host()
-        host.disabledProviderIDs = ["codex"]
-        host.agentSessions[director] = pin("codex", "c")
+        host.disabledProviderIDs = ["muse"]
+        host.agentSessions[director] = pin("muse", "c")
         guard case .ready(let looked, let session, let note) = host.providerForTurn(.director, heal: false)
         else { Issue.record("refused"); return }
         #expect(looked.id == "claude" && session == nil && note != nil)

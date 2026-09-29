@@ -1,9 +1,47 @@
 # AI Providers
 
 **Package: SZAI.** SubZ wraps third-party AI coding tools behind a consistent interface so the
-rest of the app calls "an agent session" without caring which CLI is underneath. This doc covers
+rest of the app calls "an agent session" without caring which connection is underneath. This doc covers
 the provider model, what we surface per provider, sessions, and health - plus the one genuinely
 open question (capability discovery).
+
+## Direct ChatGPT connection
+
+ChatGPT is the default OpenAI connection; there is no separate Codex CLI provider. **Continue with ChatGPT** downloads the pinned OpenAI Codex
+app-server package if needed, then opens browser OAuth with PKCE and a loopback callback.
+Eligible Plus and Pro users authorize ChatGPT plan usage; identity-only consent cannot run agents.
+Users can choose saved accounts, add another, reconnect, sign out, and open ChatGPT's usage settings.
+
+`SZChatGPTAccounts` owns installation identity, per-registration credentials in macOS Keychain,
+ID-token verification, refresh-token rotation, and revocation. Credentials never enter project files,
+logs, telemetry, or transcripts. Refresh is serialized per session and locked across app processes.
+Tests use protected files in their temporary home instead of the user's Keychain.
+
+`SZChatGPTProvider` runs a private app-server connection for each turn, authenticated against
+`https://api.openai.com/v1`. It refreshes credentials before starting a turn and resumes local threads
+in the selected account's private Codex home. A thread cannot be resumed using another account.
+The host's MCP bus and staging/compile/promote path remain the execution boundary. Success requires
+`turn/completed` with status `completed`; partial text is not proof of success. Cancellation and
+timeouts stop the process tree. Failed turns are not automatically replayed.
+
+Model discovery uses the selected account's `/v1/models` catalog. The picker preserves returned
+model capabilities; Fast mode remains unavailable until verified for this integration. Account
+changes clear the catalog and probe result. Rate-limit failures lead to **Manage usage**, with no
+automatic change of billing source.
+
+The engine is fetched at setup, not bundled in the app. `SZChatGPTEngine` pins version 0.159.0,
+architecture-specific official release URLs and SHA-256 hashes. It verifies the archive before
+extracting into a temporary directory, then installs atomically under Application Support. The
+package includes the code-mode host and runtime resources. Updates to the pin are reviewed with
+SubZ releases; the app never downloads a floating latest release. Interrupted setup can be retried.
+
+References: [registration](https://developers.openai.com/siwc/token-sharing-open-source/sign-in),
+[app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server),
+[limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations),
+[OpenAI engine release](https://github.com/openai/codex/releases/tag/rust-v0.159.0).
+The sign-in button follows OpenAI's [approved branding](https://developers.openai.com/siwc/website).
+Its white logo is rendered from the official
+[`chatgpt-logo-white.svg`](https://developers.openai.com/assets/siwc/sign-in-buttons/chatgpt-logo-white.svg).
 
 ## Provider model
 
@@ -21,7 +59,7 @@ Adapters conform to one protocol so [AGENT_ORCHESTRATION.md](AGENT_ORCHESTRATION
 ```swift
 // Illustrative.
 protocol SZProvider {
-    var id: String { get }                       // "claude-code", "codex"
+    var id: String { get }                       // "chatgpt", "claude"
     func healthCheck() async -> ProviderHealth    // installed? authed? version?
     func capabilities() async -> ProviderCapabilities  // models, thinking levels, fast? (see open question)
     func startSession(_ config: SessionConfig) async throws -> SZSession
@@ -31,7 +69,7 @@ protocol SZProvider {
 ## Built-in providers (initial)
 
 - **claude code** - CLI only.
-- **codex** - CLI, and CLI driven through Codex.app.
+- **ChatGPT** - direct sign-in; SubZ manages the downloaded OpenAI harness.
 - **grok** - CLI only (x.ai; added 2026-07, verified against grok 0.2.93).
 - **pi** - CLI only (pi.dev, `@earendil-works/pi-coding-agent`; added 2026-07, verified against
   pi 0.80.6). A BYOK multi-provider harness — the user connects their own accounts (ChatGPT
@@ -41,7 +79,7 @@ protocol SZProvider {
 - **opencode** - CLI only (opencode.ai; added 2026-07, verified against opencode 1.18.4). Also a BYOK
   multi-provider harness (like pi) with a RUNTIME-enumerated catalog — the user authes their own
   backends (`opencode auth login`) and opencode routes to them; subz drives the harness. Distinct
-  from pi in sessions: opencode mints its own `ses_…` id, parsed back from the stream (codex-style).
+  from pi in sessions: opencode mints its own `ses_…` id, parsed back from the stream .
   Catalog default (`SZOpenCodeProvider.catalogSnapshot`): the user's own configured `model` (read
   token-free from `opencode debug config`) when opencode still serves it — otherwise NONE: runs omit
   `-m` and opencode's own selection carries the run. The app never guesses a default from the
@@ -63,49 +101,21 @@ protocol SZProvider {
   app always passes an explicit `--model`, defaults to the standard id, and lists the Contributor
   id under its own name; see APP_SETUP.md.
 
-For each, we wrap and surface to the UI:
-
-- **models** available (e.g. Opus, Sonnet, …) - from the static manifest (claude/codex can't
-  enumerate models; pi is the runtime-enumerated exception — see Capability discovery below),
-- **thinking** level - claude: `--effort {low, medium, high, xhigh, max}`; codex: a `-c`
-  reasoning config key (not enumerable, manifest-declared).
+The provider exposes its models, reasoning choices, and supported options through `SZProvider`.
+`SZCLIProvider` supplies subprocess launch and parsing for installed coding tools. ChatGPT supplies
+its own authenticated app-server transport through the same `run` and health requirements.
 
 ### The capability manifest
 
-Each provider's Swift constants are its manifest (for claude and muse the whole truth; for codex
-the built-in snapshot the runtime catalog starts from). Facts are measured against the installed
-CLI, never inferred; a model id joins the list only once the CLI's manifest carries it AND a live
-launch returns clean (GPT-5.6 Sol shipped announced-but-ungated for a window, 400ing every
-turn — a failure no in-process test can see; the CLI had no metadata for it then, which is why
-codex's manifest is a fair first gate). The in-app live gate is the setup sheet's Test probe and
-the run's own failure path; composer, routing, and MCP picks are not probed.
+ChatGPT fetches visible models and their display names and reasoning options from the signed-in
+account's `/v1/models` response. No bundled OpenAI model list or Codex CLI discovery is used.
+The first returned visible model is the default. Models are cleared on account changes and fetched
+again; an unavailable catalog blocks model selection rather than inventing an entitlement.
+Fast mode is currently unavailable for this connection.
 
-- **`models`** — pinned version ids with display labels (`"claude-opus-4-8"` → "Opus 4.8"),
-  never floating aliases, so a label can't silently re-point. claude (nine ids at 2.1.282,
-  Fable 5.1 first, Opus 5.5 the default) and muse ship new models via app updates; a type-any-model override stays
-  deferred. codex reads its list from the CLI's own manifest (`codex debug models`, see
-  Capability discovery): visible rows in priority order, retiring rows (`upgrade`) kept under a
-  "(retiring)" label until the vendor hides them.
-  grok's ids come from `grok models` (`grok-build` is unversioned; no versioned alternative
-  exists).
-- **`supportedReasoningEfforts`** — `[]` means no effort menu (no CLI effort concept, or
-  per-model menus only). claude: low/medium/high/xhigh/max, uniform across its nine models
-  (recorded at 2.1.206, re-confirmed at 2.1.220; Fable 5.1 at 2.1.259; Opus 5.5 at 2.1.282). codex: each model's
-  menu and default come from the manifest row (`supported_reasoning_levels`,
-  `default_reasoning_level`) — Sol and Terra reach ultra, Luna stops at max, 5.5 at xhigh, Sol
-  alone defaults to low; the provider-level low/medium/high/xhigh is the stale-id fallback.
-  muse: minimal/low/medium/high/xhigh/ultra, provider-wide (`none` refused, re-measured 1.0.1).
-  grok: no menu — its
-  `--reasoning-effort` accepts any token silently and measured comparisons (2026-07-12)
-  showed no effect, so argv never carries it.
-- **`supportsFastMode`** — the provider flag says the CLI can express fast mode in argv;
-  `supportsFastMode(for: model)` says the CLI will enable it for that model. claude reports
-  it on only for Opus 5.5, Opus 5 and Opus 4.8, so the other models declare false and the toggle
-  hides (on Opus 4.7 the gate prevents a real 400; Fable 5.1 reads `off`). "Enabled" is not
-  "served fast": the account entitlement is reported per turn as `usage.speed` and is not
-  modeled. codex's per-model flag is the manifest's `additional_speed_tiers` (every listed
-  model but gpt-5.4-mini carries `fast`). Argv shape: claude
-  `--settings {"fastMode":true}`, codex `-c service_tier="fast" -c features.fast_mode=true`.
+Claude and Muse use measured static manifests. Grok, Pi, and OpenCode discover models through
+their own authenticated tools. The setup screen's connection test verifies a real model response;
+metadata alone does not prove inference access. Model capabilities clamp saved generation choices.
 
 Picking a new model resets that provider's agent sessions (a thread is bound to the model
 that opened it); changing effort or fast mode does not. The **default envelope is global**:
@@ -163,20 +173,19 @@ Settings, and the backward-looking truth is the
 
 ## CLI integration (verified 2026-06-13; grok column 2026-07-12; pi column 2026-07-12; opencode column 2026-07-21; muse column 2026-08-07; model rows 2026-09-03)
 
-Concrete facts the adapters rely on, from the installed CLIs (claude code 2.1.177, codex-cli
-0.137.0, grok 0.2.93, pi 0.80.6, opencode 1.18.4, muse 0.1.0-R708.1; model selection re-verified
-on claude 2.1.259, codex-cli 0.144.5, muse 1.0.1-R2006.1):
+Concrete facts the adapters rely on, from the installed CLIs (claude code 2.1.177, grok 0.2.93, pi 0.80.6, opencode 1.18.4, muse 0.1.0-R708.1; model selection re-verified
+on claude 2.1.259, muse 1.0.1-R2006.1):
 
-| Need | claude code | codex | grok | pi | opencode | muse |
-|---|---|---|---|---|---|---|
-| Non-interactive run | `claude -p/--print` | `codex exec` (alias `e`) | `grok -p/--single` | `pi -p --mode json` (prompt is a trailing positional; stdin MUST reach EOF or the CLI hangs with zero output — the runner wires /dev/null) | `opencode run` (prompt trailing positional; `--auto` bypasses permission prompts) | `muse exec` (prompt trailing positional; `--disable-approval` bypasses approvals, sandbox stays on; `--no-foreign-personal-context` keeps other CLIs' imported skills out) |
-| Structured / streamed output | `--output-format json\|stream-json`, `--json-schema <s>` | `--json` (JSONL), `--output-schema <file>` | `--output-format json\|streaming-json` (token-level `thought`/`text` chunks; NO tool events) | `--mode json` (JSONL events: session header, message/turn lifecycle, `tool_execution_*`); CAUTION: a FAILED turn still exits 0 — `parse()` reads the last assistant `stopReason` | `--format json` (JSONL: `step_start`/`reasoning`/`tool_use`/`text`/`step_finish`, each carrying `sessionID`); a failed turn exits nonzero AND emits a top-level `error` event | `--json` (the session EVENT LOG as JSONL envelopes: `run_output_delta` chunks, `task_lifecycle` per task with task_kind `tool.{name}`, final `run_terminal` with the authoritative text); reasoning is encrypted, per-turn usage rides only the durable log (`muse export`) |
-| Model selection | `--model <alias\|full>` | `-m/--model` or `-c model="…"` (`--oss` for local; catalog enumerated at runtime via `codex debug models`, the CLI's own refreshed manifest) | `-m/--model` (enumerable via `grok models`) | `--model <provider/id>` qualified (catalog enumerated at runtime via `--mode rpc` → `get_available_models`) | `-m <provider/model>` qualified (catalog enumerated at runtime via `opencode models --verbose`) | `--model <id>` (no enumeration command; static ids `muse-spark-1.3` / `-1.3-contributor` / `-1.2`, each read back from `run.model.configured`; always passed explicitly because the CLI's own no-flag default is the Contributor tier) |
-| Thinking level | `--effort <low\|medium\|high\|xhigh\|max>` | `-c` reasoning config key | `--reasoning-effort` exists but is NOT honoured (measured) - never emitted | `--thinking <minimal\|low\|medium\|high\|xhigh\|max>`, per-model menus derived from the catalog's `thinkingLevelMap`; out-of-menu values silently clamp | `--variant <low\|medium\|high\|xhigh\|max>`, per-model menus from each model's `variants` map (maps to OpenAI's `reasoningEffort`); `none` dropped | `--reasoning-effort <minimal\|low\|medium\|high\|xhigh\|ultra>` (recorded from the CLI's own rejection of `none`, which is echo-provider-only; default high) |
-| Attach SubZ MCP server | `--mcp-config <json>` | `codex mcp` / config | `<cwd>/.grok/config.toml`, staged per run by `prepare()` (no per-invocation flag) | no built-in MCP: `prepare()` stages `<cwd>/.subz/mcp-bridge.mjs` (a pi extension speaking the host's TCP protocol), loaded via `--extension` | inline `OPENCODE_CONFIG_CONTENT` env carrying an `mcp.subz` local (nc) server; NO cwd file (opencode roots a session at the git repo and drops a cwd-staged `opencode.json`), no per-invocation flag | staged config HOME: `prepare()` writes a throwaway `XDG_CONFIG_HOME` (settings.json `mcp_servers.subz` stdio → an nc bridge script, `command` is a bare path with no args field; auth.json symlinks to the user's real store — the binary ignores `MUSE_AUTH_PATH`), no per-invocation flag |
-| Sessions | host-minted `--session-id`, `--resume <id>` | id parsed from `thread.started` | host-minted `--session-id`, `--resume <id>` | host-minted `--session-id` (one flag creates AND resumes; header echoes it) | id parsed from any event's `sessionID` (`ses_…`); `-s <id>` resumes | host-minted `--session-id` (one flag creates AND resumes — the second exec appends at sequence 2; `muse resume` is the interactive TUI, not a headless lane) |
-| Fallback | `--fallback-model <list>` | - | - | - | - | - |
-| Health | `claude --version`, `claude auth status` (JSON, exit 0/1 - verified 2.1.200) | `codex --version`, `codex login status` (exit 0/1 - verified 0.141.0) | `grok --version`, `grok models` (exit 0 in BOTH auth states - output markers decide) | `pi --version`, `pi --list-models --offline` (exit 0 in BOTH auth states - output markers decide; login is TUI-only: `pi` then `/login`) | `opencode --version`, `opencode auth list` (exit 0 in BOTH auth states - "0 credentials" marker decides; login is `opencode auth login`) | `muse --version` only — NO token-free auth status command exists (empty `authStatusArgs`, the seam's "auth not checked" lane); the probe's marker ("missing meta credentials", exit 1, fails fast pre-network) is the sole auth detector |
+| Need | claude code | grok | pi | opencode | muse |
+|---|---|---|---|---|---|
+| Non-interactive run | `claude -p/--print` | `grok -p/--single` | `pi -p --mode json` (prompt is a trailing positional; stdin MUST reach EOF or the CLI hangs with zero output — the runner wires /dev/null) | `opencode run` (prompt trailing positional; `--auto` bypasses permission prompts) | `muse exec` (prompt trailing positional; `--disable-approval` bypasses approvals, sandbox stays on; `--no-foreign-personal-context` keeps other CLIs' imported skills out) |
+| Structured / streamed output | `--output-format json\|stream-json`, `--json-schema <s>` | `--output-format json\|streaming-json` (token-level `thought`/`text` chunks; NO tool events) | `--mode json` (JSONL events: session header, message/turn lifecycle, `tool_execution_*`); CAUTION: a FAILED turn still exits 0 — `parse()` reads the last assistant `stopReason` | `--format json` (JSONL: `step_start`/`reasoning`/`tool_use`/`text`/`step_finish`, each carrying `sessionID`); a failed turn exits nonzero AND emits a top-level `error` event | `--json` (the session EVENT LOG as JSONL envelopes: `run_output_delta` chunks, `task_lifecycle` per task with task_kind `tool.{name}`, final `run_terminal` with the authoritative text); reasoning is encrypted, per-turn usage rides only the durable log (`muse export`) |
+| Model selection | `--model <alias\|full>` | `-m/--model` (enumerable via `grok models`) | `--model <provider/id>` qualified (catalog enumerated at runtime via `--mode rpc` → `get_available_models`) | `-m <provider/model>` qualified (catalog enumerated at runtime via `opencode models --verbose`) | `--model <id>` (no enumeration command; static ids `muse-spark-1.3` / `-1.3-contributor` / `-1.2`, each read back from `run.model.configured`; always passed explicitly because the CLI's own no-flag default is the Contributor tier) |
+| Thinking level | `--effort <low\|medium\|high\|xhigh\|max>` | `--reasoning-effort` exists but is NOT honoured (measured) - never emitted | `--thinking <minimal\|low\|medium\|high\|xhigh\|max>`, per-model menus derived from the catalog's `thinkingLevelMap`; out-of-menu values silently clamp | `--variant <low\|medium\|high\|xhigh\|max>`, per-model menus from each model's `variants` map (maps to OpenAI's `reasoningEffort`); `none` dropped | `--reasoning-effort <minimal\|low\|medium\|high\|xhigh\|ultra>` (recorded from the CLI's own rejection of `none`, which is echo-provider-only; default high) |
+| Attach SubZ MCP server | `--mcp-config <json>` | `<cwd>/.grok/config.toml`, staged per run by `prepare()` (no per-invocation flag) | no built-in MCP: `prepare()` stages `<cwd>/.subz/mcp-bridge.mjs` (a pi extension speaking the host's TCP protocol), loaded via `--extension` | inline `OPENCODE_CONFIG_CONTENT` env carrying an `mcp.subz` local (nc) server; NO cwd file (opencode roots a session at the git repo and drops a cwd-staged `opencode.json`), no per-invocation flag | staged config HOME: `prepare()` writes a throwaway `XDG_CONFIG_HOME` (settings.json `mcp_servers.subz` stdio → an nc bridge script, `command` is a bare path with no args field; auth.json symlinks to the user's real store — the binary ignores `MUSE_AUTH_PATH`), no per-invocation flag |
+| Sessions | host-minted `--session-id`, `--resume <id>` | host-minted `--session-id`, `--resume <id>` | host-minted `--session-id` (one flag creates AND resumes; header echoes it) | id parsed from any event's `sessionID` (`ses_…`); `-s <id>` resumes | host-minted `--session-id` (one flag creates AND resumes — the second exec appends at sequence 2; `muse resume` is the interactive TUI, not a headless lane) |
+| Fallback | `--fallback-model <list>` | - | - | - | - |
+| Health | `claude --version`, `claude auth status` (JSON, exit 0/1 - verified 2.1.200) | `grok --version`, `grok models` (exit 0 in BOTH auth states - output markers decide) | `pi --version`, `pi --list-models --offline` (exit 0 in BOTH auth states - output markers decide; login is TUI-only: `pi` then `/login`) | `opencode --version`, `opencode auth list` (exit 0 in BOTH auth states - "0 credentials" marker decides; login is `opencode auth login`) | `muse --version` only — NO token-free auth status command exists (empty `authStatusArgs`, the seam's "auth not checked" lane); the probe's marker ("missing meta credentials", exit 1, fails fast pre-network) is the sole auth detector |
 
 pi's user config (extensions, skills, AGENTS.md/CLAUDE.md) is deliberately NOT silenced — pi
 users self-select for a customized harness, and the subz bridge registers additively beside
@@ -194,7 +203,7 @@ Provider health is **three tiers, cheapest first** (`SZProviderHealth.swift` /
 
 1. **install** - `/usr/bin/env <cli> --version`, 5s. env's exit 127 → `missingCLI`.
 2. **auth** - the CLI's own status command (`authStatusArgs`): `claude auth status` /
-   `codex login status` / `grok models` / `pi --list-models --offline`, 10s. Nonzero exit →
+   `grok models` / `pi --list-models --offline`, 10s. Nonzero exit →
    `authNeeded` - except an unknown-subcommand error (older CLI), which leaves auth unknown and
    defers to the probe. A ZERO exit whose output contains one of the provider's
    `authFailureMarkers` is also `authNeeded`: not every CLI encodes auth in its status command's
@@ -240,15 +249,14 @@ codex's wrapper spawns the vendor binary as a grandchild, which used to leak).
 
 ## Auth & secrets
 
-- Auth is delegated to each underlying tool's own mechanism (its CLI login). SubZ does not store
-  provider credentials itself in V1; it reads installed/authenticated state via the adapter.
+- CLI providers delegate authentication to their own login mechanisms. The direct ChatGPT
+  connection stores its OAuth credentials in macOS Keychain as described above.
 
 ## Capability discovery - resolved (2026-06-13)
 
 **claude and muse cannot enumerate models** (no list subcommand; you pass a model alias or
 name), so their lists are static. claude's thinking levels *are* enumerable (`--effort` has a
-fixed set); codex's reasoning effort is a config key, declared per model in its manifest. codex,
-grok, pi, and opencode enumerate through their own CLIs (see below).
+fixed set). Grok, Pi, and OpenCode enumerate through their own CLIs (see below).
 (grok, added later, is the exception that proves the manifest right: `grok models` DOES
 enumerate, which makes re-verifying its manifest one command - but the manifest stays static,
 and the CLI's own docs/flags still can't be trusted for capabilities: its effort flag parses
@@ -268,30 +276,8 @@ the exact `--model` argv token. Until a first successful fetch, pi serves an EMP
 the model menus dim and pre-flights refuse, which is the truthful state for a logged-out harness.
 Static manifests remain the rule for CLIs that can't enumerate.
 
-**codex: the CLI's own manifest is the catalog** (verified codex-cli 0.144.5, 2026-09-03).
-`codex debug models` refreshes the manifest its picker reads (slug, visibility, priority,
-per-model reasoning levels and default, speed tiers, an `upgrade` pointer on retiring rows) and
-prints it as JSON, token-free. `SZCodexProvider` maps that through the same catalog cell and
-host persistence as pi/opencode, starting from a built-in snapshot (the recorded manifest,
-pinned by a drift test) so the picker is never empty. Retiring rows stay listed with a
-"(retiring)" label so a stored pick keeps its model and thread; the default follows Terra's
-`upgrade` pointer once its replacement is listed. The manifest is the first half of the
-never-infer gate (a slug the CLI has no metadata for is absent, which is what the Sol 400 window
-was); the setup sheet's Test probe and the run's failure path are the live-launch half.
-
-**Decision:**
-
-- **`capabilities()` reads a static manifest** (per provider, ideally keyed by detected CLI
-  version) - the source of truth for available **models** and **thinking levels**. claude's
-  `--effort` set can be hard-coded from the known flag values; everything else is manifest data.
-- **The CLI is used for health + session control, not capability discovery** (`doctor`/`auth`/
-  `login`; see CLI integration above).
-- **A manual override** in settings lets a user type a model name the manifest doesn't list yet
-  (both CLIs accept arbitrary `--model`), so we're never blocked by a stale manifest.
-- **No probing** - too slow/noisy for what is effectively static data.
-
-This keeps the adapter simple and the settings UI instant, while the manual override absorbs new
-models between manifest updates.
+**ChatGPT:** the authenticated `/v1/models` catalog is the source of truth, as described above.
+It is intentionally not seeded from the engine's model list or from another account's saved catalog.
 
 ## Test scenarios
 

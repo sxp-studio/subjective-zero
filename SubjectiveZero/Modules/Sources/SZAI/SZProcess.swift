@@ -381,11 +381,6 @@ public enum SZAgentEnvironment {
         [".local/bin", ".cargo/bin", ".bun/bin", ".opencode/bin"].forEach { add(URL(fileURLWithPath: home).appending(path: $0).path) }
         nodeVersionBinDirectories(homeDirectory: homeDirectory, fileManager: fileManager).forEach { add($0.path) }
         ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"].forEach(add)
-        // Codex ships its CLI inside Codex.app — support users who installed the app, not the npm/standalone CLI.
-        for apps in ["/Applications", URL(fileURLWithPath: home).appending(path: "Applications").path] {
-            let resources = apps + "/Codex.app/Contents/Resources"
-            if fileManager.isExecutableFile(atPath: resources + "/codex") { add(resources) }
-        }
         ["/usr/bin", "/bin", "/usr/sbin", "/sbin"].forEach(add)
         return paths.joined(separator: ":")
     }

@@ -346,8 +346,8 @@ the agent it is for.
   hides the rest and says where everything runs; a (?) bubble carries the explainer) over a
   Profiles list where the SELECTED row is both what runs and what the cards below edit —
   double-click renames in place, + creates and selects, the toolbar deletes and duplicates.
-  Two shipped read-only starters seed once their provider is usable (Claude Routing and
-  Codex Routing, both "(sxp.studio)"): locked rows, no edit or rename or delete — Duplicate
+  The read-only Claude Routing (sxp.studio) starter seeds once Claude is usable. ChatGPT
+  routing uses the signed-in account's models. Starter rows have no edit, rename, or delete — Duplicate
   births an editable copy. Below, one tinted card per agent, one row per declared slot with
   the pack author's caption (the built-ins: the Director's Plan/Chat/Sort, Coding's Build
   rows the task grades pick among plus Edit for a change asked of a built node, Debug's

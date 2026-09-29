@@ -7,7 +7,7 @@ import SZAI
 import SZCore
 
 /// Two models, distinct effort menus, fast mode honoured only on m-fast.
-private struct TwoModelProvider: SZProvider {
+private struct TwoModelProvider: SZCLIProvider {
     let id = "stub"
     let models = [
         SZProviderModel(id: "m-big", displayName: "Big",
@@ -30,7 +30,7 @@ private struct TwoModelProvider: SZProvider {
 }
 
 /// A dynamic-catalog provider before its first fetch: an empty model list.
-private struct EmptyCatalogProvider: SZProvider {
+private struct EmptyCatalogProvider: SZCLIProvider {
     let id = "empty"
     let models: [SZProviderModel] = []
     let defaultModel = ""

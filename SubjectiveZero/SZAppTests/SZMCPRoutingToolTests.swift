@@ -28,7 +28,7 @@ struct SZMCPRoutingToolTests {
         SZRoutingProfile(
             name: "fast-fleet",
             agents: ["director": ["planner": SZRouteEnvelope(providerID: "claude")],
-                     "coding": ["builder-default": SZRouteEnvelope(providerID: "codex")]])
+                     "coding": ["builder-default": SZRouteEnvelope(providerID: "muse")]])
     }
 
     private func json(_ result: SZMCPToolResult) throws -> [String: Any] {

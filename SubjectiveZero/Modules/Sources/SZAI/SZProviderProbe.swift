@@ -27,7 +27,8 @@ public extension SZProvider {
                                         workingDirectory: work, cacheDirectory: cache,
                                         model: model, reasoningEffort: reasoningEffort,
                                         timeout: 90)
-        let preallocated = usesPreallocatedSessionID ? UUID().uuidString : nil
+        let cli = self as? any SZCLIProvider
+        let preallocated = cli?.usesPreallocatedSessionID == true ? UUID().uuidString : nil
         let cliPath = SZAgentEnvironment.resolveExecutable(healthArgs.first ?? "")
 
         func report(_ status: SZProviderHealthStatus, _ message: String,
@@ -39,34 +40,31 @@ public extension SZProvider {
 
         // Same order as run(): stage the working directory, then build argv.
         do {
-            try prepare(request)
+            try cli?.prepare(request)
         } catch {
             return report(.healthFailed, "Probe could not stage the working directory.",
                           diagnostic: SZProviderHealthDiagnostic(
                               tier: .probe, attemptedCommand: [], exitCode: nil, timedOut: false,
                               outputExcerpt: SZProviderHealthDiagnostic.excerpt("\(error)")))
         }
-        let launch = launch(request, preallocatedSessionID: preallocated)
+        let command = cli?.launch(request, preallocatedSessionID: preallocated).arguments ?? [displayName, "test"]
         let startedAt = Date()
 
-        let result: SZProcessResult
+        let runResult: SZAgentRunResult
         do {
-            result = try await runner.run(launch.executable, launch.arguments,
-                                          environment: launch.environment,
-                                          currentDirectoryURL: work,
-                                          timeout: request.timeout, onOutput: nil)
+            runResult = try await run(request, runner: runner)
         } catch {
-            return report(.healthFailed, "Probe could not launch.",
+            return report(.healthFailed, error.localizedDescription,
                           diagnostic: SZProviderHealthDiagnostic(
-                              tier: .probe, attemptedCommand: launch.arguments, exitCode: nil,
+                              tier: .probe, attemptedCommand: command, exitCode: nil,
                               timedOut: false,
                               outputExcerpt: SZProviderHealthDiagnostic.excerpt("\(error)")))
         }
-        let outcome = parse(output: result.output, exitCode: result.exitCode,
-                            preallocatedSessionID: preallocated)
+        let result = runResult.process
+        let outcome = runResult.outcome
         let succeeded = !outcome.failed && !result.timedOut
         let diagnostic = SZProviderHealthDiagnostic(
-            tier: .probe, attemptedCommand: launch.arguments, exitCode: result.exitCode,
+            tier: .probe, attemptedCommand: command, exitCode: result.exitCode,
             timedOut: result.timedOut,
             outputExcerpt: succeeded ? nil : SZProviderHealthDiagnostic.excerpt(result.output))
 
@@ -85,6 +83,6 @@ public extension SZProvider {
             return report(.healthFailed, "Probe timed out after \(Int(request.timeout ?? 0))s.",
                           diagnostic: diagnostic)
         }
-        return report(.healthFailed, "Probe failed (exit \(result.exitCode)).", diagnostic: diagnostic)
+        return report(.healthFailed, outcome.message ?? "Probe failed (exit \(result.exitCode)).", diagnostic: diagnostic)
     }
 }

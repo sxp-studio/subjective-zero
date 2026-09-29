@@ -253,7 +253,7 @@ calling `HostBridge.dispatch`.
 
 ```swift
 protocol SZProvider {                          // one adapter per CLI
-    var id: String { get }                      // "claude-code", "codex"
+    var id: String { get }                      // "chatgpt", "claude"
     func healthCheck() async -> ProviderHealth
     func capabilities() async -> ProviderCapabilities   // from a static manifest (AI_PROVIDERS.md)
     func startSession(_ config: SessionConfig) async throws -> SZSession

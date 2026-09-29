@@ -283,7 +283,7 @@ public struct SZWelcomeOverlay: View {
     private var emptyState: some View {
         VStack(spacing: 6) {
             Text("No projects yet").font(.system(size: 14, weight: .medium)).foregroundStyle(SZWelcomeStyle.text)
-            Text("Create one to get started, or open an existing .subz.")
+            Text("Create a project, then connect ChatGPT or your preferred coding tool to start making effects.")
                 .font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)

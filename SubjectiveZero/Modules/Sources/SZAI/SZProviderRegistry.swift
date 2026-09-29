@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The set of providers SubZ ships (claude + codex + grok + pi + opencode + muse), and lookup by id. Adding a
-// backend = add a Providers/SZ<Name>Provider.swift conforming to SZProvider and list it here.
+// direct account connections and optional coding tools, in setup order.
 import Foundation
 
 public struct SZProviderRegistry: Sendable {
@@ -14,9 +13,9 @@ public struct SZProviderRegistry: Sendable {
 
     /// The bundled providers, in selection order.
     public static let shared = SZProviderRegistry(
-        providers: [SZClaudeProvider(), SZCodexProvider(), SZGrokProvider(), SZPiProvider(),
+        providers: [SZChatGPTProvider(), SZClaudeProvider(), SZGrokProvider(), SZPiProvider(),
                     SZOpenCodeProvider(), SZMuseCodeProvider()],
-        defaultProviderID: SZClaudeProvider.providerID
+        defaultProviderID: SZChatGPTProvider.providerID
     )
 
     public func provider(id: String) -> (any SZProvider)? {

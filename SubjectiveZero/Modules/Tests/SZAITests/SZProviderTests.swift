@@ -65,10 +65,10 @@ private extension Array where Element == String {
 
 @Test func registryVendsAllProviders() {
     let reg = SZProviderRegistry.shared
-    #expect(reg.providers.map(\.id).sorted() == ["claude", "codex", "grok", "muse", "opencode", "pi"])
-    #expect(reg.defaultProvider.id == "claude")
+    #expect(reg.providers.map(\.id).sorted() == ["chatgpt", "claude", "grok", "muse", "opencode", "pi"])
+    #expect(reg.defaultProvider.id == "chatgpt")
     #expect(reg.provider(id: "claude")?.defaultModel == "claude-opus-5-5")
-    #expect(reg.provider(id: "codex")?.defaultModel == "gpt-5.6-terra")
+    #expect(reg.provider(id: "codex") == nil)
     #expect(reg.provider(id: "muse")?.defaultModel == "muse-spark-1.3")
     // grok's, pi's and opencode's catalogs are runtime-enumerated (grok's backend re-points
     // unversioned ids; pi and opencode are BYOK — the user's authed providers decide): at rest they
@@ -123,26 +123,6 @@ private extension Array where Element == String {
     #expect(!launch.arguments.contains("--mcp-config"))
 }
 
-@Test func codexLaunchUsesConfigFlagsAndParsesJsonlSession() async throws {
-    let codex = SZCodexProvider()
-    let stub = StubRunner(output: """
-    {"type":"session.created"}
-    {"type":"thread.started","thread_id":"T-abc-123"}
-    {"type":"item.completed"}
-    """)
-    let result = try await codex.run(request(port: 42100), runner: stub)
-
-    let call = try #require(stub.lastCall)
-    #expect(call.arguments.prefix(3) == ["codex", "exec", "--json"])
-    #expect(call.arguments.value(after: "-m") == "gpt-5.6-terra")
-    #expect(call.arguments.contains(#"mcp_servers.subz.args=["127.0.0.1","42100"]"#))
-    #expect(call.arguments.contains("mcp_servers.subz.required=true"))
-    // exec has no per-tool allowlist; bypass is its only unattended-autonomy lever (else MCP calls cancel).
-    #expect(call.arguments.contains("--dangerously-bypass-approvals-and-sandbox"))
-    #expect(call.arguments.last == "make it grayscale")   // prompt is the trailing positional
-    // codex's id is parsed from the jsonl stream, not minted.
-    #expect(result.outcome.sessionID == "T-abc-123")
-}
 
 /// A chat turn continues an existing session. claude uses `--resume <id>` (not the
 /// `--session-id` mint), and run() keeps the id stable so the host's session map stays addressable.
@@ -163,21 +143,6 @@ private extension Array where Element == String {
 /// codex continues a thread via `exec resume <id> … <prompt>` — no `--cd` (invalid on the
 /// resume subcommand; the process cwd carries it), and run() falls back to the resume id when the
 /// resumed stream doesn't re-announce a thread.started.
-@Test func codexResumeUsesResumeSubcommand() async throws {
-    let codex = SZCodexProvider()
-    var req = request(port: 42100)
-    req.resumeSessionID = "T-existing"
-
-    let argv = codex.launch(req, preallocatedSessionID: nil).arguments
-    #expect(argv.prefix(3) == ["codex", "exec", "resume"])
-    #expect(!argv.contains("--cd"))                  // not valid on `exec resume`
-    #expect(argv.contains("T-existing"))             // SESSION_ID positional
-    #expect(argv.last == "make it grayscale")        // PROMPT trailing positional
-    #expect(argv.contains("--dangerously-bypass-approvals-and-sandbox"))
-
-    let result = try await codex.run(req, runner: StubRunner())   // empty output → no thread.started
-    #expect(result.outcome.sessionID == "T-existing")
-}
 
 /// grok is claude-shaped on sessions (host-minted `--session-id`, echoed back) but attaches MCP
 /// through a config FILE staged by `prepare()` — run() calls it before launch(), so after a run
@@ -344,64 +309,10 @@ private let grokModelsLoggedOut =
     #expect(defaulted.value(after: "--effort") == "high")
 }
 
-@Test func codexFastModeAndOverridesReachArgv() {
-    let codex = SZCodexProvider()
-    let argv = codex.launch(
-        request(port: nil, model: "gpt-5.6-terra", reasoningEffort: "max", fastMode: true),
-        preallocatedSessionID: nil).arguments
-    #expect(argv.value(after: "-m") == "gpt-5.6-terra")
-    #expect(argv.contains(#"model_reasoning_effort="max""#))
-    #expect(argv.contains(#"service_tier="fast""#))
-    #expect(argv.contains("features.fast_mode=true"))
 
-    let normal = codex.launch(request(port: nil), preallocatedSessionID: nil).arguments
-    #expect(!normal.contains(#"service_tier="fast""#))
-    #expect(!normal.contains("features.fast_mode=true"))
-}
-
-@Test func codexFastModeSurvivesResume() {
-    var req = request(port: nil, fastMode: true)
-    req.resumeSessionID = "T-existing"
-    let argv = SZCodexProvider().launch(req, preallocatedSessionID: nil).arguments
-    #expect(argv.prefix(3) == ["codex", "exec", "resume"])
-    #expect(argv.contains(#"service_tier="fast""#))
-}
 
 /// The resolver clamps a stored (possibly stale) selection to the provider's real capabilities.
 @Test func resolverClampsStaleSelections() {
-    let codex = SZCodexProvider()
-    // "bogus" is the unknown-effort probe, NOT "ultra": ultra is real on the default model (Terra),
-    // so it would survive the clamp and quietly invert this assertion.
-    let stale = codex.resolvedGenerationSettings(
-        from: SZProviderGenerationSettings(model: "gpt-9-imaginary", reasoningEffort: "bogus", fastMode: true))
-    #expect(stale.model == "gpt-5.6-terra")      // unknown model → default
-    #expect(stale.reasoningEffort == "medium")   // unknown effort → default
-    #expect(stale.fastMode == true)              // codex supports fast
-
-    // A retiring model stays a valid pick until the vendor hides it — a stored row keeps its model.
-    let kept = codex.resolvedGenerationSettings(
-        from: SZProviderGenerationSettings(model: "gpt-5.4", reasoningEffort: "xhigh", fastMode: false))
-    #expect(kept == SZProviderGenerationSettings(model: "gpt-5.4", reasoningEffort: "xhigh", fastMode: false))
-
-    // `max` arrived with GPT-5.6: kept on luna, clamped on the 5.4 that never advertised it.
-    let lunaMax = codex.resolvedGenerationSettings(
-        from: SZProviderGenerationSettings(model: "gpt-5.6-luna", reasoningEffort: "max", fastMode: false))
-    #expect(lunaMax == SZProviderGenerationSettings(model: "gpt-5.6-luna", reasoningEffort: "max", fastMode: false))
-
-    let oldModelMax = codex.resolvedGenerationSettings(
-        from: SZProviderGenerationSettings(model: "gpt-5.4", reasoningEffort: "max", fastMode: false))
-    #expect(oldModelMax == SZProviderGenerationSettings(model: "gpt-5.4", reasoningEffort: "medium", fastMode: false))
-
-    // `ultra` is Terra's alone — the one token that proves the list is per-model, not per-provider:
-    // the SAME stored effort survives on Terra and clamps to the default on Luna.
-    let terraUltra = codex.resolvedGenerationSettings(
-        from: SZProviderGenerationSettings(model: "gpt-5.6-terra", reasoningEffort: "ultra", fastMode: false))
-    #expect(terraUltra.reasoningEffort == "ultra")
-
-    let lunaUltra = codex.resolvedGenerationSettings(
-        from: SZProviderGenerationSettings(model: "gpt-5.6-luna", reasoningEffort: "ultra", fastMode: false))
-    #expect(lunaUltra.reasoningEffort == "medium")
-
     let claude = SZClaudeProvider()
     let resolved = claude.resolvedGenerationSettings(
         from: SZProviderGenerationSettings(reasoningEffort: "max", fastMode: true))
@@ -411,8 +322,9 @@ private let grokModelsLoggedOut =
     #expect(resolved.fastMode == true)
 
     // nil stored = provider defaults across the board.
-    let defaults = codex.resolvedGenerationSettings(from: nil)
-    #expect(defaults == SZProviderGenerationSettings(model: "gpt-5.6-terra", reasoningEffort: "medium", fastMode: false))
+    let defaults = claude.resolvedGenerationSettings(from: nil)
+    #expect(defaults.model == claude.defaultModel)
+    #expect(defaults.fastMode == false)
 }
 
 /// claude's models in menu order, with a uniform effort surface: none overrides it. A model that
@@ -505,69 +417,17 @@ private let grokModelsLoggedOut =
 /// codex's per-model fast surface is read from the manifest's `additional_speed_tiers`: every
 /// listed model but gpt-5.4-mini carries the `fast` tier, so those inherit the provider's `true`
 /// and argv keeps carrying `service_tier="fast"`; mini alone declares false and the toggle hides.
-@Test func codexFastModeIsUnchangedAcrossEveryModel() {
-    let codex = SZCodexProvider()
-    #expect(codex.supportsFastMode)
-    #expect(codex.model(id: "gpt-5.4-mini")?.supportsFastMode == false)
-    #expect(!codex.supportsFastMode(for: "gpt-5.4-mini"))
-    for model in codex.models where model.id != "gpt-5.4-mini" {
-        #expect(model.supportsFastMode == nil)                 // manifest lists `fast` → inherit
-        #expect(codex.supportsFastMode(for: model.id))         // …so the rest inherit true
-        let resolved = codex.resolvedGenerationSettings(
-            from: SZProviderGenerationSettings(model: model.id, reasoningEffort: nil, fastMode: true))
-        #expect(resolved.fastMode == true)
-    }
-}
 
 /// Both effort dimensions are per MODEL, read from the manifest and live-verified against codex-cli
 /// 0.144.5 — a slug the ChatGPT backend won't serve dies with a 400 no in-process test can catch.
-@Test func codexReasoningEffortsVaryByModel() {
-    let codex = SZCodexProvider()
-    #expect(codex.supportedReasoningEfforts(for: "gpt-5.6-sol") == ["low", "medium", "high", "xhigh", "max", "ultra"])
-    #expect(codex.supportedReasoningEfforts(for: "gpt-5.6-terra") == ["low", "medium", "high", "xhigh", "max", "ultra"])
-    #expect(codex.supportedReasoningEfforts(for: "gpt-5.6-luna") == ["low", "medium", "high", "xhigh", "max"])
-    // 5.5 and 5.4 stop at xhigh — the same menu the provider-level fallback carries.
-    #expect(codex.supportedReasoningEfforts(for: "gpt-5.5") == codex.supportedReasoningEfforts)
-    #expect(codex.supportedReasoningEfforts(for: "gpt-5.4") == codex.supportedReasoningEfforts)
-    // A stale stored id resolves to the provider list instead of an empty menu.
-    #expect(codex.supportedReasoningEfforts(for: "gpt-9-imaginary") == codex.supportedReasoningEfforts)
-
-    // Sol is the only model that doesn't inherit the provider's `medium` — the whole reason
-    // `SZProviderModel.defaultReasoningEffort` exists rather than being read off the provider.
-    #expect(codex.defaultReasoningEffort(for: "gpt-5.6-sol") == "low")
-    #expect(codex.defaultReasoningEffort(for: "gpt-5.6-terra") == "medium")
-    #expect(codex.defaultReasoningEffort(for: "gpt-9-imaginary") == codex.defaultReasoningEffort)
-
-    // Each model's own default is on its own menu, so the resolver's `efforts.first` tail never fires.
-    #expect(codex.models.allSatisfy {
-        codex.supportedReasoningEfforts(for: $0.id).contains(codex.defaultReasoningEffort(for: $0.id))
-    })
-    // `none` is accepted by the backend but advertised for no model, so it stays off every menu.
-    #expect(codex.models.allSatisfy { !codex.supportedReasoningEfforts(for: $0.id).contains("none") })
-}
 
 /// Sol resolves to its OWN `low` default, not the provider's `medium` — a stale/absent stored effort
 /// must not silently upgrade the model the vendor ships at low.
-@Test func codexSolDefaultsToItsOwnLowEffort() {
-    let codex = SZCodexProvider()
-    let fresh = codex.resolvedGenerationSettings(
-        from: SZProviderGenerationSettings(model: "gpt-5.6-sol", reasoningEffort: nil, fastMode: false))
-    #expect(fresh.reasoningEffort == "low")
-
-    let stale = codex.resolvedGenerationSettings(
-        from: SZProviderGenerationSettings(model: "gpt-5.6-sol", reasoningEffort: "bogus", fastMode: false))
-    #expect(stale.reasoningEffort == "low")
-
-    // An explicit, supported pick still wins over the model's default.
-    let picked = codex.resolvedGenerationSettings(
-        from: SZProviderGenerationSettings(model: "gpt-5.6-sol", reasoningEffort: "ultra", fastMode: false))
-    #expect(picked.reasoningEffort == "ultra")
-}
 
 /// fastMode stored true against a provider that doesn't support it resolves off — the argv can
 /// never carry a flag the CLI lacks.
 @Test func resolverClampsFastModeToCapability() {
-    struct NoFastProvider: SZProvider {
+    struct NoFastProvider: SZCLIProvider {
         let id = "nofast"
         let models = [SZProviderModel(id: "m1", displayName: "M1")]
         let defaultModel = "m1"
@@ -698,33 +558,11 @@ private let grokModelsLoggedOut =
             == [.usage(SZTokenUsage(inputTokens: 0, outputTokens: 4)), .reply("done")])
 }
 
-@Test func codexStreamConsumerClassifiesReplyAndTrace() {
-    let c = SZCodexProvider().makeStreamConsumer()
-    // a preamble agent_message is held; a tool call streams as a toolCall (real tool name)
-    #expect(c.consume(#"{"type":"item.completed","item":{"type":"agent_message","text":"I'll do X"}}"#).isEmpty)
-    #expect(c.consume(#"{"type":"item.completed","item":{"type":"mcp_tool_call","server":"subz","tool":"agent_compile_node"}}"#)
-            == [.toolCall(name: "agent_compile_node")])
-    // a reasoning summary is codex's actual thinking
-    #expect(c.consume(#"{"type":"item.completed","item":{"type":"reasoning","text":"Considering X vs Y"}}"#)
-            == [.thinking("Considering X vs Y")])
-    // a second agent_message supersedes the preamble → preamble becomes narration
-    #expect(c.consume(#"{"type":"item.completed","item":{"type":"agent_message","text":"done"}}"#) == [.thinking("I'll do X")])
-    // finish flushes the final message as the reply
-    #expect(c.finish() == [.reply("done")])
-}
 
 /// The final `turn.completed` event carries the turn's usage — shape recorded verbatim from a live
 /// 0.144.1 run. `cached_input_tokens` is a SUBSET of `input_tokens` (OpenAI's convention, opposite
 /// of Anthropic's), so input passes through unsummed; `reasoning_output_tokens` is reported even
 /// when the turn emitted no `reasoning` summary item (this run: 46 reasoning tokens, zero items).
-@Test func codexStreamConsumerReportsUsageFromTurnCompleted() {
-    let c = SZCodexProvider().makeStreamConsumer()
-    #expect(c.consume(#"{"type":"turn.completed","usage":{"input_tokens":13305,"cached_input_tokens":10496,"output_tokens":53,"reasoning_output_tokens":46}}"#)
-            == [.usage(SZTokenUsage(inputTokens: 13305, outputTokens: 53, cachedInputTokens: 10496, reasoningOutputTokens: 46))])
-    // A turn.completed with no usable usage stays silent instead of fabricating zeros.
-    #expect(c.consume(#"{"type":"turn.completed"}"#).isEmpty)
-    #expect(c.consume(#"{"type":"turn.completed","usage":{"input_tokens":5}}"#).isEmpty)
-}
 
 /// grok streams token-level chunks (recorded from grok 0.2.93 streaming-json), so the consumer
 /// accumulates: thought chunks flush as ONE `.thinking` when text starts (per-token events would
@@ -1170,323 +1008,21 @@ func allProvidersHealthReady() async {
 // (`gpt-reserve`, `codex-auto-review`), the two rows the vendor is retiring (`gpt-5.4`,
 // `gpt-5.4-mini`, both with `upgrade`), a row with no fast tier (`gpt-5.4-mini`), priorities that
 // are not contiguous, and a leading log line — stdout and stderr arrive merged.
-private let codexDebugModelsOutput = """
-2026-09-03T20:56:53Z INFO refreshing model catalog
-{
- "models": [
-  {
-   "slug": "gpt-reserve",
-   "display_name": "GPT-Reserve",
-   "visibility": "hide",
-   "priority": 3,
-   "default_reasoning_level": "medium",
-   "supported_reasoning_levels": [
-    {
-     "effort": "low"
-    },
-    {
-     "effort": "medium"
-    },
-    {
-     "effort": "high"
-    },
-    {
-     "effort": "xhigh"
-    },
-    {
-     "effort": "max"
-    }
-   ],
-   "additional_speed_tiers": [
-    "fast"
-   ],
-   "upgrade": null
-  },
-  {
-   "slug": "gpt-5.6-sol",
-   "display_name": "GPT-5.6-Sol",
-   "visibility": "list",
-   "priority": 6,
-   "default_reasoning_level": "low",
-   "supported_reasoning_levels": [
-    {
-     "effort": "low"
-    },
-    {
-     "effort": "medium"
-    },
-    {
-     "effort": "high"
-    },
-    {
-     "effort": "xhigh"
-    },
-    {
-     "effort": "max"
-    },
-    {
-     "effort": "ultra"
-    }
-   ],
-   "additional_speed_tiers": [
-    "fast"
-   ],
-   "upgrade": null
-  },
-  {
-   "slug": "gpt-5.6-terra",
-   "display_name": "GPT-5.6-Terra",
-   "visibility": "list",
-   "priority": 7,
-   "default_reasoning_level": "medium",
-   "supported_reasoning_levels": [
-    {
-     "effort": "low"
-    },
-    {
-     "effort": "medium"
-    },
-    {
-     "effort": "high"
-    },
-    {
-     "effort": "xhigh"
-    },
-    {
-     "effort": "max"
-    },
-    {
-     "effort": "ultra"
-    }
-   ],
-   "additional_speed_tiers": [
-    "fast"
-   ],
-   "upgrade": null
-  },
-  {
-   "slug": "gpt-5.6-luna",
-   "display_name": "GPT-5.6-Luna",
-   "visibility": "list",
-   "priority": 8,
-   "default_reasoning_level": "medium",
-   "supported_reasoning_levels": [
-    {
-     "effort": "low"
-    },
-    {
-     "effort": "medium"
-    },
-    {
-     "effort": "high"
-    },
-    {
-     "effort": "xhigh"
-    },
-    {
-     "effort": "max"
-    }
-   ],
-   "additional_speed_tiers": [
-    "fast"
-   ],
-   "upgrade": null
-  },
-  {
-   "slug": "gpt-5.5",
-   "display_name": "GPT-5.5",
-   "visibility": "list",
-   "priority": 12,
-   "default_reasoning_level": "medium",
-   "supported_reasoning_levels": [
-    {
-     "effort": "low"
-    },
-    {
-     "effort": "medium"
-    },
-    {
-     "effort": "high"
-    },
-    {
-     "effort": "xhigh"
-    }
-   ],
-   "additional_speed_tiers": [
-    "fast"
-   ],
-   "upgrade": null
-  },
-  {
-   "slug": "gpt-5.4",
-   "display_name": "GPT-5.4",
-   "visibility": "list",
-   "priority": 16,
-   "default_reasoning_level": "medium",
-   "supported_reasoning_levels": [
-    {
-     "effort": "low"
-    },
-    {
-     "effort": "medium"
-    },
-    {
-     "effort": "high"
-    },
-    {
-     "effort": "xhigh"
-    }
-   ],
-   "additional_speed_tiers": [
-    "fast"
-   ],
-   "upgrade": {
-    "model": "gpt-5.6-terra",
-    "migration_markdown": "GPT-5.4 will be deprecated soon"
-   }
-  },
-  {
-   "slug": "gpt-5.4-mini",
-   "display_name": "GPT-5.4-Mini",
-   "visibility": "list",
-   "priority": 23,
-   "default_reasoning_level": "medium",
-   "supported_reasoning_levels": [
-    {
-     "effort": "low"
-    },
-    {
-     "effort": "medium"
-    },
-    {
-     "effort": "high"
-    },
-    {
-     "effort": "xhigh"
-    }
-   ],
-   "additional_speed_tiers": [],
-   "upgrade": {
-    "model": "gpt-5.6-luna",
-    "migration_markdown": "GPT-5.4 will be deprecated soon"
-   }
-  },
-  {
-   "slug": "codex-auto-review",
-   "display_name": "Codex Auto Review",
-   "visibility": "hide",
-   "priority": 43,
-   "default_reasoning_level": "medium",
-   "supported_reasoning_levels": [
-    {
-     "effort": "low"
-    },
-    {
-     "effort": "medium"
-    },
-    {
-     "effort": "high"
-    },
-    {
-     "effort": "xhigh"
-    },
-    {
-     "effort": "max"
-    }
-   ],
-   "additional_speed_tiers": [
-    "fast"
-   ],
-   "upgrade": null
-  }
- ]
-}
-"""
 
 /// The manifest is the catalog: visible rows in priority order, per-model menus and defaults, the
 /// fast tier as the per-model fast flag, retiring rows (`upgrade`) kept and labelled, `none` never
 /// on a menu, and labels in the shape the picker has always shown.
-@Test func codexCatalogMapsTheManifest() throws {
-    let snapshot = try #require(SZCodexProvider.catalogSnapshot(fromDebugModelsOutput: codexDebugModelsOutput))
-    #expect(snapshot.models.map(\.id)
-        == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"])
-    #expect(snapshot.models.map(\.displayName) == [
-        "GPT-5.6 Sol", "GPT-5.6 Terra", "GPT-5.6 Luna", "GPT-5.5", "GPT-5.4 (retiring)", "GPT-5.4 Mini (retiring)",
-    ])
-    #expect(snapshot.defaultModelID == "gpt-5.6-terra")
-    #expect(!snapshot.models.map(\.id).contains("gpt-reserve"))   // hidden stays hidden
-    let sol = try #require(snapshot.models.first { $0.id == "gpt-5.6-sol" })
-    #expect(sol.supportedReasoningEfforts == ["low", "medium", "high", "xhigh", "max", "ultra"])
-    #expect(sol.defaultReasoningEffort == "low")
-    #expect(sol.supportsFastMode == nil)   // `fast` tier listed → inherits the provider's true
-    let luna = try #require(snapshot.models.first { $0.id == "gpt-5.6-luna" })
-    #expect(luna.supportedReasoningEfforts == ["low", "medium", "high", "xhigh", "max"])
-    #expect(luna.defaultReasoningEffort == "medium")
-    #expect(snapshot.models.allSatisfy { !($0.supportedReasoningEfforts ?? []).contains("none") })
-    #expect(snapshot.models.first { $0.id == "gpt-5.4-mini" }?.supportsFastMode == false)   // no `fast` tier
-
-    // Garbage, or a manifest with nothing visible, maps to nil so the host keeps the last snapshot.
-    #expect(SZCodexProvider.catalogSnapshot(fromDebugModelsOutput: "not json") == nil)
-    #expect(SZCodexProvider.catalogSnapshot(fromDebugModelsOutput: #"{"models":[]}"#) == nil)
-}
 
 /// The default follows the vendor the day Terra retires: its `upgrade` pointer when that row is
 /// listed, Terra itself while the replacement isn't, and never a retiring row when Terra is gone.
-@Test func codexCatalogDefaultFollowsTerraRetirement() throws {
-    func manifest(_ rows: String) -> String { #"{"models":[\#(rows)]}"# }
-    let sol = #"{"slug":"gpt-5.6-sol","visibility":"list","priority":1}"#
-    let terraRetiring = #"{"slug":"gpt-5.6-terra","visibility":"list","priority":2,"upgrade":{"model":"gpt-5.7-terra"}}"#
-    let next = #"{"slug":"gpt-5.7-terra","visibility":"list","priority":3}"#
-
-    let followed = try #require(SZCodexProvider.catalogSnapshot(fromDebugModelsOutput: manifest("\(sol),\(terraRetiring),\(next)")))
-    #expect(followed.defaultModelID == "gpt-5.7-terra")
-    #expect(followed.models.first { $0.id == "gpt-5.6-terra" }?.displayName == "GPT-5.6 Terra (retiring)")
-
-    let notYet = try #require(SZCodexProvider.catalogSnapshot(fromDebugModelsOutput: manifest("\(sol),\(terraRetiring)")))
-    #expect(notYet.defaultModelID == "gpt-5.6-terra")
-
-    let solRetiring = #"{"slug":"gpt-5.6-sol","visibility":"list","priority":1,"upgrade":{"model":"x"}}"#
-    let gone = try #require(SZCodexProvider.catalogSnapshot(fromDebugModelsOutput: manifest("\(solRetiring),\(next)")))
-    #expect(gone.defaultModelID == "gpt-5.7-terra")   // first row not retiring, not Sol
-}
 
 /// The built-in snapshot is the recorded manifest run through the mapper — asserted, so the
 /// hand-written literal and the mapper cannot drift apart. Re-record the fixture with
 /// `codex debug models` when the CLI updates, then bring the literal to match.
-@Test func codexBuiltInCatalogMatchesTheRecordedManifest() throws {
-    let mapped = try #require(SZCodexProvider.catalogSnapshot(fromDebugModelsOutput: codexDebugModelsOutput))
-    #expect(mapped.models == SZCodexProvider.builtInCatalog.models)
-    #expect(mapped.defaultModelID == SZCodexProvider.builtInCatalog.defaultModelID)
-    #expect(SZCodexProvider().models == SZCodexProvider.builtInCatalog.models)
-}
 
 /// A seed replaces the built-in snapshot (keeping its default while listed, else re-deriving it), a
 /// failed fetch leaves the seeded snapshot alone, and a successful fetch replaces it. Each provider
 /// value has its own cell, so seeding one never leaks into another.
-@Test func codexCatalogSeedAndRefreshReplaceTheSnapshot() async throws {
-    let codex = SZCodexProvider()
-    codex.seedModelCatalog(SZProviderModelCatalog(
-        models: [SZProviderModel(id: "gpt-7-next", displayName: "GPT-7 Next")],
-        defaultModelID: "gpt-5.6-terra"))   // a default the list no longer carries
-    #expect(codex.models.map(\.id) == ["gpt-7-next"])
-    #expect(codex.defaultModel == "gpt-7-next")
-    #expect(SZCodexProvider().models == SZCodexProvider.builtInCatalog.models)   // another cell, untouched
-
-    await #expect(throws: SZCodexCatalogError.self) {
-        try await codex.refreshModelCatalog(runner: StubRunner(output: "offline", exitCode: 1))
-    }
-    #expect(codex.models.map(\.id) == ["gpt-7-next"])   // kept
-
-    let stub = StubRunner(output: codexDebugModelsOutput)
-    let fetched = try await codex.refreshModelCatalog(runner: stub)
-    #expect(stub.lastCall?.arguments == ["codex", "debug", "models"])
-    #expect(fetched?.models == SZCodexProvider.builtInCatalog.models)
-    #expect(codex.models == SZCodexProvider.builtInCatalog.models)   // replaced
-    #expect(codex.defaultModel == "gpt-5.6-terra")
-
-    codex.seedModelCatalog(SZProviderModelCatalog(models: [], defaultModelID: nil))
-    #expect(codex.models == SZCodexProvider.builtInCatalog.models)   // an empty seed is ignored
-}
 
 // MARK: - opencode
 

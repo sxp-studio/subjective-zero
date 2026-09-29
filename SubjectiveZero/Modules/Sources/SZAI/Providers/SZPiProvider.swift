@@ -37,7 +37,7 @@ import Foundation
 import Synchronization
 import SZCore
 
-public struct SZPiProvider: SZProvider {
+public struct SZPiProvider: SZCLIProvider {
     public init() {}
 
     /// The provider's registry id — the one place the string is written (see SZClaudeProvider).

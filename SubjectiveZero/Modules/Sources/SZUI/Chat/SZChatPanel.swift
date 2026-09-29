@@ -55,6 +55,7 @@ public struct SZChatPanel: View {
     // The ⋯ menu's way into the AI Settings sheet (providers + routing profiles) — the
     // generation controls' home since the composer pill retired.
     private let onOpenAISettings: () -> Void
+    private let chatGPTUsageURL: URL?
 
     // Composer control hover highlights (view-local UI state).
     @State private var sendHover = false
@@ -142,7 +143,8 @@ public struct SZChatPanel: View {
                 onConsumePendingDraft: @escaping (UUID) -> Void = { _ in },
                 pendingMention: SZComposerMentionInjection? = nil,
                 onConsumePendingMention: @escaping (UUID) -> Void = { _ in },
-                onOpenAISettings: @escaping () -> Void = {}) {
+                onOpenAISettings: @escaping () -> Void = {},
+                chatGPTUsageURL: URL? = nil) {
         self.store = store
         self.scope = scope
         self.feed = feed
@@ -171,6 +173,7 @@ public struct SZChatPanel: View {
         self.pendingMention = pendingMention
         self.onConsumePendingMention = onConsumePendingMention
         self.onOpenAISettings = onOpenAISettings
+        self.chatGPTUsageURL = chatGPTUsageURL
     }
 
     /// The selected node (if the scope names one that still exists).
@@ -191,6 +194,15 @@ public struct SZChatPanel: View {
             transcript(feed)
             if isRunning || !scheduledTasks.isEmpty { runStrip }
             composer
+            if let chatGPTUsageURL {
+                HStack {
+                    Text("Using ChatGPT plan")
+                    Spacer()
+                    Link("Manage usage", destination: chatGPTUsageURL)
+                }
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .padding(.horizontal, 12).padding(.bottom, 8)
+            }
         }
         .background(Self.panelFill)
         // Measured as the strip's budget, not the height: a raw CGFloat would write state, and so

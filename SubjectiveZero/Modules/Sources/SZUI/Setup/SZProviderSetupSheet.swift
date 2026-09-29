@@ -44,6 +44,7 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
         case disabled       // user-disabled → Enable is the only remedy
     }
 
+    public var directSignIn: Bool
     public var id: String
     public var displayName: String
     public var statusLabel: String
@@ -76,7 +77,7 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
                 models: [SZProviderGenerationPickerModelItem] = [], selectedModel: String = "",
                 isTesting: Bool = false,
                 isSelectable: Bool = true, isConfirmable: Bool = false,
-                fallbackName: String? = nil, canDisable: Bool = false) {
+                fallbackName: String? = nil, canDisable: Bool = false, directSignIn: Bool = false) {
         self.id = id
         self.displayName = displayName
         self.statusLabel = statusLabel
@@ -93,10 +94,13 @@ public struct SZProviderSetupCard: Identifiable, Equatable, Sendable {
         self.isConfirmable = isConfirmable
         self.fallbackName = fallbackName
         self.canDisable = canDisable
+        self.directSignIn = directSignIn
     }
 }
 
 public struct SZProviderSetupSheet: View {
+    @State private var showCodingTools = false
+    private let chatGPT: SZChatGPTConnectionView?
     private let cards: [SZProviderSetupCard]
     private let selectedID: String?
     /// The provider actually active (runs, chat, routing's Default) — what the capsule marks.
@@ -131,7 +135,8 @@ public struct SZProviderSetupSheet: View {
     /// open and can move an open sheet (a Mac project opened without the tools lands on Target).
     @Binding private var section: SZProviderSetupSection
 
-    public init(cards: [SZProviderSetupCard], selectedID: String?,
+    public init(cards: [SZProviderSetupCard],
+                chatGPT: SZChatGPTConnectionView? = nil, selectedID: String?,
                 activeID: String? = nil,
                 targetPlatform: SZTargetPlatformPane? = nil,
                 routing: SZRoutingSettingsView? = nil,
@@ -150,6 +155,7 @@ public struct SZProviderSetupSheet: View {
                 onSectionChange: @escaping (SZProviderSetupSection) -> Void = { _ in },
                 isFirstRun: Bool = true,
                 library: SZLibrarySettingsView? = nil) {
+        self.chatGPT = chatGPT
         self.cards = cards
         self.selectedID = selectedID
         self.activeID = activeID
@@ -275,16 +281,22 @@ public struct SZProviderSetupSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Choose the active agent provider. Runs, chat, and anything Routing leaves unset use it.")
-                Text("Cards re-check on their own while this sheet is open. Install or log in and watch them turn green. Only Ready providers can run agents.")
+                Text("Connect an AI account to create and edit effects.")
+                Text("Sign in directly for the simplest setup, or connect a coding tool you already use.")
                     .foregroundStyle(.secondary)
             }
             .font(.system(size: 12))
             .textSelection(.enabled)
 
             ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(cards) { providerCard($0) }
+                VStack(spacing: 10) {
+                    ForEach(cards.filter(\.directSignIn)) { directConnectionCard($0) }
+                    DisclosureGroup("Other AI coding tools", isExpanded: $showCodingTools) {
+                        VStack(spacing: 10) {
+                            ForEach(cards.filter { !$0.directSignIn }) { providerCard($0) }
+                        }.padding(.top, 12)
+                    }.padding(.top, 14)
+                    .onAppear { showCodingTools = cards.contains { !$0.directSignIn && $0.id == activeID } }
                 }
             }
             .modifier(SZScrollBottomFade())
@@ -300,7 +312,7 @@ public struct SZProviderSetupSheet: View {
                 // decision); a settled install just closes.
                 if isFirstRun {
                     Button("Skip for Now") { onSkip() }
-                    Button("Confirm") { onConfirm() }
+                    Button("Start creating") { onConfirm() }
                         .buttonStyle(.borderedProminent)
                         .disabled(!(selectedCard?.isConfirmable ?? false))
                 } else {
@@ -357,6 +369,7 @@ public struct SZProviderSetupSheet: View {
                 HStack(spacing: 8) {
                     Text(card.displayName).font(.system(size: 13, weight: .semibold))
                     statusBadge(card)
+                    if card.directSignIn { SZSetupBadge(label: "Direct sign-in", color: .accentColor) }
                     // The provider the Routing pane's helper and "Default (…)" rows resolve
                     // to — the active truth, never the radio selection.
                     if card.id == activeID {
@@ -373,7 +386,11 @@ public struct SZProviderSetupSheet: View {
                     .lineLimit(5)
                     .textSelection(.enabled)
 
-                remedyRow(card)
+                if card.directSignIn, card.readiness != .disabled {
+                    chatGPT
+                } else {
+                    remedyRow(card)
+                }
 
                 // No path line on a disabled card: checks skip it, so there is no fresh lookup to
                 // report — "not found" would be a claim nobody made.
@@ -393,6 +410,47 @@ public struct SZProviderSetupSheet: View {
         .onTapGesture {
             if card.isSelectable { onSelect(card.id) }
         }
+    }
+
+    func directConnectionCard(_ card: SZProviderSetupCard) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("ChatGPT").font(.system(size: 20, weight: .semibold))
+                    Text("Create with your ChatGPT plan").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if card.isConfirmable {
+                    Label("Connected", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 12)).foregroundStyle(.green)
+                }
+            }
+            chatGPT
+            if card.readiness == .failed || card.readiness == .unavailable {
+                Text(card.message).font(.system(size: 12)).foregroundStyle(.secondary).textSelection(.enabled)
+                if let detail = card.detail { SZCopyableDetailDisclosure(detail: detail) }
+            }
+            if card.isConfirmable {
+                Divider()
+                HStack {
+                    modelMenu(card)
+                    testButton(card)
+                    Spacer()
+                    if card.id == activeID && !isFirstRun {
+                        Text("Default connection").font(.system(size: 11)).foregroundStyle(.secondary)
+                    } else if card.id != selectedID {
+                        Button("Use ChatGPT") { onSelect(card.id) }
+                    }
+                }
+            } else if card.readiness == .needsLogin {
+                Text("Sign in securely in your browser. Setup takes care of the rest.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.12), lineWidth: 1))
     }
 
     private func statusBadge(_ card: SZProviderSetupCard) -> some View {

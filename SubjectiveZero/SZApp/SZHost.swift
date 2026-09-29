@@ -508,6 +508,12 @@ final class SZHost {
     /// (SZHost+ProviderHealth owns the mutator and its never-strand/never-empty guards).
     internal(set) var disabledProviderIDs: Set<String> = Set(SZAppStateIO.load()?.disabledProviderIDs ?? [])
     /// Latest cheap-tier report (install + auth — token-free) per provider id.
+    var chatGPTAccounts: [SZChatGPTAccount] = []
+    var chatGPTActiveAccountID: String?
+    var chatGPTSetupTask: Task<Void, Never>?
+    var chatGPTSetupMessage: String?
+    var chatGPTWelcomePresented = false
+
     internal(set) var providerHealth: [String: SZProviderHealthReport] = [:]
     /// Sticky probe verdicts (tier 3, token-costing). Displayed over a bare cheap `ready`
     /// (deeper truth); dropped when a provider's cheap status transitions — the world changed.

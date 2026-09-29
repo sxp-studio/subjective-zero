@@ -5,7 +5,7 @@
 import Foundation
 import SZCore
 
-public struct SZClaudeProvider: SZProvider {
+public struct SZClaudeProvider: SZCLIProvider {
     public init() {}
 
     /// The provider's registry id — the one place the string is written (the registry's default and

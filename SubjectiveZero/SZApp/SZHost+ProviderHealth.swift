@@ -210,6 +210,7 @@ extension SZHost {
     /// One install+auth pass over the enabled providers, concurrently (a disabled provider spawns
     /// nothing). Safe anywhere: launch, Refresh, the poll loop. Never probes.
     func refreshProviderHealthOnce() async {
+        await refreshChatGPTAccounts()
         let reports = await withTaskGroup(of: SZProviderHealthReport.self) { group in
             for provider in enabledProviders {
                 group.addTask { await provider.healthReport() }
@@ -253,10 +254,15 @@ extension SZHost {
         catalogRefreshAttemptedAt[id] = Date()
         Task { @MainActor in
             defer { catalogRefreshesInFlight.remove(id) }
-            guard let snapshot = try? await provider.refreshModelCatalog(runner: SZSystemProcessRunner())
-            else { return }   // static provider (nil) or failed fetch — keep last-known
-            providerModelCatalogs[id] = snapshot
-            try? SZProviderCatalogIO.save(providerModelCatalogs)
+            do {
+                guard let snapshot = try await provider.refreshModelCatalog(runner: SZSystemProcessRunner()) else { return }
+                providerModelCatalogs[id] = snapshot
+                try? SZProviderCatalogIO.save(providerModelCatalogs)
+            } catch is CancellationError {
+                // account changes discard the previous account's pending catalog.
+            } catch {
+                if id == SZChatGPTProvider.providerID { chatGPTSetupMessage = error.localizedDescription }
+            }
         }
     }
 
@@ -362,6 +368,7 @@ extension SZHost {
     /// failure still surfaces downstream. A user-disabled provider is never ready — that's a
     /// choice, not a fluke.
     func isProviderReadyForNewWork(_ id: String) -> Bool {
+        if id == SZChatGPTProvider.providerID, chatGPTSetupTask != nil { return false }
         guard !disabledProviderIDs.contains(id) else { return false }
         return displayedProviderHealth(id).map { $0.status == .ready } ?? true
     }
@@ -416,6 +423,7 @@ extension SZHost {
     /// `.command` default handler). PATH is exported so the CLI resolves exactly the way the app
     /// itself launches it (incl. the Codex.app bundled binary).
     func openProviderLoginTerminal(_ id: String) {
+        if id == SZChatGPTProvider.providerID { connectChatGPT(newAccount: false); return }
         guard let provider = SZProviderRegistry.shared.provider(id: id) else { return }
         openTerminal(running: provider.loginCommand, name: "sz-login-\(id)")
     }
@@ -476,7 +484,7 @@ extension SZHost {
                     message: "Disabled. Skipped by health checks and unavailable for runs.",
                     readiness: .disabled,
                     installCommand: provider.installCommand,
-                    isSelectable: false)
+                    isSelectable: false, directSignIn: provider is SZChatGPTProvider)
             }
             let report = displayedProviderHealth(provider.id)
             let readiness = Self.cardReadiness(report)
@@ -513,7 +521,7 @@ extension SZHost {
                 isConfirmable: readiness == .ready || readiness == .verified,
                 fallbackName: readiness == .failed
                     ? fallbackProvider(insteadOf: provider.id)?.displayName : nil,
-                canDisable: canDisableAnother)
+                canDisable: canDisableAnother, directSignIn: provider is SZChatGPTProvider)
         }
     }
 

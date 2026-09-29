@@ -5,6 +5,19 @@ user install and verify SubjectiveZero and its agent-provider CLIs. It will be p
 `https://sxp.studio/subjective-zero/app-setup.md`; the in-app **Agent Providers ▸ Setup
 Guide** button opens that URL. Humans are welcome too - every step is copy-pasteable.
 
+## Connect ChatGPT directly
+
+For eligible ChatGPT Plus or Pro accounts, open **Settings → Providers → Continue with ChatGPT**.
+SubZ downloads an approximately 100 MB agent engine from OpenAI's official release, verifies it,
+and opens your browser for sign-in and permission to use your plan. Return to SubZ after consent,
+choose a model, and click **Test** to verify a completed request. No Terminal, npm, API key, or
+separate Codex installation is needed. The engine is downloaded only during setup and cached locally.
+
+Use **Manage usage** to review your plan's allowance and SubZ's limit in ChatGPT settings.
+Account switching and sign-out are available on the same card. Installation or sign-in can be
+cancelled and retried. Mac-target effects still require the Xcode Command Line Tools described below.
+The CLI setup instructions below apply to the separate coding-tool providers.
+
 ## Safety rules for setup agents
 
 Operate as **guided automation**, not autonomous installation:
@@ -71,16 +84,6 @@ sheet shows the same remedies listed here.
   exit 0 = logged in, exit 1 = not. (Verified on claude 2.1.200.)
 - Log in: run `claude auth login` (or plain `claude`, then `/login`) in a **terminal the user
   controls** - the flow is interactive; never attempt it headless.
-
-### Codex (`codex`)
-
-- Install (ask first): `npm install -g @openai/codex`. The CLI bundled inside `Codex.app`
-  (`/Applications/Codex.app/Contents/Resources/codex`) also works - the app finds it without a
-  PATH edit.
-- Health: `codex --version`.
-- Auth status: `codex login status` - exit 0 = "Logged in using ChatGPT", exit 1 = "Not logged
-  in". (Verified on codex-cli 0.141.0.)
-- Log in: run `codex login` interactively (browser flow); ask before launching.
 
 ### Grok (`grok`)
 
@@ -156,7 +159,7 @@ sheet shows the same remedies listed here.
   updates land.
 
 The app resolves CLIs on its own synthesized search path (inherited PATH + nvm/volta/bun/cargo/
-`~/.local/bin`/`~/.opencode/bin`/Homebrew/`Codex.app` + system dirs), so a CLI visible in the user's
+`~/.local/bin`/`~/.opencode/bin`/Homebrew + system dirs), so a CLI visible in the user's
 shell is normally visible to the app even when launched from Finder.
 
 ## App-level verification
@@ -207,7 +210,7 @@ reopened any time with **⌘,**).
 ## Failure handling
 
 - `missingCLI` → offer the install command above; ask before running it. The in-app card has the
-  same command with an "Install in Terminal" button; the Codex and Pi commands go through npm, so
+  same command with an "Install in Terminal" button; the Pi command goes through npm, so
   those cards ask for Node.js first when npm is absent.
 - Apple's developer tools missing (a Mac project's builds, chat and runs refuse with "Building for
   this Mac needs Apple's developer tools") → `xcode-select --install`, ask first; or switch the

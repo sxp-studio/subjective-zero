@@ -18,7 +18,7 @@
 import Foundation
 import Synchronization
 
-public struct SZGrokProvider: SZProvider {
+public struct SZGrokProvider: SZCLIProvider {
     public init() {}
 
     /// The provider's registry id — the one place the string is written (see SZClaudeProvider).
