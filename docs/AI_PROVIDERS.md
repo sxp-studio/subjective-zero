@@ -325,3 +325,26 @@ on the reviewed code passed: `swift build`, all 1,406 package tests, the Xcode a
 duplicate account labels, rapid account switches and stale catalog completions, and probe recovery.
 A native failed-connection preview verifies that the model picker and Test button remain visible.
 Merge remains gated on the user's onboarding approval.
+
+### Provider controls follow-up
+
+Implementation: `fbc73a96`. Provider cards expose default reasoning effort and Fast when the
+selected model advertises them. ChatGPT maps `additional_speed_tiers` from the authenticated
+catalog; runs and connection probes pass the selected speed to the managed harness. Each run
+explicitly sets Fast or default so resuming a conversation cannot retain a previous Fast setting.
+Changing a setup default rechecks the connection; a no-op preserves a held failed probe.
+
+The routing enable row uses one SwiftUI button for its label and switch indicator. Fresh-profile
+creation and off/on restoration pass host tests. The reported live click failure still needs the
+user's confirmation in the rebuilt app; it was not reproduced in an isolated native control test.
+
+Verification: all 1,406 package tests passed, followed by all 328 UI tests after the final indicator
+adjustment. The final app build and all 420 app-hosted tests passed. Native previews checked the
+connected provider controls and routing row. A local HTTP capture using the downloaded 0.159.0
+harness confirmed Fast sends the Responses `priority` tier and switching to default while resuming
+the same thread omits it; this check made no live inference request. Independent review approved
+the final implementation with no remaining actionable findings.
+
+The updated isolated test app was relaunched with its account and settings preserved. Work remains
+on `feat/chatgpt-sign-in` in `.claude/worktrees/chatgpt-sign-in`, pending the user's onboarding and
+routing acceptance before merging to main.
