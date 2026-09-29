@@ -348,3 +348,12 @@ the final implementation with no remaining actionable findings.
 The updated isolated test app was relaunched with its account and settings preserved. Work remains
 on `feat/chatgpt-sign-in` in `.claude/worktrees/chatgpt-sign-in`, pending the user's onboarding and
 routing acceptance before merging to main.
+
+Catalog follow-up: `26a8037a` makes explicit Refresh fetch model catalogs immediately instead of
+only checking provider health and retaining the 24-hour catalog cache. The ChatGPT request also
+bypasses the local HTTP cache. Debug builds log only model identifiers and visibility so missing
+entries can be distinguished from entries the server marks hidden. Independent review approved
+the change; `swift build`, all 12 focused ChatGPT tests, and all 421 app-hosted tests passed.
+The account catalog fetched at 16:03 PDT listed five displayable models without GPT-6.1 Sol or
+GPT-6 Luna. The cause of those omissions remains unconfirmed; the refresh fix is not evidence
+that newer models are available through this account's integration.
