@@ -285,3 +285,28 @@ It is intentionally not seeded from the engine's model list or from another acco
 - Starting a Director Agent session with a chosen model/thinking level and exchanging one message works
   end-to-end.
 - A killed session is detected and restarted without losing the project.
+
+## ChatGPT verification checkpoint — 2026-09-29
+
+Implementation: `592bc0ec` on `feat/chatgpt-sign-in`. The separate test-helper fix is `6735444a`:
+two run-badge test helpers recursively called themselves instead of the production style mapper.
+
+Verified on macOS arm64:
+
+- `swift build` and the full `swift test` run from `SubjectiveZero/Modules` passed.
+- `xcodebuild -project SZApp.xcodeproj -scheme SubjectiveZero -configuration Debug test`
+  from `SubjectiveZero` passed (416 host tests).
+- Real browser authorization returned to SubZ. The connected account supplied the model catalog
+  and completed a real inference probe with no Codex, npm, or Node.js on the app's search path.
+- A live coding turn used SubZ MCP tools, generated a WebGL gradient, and passed the normal
+  compile/promote flow. A viewport readback showed the resulting blue-to-magenta gradient.
+- Native view previews checked the branded button, connected account dropdown, and first-use sheet.
+  Run `SZ_CONNECTION_PREVIEWS=/tmp/subz-previews swift test --filter renderChatGPTConnectionPreviews`
+  from `SubjectiveZero/Modules` to reproduce the card and welcome renders.
+- OAuth validation, refresh serialization, archive integrity rejection, direct-provider dispatch,
+  account model discovery, and failed/resumed transport behavior have regression coverage.
+
+The Intel archive is pinned to its official checksum but has not been executed on this arm64 Mac.
+The worktree stays at `.claude/worktrees/chatgpt-sign-in` for the UI review checkpoint; this branch
+has not been merged into main. The isolated development build retains its test connection through
+`SZ_CHATGPT_TEST_FILE_CREDENTIALS=1` (Debug only); normal builds store credentials in Keychain.
