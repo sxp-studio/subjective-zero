@@ -357,3 +357,10 @@ the change; `swift build`, all 12 focused ChatGPT tests, and all 421 app-hosted 
 The account catalog fetched at 16:03 PDT listed five displayable models without GPT-6.1 Sol or
 GPT-6 Luna. The cause of those omissions remains unconfirmed; the refresh fix is not evidence
 that newer models are available through this account's integration.
+
+At 16:30 PDT, the diagnostic build signed as `Clement Boissiere (7U852S3789)` fetched the catalog
+with local HTTP caching bypassed. The server returned the same five visible models and only two
+hidden entries (`gpt-reserve`, `codex-auto-review`); GPT-6.1 Sol and GPT-6 Luna were absent entirely.
+This rules out SubZ's visibility filter and a stale local catalog as causes of that result. The
+upstream reason for their absence remains unknown. The signed Debug build passed strict signature
+verification and launched successfully; it is not a notarized release or a signed-upgrade test.
