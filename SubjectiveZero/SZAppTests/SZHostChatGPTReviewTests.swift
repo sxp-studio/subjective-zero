@@ -7,6 +7,25 @@ import SZAI
 
 @MainActor
 struct SZHostChatGPTReviewTests {
+    @Test func explicitRefreshBypassesFreshCatalogAndCooldownWithoutDuplicatingInflightWork() async throws {
+        let host = SZHost()
+        let provider = SZDeferredCatalogProvider()
+        let id = provider.id
+        host.providerModelCatalogs[id] = .init(models: [.init(id: "previous", displayName: "Previous")], defaultModelID: "previous")
+        host.catalogRefreshAttemptedAt[id] = Date()
+        host.refreshProviderModelCatalogIfNeeded(provider, transitioned: false)
+        #expect(host.catalogRefreshesInFlight[id] == nil)
+        host.refreshProviderModelCatalogIfNeeded(provider, transitioned: false, force: true)
+        try await waitFor { await provider.pending.count == 1 }
+        let generation = host.catalogRefreshesInFlight[id]
+        host.refreshProviderModelCatalogIfNeeded(provider, transitioned: false, force: true)
+        #expect(host.catalogRefreshesInFlight[id] == generation)
+        #expect(await provider.pending.count == 1)
+        await provider.pending.complete(0, model: "latest")
+        try await waitFor { host.catalogRefreshesInFlight[id] == nil }
+        #expect(host.providerModelCatalogs[id]?.defaultModelID == "latest")
+    }
+
     @Test func accountChangesReplaceInflightCatalogsAndResetCooldown() async throws {
         let host = SZHost()
         let provider = SZDeferredCatalogProvider()

@@ -209,7 +209,8 @@ struct SZChatGPTTests {
         let started = Mutex(false)
         let release = DispatchSemaphore(value: 0)
         defer { release.signal() }
-        SZChatGPTTestHTTP.handler.withLock { $0 = { _ in
+        SZChatGPTTestHTTP.handler.withLock { $0 = { request in
+            #expect(request.cachePolicy == .reloadIgnoringLocalCacheData)
             started.withLock { $0 = true }
             _ = release.wait(timeout: .now() + 5)
             return (200, Data(#"{"models":[{"slug":"stale","visibility":"list"}]}"#.utf8))

@@ -209,7 +209,7 @@ extension SZHost {
 
     /// One install+auth pass over the enabled providers, concurrently (a disabled provider spawns
     /// nothing). Safe anywhere: launch, Refresh, the poll loop. Never probes.
-    func refreshProviderHealthOnce() async {
+    func refreshProviderHealthOnce(refreshModels: Bool = false) async {
         await refreshChatGPTAccounts()
         let reports = await withTaskGroup(of: SZProviderHealthReport.self) { group in
             for provider in enabledProviders {
@@ -230,7 +230,7 @@ extension SZHost {
             }
             providerHealth[report.providerID] = report
             if report.status == .ready {
-                refreshProviderModelCatalogIfNeeded(report.providerID, transitioned: transitioned)
+                refreshProviderModelCatalogIfNeeded(report.providerID, transitioned: transitioned, force: refreshModels)
             }
         }
     }
@@ -243,20 +243,20 @@ extension SZHost {
         try? SZProviderCatalogIO.save(providerModelCatalogs)
     }
 
-    func refreshProviderModelCatalogIfNeeded(_ id: String, transitioned: Bool) {
+    func refreshProviderModelCatalogIfNeeded(_ id: String, transitioned: Bool, force: Bool = false) {
         guard let provider = SZProviderRegistry.shared.provider(id: id) else { return }
-        refreshProviderModelCatalogIfNeeded(provider, transitioned: transitioned)
+        refreshProviderModelCatalogIfNeeded(provider, transitioned: transitioned, force: force)
     }
 
     // ready transitions fetch immediately; stale snapshots retry at most once a minute.
-    func refreshProviderModelCatalogIfNeeded(_ provider: any SZProvider, transitioned: Bool) {
+    func refreshProviderModelCatalogIfNeeded(_ provider: any SZProvider, transitioned: Bool, force: Bool = false) {
         let id = provider.id
         guard catalogRefreshesInFlight[id] == nil else { return }
         let staleAfter: TimeInterval = 24 * 3600
         let retryAfter: TimeInterval = 60
         let stale = providerModelCatalogs[id].map { Date().timeIntervalSince($0.fetchedAt) > staleAfter } ?? true
         let coolingDown = catalogRefreshAttemptedAt[id].map { Date().timeIntervalSince($0) < retryAfter } ?? false
-        guard transitioned || ((stale || provider.models.isEmpty) && !coolingDown) else { return }
+        guard force || transitioned || ((stale || provider.models.isEmpty) && !coolingDown) else { return }
         let generation = UUID()
         catalogRefreshesInFlight[id] = generation
         catalogRefreshAttemptedAt[id] = Date()

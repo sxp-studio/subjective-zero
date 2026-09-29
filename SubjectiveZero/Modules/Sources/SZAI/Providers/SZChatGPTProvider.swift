@@ -65,11 +65,22 @@ public final class SZChatGPTProvider: SZProvider, Sendable {
         let generation = catalog.withLock { $0.generation }
         guard let accountID = try await accounts.activeAccountID() else { throw SZChatGPTError("Connect a ChatGPT account first.") }
         let token = try await accounts.accessToken(for: accountID)
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!,
+                                 cachePolicy: .reloadIgnoringLocalCacheData)
         request.timeoutInterval = 30
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SZChatGPTHTTPError(data: data, response: response) }
+        #if DEBUG
+        // model identifiers and visibility only; never log account data or credentials.
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let rows = object["models"] as? [[String: Any]],
+           let summary = try? JSONSerialization.data(withJSONObject: rows.map {
+               ["slug": $0["slug"] as? String ?? "", "visibility": $0["visibility"] as? String ?? ""]
+           }, options: [.sortedKeys]), let text = String(data: summary, encoding: .utf8) {
+            NSLog("[SZChatGPT] model catalog: %@", text)
+        }
+        #endif
         guard let snapshot = Self.catalogSnapshot(data) else {
             throw SZChatGPTError("No ChatGPT models are available for this account.")
         }

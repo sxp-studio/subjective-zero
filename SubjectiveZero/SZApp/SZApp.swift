@@ -425,7 +425,7 @@ struct SZApp: App {
                                      routing: routingSettingsView,
                                      section: Binding(get: { host.setupSection }, set: { host.setupSection = $0 }),
                                      onSelect: { host.selectSetupProvider($0) },
-                                     onRefresh: { Task { await host.refreshProviderHealthOnce() } },
+                                     onRefresh: { Task { await host.refreshProviderHealthOnce(refreshModels: true) } },
                                      onTest: { host.runProviderProbe($0) },
                                      onSetModel: { host.pickSetupModel($1, for: $0) },
                                      onSetEffort: { host.pickSetupEffort($1, for: $0) },
