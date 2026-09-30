@@ -247,20 +247,18 @@ public struct SZRoutingSettingsView: View {
 
             if let card = defaultProvider {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 12) {
-                        Text("Default model").font(.system(size: 13, weight: .medium))
-                        Spacer()
-                        SZGenerationControls(selectionLabel: activeProviderSummary, options: defaultOptions,
-                            effortOptions: card.isConfirmable ? card.effortOptions : [], selectedEffort: card.selectedEffort,
-                            supportsFastMode: card.isConfirmable && card.supportsFastMode, fastModeEnabled: card.fastModeEnabled,
-                            onSelect: { provider, model in if let provider { onSelectDefaultModel(provider, model) } },
-                            onSetEffort: { if let effort = $0 { onSetDefaultEffort(effort) } },
-                            onSetFastMode: onSetDefaultFastMode)
-                            .disabled(card.isTesting)
-                    }
+                    Text("Default model").font(.system(size: 13, weight: .medium))
+                    SZGenerationControls(selectionLabel: activeProviderSummary, options: defaultOptions,
+                        effortOptions: card.isConfirmable ? card.effortOptions : [], selectedEffort: card.selectedEffort,
+                        supportsFastMode: card.isConfirmable && card.supportsFastMode, fastModeEnabled: card.fastModeEnabled,
+                        onSelect: { provider, model in if let provider { onSelectDefaultModel(provider, model) } },
+                        onSetEffort: { if let effort = $0 { onSetDefaultEffort(effort) } },
+                        onSetFastMode: onSetDefaultFastMode)
+                        .disabled(card.isTesting)
                     Text("Used when routing is off and when a slot inherits the app default.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
                 .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.12)))

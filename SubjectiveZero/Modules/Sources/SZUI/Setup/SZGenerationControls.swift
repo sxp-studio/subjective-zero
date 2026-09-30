@@ -18,6 +18,26 @@ struct SZGenerationControls: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            Menu {
+                if let clearLabel {
+                    Button { onSelect(nil, nil) } label: {
+                        if isInherited { Label(clearLabel, systemImage: "checkmark") }
+                        else { Text(clearLabel) }
+                    }
+                    Divider()
+                }
+                ForEach(options) { option in
+                    Button { onSelect(option.providerID, option.modelID) } label: {
+                        if option.isSelected { Label(option.label, systemImage: "checkmark") }
+                        else { Text(option.label) }
+                    }
+                    .disabled(!option.isEnabled)
+                }
+            } label: {
+                SZChipMenuFace(text: selectionLabel, quiet: isInherited)
+            }
+            .accessibilityLabel("Model")
+            .disabled(options.isEmpty && clearLabel == nil)
             if !isInherited {
                 if !effortOptions.isEmpty {
                     Menu {
@@ -44,26 +64,6 @@ struct SZGenerationControls: View {
                     fastChip
                 }
             }
-            Menu {
-                if let clearLabel {
-                    Button { onSelect(nil, nil) } label: {
-                        if isInherited { Label(clearLabel, systemImage: "checkmark") }
-                        else { Text(clearLabel) }
-                    }
-                    Divider()
-                }
-                ForEach(options) { option in
-                    Button { onSelect(option.providerID, option.modelID) } label: {
-                        if option.isSelected { Label(option.label, systemImage: "checkmark") }
-                        else { Text(option.label) }
-                    }
-                    .disabled(!option.isEnabled)
-                }
-            } label: {
-                SZChipMenuFace(text: selectionLabel, quiet: isInherited)
-            }
-            .accessibilityLabel("Model")
-            .disabled(options.isEmpty && clearLabel == nil)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
