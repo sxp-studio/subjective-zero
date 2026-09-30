@@ -47,6 +47,7 @@ struct SZRoutingHostTests {
 
     @Test func freshInstallCanEnableRoutingAndRestoreItsProfile() {
         let host = bareHost()
+        host.providerHealth["claude"] = .init(providerID: "claude", status: .ready, message: "Ready")
         host.routingLastProfileName = nil
         host.setRoutingEnabled(true)
         let name = host.activeRoutingProfileName
@@ -262,6 +263,7 @@ struct SZRoutingHostTests {
 
     @Test func editedProfileCardsKeepTheOneWordDefaultOnUnsetRows() {
         let host = bareHost(profiles: [fastFleet], active: nil)
+        host.providerHealth["claude"] = .init(providerID: "claude", status: .ready, message: "Ready")
         let rows = host.routingAgentCards(editedName: "fast-fleet").flatMap(\.rows)
         // Filled positions read their envelope; unfilled ones the one-word "Default" with
         // the live resolution kept to the menu's clear row.
@@ -273,6 +275,52 @@ struct SZRoutingHostTests {
             #expect(row.clearLabel.hasPrefix("Default ("))
             #expect(!row.options.isEmpty)
         }
+    }
+
+    @Test func routingMenusOnlyOfferReadyEnabledProvidersAndKeepStaleAssignmentsVisible() throws {
+        let host = bareHost(profiles: [fastFleet], active: "fast-fleet")
+        host.providerHealth = [:]
+        host.providerProbes = [:]
+        host.providerHealth["claude"] = .init(providerID: "claude", status: .ready, message: "Ready")
+        host.providerHealth["muse"] = .init(providerID: "muse", status: .authNeeded, message: "Sign in")
+        host.providerHealth["grok"] = .init(providerID: "grok", status: .missingCLI, message: "Install")
+        #expect(!host.routingDefaultOptions.isEmpty)
+        #expect(host.routingDefaultOptions.allSatisfy { $0.providerID == "claude" })
+        host.disabledProviderIDs = ["claude"]
+        #expect(host.routingDefaultOptions.isEmpty)
+        let rows = host.routingAgentCards(editedName: "fast-fleet").flatMap(\.rows)
+        #expect(rows.allSatisfy { $0.options.isEmpty })
+        #expect(rows.contains { $0.isSet && $0.selectionLabel.contains("Claude") })
+        host.disabledProviderIDs = []
+        host.providerProbes["claude"] = .init(providerID: "claude", status: .healthFailed, message: "Failed")
+        #expect(host.routingDefaultOptions.isEmpty)
+    }
+
+    @Test func routingDefaultEditsShareProviderSettingsWithoutChangingExplicitRoutes() throws {
+        let saved = SZAppStateIO.load()
+        defer {
+            if let saved { try? SZAppStateIO.save(saved) }
+            else { try? FileManager.default.removeItem(at: SZAppStateIO.defaultURL) }
+        }
+        let host = bareHost(profiles: [fastFleet], active: "fast-fleet")
+        let provider = try #require(SZProviderRegistry.shared.provider(id: "claude"))
+        let model = try #require(provider.models.last { provider.supportsFastMode(for: $0.id) })
+        host.providerHealth[provider.id] = .init(providerID: provider.id, status: .ready, message: "Ready")
+        host.providerProbes[provider.id] = nil
+        #expect(host.setActiveProvider("muse"))
+        host.defaultProviderID = "muse"
+        // suppress the real setup probe; this test exercises preference and inheritance wiring.
+        host.probingProviders.insert(provider.id)
+        host.pickRoutingDefault(providerID: provider.id, model: model.id)
+        #expect(host.activeProviderID == provider.id)
+        #expect(host.defaultProviderID == provider.id)
+        #expect(host.selectedSetupProviderID == provider.id)
+        #expect(host.resolvedGenerationSettings(for: provider.id).model == model.id)
+        #expect(host.providerSetupCards.first { $0.id == provider.id }?.selectedModel == model.id)
+        #expect(host.routingProfiles == [fastFleet])
+        #expect(host.routingDefaultOptions.contains { $0.isSelected && $0.modelID == model.id })
+        host.pickRoutingDefault(providerID: "muse", model: "unavailable")
+        #expect(host.activeProviderID == provider.id)
     }
 
     @Test func chatGPTDoesNotShipAnInventedAccountCatalog() {

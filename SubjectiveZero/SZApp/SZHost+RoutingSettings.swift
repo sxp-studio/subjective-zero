@@ -129,21 +129,30 @@ extension SZHost {
         routingEnvelopeDisplay(SZRouteEnvelope(providerID: activeProviderID))
     }
 
-    /// Every provider·model pair, in registry order — the same health/disable rules as the
-    /// provider cards: a dimmed row says why in its label (menu rows carry no tooltip).
+    var routingDefaultOptions: [SZRoutingEnvelopeOption] {
+        routingEnvelopeOptions(selected: .init(providerID: activeProviderID,
+            model: resolvedGenerationSettings(for: activeProviderID).model))
+    }
+
+    func pickRoutingDefault(providerID: String, model: String?) {
+        guard !agentsOwnProject,
+              routingDefaultOptions.contains(where: { $0.providerID == providerID && $0.modelID == model }),
+              setActiveProvider(providerID) else { return }
+        selectedSetupProviderID = providerID
+        if let model { pickSetupModel(model, for: providerID) }
+    }
+
+    // only ready, enabled providers belong in model-choice menus.
     private func routingEnvelopeOptions(selected: SZRouteEnvelope?) -> [SZRoutingEnvelopeOption] {
         SZProviderRegistry.shared.providers.flatMap { provider -> [SZRoutingEnvelopeOption] in
-            let enabled = routingProviderUsable(provider.id)
-            let reason: String = if disabledProviderIDs.contains(provider.id) { " (disabled)" }
-                else if enabled { "" }
-                else { Self.routingHealthSuffix(displayedProviderHealth(provider.id)?.status) }
+            guard !disabledProviderIDs.contains(provider.id),
+                  displayedProviderHealth(provider.id)?.status == .ready else { return [] }
             func option(_ modelID: String?, _ modelLabel: String?) -> SZRoutingEnvelopeOption {
                 let label = ([provider.displayName] + (modelLabel.map { [$0] } ?? []))
-                    .joined(separator: " · ") + reason
+                    .joined(separator: " · ")
                 return SZRoutingEnvelopeOption(
                     providerID: provider.id, modelID: modelID, label: label,
-                    isSelected: selected?.providerID == provider.id && selected?.model == modelID,
-                    isEnabled: enabled)
+                    isSelected: selected?.providerID == provider.id && selected?.model == modelID)
             }
             // A catalog-less provider still offers one row that pins no model.
             guard !provider.models.isEmpty else { return [option(nil, nil)] }
@@ -171,16 +180,6 @@ extension SZHost {
     private func routingProviderUsable(_ id: String) -> Bool {
         let status = displayedProviderHealth(id)?.status
         return !disabledProviderIDs.contains(id) && (status == nil || status == .ready)
-    }
-
-    nonisolated private static func routingHealthSuffix(_ status: SZProviderHealthStatus?) -> String {
-        switch status {
-        case .missingCLI: " (not installed)"
-        case .authNeeded: " (needs login)"
-        case .healthFailed: " (failing)"
-        case .invalidConfig, .unsupported: " (unavailable)"
-        case .ready, nil: ""
-        }
     }
 
     // MARK: - What the pane writes (position → profile edit)

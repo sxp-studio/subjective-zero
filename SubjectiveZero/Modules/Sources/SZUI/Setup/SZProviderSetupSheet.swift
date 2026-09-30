@@ -392,7 +392,6 @@ public struct SZProviderSetupSheet: View {
                         SZSetupBadge(label: "Active", color: .accentColor)
                     }
                     Spacer()
-                    modelMenu(card)
                     testButton(card)
                 }
 
@@ -451,7 +450,7 @@ public struct SZProviderSetupSheet: View {
             if card.isConfirmable || card.readiness == .failed {
                 Divider()
                 HStack {
-                    modelMenu(card)
+                    generationControls(card)
                     testButton(card)
                     Spacer()
                     if card.isConfirmable && card.id == activeID && !isFirstRun {
@@ -460,7 +459,6 @@ public struct SZProviderSetupSheet: View {
                         Button("Use ChatGPT") { onSelect(card.id) }
                     }
                 }
-                generationControls(card)
             } else if card.readiness == .needsLogin {
                 Text("Sign in securely in your browser. Setup takes care of the rest.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -475,35 +473,16 @@ public struct SZProviderSetupSheet: View {
     @ViewBuilder
     private func generationControls(_ card: SZProviderSetupCard) -> some View {
         if card.isConfirmable || card.readiness == .failed {
-            HStack(spacing: 12) {
-                if !card.effortOptions.isEmpty {
-                    HStack(spacing: 6) {
-                        Text("Reasoning").foregroundStyle(.secondary)
-                        Menu {
-                            ForEach(card.effortOptions, id: \.self) { effort in
-                                Button { onSetEffort(card.id, effort) } label: {
-                                    if effort == card.selectedEffort {
-                                        Label(SZGenerationLabels.effort(effort), systemImage: "checkmark")
-                                    } else { Text(SZGenerationLabels.effort(effort)) }
-                                }
-                            }
-                        } label: {
-                            Text(card.selectedEffort.map(SZGenerationLabels.effort) ?? "Default")
-                        }
-                        .accessibilityLabel("Reasoning effort")
-                    }
-                }
-                if card.supportsFastMode {
-                    Toggle("Fast", isOn: Binding(get: { card.fastModeEnabled },
-                                                 set: { onSetFastMode(card.id, $0) }))
-                        .toggleStyle(.checkbox)
-                        .help("Request the provider's faster processing tier. This may use more of your plan.")
-                }
-                Spacer()
-            }
-            .font(.system(size: 11))
-            .controlSize(.small)
-            .disabled(card.isTesting)
+            let label = card.models.first { $0.id == card.selectedModel }?.label ?? card.selectedModel
+            SZGenerationControls(selectionLabel: label.isEmpty ? "Model" : label,
+                options: card.models.map { .init(providerID: card.id, modelID: $0.id, label: $0.label,
+                                                isSelected: $0.id == card.selectedModel) },
+                effortOptions: card.effortOptions, selectedEffort: card.selectedEffort,
+                supportsFastMode: card.supportsFastMode, fastModeEnabled: card.fastModeEnabled,
+                onSelect: { _, model in if let model { onSetModel(card.id, model) } },
+                onSetEffort: { if let effort = $0 { onSetEffort(card.id, effort) } },
+                onSetFastMode: { onSetFastMode(card.id, $0) })
+                .disabled(card.isTesting)
         }
     }
 
@@ -517,47 +496,6 @@ public struct SZProviderSetupSheet: View {
         case .needsInstall, .needsLogin: .orange
         case .failed: .red
         case .checking, .unavailable, .disabled: .secondary
-        }
-    }
-
-    /// The per-card model picker — the reachable model control for a failing provider, whose composer
-    /// picker is gated behind being active. Shown only when the provider lists ≥2 models and only for
-    /// the same readiness set as the Test button (below): a model choice is meaningless where there's
-    /// nothing to install/log-into or nothing yet to test, and its help promises a Test that must
-    /// actually be present. A one-model or un-fetched provider shows nothing.
-    @ViewBuilder
-    private func modelMenu(_ card: SZProviderSetupCard) -> some View {
-        switch card.readiness {
-        case .needsInstall, .unavailable, .checking, .disabled:
-            EmptyView()
-        default:
-            if card.models.count > 1 {
-                let selectedLabel = card.models.first { $0.id == card.selectedModel }?.label
-                    ?? card.selectedModel
-                Menu {
-                    ForEach(card.models) { model in
-                        Button {
-                            onSetModel(card.id, model.id)
-                        } label: {
-                            if model.id == card.selectedModel {
-                                Label(model.label, systemImage: "checkmark")
-                            } else {
-                                Text(model.label)
-                            }
-                        }
-                    }
-                } label: {
-                    // Bare value, no "Model:" prefix — position and the chevron say what it
-                    // is; secondary until hovered so it reads as a control, not a spec line.
-                    // Cap the width and truncate — a long qualified id (the raw-id fallback path)
-                    // must never expand the row and shove Test off the fixed-width card. `.fixedSize`
-                    // would do exactly that (it sizes to the label's full ideal width), so it's out.
-                    SZModelPillLabel(text: selectedLabel.isEmpty ? "Model" : selectedLabel)
-                }
-                .menuStyle(.button)
-                .controlSize(.small)
-                .help("Pick the model this provider runs. Applies immediately and re-tests it here")
-            }
         }
     }
 
@@ -771,21 +709,5 @@ struct SZCopyableDetailDisclosure: View {
             .padding(12)
             .frame(width: 420, height: 220)
         }
-    }
-}
-
-/// The model pill's text: quiet at rest, primary under the cursor — a control, not a spec
-/// line. Its own view because hover is per-pill state.
-private struct SZModelPillLabel: View {
-    let text: String
-    @State private var hovered = false
-
-    var body: some View {
-        Text(text)
-            .foregroundStyle(hovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: 190)
-            .onHover { hovered = $0 }
     }
 }

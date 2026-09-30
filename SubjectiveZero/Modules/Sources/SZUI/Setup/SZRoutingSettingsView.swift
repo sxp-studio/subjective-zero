@@ -38,13 +38,12 @@ public struct SZRoutingProfileRow: Identifiable, Equatable, Sendable {
     }
 }
 
-/// One provider·model pair an envelope menu offers. Dimmed rows carry their reason in the
-/// label ("(disabled)", "(needs login)") — menu rows have no tooltip.
+/// one available provider/model pair offered by a generation menu.
 public struct SZRoutingEnvelopeOption: Identifiable, Equatable, Sendable {
     public var id: String          // "provider/model" ("provider/" for a catalog-less provider)
     public var providerID: String
     public var modelID: String?    // nil = the provider's own selected/default model
-    public var label: String       // "Codex · GPT-5.6 Terra"
+    public var label: String       // "ChatGPT · GPT-6.1 Sol"
     public var isSelected: Bool
     public var isEnabled: Bool
 
@@ -156,6 +155,11 @@ public struct SZRoutingSettingsView: View {
     /// Live resolution of the active provider ("Claude Code · Opus 5"), for the toggle's
     /// off-state helper.
     private let activeProviderSummary: String
+    private let defaultProvider: SZProviderSetupCard?
+    private let defaultOptions: [SZRoutingEnvelopeOption]
+    private let onSelectDefaultModel: (String, String?) -> Void
+    private let onSetDefaultEffort: (String) -> Void
+    private let onSetDefaultFastMode: (Bool) -> Void
     /// Non-nil = SZ_MODEL_ROUTING pins this profile at launch; the toggle and list lock.
     private let envPinnedProfileName: String?
     /// SZ_MODEL_ROUTING=0: routing is off for this launch no matter what's persisted.
@@ -184,6 +188,11 @@ public struct SZRoutingSettingsView: View {
                 selectedProfileName: String?,
                 agents: [SZRoutingAgentCard],
                 activeProviderSummary: String = "",
+                defaultProvider: SZProviderSetupCard? = nil,
+                defaultOptions: [SZRoutingEnvelopeOption] = [],
+                onSelectDefaultModel: @escaping (String, String?) -> Void = { _, _ in },
+                onSetDefaultEffort: @escaping (String) -> Void = { _ in },
+                onSetDefaultFastMode: @escaping (Bool) -> Void = { _ in },
                 envPinnedProfileName: String? = nil,
                 envKilled: Bool = false,
                 onSetRoutingEnabled: @escaping (Bool) -> Void = { _ in },
@@ -201,6 +210,11 @@ public struct SZRoutingSettingsView: View {
         self.selectedProfileName = selectedProfileName
         self.agents = agents
         self.activeProviderSummary = activeProviderSummary
+        self.defaultProvider = defaultProvider
+        self.defaultOptions = defaultOptions
+        self.onSelectDefaultModel = onSelectDefaultModel
+        self.onSetDefaultEffort = onSetDefaultEffort
+        self.onSetDefaultFastMode = onSetDefaultFastMode
         self.envPinnedProfileName = envPinnedProfileName
         self.envKilled = envKilled
         self.onSetRoutingEnabled = onSetRoutingEnabled
@@ -230,6 +244,27 @@ public struct SZRoutingSettingsView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Routing").font(.system(size: 17, weight: .semibold))
+
+            if let card = defaultProvider {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Text("Default model").font(.system(size: 13, weight: .medium))
+                        Spacer()
+                        SZGenerationControls(selectionLabel: activeProviderSummary, options: defaultOptions,
+                            effortOptions: card.isConfirmable ? card.effortOptions : [], selectedEffort: card.selectedEffort,
+                            supportsFastMode: card.isConfirmable && card.supportsFastMode, fastModeEnabled: card.fastModeEnabled,
+                            onSelect: { provider, model in if let provider { onSelectDefaultModel(provider, model) } },
+                            onSetEffort: { if let effort = $0 { onSetDefaultEffort(effort) } },
+                            onSetFastMode: onSetDefaultFastMode)
+                            .disabled(card.isTesting)
+                    }
+                    Text("Used when routing is off and when a slot inherits the app default.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.12)))
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
@@ -457,91 +492,20 @@ public struct SZRoutingSettingsView: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
             } else {
-                if row.isSet {
-                    effortMenu(row)
-                    fastToggle(row)
-                }
-                envelopeMenu(row)
+                SZGenerationControls(selectionLabel: row.selectionLabel, options: row.options,
+                    effortOptions: row.effortOptions, selectedEffort: row.selectedEffort,
+                    supportsFastMode: row.supportsFastMode, fastModeEnabled: row.fastModeEnabled,
+                    clearLabel: row.clearLabel, isInherited: !row.isSet, allowsDefaultEffort: true,
+                    onSelect: { onAssignEnvelope(row.position, $0, $1) },
+                    onSetEffort: { onSetPositionEffort(row.position, $0) },
+                    onSetFastMode: { onSetPositionFastMode(row.position, $0) })
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
-    private func envelopeMenu(_ row: SZRoutingPositionRow) -> some View {
-        Menu {
-            // The clear action, spelled as its destination ("Default (…)", live-resolved).
-            Button {
-                onAssignEnvelope(row.position, nil, nil)
-            } label: {
-                if !row.isSet { Label(row.clearLabel, systemImage: "checkmark") }
-                else { Text(row.clearLabel) }
-            }
-            Divider()
-            ForEach(row.options) { option in
-                Button {
-                    onAssignEnvelope(row.position, option.providerID, option.modelID)
-                } label: {
-                    if option.isSelected { Label(option.label, systemImage: "checkmark") }
-                    else { Text(option.label) }
-                }
-                .disabled(!option.isEnabled)
-            }
-        } label: {
-            SZChipMenuFace(text: row.selectionLabel, quiet: !row.isSet)
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Pick the provider and model this runs on. The first item shows where it goes when you don't")
-    }
 
-    /// Shown only when the routed model has an effort concept.
-    @ViewBuilder
-    private func effortMenu(_ row: SZRoutingPositionRow) -> some View {
-        if !row.effortOptions.isEmpty {
-            Menu {
-                Button {
-                    onSetPositionEffort(row.position, nil)
-                } label: {
-                    if row.selectedEffort == nil { Label("Default", systemImage: "checkmark") }
-                    else { Text("Default") }
-                }
-                Divider()
-                ForEach(row.effortOptions, id: \.self) { token in
-                    Button {
-                        onSetPositionEffort(row.position, token)
-                    } label: {
-                        if token == row.selectedEffort {
-                            Label(SZGenerationLabels.effort(token), systemImage: "checkmark")
-                        } else {
-                            Text(SZGenerationLabels.effort(token))
-                        }
-                    }
-                }
-            } label: {
-                SZChipMenuFace(text: row.selectedEffort.map(SZGenerationLabels.effort) ?? "Effort",
-                               quiet: row.selectedEffort == nil, maxWidth: 90)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Reasoning effort for this model. Default is the model's own")
-        }
-    }
-
-    /// Shown only where the routed model supports it. A bordered chip (accent-filled when
-    /// on), so it reads as a pressable control, not a status glyph.
-    @ViewBuilder
-    private func fastToggle(_ row: SZRoutingPositionRow) -> some View {
-        if row.supportsFastMode {
-            SZFastToggleChip(isOn: row.fastModeEnabled) {
-                onSetPositionFastMode(row.position, !row.fastModeEnabled)
-            }
-        }
-    }
 }
 
 /// One row of the profiles list (the sidebar's selection-pill recipe). Double-click renames
@@ -652,7 +616,7 @@ private struct SZHelpBubble: View {
 
 /// A menu's chip face: the chip recipe with its own chevron, quiet while it shows the
 /// unset word. Cap-and-truncate: a long label must never shove the row wider than the sheet.
-private struct SZChipMenuFace: View {
+struct SZChipMenuFace: View {
     let text: String
     var quiet = false
     var maxWidth: CGFloat = 210
@@ -740,7 +704,7 @@ private struct SZCardChipButton: View {
 
 /// The fast-mode chip: "Fast On"/"Fast Off" with the bolt. Turning on floods the accent
 /// left to right, then shimmers the bolt; off stays quiet; Reduce Motion skips the show.
-private struct SZFastToggleChip: View {
+struct SZFastToggleChip: View {
     let isOn: Bool
     let action: () -> Void
     @State private var hovered = false

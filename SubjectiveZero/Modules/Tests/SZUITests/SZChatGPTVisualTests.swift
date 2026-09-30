@@ -31,9 +31,21 @@ func renderChatGPTConnectionPreviews() throws {
         try render(view.directConnectionCard(card), size: NSSize(width: 594, height: failed ? 330 : (connected ? 285 : 230)),
                    to: directory.appending(path: state + ".png"))
     }
-    try render(SZRoutingSettingsView(profiles: [], selectedProfileName: nil, agents: [],
-                   activeProviderSummary: "ChatGPT · Model One · Medium · Fast"),
-               size: NSSize(width: 594, height: 350), to: directory.appending(path: "routing-off.png"))
+    let defaults = SZProviderSetupCard(id: "chatgpt", displayName: "ChatGPT", statusLabel: "Ready", message: "",
+        readiness: .ready, models: [.init(id: "model", label: "GPT-6.1-Sol")], selectedModel: "model",
+        effortOptions: ["low", "medium", "high"], selectedEffort: "medium", supportsFastMode: true,
+        fastModeEnabled: true, isConfirmable: true, directSignIn: true)
+    let options = [SZRoutingEnvelopeOption(providerID: "chatgpt", modelID: "model", label: "ChatGPT · GPT-6.1-Sol", isSelected: true)]
+    for enabled in [false, true] {
+        let row = SZRoutingPositionRow(position: .init(agent: "director", slot: "plan"), label: "Plan",
+            caption: "Plans the graph, briefs each node, and checks the results", selectionLabel: "ChatGPT · GPT-6.1-Sol",
+            clearLabel: "Default (ChatGPT · GPT-6.1-Sol)", isSet: true, options: options,
+            effortOptions: defaults.effortOptions, selectedEffort: nil, supportsFastMode: true)
+        try render(SZRoutingSettingsView(profiles: [.init(name: "My routing")], selectedProfileName: enabled ? "My routing" : nil,
+            agents: [.init(id: "director", title: "Director Agent", symbol: "eyeglasses", tint: "purple", rows: [row])],
+            activeProviderSummary: "ChatGPT · GPT-6.1-Sol", defaultProvider: defaults, defaultOptions: options),
+            size: NSSize(width: 594, height: 500), to: directory.appending(path: enabled ? "routing-on.png" : "routing-off.png"))
+    }
     try render(SZChatGPTWelcomeView(onContinue: {}, onManageUsage: {}),
                size: NSSize(width: 416, height: 310), to: directory.appending(path: "welcome.png"))
 }
