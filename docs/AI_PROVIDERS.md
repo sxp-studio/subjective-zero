@@ -24,10 +24,15 @@ The host's MCP bus and staging/compile/promote path remain the execution boundar
 `turn/completed` with status `completed`; partial text is not proof of success. Cancellation and
 timeouts stop the process tree. Failed turns are not automatically replayed.
 
-Model discovery uses the selected account's `/v1/models` catalog. The picker preserves returned
-model capabilities; Fast mode remains unavailable until verified for this integration. Account
+Model discovery uses the selected account's `/v1/models` catalog with the managed harness's
+`client_version`. The picker preserves returned model capabilities, including advertised Fast mode. Account
 changes clear the catalog and probe result. Rate-limit failures lead to **Manage usage**, with no
 automatic change of billing source.
+
+Provider defaults and routing slots share the same effort, Fast, and model controls. Routing also
+offers an always-visible default model row that edits the same provider preferences. Its menus
+offer only ready, enabled providers; existing assignments remain visible if their provider becomes
+unavailable. Changing the app default does not rewrite explicit route assignments.
 
 The engine is fetched at setup, not bundled in the app. `SZChatGPTEngine` pins version 0.159.0,
 architecture-specific official release URLs and SHA-256 hashes. It verifies the archive before
@@ -381,3 +386,18 @@ tests passed. The signed app's live verifier fetched all eight visible models an
 real inference probe using the server's new default, GPT-6.1 Sol (verified response in five seconds).
 The updated test app was relaunched with the user's account and saved settings preserved.
 User UI acceptance remains pending before merge.
+
+### Shared default and routing controls
+
+The user's screenshots confirmed the routing enable control and newer model choices work.
+Follow-up `7b41db16` hides unavailable providers from routing choices and shares one effort/Fast/model
+control across provider defaults, the Routing page's always-visible app default, and route slots.
+Both default surfaces edit the same stored settings; explicit route assignments remain unchanged.
+Saved assignments to an unavailable provider retain their labels so users can replace them.
+
+Independent review approved `7b41db16`. `swift build`, all 1,407 package tests, and all 423
+app-hosted tests passed. Native previews checked the provider card and Routing default controls.
+The first package run dropped one frame in an unrelated recording test while Xcode tests and the
+live app were also running; the full rerun passed with that concurrent work stopped. The signed
+Debug app passed strict signature verification and was relaunched with account/settings preserved.
+Final user acceptance of these UI changes remains pending; main has not been merged.
