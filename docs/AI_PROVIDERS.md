@@ -401,3 +401,10 @@ The first package run dropped one frame in an unrelated recording test while Xco
 live app were also running; the full rerun passed with that concurrent work stopped. The signed
 Debug app passed strict signature verification and was relaunched with account/settings preserved.
 Final user acceptance of these UI changes remains pending; main has not been merged.
+
+The layout follow-up `db10c436` places Routing's default controls below its title and orders the
+shared controls Model → Effort → Fast in Providers and Routing. Independent review approved the
+final diff; `swift build`, the native preview render test, and the Clement Boissiere-signed Debug
+app build passed. Provider and Routing previews were visually checked, and the app passed strict
+signature verification before relaunch. This layout-only change did not rerun the full suites;
+the preceding checkpoint's full results remain recorded above. User acceptance is still pending.
