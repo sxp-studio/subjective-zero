@@ -73,7 +73,7 @@ can still change between versions.
 
 **Setting up.**<br>
 [`APP_SETUP.md`](docs/APP_SETUP.md) covers the Xcode Command Line Tools and
-logging in a provider CLI. It is written to be handed to a coding agent, which will do it for you.
+connecting ChatGPT or a coding-tool provider. It is written to be handed to a coding agent, which will do it for you.
 
 **Building from source:**<br>
 Clone, then open `SubjectiveZero/SZApp.xcodeproj` an run the
@@ -92,7 +92,7 @@ SubjectiveZero scheme. For the libraries alone: `swift build` in `SubjectiveZero
 | [AGENT_ORCHESTRATION](docs/AGENT_ORCHESTRATION.md) | `SZAI`. How the host drives agents. |
 | [AGENT_GRAPHS](docs/AGENT_GRAPHS.md) | How an agent turn is described as a graph of steps you can read. |
 | [AUTHORING](docs/AUTHORING.md) | Writing an agent of your own, as a tutorial. |
-| [AI_PROVIDERS](docs/AI_PROVIDERS.md) | The provider CLIs behind one interface. |
+| [AI_PROVIDERS](docs/AI_PROVIDERS.md) | ChatGPT and coding tools behind one interface. |
 | [MCP](docs/MCP.md) | How agents act on the app. |
 | [NODE_LIBRARY](docs/NODE_LIBRARY.md) | The built-in nodes, and how agents read them. |
 | [PRIVACY](docs/PRIVACY.md) | Every anonymous event a release build reports. |

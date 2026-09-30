@@ -58,27 +58,29 @@ public struct SZChatGPTConnectionView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Continue with ChatGPT")
                 }
-                HStack {
-                    if !accounts.isEmpty {
-                        Menu {
-                            ForEach(accounts) { account in
-                                Button { onSelect(account.id) } label: {
-                                    if account.id == activeID { Label(account.label, systemImage: "checkmark") }
-                                    else { Text(account.label) }
+                if !accounts.isEmpty || connected {
+                    HStack {
+                        if !accounts.isEmpty {
+                            Menu {
+                                ForEach(accounts) { account in
+                                    Button { onSelect(account.id) } label: {
+                                        if account.id == activeID { Label(account.label, systemImage: "checkmark") }
+                                        else { Text(account.label) }
+                                    }
                                 }
-                            }
-                            Divider()
-                            Button("Add another account", action: onAddAccount)
-                            if connected { Button("Sign out", action: onSignOut) }
-                        } label: {
-                            Text(accounts.first { $0.id == activeID }?.label ?? "Choose an account")
-                                .lineLimit(1).truncationMode(.middle)
-                        }.fixedSize()
-                        .accessibilityLabel("ChatGPT account")
-                    }
-                    if connected {
-                        Spacer()
-                        Button("Manage usage", action: onManageUsage)
+                                Divider()
+                                Button("Add another account", action: onAddAccount)
+                                if connected { Button("Sign out", action: onSignOut) }
+                            } label: {
+                                Text(accounts.first { $0.id == activeID }?.label ?? "Choose an account")
+                                    .lineLimit(1).truncationMode(.middle)
+                            }.fixedSize()
+                            .accessibilityLabel("ChatGPT account")
+                        }
+                        if connected {
+                            Spacer()
+                            Button("Manage usage", action: onManageUsage)
+                        }
                     }
                 }
                 if let message {

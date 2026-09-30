@@ -430,9 +430,9 @@ public struct SZProviderSetupSheet: View {
     }
 
     func directConnectionCard(_ card: SZProviderSetupCard) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("ChatGPT").font(.system(size: 20, weight: .semibold))
                     Text("Create with your ChatGPT plan").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
@@ -464,7 +464,7 @@ public struct SZProviderSetupSheet: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
-        .padding(22)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.12), lineWidth: 1))
