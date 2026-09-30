@@ -408,3 +408,11 @@ final diff; `swift build`, the native preview render test, and the Clement Boiss
 app build passed. Provider and Routing previews were visually checked, and the app passed strict
 signature verification before relaunch. This layout-only change did not rerun the full suites;
 the preceding checkpoint's full results remain recorded above. User acceptance is still pending.
+
+### Main acceptance and release checkpoint
+
+The user accepted the final layout and authorized release on 2026-09-29. Branch head `b62255ad`
+rebased cleanly onto main and passed a fresh `swift build`, all 1,407 package tests, and all 423
+app-hosted tests before a fast-forward merge and push. The feature worktree and branch were removed.
+The release uses the Clement Boissiere Developer ID identity; preflight confirmed notarization
+credentials and telemetry configuration.

@@ -1,7 +1,7 @@
 # SubjectiveZero - Agent Setup Guide
 
 This document is written for an **LLM setup agent** (Claude Code, Codex, or similar) helping a
-user install and verify SubjectiveZero and its agent-provider CLIs. It will be published at
+user install and verify SubjectiveZero and its AI connections. It will be published at
 `https://sxp.studio/subjective-zero/app-setup.md`; the in-app **Agent Providers ▸ Setup
 Guide** button opens that URL. Humans are welcome too - every step is copy-pasteable.
 
@@ -27,9 +27,9 @@ Operate as **guided automation**, not autonomous installation:
 - You MUST ask the user before: installing or upgrading any CLI, replacing the app bundle,
   launching an auth/login flow, editing shell profiles or PATH, deleting files, or granting
   system permissions.
-- NEVER ask the user to paste API keys, tokens, or cookies. SubjectiveZero's providers are
-  CLI-only - auth belongs to each CLI's own interactive login, and the app stores no provider
-  credentials.
+- NEVER ask the user to paste API keys, tokens, or cookies. SubjectiveZero's
+  ChatGPT connection uses browser authorization and stores its credentials in macOS Keychain.
+  Other providers authenticate through their CLI's own interactive login.
 - If a verification step fails suspiciously (checksum mismatch, unexpected signer), stop and
   report; do not work around it.
 
@@ -66,11 +66,12 @@ A project runs either **in a browser** or **on this Mac**; the New Project sheet
   then run `xcode-select --install` and let them accept Apple's dialog and license; the app
   re-checks every few seconds and clears the requirement without a relaunch. Never redistribute
   the tools or the SDK; Apple's license forbids it.
-- **Agents** need one provider CLI on either kind of project; the next section covers them.
+- **Agents** need a connected ChatGPT account or one ready coding-tool provider on either kind of project.
+  The next section covers the optional coding-tool providers.
 
 ## Provider CLI setup
 
-SubjectiveZero drives agent CLIs as subprocesses. At least one provider must be **ready**
+SubjectiveZero drives agent CLIs as subprocesses. If using a coding-tool connection, its provider must be **ready**
 (installed + logged in). Each is optional individually; each card in the in-app Agent Providers
 sheet shows the same remedies listed here.
 
