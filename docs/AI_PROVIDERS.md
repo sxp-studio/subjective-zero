@@ -416,3 +416,9 @@ rebased cleanly onto main and passed a fresh `swift build`, all 1,407 package te
 app-hosted tests before a fast-forward merge and push. The feature worktree and branch were removed.
 The release uses the Clement Boissiere Developer ID identity; preflight confirmed notarization
 credentials and telemetry configuration.
+
+Release follow-up `cee314e6` keeps the existing Settings layout and evens the ChatGPT card's
+vertical gaps, removing an empty account row before sign-in. Independent review, `swift build`,
+native preview rendering, and the Clement Boissiere-signed Debug build passed. A proposed separate
+welcome screen was discarded after the user clarified the feedback. Publication is held for the
+spacing check; final release verification and notarization follow that checkpoint.
